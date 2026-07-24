@@ -8,8 +8,10 @@
 // authored + typechecked here (`bunx playwright test --list` parses it) and RUN in
 // CI by the `plugin-runtime-cert` job (`.github/workflows/plugin-runtime-e2e.yml`).
 //
-// `testMatch` is scoped to `plugin-runtime.spec.ts` so the happy-dom wiring test
-// under `e2e/wiring/` (a `bun test`, not a Playwright test) is never picked up.
+// `testMatch` is `*.spec.ts` so the isolated-component browser specs
+// (`overflow-story.spec.ts`, `command-palette.spec.ts`) run alongside the
+// plugin-runtime cert, while the happy-dom wiring test under `e2e/wiring/`
+// (`*.test.tsx`, a `bun test`, not a Playwright test) is still never picked up.
 
 import { defineConfig, devices } from "@playwright/test";
 
@@ -17,7 +19,7 @@ const HARNESS_URL = "http://localhost:5177/";
 
 export default defineConfig({
 	testDir: "./e2e",
-	testMatch: /plugin-runtime\.spec\.ts$/,
+	testMatch: /\.spec\.ts$/,
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,

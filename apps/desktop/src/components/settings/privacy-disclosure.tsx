@@ -27,7 +27,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
-import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
+import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
 // Shared with PrivacySettings.tsx so the in-tab notice and this startup dialog
 // use ONE acknowledgement flag: dismissing either never re-shows the other.
@@ -56,7 +56,8 @@ export function acknowledgePrivacyDisclosure(): void {
  */
 export function PrivacyDisclosure() {
 	const [open, setOpen] = useState(false);
-	const openSettings = useSettingsDialog((s) => s.openSettings);
+	// Privacy settings moved to the node-scoped Gateway dialog.
+	const openGateway = useGatewayDialog((s) => s.openGateway);
 
 	useEffect(() => {
 		if (!isPrivacyDisclosureAcknowledged()) {
@@ -72,8 +73,8 @@ export function PrivacyDisclosure() {
 	const openPrivacySettings = useCallback(() => {
 		acknowledgePrivacyDisclosure();
 		setOpen(false);
-		openSettings("privacy");
-	}, [openSettings]);
+		openGateway("privacy");
+	}, [openGateway]);
 
 	// Open the published privacy/data page in the browser so the reference is a
 	// real, followable link rather than a dead file path.
@@ -120,7 +121,7 @@ export function PrivacyDisclosure() {
 					</DialogDescription>
 				</DialogHeader>
 				<DialogFooter>
-					<Button onClick={openPrivacySettings} variant="outline">
+					<Button onClick={openPrivacySettings} variant="ghost">
 						Review privacy settings
 					</Button>
 					<Button onClick={dismiss}>Got it</Button>

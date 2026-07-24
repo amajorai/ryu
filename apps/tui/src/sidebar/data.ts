@@ -60,6 +60,11 @@ export const emptySidebarData: SidebarData = {
 };
 
 const DATE_SPLIT = "T";
+// Max absolute epoch (ms) the ECMAScript Date can represent (±8.64e15). A finite
+// number past this makes `new Date(raw).toISOString()` throw RangeError; since
+// bucketConversations runs OUTSIDE `settled`, an unguarded throw would reject the
+// entire sidebar load. Treat an out-of-range timestamp as "no badge".
+const MAX_EPOCH_MS = 8.64e15;
 
 // GET /api/conversations wire shape (snake_case). The flag/folder fields are
 // optional: Core may not serialize them, in which case the derived buckets are
@@ -85,6 +90,9 @@ function convBadge(wire: ConversationWire): string | undefined {
 	// Core serializes updated_at as epoch milliseconds (number); older shapes used
 	// an ISO string. Normalise both to a YYYY-MM-DD badge, and ignore anything else.
 	if (typeof raw === "number" && Number.isFinite(raw)) {
+		if (Math.abs(raw) > MAX_EPOCH_MS) {
+			return undefined;
+		}
 		return new Date(raw).toISOString().split(DATE_SPLIT)[0];
 	}
 	const date = typeof raw === "string" ? raw.split(DATE_SPLIT)[0] : undefined;

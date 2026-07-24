@@ -1368,23 +1368,24 @@ export function setClaudeGatewayRouting(
 }
 
 // --- Command-approval gate ---------------------------------------------------
-// Opt-in: scan every ACP agent's native tool calls (Claude/Codex `Bash`,
-// `Write`, `Edit`, …) through the gateway command-approval scanner at the ACP
-// `request_permission` seam before they run. Backed by the `exec-approval-mode`
-// Core preference, which Core seeds into `RYU_EXEC_APPROVAL_MODE` at startup
-// (restart-to-apply). Stored as the mode string: `enforce` (on) / `off`. Off by
-// default; when on the scan is fail-closed and relies on the gateway's firewall
-// / allow-deny rules to decide.
+// Armed by default: every ACP agent's native tool calls (Claude/Codex `Bash`,
+// `Write`, `Edit`, …) are scanned through the gateway command-approval scanner
+// at the ACP `request_permission` seam before they run. Backed by the
+// `exec-approval-mode` Core preference, which Core seeds into
+// `RYU_EXEC_APPROVAL_MODE` at startup (restart-to-apply). Stored as the mode
+// string: `enforce` (on) / `off`. An UNSET pref means armed (Core's default-on
+// posture — headless runs auto-approve permission requests, so the scan is
+// what governs them); turning the toggle off stores an explicit `off`.
 
 export const EXEC_APPROVAL_MODE_PREF_KEY = "exec-approval-mode";
 
 /** Mode string persisted when the gate is enabled (any non-`off` value works). */
 const EXEC_APPROVAL_ENABLED_MODE = "enforce";
 
-/** Default: off, so agent tool calls run ungoverned until opt-in. */
-export const DEFAULT_EXEC_APPROVAL_ENABLED = false;
+/** Default: on — the scan is armed unless the user explicitly opts out. */
+export const DEFAULT_EXEC_APPROVAL_ENABLED = true;
 
-/** Read the command-approval gate toggle, defaulting to off. */
+/** Read the command-approval gate toggle, defaulting to on (armed). */
 export async function getExecApprovalEnabled(
 	target: ApiTarget
 ): Promise<boolean> {
@@ -1393,9 +1394,9 @@ export async function getExecApprovalEnabled(
 		return DEFAULT_EXEC_APPROVAL_ENABLED;
 	}
 	const value = raw.trim().toLowerCase();
-	// Empty or `off` disables; any other stored mode enables (matches Core's
-	// `exec_approval::seed_from_pref`).
-	return !(value === "" || value === "off");
+	// Only an explicit `off` disables; empty/unset or any other stored mode is
+	// armed (matches Core's `exec_approval_enabled` default-on semantics).
+	return value !== "off";
 }
 
 /** Write the command-approval gate toggle (as a mode string: `enforce` / `off`). */

@@ -224,7 +224,10 @@ mod tests {
             cloud_provider(&json!({ "provider": " Replicate " })),
             Some("replicate".into())
         );
-        assert_eq!(cloud_provider(&json!({ "provider": "fal" })), Some("fal".into()));
+        assert_eq!(
+            cloud_provider(&json!({ "provider": "fal" })),
+            Some("fal".into())
+        );
     }
 
     #[test]
@@ -246,6 +249,9 @@ mod tests {
         // "install from the Store first" hint (and lazy-start is a no-op here).
         let (code, body) = generate(&FakeHost, json!({ "prompt": "a corgi" })).await;
         assert_eq!(code, 502);
-        assert!(body["error"].as_str().unwrap_or("").contains("not reachable"));
+        assert!(body["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not reachable"));
     }
 }

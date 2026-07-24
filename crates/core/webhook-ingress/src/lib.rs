@@ -29,8 +29,8 @@ mod tunnels;
 mod win_process;
 
 pub use dispatch::{
-    deliver_inbound, deliver_workflow_webhook, last_delivery, record_delivery, timestamp_fresh,
-    workflow_webhook_path, InboundOutcome, WorkflowWebhookOutcome,
+    deliver_inbound, deliver_workflow_webhook, first_http_delivery, last_delivery, record_delivery,
+    timestamp_fresh, workflow_webhook_path, InboundOutcome, WorkflowWebhookOutcome,
 };
 pub use host::{set_global_host, WebhookIngressHost, WorkflowWebhookSecret};
 pub use ryu_relay::{ensure_relay_started, relay_inbound_url};

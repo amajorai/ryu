@@ -208,12 +208,6 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<Requires>,
 
-    /// Ids of separate plugins this app ships as a logical bundle — installed and
-    /// uninstalled TOGETHER with this app, but otherwise independent plugins
-    /// (NOT dependency edges: bundles never affect enable/disable order).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub bundles: Vec<String>,
-
     /// Host surfaces this plugin runs on (desktop / island / mobile / …).
     ///
     /// **Empty or absent = runs on EVERY surface.** This is the backward-compatible
@@ -266,6 +260,18 @@ pub struct PluginManifest {
     #[serde(default)]
     pub sidecars: Vec<schema::SidecarSpec>,
 
+    /// Declarative **stdio MCP servers** this plugin registers into Core's MCP
+    /// registry on enable and deregisters on disable/uninstall. Each entry is a
+    /// [`McpServerDecl`] keyed by the server name the registry uses (the same key a
+    /// user's `mcp.json` would use). This is the manifest-owned successor to Core's
+    /// hardcoded built-in MCP servers: a plugin declares its server here instead of
+    /// Core baking a `com.ryu.<app>` server into `builtin_servers()`. Empty for the
+    /// common case (a plugin that ships no MCP server). A user `mcp.json` entry with
+    /// the same name still wins (user-overrides-builtin precedence is preserved by
+    /// the registry).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mcp_servers: BTreeMap<String, McpServerDecl>,
+
     // ── Rich marketplace metadata (Phase 1.5) ─────────────────────────────────
     //
     // All optional/additive so older manifests still load and render. These feed
@@ -286,12 +292,41 @@ pub struct PluginManifest {
     #[serde(default, rename = "iconUrl", skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
 
+    /// Icon-primitive id for the listing card (Ryu extension: `icon`). An
+    /// Iconify/icons0 `prefix:name`, a bare Hugeicons name, or a URL — resolved by
+    /// the shared `Icon` primitive. Distinct from `icon_url`: this is a GLYPH id the
+    /// card masks with `currentColor`, `icon_url` is a raster logo. When absent the
+    /// card falls back to `icon_url`, then a default glyph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+
+    /// Dithered-gradient background for the card's icon square (Ryu extension:
+    /// `iconDither`). Opaque passthrough `{ from, to?, direction? }` mirroring
+    /// dither-kit's `DitherGradient` props (`from`/`to` are a palette-colour name or
+    /// a hue number, `direction` is up|down|left|right). Kept as raw JSON like
+    /// `banner` so an untrusted/typo'd value never fails the manifest parse — the
+    /// render layer validates and falls back before painting.
+    #[serde(
+        default,
+        rename = "iconDither",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub icon_dither: Option<serde_json::Value>,
+
     /// CSS background for the icon square (Ryu extension: `iconBackground`).
-    #[serde(default, rename = "iconBackground", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "iconBackground",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub icon_background: Option<String>,
 
     /// Primary brand accent color, hex (Ryu extension: `accentColor`).
-    #[serde(default, rename = "accentColor", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "accentColor",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub accent_color: Option<String>,
 
     /// Detail-page hero banner spec ({colors,style,seed}); opaque passthrough (Ryu ext).
@@ -358,6 +393,15 @@ pub struct PluginManifest {
     /// extension). Opaque to Core — passed through to the detail payload verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<serde_json::Value>,
+
+    /// Provenance hint for the marketplace index: `"builtin"`, an `owner/repo`
+    /// slug, or a git/raw URL an external plugin ships from. Absent ⇒ `"builtin"`.
+    /// This is an index HINT only — Core derives the real trust tier from
+    /// `plugins::builtins` membership at runtime, NOT from this field. Consumed by
+    /// the marketplace generator (`tools/mirror-plugins.sh`) to populate each
+    /// entry's `source`/`builtin` pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 impl PluginManifest {
@@ -589,6 +633,51 @@ impl PluginManifest {
     }
 }
 
+/// One declarative **stdio MCP server** a plugin registers (see
+/// [`PluginManifest::mcp_servers`]).
+///
+/// This is the manifest-side, dependency-free mirror of Core's runtime
+/// `McpServerConfig`: pure data (schemars/serde only) so it can live in
+/// kernel-contracts, with Core lowering it into its registry type on enable. A
+/// server is spawned per request as `command args…` (stdio); `command_env` lets
+/// the manifest name an env var Core resolves to an absolute binary path
+/// (e.g. `RYU_GHOST_BIN`) so a downloaded `~/.ryu/bin` binary can override the
+/// bare `command`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct McpServerDecl {
+    /// Executable to spawn (e.g. `npx`, an absolute path, or a `~/.ryu/bin` name).
+    pub command: String,
+
+    /// Optional env var whose value, when set, OVERRIDES [`command`] with an
+    /// absolute binary path. Lets a plugin ship a bare `command` that Core repoints
+    /// at a profile-specific downloaded binary. Absent ⇒ use `command` verbatim.
+    ///
+    /// [`command`]: McpServerDecl::command
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_env: Option<String>,
+
+    /// Arguments passed to the command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+
+    /// Extra environment variables for the server process.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+
+    /// Optional human description for the MCP listing endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// When false, the server is registered but skipped by list/call. Defaults to
+    /// true so a bare `{ command }` entry just works.
+    #[serde(default = "default_mcp_server_enabled")]
+    pub enabled: bool,
+}
+
+const fn default_mcp_server_enabled() -> bool {
+    true
+}
+
 /// Companion surface descriptor — an optional in-desktop overlay or sidebar panel
 /// an App may register. Fields mirror the UX primitives a Companion widget needs;
 /// all are optional except `label`.
@@ -690,6 +779,21 @@ pub struct Contributes {
     /// [`settings_tabs`]: Contributes::settings_tabs
     #[serde(default)]
     pub views: Vec<ViewContribution>,
+
+    /// App-registered sidebar **sections** — a header plus a live list of rows the
+    /// shell fetches from a declared Core `/api/` path. Lets an app own its sidebar
+    /// section (Canvas/Whiteboard/Meetings recent-doc lists) instead of the shell
+    /// hardcoding it. Self-contained + opaque `spec` (see [`SidebarSectionContribution`]),
+    /// so a new section capability needs no Core change; served + tagged with the
+    /// owning `plugin` id at `GET /api/plugins/contributions`.
+    #[serde(default)]
+    pub sidebar_sections: Vec<SidebarSectionContribution>,
+
+    /// App-registered sidebar **buttons** — a single nav row (e.g. Memory →
+    /// `/library/memory`). The button-shaped sibling of [`Contributes::sidebar_sections`]
+    /// (no live list, just a label/icon + a client route). See [`SidebarButtonContribution`].
+    #[serde(default)]
+    pub sidebar_buttons: Vec<SidebarButtonContribution>,
 }
 
 /// One **declarative view** contribution (the Raycast tier — see [`Contributes::views`]).
@@ -719,6 +823,61 @@ pub struct ViewContribution {
     /// — the shared renderer interprets it per the `view` kind. Absent = an empty view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec: Option<serde_json::Value>,
+}
+
+/// One app-registered **sidebar section** — a header plus a live list of rows the
+/// desktop's compact sidebar renderer draws (the app-owned replacement for the
+/// hardcoded Canvas/Whiteboard/Meetings sections). A typed envelope around an opaque
+/// `spec` (the `SidebarSectionSpec` in `@ryu/app-host/views`: a `ViewSource` for the
+/// rows, an `itemTarget` route template for `openTab`, optional `itemActions` and a
+/// `create` action). Core stores it verbatim and tags it with the owning `plugin` id;
+/// the `spec` stays opaque so a new section capability is a renderer change, not a
+/// Core change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SidebarSectionContribution {
+    /// Stable id for this section within the plugin (namespaced into the shell's
+    /// section key as `plugin:<pluginId>:<id>`).
+    pub id: String,
+
+    /// Header label shown in the sidebar and the Customize dialog.
+    pub title: String,
+
+    /// Optional glyph id resolved by the shell's Icon primitive (Iconify/Hugeicons).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+
+    /// Optional placement hint among the sidebar sections (lower = higher up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<i64>,
+
+    /// The opaque section spec (source/itemTarget/itemActions/create). Interpreted by
+    /// the desktop renderer, never by Core. Absent = a header with no rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<serde_json::Value>,
+}
+
+/// One app-registered **sidebar button** — a single nav row (the button-shaped
+/// sibling of [`SidebarSectionContribution`]). No live list: just a label/icon and a
+/// client route the shell opens with `openTab`. Migrates hardcoded header-chrome
+/// buttons (e.g. Memory) to the owning app.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SidebarButtonContribution {
+    /// Stable id for this button within the plugin.
+    pub id: String,
+
+    /// Button label.
+    pub title: String,
+
+    /// Optional glyph id resolved by the shell's Icon primitive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+
+    /// The client route this button opens (e.g. `"/library/memory"`).
+    pub target: String,
+
+    /// Optional placement hint among the sidebar buttons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<i64>,
 }
 
 /// One app-widget contribution (Ryu Apps). Binds the tool that renders the widget
@@ -936,9 +1095,7 @@ pub struct ProvidesEntry {
 /// Per-surface support level a plugin declares for a [`Surface`] in the
 /// [`PluginManifest::surfaces`] map. Governs both whether the plugin appears on the
 /// surface and how much of its UI that surface renders.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SurfaceSupport {
     /// Full first-class UI + backend on this surface.
@@ -1316,7 +1473,15 @@ mod tests {
         assert!(validate_plugin_id("ghost").is_ok());
         assert!(validate_plugin_id("data-grid-explorer").is_ok());
         assert!(validate_plugin_id("com.example.research-assistant").is_ok());
-        for bad in ["../../etc/x", "..", "a/../b", ".hidden", "app.", "-lead", ""] {
+        for bad in [
+            "../../etc/x",
+            "..",
+            "a/../b",
+            ".hidden",
+            "app.",
+            "-lead",
+            "",
+        ] {
             assert!(validate_plugin_id(bad).is_err(), "'{bad}' must be rejected");
         }
     }
@@ -1381,7 +1546,10 @@ mod tests {
         assert!(m.supports_surface(Surface::Desktop), "declared full");
         assert!(m.supports_surface(Surface::Web), "declared list");
         assert!(!m.supports_surface(Surface::Mobile), "explicit none");
-        assert!(!m.supports_surface(Surface::Island), "absent key ⇒ unsupported");
+        assert!(
+            !m.supports_surface(Surface::Island),
+            "absent key ⇒ unsupported"
+        );
         assert!(
             !m.supports_surface(Surface::Gateway),
             "targets ignored when surfaces present"
@@ -1403,7 +1571,12 @@ mod tests {
         }"#;
         let m = PluginManifest::parse_and_validate(raw).expect("parse");
         assert!(m.surfaces.is_none());
-        for s in [Surface::Desktop, Surface::Gateway, Surface::Mobile, Surface::Cli] {
+        for s in [
+            Surface::Desktop,
+            Surface::Gateway,
+            Surface::Mobile,
+            Surface::Cli,
+        ] {
             assert!(m.supports_surface(s), "absent surfaces ⇒ all surfaces");
         }
     }
@@ -1435,7 +1608,10 @@ mod tests {
         assert_eq!(cli.commands.len(), 2);
         assert_eq!(cli.commands[0].name, "status");
         assert_eq!(cli.commands[0].method.as_deref(), Some("GET"));
-        assert_eq!(cli.commands[0].summary.as_deref(), Some("Show inbox status"));
+        assert_eq!(
+            cli.commands[0].summary.as_deref(),
+            Some("Show inbox status")
+        );
         assert_eq!(cli.commands[1].name, "send");
         assert_eq!(cli.commands[1].method, None);
         assert_eq!(cli.commands[1].summary, None);
@@ -1454,7 +1630,10 @@ mod tests {
     fn cli_command_path_rejects_traversal_and_accepts_plain_subpaths() {
         // Safe, plain absolute sub-paths pass.
         for ok in ["/status", "/inboxes/send", "/a-b_c/1", "/x?y=1"] {
-            assert!(validate_cli_command_path(ok).is_ok(), "'{ok}' must be allowed");
+            assert!(
+                validate_cli_command_path(ok).is_ok(),
+                "'{ok}' must be allowed"
+            );
         }
         // Every traversal / escape form is rejected — literal `..`, percent-encoded
         // `%2e`, backslash separators, encoded separators, and a non-absolute path.
@@ -1509,7 +1688,10 @@ mod tests {
             commands: Vec::new(),
         };
         let value = serde_json::to_value(&entry).unwrap();
-        assert!(value.get("commands").is_none(), "empty commands must be omitted");
+        assert!(
+            value.get("commands").is_none(),
+            "empty commands must be omitted"
+        );
     }
 
     // ── provides / requires.capabilities validation ─────────────────────────────
@@ -1639,11 +1821,7 @@ mod tests {
         assert!(views[0].spec.is_some(), "opaque spec is carried through");
         // A view id is NOT a runnable reference, so it never appears in referenced_ids.
         assert!(
-            m.contributes
-                .as_ref()
-                .unwrap()
-                .referenced_ids()
-                .is_empty(),
+            m.contributes.as_ref().unwrap().referenced_ids().is_empty(),
             "views must not be cross-validated as runnable references"
         );
         let round =
@@ -1696,7 +1874,10 @@ mod tests {
         let m = PluginManifest::parse_and_validate(raw).expect("parse");
         assert!(m.permissions.is_none());
         let value = serde_json::to_value(&m).unwrap();
-        assert!(value.get("permissions").is_none(), "absent permissions omitted");
+        assert!(
+            value.get("permissions").is_none(),
+            "absent permissions omitted"
+        );
     }
 
     #[test]
@@ -1742,7 +1923,10 @@ mod tests {
         // An empty host list denies (a list with no reachable host is not "allow").
         assert!(NetworkPermission::Hosts(vec![]).is_deny());
         // Serialize round-trips the type: All(bool) → bool, Hosts → array.
-        assert_eq!(serde_json::to_string(&NetworkPermission::All(true)).unwrap(), "true");
+        assert_eq!(
+            serde_json::to_string(&NetworkPermission::All(true)).unwrap(),
+            "true"
+        );
         assert_eq!(
             serde_json::to_string(&NetworkPermission::Hosts(vec!["h".to_string()])).unwrap(),
             r#"["h"]"#

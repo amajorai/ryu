@@ -493,7 +493,11 @@ mod tests {
             let conn = store.conn.lock().await;
             IdentityStore::migrate(&conn).unwrap();
         }
-        let found = store.find("prof_1", "a.example.com").await.unwrap().unwrap();
+        let found = store
+            .find("prof_1", "a.example.com")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(found.source, "manual");
     }
 

@@ -65,7 +65,8 @@ pub fn set_smart_routes_from_json(value: &str) {
     let mut next: HashMap<String, serde_json::Value> = HashMap::new();
     let trimmed = value.trim();
     if !trimmed.is_empty() {
-        if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(trimmed)
+        if let Ok(serde_json::Value::Object(obj)) =
+            serde_json::from_str::<serde_json::Value>(trimmed)
         {
             for (id, cfg) in obj {
                 // Only store a non-empty object override; a null/empty entry means

@@ -21,7 +21,6 @@ pub(crate) use ryu_composio::triggers as composio_triggers;
 mod connections;
 mod crash;
 mod crypto_host;
-mod memory_host;
 mod dashboards_client;
 mod data_path;
 mod downloads;
@@ -30,14 +29,15 @@ mod events;
 mod exec_approval;
 mod fal_auth;
 mod hardware;
+mod healing_client;
 mod hf_auth;
 mod identity;
-mod image_host;
-mod sandbox_host;
-mod healing_client;
 mod identity_verify;
+mod image_host;
 mod inference;
 mod learning;
+mod memory_host;
+mod sandbox_host;
 /// Re-export shim: the MCP server catalog primitive now lives in the
 /// `ryu-mcp-catalog` crate. Consumers reference
 /// `crate::mcp_catalog::{ServerJson, InstallPlan, plan_from_server, …}`
@@ -46,10 +46,10 @@ mod learning;
 pub use ryu_mcp_catalog as mcp_catalog;
 mod mcp_catalog_host;
 mod meetings_client;
+mod mesh_host;
 /// OpenAPI/Swagger spec → `http`-backed tool descriptors (integrations.sh REST
 /// install-abstraction). Pure transform; install/persist wiring lives in `server`.
 mod openapi_import;
-mod mesh_host;
 /// Re-export shim: the Hugging Face model catalog + device-fit primitive now
 /// lives in the `ryu-model-catalog` crate. Consumers reference
 /// `crate::model_catalog::{ModelCard, install_from_descriptor, device, …}`
@@ -69,38 +69,38 @@ mod notify;
 /// `ryu-knowledge` crate. Consumers reference `crate::okf::{Bundle, Concept, …}`
 /// unchanged.
 pub use ryu_knowledge as okf;
+mod finetune_client;
 mod openrouter_auth;
 mod paths;
-mod profile;
 mod pi_config;
 mod plugin_host;
 mod plugin_manifest;
-mod rtk_config;
 mod plugin_storage;
-mod policy_alerts;
-mod smtp_auth;
 mod plugins;
+mod policy_alerts;
 mod predict;
 mod predict_host;
 mod privacy;
+mod profile;
 mod quests_client;
 mod rag_host;
 mod recipes_client;
 mod recipes_host;
 mod registry;
 mod replicate_auth;
+mod rtk_config;
 mod runnable;
 mod sandbox;
 mod scheduler;
 mod search_host;
 mod self_api;
 mod server;
-mod stt_host;
 mod sidecar;
 mod skills_catalog;
 mod skills_host;
-mod finetune_client;
+mod smtp_auth;
 mod stats_beacon;
+mod stt_host;
 mod support_access;
 mod system_info;
 mod teams_client;
@@ -128,13 +128,12 @@ use sidecar::{
         llamacpp::LlamaCppRerankManager, mlx::MlxManager, mlx_vlm::MlxVlmManager,
         ollama::OllamaManager, omlx::OmlxManager, outetts::OuteTtsManager,
         parakeet::ParakeetManager, ryutts::RyuTtsManager, sdcpp::StableDiffusionManager,
-        sglang::SglangManager, vllm::VllmManager,
-        whispercpp::WhisperCppManager, DockerModelRunnerManager,
+        sglang::SglangManager, vllm::VllmManager, whispercpp::WhisperCppManager,
+        DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
     tools::{
         ghost::GhostManager, llmfit::LlmFit, research::ResearchManager, shadow::ShadowManager,
-        spider::SpiderManager,
     },
     SidecarManager,
 };
@@ -151,6 +150,49 @@ macro_rules! boot_fail {
         eprintln!("ryu-core: {}", format_args!($($arg)*));
         std::process::exit(1);
     }};
+}
+
+/// Seed the profile-aware env vars the Ghost MCP server needs, which its plugin
+/// manifest (`fixtures/ghost.plugin.json`) can't express statically. Called once,
+/// early in `main` (before threads spawn), so the values are present when the
+/// manifest decl is lowered and when the Ghost child is later spawned:
+/// - `RYU_GHOST_BIN` → the profile-scoped `~/.ryu{profile}/bin/ghost` path,
+///   consumed at lowering time by `mcp_server_config_from_decl` (`command_env`);
+/// - `RYU_GHOST_OVERLAY_URL` → the island loopback overlay endpoint (profile port
+///   math mirrors `control.ts`: base 7989, +1000 for dev), so Ghost's pointer
+///   actions drive the visible ghost-cursor overlay (fire-and-forget; a dead port
+///   is a harmless no-op);
+/// - `GHOST_DATA_DIR` → the per-profile `~/.ryu{profile}/ghost` recipe/model store
+///   (isolating dev vs release), read by Ghost's `RecipeStore`.
+///
+/// Set-if-unset: a user-provided value wins, matching `profile::apply_env_defaults`.
+/// The latter two reach the scrubbed Ghost child via the `mcp_safe_env` allowlist.
+fn seed_ghost_sidecar_env() {
+    let set_if_unset = |key: &str, value: String| {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    };
+    set_if_unset(
+        "RYU_GHOST_BIN",
+        crate::sidecar::tools::ghost::ghost_bin_path()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    set_if_unset(
+        "RYU_GHOST_OVERLAY_URL",
+        format!(
+            "http://127.0.0.1:{}/ghost-cursor",
+            crate::profile::port(7989)
+        ),
+    );
+    set_if_unset(
+        "GHOST_DATA_DIR",
+        crate::paths::ryu_dir()
+            .join("ghost")
+            .to_string_lossy()
+            .into_owned(),
+    );
 }
 
 #[tokio::main]
@@ -190,6 +232,26 @@ async fn main() {
     // `release` profile, and any env var the user already set wins. The matching
     // sidecar SPAWN ports are threaded through `profile::port` in `sidecar/**`.
     crate::profile::apply_env_defaults();
+
+    // Ghost sidecar env: the Ghost MCP server moved from a hardcoded built-in to
+    // its plugin manifest's `mcp_servers` (fixtures/ghost.plugin.json). A static
+    // manifest can't express Ghost's three profile-aware values, so Core seeds
+    // them into its own process env HERE — early, before threads spawn and before
+    // `fire_activation_event` lowers the manifest decl — and the child inherits
+    // them: `RYU_GHOST_BIN` (the `~/.ryu{profile}/bin/ghost` path) is read at
+    // lowering time by `mcp_server_config_from_decl`, while `RYU_GHOST_OVERLAY_URL`
+    // (island cursor overlay) and `GHOST_DATA_DIR` (per-profile recipe store) reach
+    // the spawned Ghost via the `mcp_safe_env` allowlist. Set-if-unset so a user
+    // override still wins, matching `apply_env_defaults`.
+    seed_ghost_sidecar_env();
+
+    // Full node reset: if `POST /api/node/reset` armed a wipe, delete every store
+    // DB / download / preference under the data dir (preserving only the encryption
+    // key so the node still boots) BEFORE anything opens a store. The API handler
+    // can't wipe live — the SQLite files are open — so it drops a marker and asks
+    // the desktop to restart Core; this is where the marker is consumed. Runs after
+    // `apply_env_defaults` so the data dir resolves against the active profile.
+    crate::paths::apply_pending_reset();
 
     // Install the crypto host BEFORE any store opens (the first `global_cipher()`
     // caller is `ConversationStore::open_default` further down). This inverts the
@@ -285,6 +347,14 @@ async fn main() {
     // sandbox never runs with drift-prone duplicates. Idempotent; safe before any
     // request-path sandbox use.
     tool_exec::install_tool_exec_host_hooks();
+
+    // Seed the command-tool allowlist from the TRUSTED compiled-in manifests
+    // (spider/rtk), so a granted built-in `command` tool resolves its bin out of
+    // the box. Only `load_builtins()` feeds this — an untrusted `~/.ryu/plugins`
+    // manifest can never self-allowlist a bin (it still needs the `tool:command:*`
+    // grant + explicit allowlist). Idempotent; must run before any command-tool
+    // dispatch.
+    tool_exec::seed_builtin_command_allowlist();
 
     // Hand the extracted `ryu-sandbox` crate Core's host couplings (Gateway
     // metering url/bearer, ryu-dir for the persisted default backend, the
@@ -407,7 +477,9 @@ async fn main() {
         // worker HTTP client, and the `/api/finetune/*` surface; Core reaches only its
         // `host.finetune_*` bridge over loopback via `finetune_client`.)
         // Tools
-        Arc::new(SpiderManager::new()),
+        // (Spider is now a declarative `command` plugin — fixtures/spider.plugin.json —
+        // with no in-process manager; the `spider` CLI is user-installed and reached
+        // via the command-tool allowlist, so there is no SpiderManager sidecar here.)
         // Autoresearch experiment runner (Python stdlib HTTP service). Opt-in;
         // NOT in startup_order — it only starts once a user installs it or runs
         // `python -m ryu_research` (adopt-mode) and the /api/research path or the
@@ -428,10 +500,16 @@ async fn main() {
 
     let startup_order = vec![
         // Tools first
-        "spider".into(),
         "llmfit".into(),
-        "shadow".into(),
-        "ghost".into(),
+        // ── shadow + ghost autostart: DISABLED for v1 ───────────────────────
+        // Deferred out of the first release to shrink the shippable surface.
+        // Both are still registered in `all_sidecars` above and stay seeded via
+        // CORE_DEFAULT_ON, so their tools remain available on-demand (Core spawns
+        // them lazily when a ghost/shadow MCP tool is first invoked). Removing
+        // them here only stops the *boot-time* auto-start + binary download.
+        // TO RE-ENABLE: uncomment the two lines below.
+        // "shadow".into(),
+        // "ghost".into(),
         // Then providers
         "llamacpp".into(),
         // Embeddings server auto-starts so RAG has real embeddings on launch.
@@ -562,11 +640,18 @@ async fn main() {
     {
         tracing::warn!("failed to ensure Artifacts system space: {e:#}");
     }
-    // The "Clips" system space seed moved out with the clips capability: clips is now
-    // the out-of-process `com.ryu.clips` sidecar and no longer links into the kernel,
-    // so there is no in-process `CLIPS_SPACE_NAME/DESC` seed here. (Auto-filing a clip
-    // into that Space is a `ClipsHost` coupling the standalone sidecar degrades
-    // cleanly — see `apps-store/clips/backend/src/main.rs`.)
+    // Ensure the default, undeletable "Clips" system space exists — where the
+    // out-of-process `com.ryu.clips` sidecar files recorded clips. The seed lives
+    // here (not in the sidecar) so the Space is present and undeletable on every
+    // fresh install regardless of whether the clips app has run yet; the name must
+    // match the sidecar's `CLIPS_SPACE_NAME` ("Clips") since `ensure_system_space`
+    // is get-or-create by name.
+    if let Err(e) = spaces
+        .ensure_system_space("Clips", Some("Screen and agent recordings"))
+        .await
+    {
+        tracing::warn!("failed to ensure Clips system space: {e:#}");
+    }
     // Ensure the "Canvas" system space and import any legacy file-store boards into
     // it as `com.ryu.canvas` app documents (the built-in creative canvas was ported
     // to a Ryu App; see `server::canvas_migrate`). Idempotent — migrated files are
@@ -800,8 +885,8 @@ async fn main() {
     // Loopback client for the out-of-process `ryu-quests` sidecar (single owner of
     // `quests.db` + the detection engine). Port resolved from the just-loaded
     // manifests, profile-shifted — same posture as `finetune`/`teams`. Published as
-    // a process-global so the scheduler (`JobTarget::Quest`) and the MCP quest-board
-    // widget can reach it without `ServerState`.
+    // a process-global so the scheduler (`JobTarget::Quest`) can reach it without
+    // `ServerState`.
     let quests = crate::quests_client::QuestsClient::new(crate::quests_client::sidecar_port(
         &*app_manifests.read().await,
     ));
@@ -837,8 +922,7 @@ async fn main() {
     // Resolve the `ryu-healing` sidecar port now, while `app_manifests` is still in
     // scope (it is moved into `ServerState` below); the healing client is built
     // later, once `server_state` exists.
-    let healing_sidecar_port =
-        crate::healing_client::sidecar_port(&*app_manifests.read().await);
+    let healing_sidecar_port = crate::healing_client::sidecar_port(&*app_manifests.read().await);
     let app_store = match crate::plugins::PluginStore::open() {
         Ok(store) => store,
         Err(e) => boot_fail!("failed to open app store: {e:#}"),
@@ -971,9 +1055,6 @@ async fn main() {
             // Wire the preferences store so the built-in `advisor` tool resolves
             // the configured `advisor-model` (the stronger reviewer model).
             .with_preferences(preferences.clone())
-            // Wire the per-run worktree diff store so the in-process `ryu.worktree`
-            // app can resolve a run's diff and apply/discard it (widget callTool).
-            .with_worktree_diffs(Arc::clone(&worktree_diffs))
             // Wire the Spaces store so the built-in `artifact__create` tool can save
             // agent-generated files into a Space (default: the Artifacts space).
             .with_spaces(spaces.clone()),
@@ -1062,7 +1143,10 @@ async fn main() {
     // guarded — only connected devices are nudged, per-device debounced. The nudge
     // loop now consumes the sidecar's `/events` SSE (as an internal, non-viewer
     // subscriber) through the `DashboardFeed` seam, reconnecting across a restart.
-    ryu_hardware::nudge::spawn(std::sync::Arc::new(dashboards.clone()), hardware_store.clone());
+    ryu_hardware::nudge::spawn(
+        std::sync::Arc::new(dashboards.clone()),
+        hardware_store.clone(),
+    );
 
     // Approval inbox (human-in-the-loop). Opens its own SQLite store and reuses a
     // shared HTTP client (mobile Expo push) + the kernel notify store's registered
@@ -1472,6 +1556,16 @@ async fn main() {
     // alters default behaviour, sends identity data, or blocks startup.
     stats_beacon::spawn_stats_beacon(stats_preferences);
 
+    // F7 boot precedence: BEFORE any control-plane spawn reads the gateway env,
+    // re-adopt a durable token persisted by a prior bootstrap exchange. On a
+    // RESTARTED managed node `core.env` still carries the now expired+revoked
+    // bootstrap KEY; if the loader did not run first, both `resolve_scope` (just
+    // below) and `register_managed_node` would grab that stale key and 401 for the
+    // whole process lifetime. The loader overrides BOTH `RYU_GATEWAY_KEY` and
+    // `RYU_GATEWAY_TOKEN` with the durable when the file is present; a fresh node
+    // (no file) is untouched and exchanges its bootstrap normally.
+    sidecar::control_plane::load_persisted_durable_token();
+
     // Resolve the hierarchy-scoped tool set from the control plane (U30) when a
     // gateway key is configured. This narrows the local config-driven MCP
     // registry (U13) to what the org/team/project has granted. Best-effort: a
@@ -1507,19 +1601,51 @@ async fn main() {
     // attributes to the right wallet (the credits debit resolves the same org).
     // Best-effort: a non-managed install or a missing key is a no-op, and a
     // resolve failure logs a warning but never blocks Core from coming up.
+    //
+    // F7 (bounded retry): on a fresh managed node the FIRST `/gateway/resolve`
+    // ALSO performs the single-use bootstrap→durable exchange, and Core is
+    // un-chattable (`gateway_bearer` fails closed) until the durable is adopted.
+    // The old durable-in-core.env model needed no exchange, so a transient
+    // first-boot failure (node network not yet up, control-plane blip) never
+    // stranded a node; now it could, with no auto-recovery under `Restart=always`
+    // (Core does not exit). So retry with capped backoff. This does NOT worsen the
+    // accepted "lost resolve RESPONSE" brick (a revoked bootstrap just 401s every
+    // retry → re-provision, same as before); it recovers the common case where the
+    // request never reached the server. Non-managed / no-key nodes return
+    // `Ok(None)` on the first attempt and never loop.
     {
         let cp_client = reqwest::Client::new();
         tokio::spawn(async move {
-            match sidecar::control_plane::register_managed_node(&cp_client).await {
-                Ok(None) => {}
-                Ok(Some(org)) => tracing::info!(
-                    org_id = %org.id,
-                    org = %org.name,
-                    "control-plane: managed node registered; usage attributes to this org"
-                ),
-                Err(e) => tracing::warn!(
-                    "control-plane: managed-node registration failed ({e}); node not org-bound until it succeeds"
-                ),
+            const MAX_ATTEMPTS: u32 = 6;
+            let mut attempt: u32 = 0;
+            loop {
+                attempt += 1;
+                match sidecar::control_plane::register_managed_node(&cp_client).await {
+                    Ok(None) => break,
+                    Ok(Some(org)) => {
+                        tracing::info!(
+                            org_id = %org.id,
+                            org = %org.name,
+                            "control-plane: managed node registered; usage attributes to this org"
+                        );
+                        break;
+                    }
+                    Err(e) if attempt < MAX_ATTEMPTS => {
+                        // 2,4,8,16,32s (capped) — ~1 min total across the boot window.
+                        let backoff =
+                            std::time::Duration::from_secs(2u64.pow(attempt.min(5)));
+                        tracing::warn!(
+                            "control-plane: managed-node registration attempt {attempt} failed ({e}); retrying in {backoff:?}"
+                        );
+                        tokio::time::sleep(backoff).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "control-plane: managed-node registration failed after {attempt} attempts ({e}); node not org-bound until it succeeds"
+                        );
+                        break;
+                    }
+                }
             }
         });
     }
@@ -1549,12 +1675,14 @@ async fn main() {
                      error until a model/provider is configured"
                 );
             }
-            // Surface the default-installed tool apps (agentbrowser, spider,
+            // Surface the default-installed tool apps (agentbrowser,
             // shadow, ghost, llmfit) as "installed" in the catalog. The catalog's
             // install_state is read from InstallStatusStore, so onboarding's
             // SetupManager mark alone is not enough — seed both. shadow + ghost
             // are built into Core (MCP registry); the rest are managed sidecars.
-            for tool in ["agentbrowser", "spider", "shadow", "ghost", "llmfit"] {
+            // (Spider is a declarative `command` plugin, user-installed CLI — not
+            // a managed sidecar — so it is not seeded here.)
+            for tool in ["agentbrowser", "shadow", "ghost", "llmfit"] {
                 if !setup_ref.is_installed(tool).await {
                     setup_ref.mark_installed(tool).await;
                 }

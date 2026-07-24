@@ -62,7 +62,11 @@ impl RecipesHost for CoreRecipesHost {
         let registry = crate::sidecar::mcp::global_registry()
             .ok_or_else(|| anyhow!("MCP registry not initialized"))?;
         registry
-            .call_tool(GHOST_RUN, json!({ "recipe": recipe, "params": params }), None)
+            .call_tool(
+                GHOST_RUN,
+                json!({ "recipe": recipe, "params": params }),
+                None,
+            )
             .await
             .map_err(|e| anyhow!("recipe replay failed: {e}"))
     }

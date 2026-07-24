@@ -1,6 +1,12 @@
 //! RTK per-agent auto-wrap (Phase 2 of the `rtk` plugin).
 //!
-//! Phase 1 exposes RTK as an explicit `rtk__run` tool ([`crate::sidecar::mcp::rtk`]).
+//! Phase 1 exposes RTK as an explicit `rtk__run` tool — now a fully declarative
+//! `command`-backend plugin (`plugins-store/rtk`, mirrored as the built-in
+//! fixture `plugin_manifest/fixtures/rtk.plugin.json`); its native provider
+//! (`sidecar/mcp/rtk.rs`) was deleted. Phase 2, below, is NOT a tool and cannot be
+//! declarative, so it stays as Rust — including [`rtk_bin_path`]/[`is_available`],
+//! relocated here from the deleted provider (Phase 2 is their only consumer).
+//!
 //! Phase 2 makes RTK *transparent* for a Ryu-managed agent: when the user turns on
 //! the plugin's per-agent toggle, Core runs `rtk init --agent <id> --hook-only`
 //! against that agent's Ryu-owned config dir, installing RTK's PreToolUse hook so
@@ -36,6 +42,35 @@ pub const EXCLUDE_COMMANDS_PREF_KEY: &str = "rtk-exclude-commands";
 
 static WRAP_PI: AtomicBool = AtomicBool::new(false);
 static WRAP_CLAUDE: AtomicBool = AtomicBool::new(false);
+
+/// Resolve the `rtk` binary: `RYU_RTK_BIN` override first, else the first `rtk`
+/// (`rtk.exe` on Windows) found on `PATH`. Returns `None` when RTK is not
+/// installed — the detect-on-PATH, BYO posture (nothing downloaded).
+///
+/// Relocated verbatim from the deleted `sidecar/mcp/rtk.rs` provider: Phase-2
+/// auto-wrap (this module) is its only remaining consumer. The declarative
+/// `rtk__run` tool does NOT use this — the generic `command` backend resolves its
+/// bin through the Core command-tool allowlist (`RYU_COMMAND_TOOL_ALLOWLIST`).
+pub fn rtk_bin_path() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("RYU_RTK_BIN") {
+        let path = PathBuf::from(p);
+        return path.exists().then_some(path);
+    }
+    let exe = if cfg!(target_os = "windows") {
+        "rtk.exe"
+    } else {
+        "rtk"
+    };
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths)
+        .map(|dir| dir.join(exe))
+        .find(|candidate| candidate.exists())
+}
+
+/// True when an `rtk` binary is resolvable (the auto-wrap availability check).
+pub fn is_available() -> bool {
+    rtk_bin_path().is_some()
+}
 
 /// A Ryu-managed agent RTK auto-wrap supports. Each maps to an `rtk init --agent
 /// <id>` target and the env that points `rtk` at the agent's Ryu-owned config dir.
@@ -126,7 +161,7 @@ pub fn init_args(agent: WrapAgent, enable: bool) -> Vec<String> {
 /// block a spawn. Runs `rtk init` with the agent's Ryu-owned config dir in the
 /// environment so the hook lands where the managed agent will read it.
 pub async fn configure(agent: WrapAgent, enable: bool) -> anyhow::Result<()> {
-    let Some(bin) = crate::sidecar::mcp::rtk::rtk_bin_path() else {
+    let Some(bin) = rtk_bin_path() else {
         tracing::info!(
             agent = agent.rtk_agent_id(),
             "rtk auto-wrap: rtk not on PATH; skipping hook configuration"
@@ -159,7 +194,10 @@ pub async fn configure(agent: WrapAgent, enable: bool) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("spawn `rtk init`: {e}"))?;
     if !status.success() {
-        anyhow::bail!("`rtk init` for agent '{}' exited {status}", agent.rtk_agent_id());
+        anyhow::bail!(
+            "`rtk init` for agent '{}' exited {status}",
+            agent.rtk_agent_id()
+        );
     }
     tracing::info!(
         agent = agent.rtk_agent_id(),
@@ -190,7 +228,7 @@ fn parse_excludes(raw: &str) -> Vec<String> {
 /// installed). Best-effort: a parse/write failure is surfaced as `Err` for the
 /// caller to log, never fatal.
 pub fn set_exclude_commands(raw: &str) -> anyhow::Result<()> {
-    if crate::sidecar::mcp::rtk::rtk_bin_path().is_none() {
+    if rtk_bin_path().is_none() {
         return Ok(());
     }
     let Some(path) = rtk_config_path() else {
@@ -266,7 +304,10 @@ mod tests {
 
     #[test]
     fn pref_key_roundtrips_to_agent() {
-        assert_eq!(WrapAgent::from_pref_key(WRAP_PI_PREF_KEY), Some(WrapAgent::Pi));
+        assert_eq!(
+            WrapAgent::from_pref_key(WRAP_PI_PREF_KEY),
+            Some(WrapAgent::Pi)
+        );
         assert_eq!(
             WrapAgent::from_pref_key(WRAP_CLAUDE_PREF_KEY),
             Some(WrapAgent::Claude)
@@ -303,7 +344,10 @@ mod tests {
             parse_excludes("curl, playwright,  npm run dev "),
             vec!["curl", "playwright", "npm run dev"]
         );
-        assert_eq!(parse_excludes("curl\nplaywright"), vec!["curl", "playwright"]);
+        assert_eq!(
+            parse_excludes("curl\nplaywright"),
+            vec!["curl", "playwright"]
+        );
         assert!(parse_excludes("  ,, \n ").is_empty());
         assert!(parse_excludes("").is_empty());
     }

@@ -180,3 +180,87 @@ impl Default for RestateDownloader {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static RESTATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        RESTATE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    struct EnvGuard {
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        fn set(val: &str) -> Self {
+            let prev = std::env::var("RYU_RESTATE_VERSION").ok();
+            std::env::set_var("RYU_RESTATE_VERSION", val);
+            Self { prev }
+        }
+        fn clear() -> Self {
+            let prev = std::env::var("RYU_RESTATE_VERSION").ok();
+            std::env::remove_var("RYU_RESTATE_VERSION");
+            Self { prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var("RYU_RESTATE_VERSION", v),
+                None => std::env::remove_var("RYU_RESTATE_VERSION"),
+            }
+        }
+    }
+
+    #[test]
+    fn bin_path_lands_in_ryu_bin() {
+        let p = bin_path();
+        assert!(p.ends_with(if cfg!(target_os = "windows") {
+            "restate-server.exe"
+        } else {
+            "restate-server"
+        }));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
+    }
+
+    #[test]
+    fn archive_platform_pairs_target_with_extension() {
+        let (platform, ext) = archive_platform();
+        assert!(platform.starts_with("restate-server."));
+        // Windows ships a zip; every other target a tar.gz.
+        if cfg!(target_os = "windows") {
+            assert_eq!(ext, "zip");
+        } else {
+            assert_eq!(ext, "tar.gz");
+        }
+    }
+
+    #[test]
+    fn archive_url_uses_pinned_version_by_default() {
+        let _lock = lock_env();
+        let _g = EnvGuard::clear();
+        let url = archive_url();
+        assert!(url.starts_with("https://github.com/restatedev/restate/releases/download/v"));
+        assert!(url.contains(RESTATE_VERSION));
+        let (platform, ext) = archive_platform();
+        assert!(url.ends_with(&format!("{platform}.{ext}")));
+    }
+
+    #[test]
+    fn archive_url_honours_version_env_override() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set("9.9.9");
+        let url = archive_url();
+        assert!(url.contains("/download/v9.9.9/"), "got: {url}");
+    }
+
+    #[test]
+    fn archive_url_blank_version_env_uses_default() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set("");
+        let url = archive_url();
+        assert!(url.contains(&format!("/download/v{RESTATE_VERSION}/")), "got: {url}");
+    }
+}

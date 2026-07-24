@@ -10,8 +10,8 @@ use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
 use crate::catalog::registry;
-use crate::win_process::NoWindow;
 use crate::sidecar::download_manager::VersionStore;
+use crate::win_process::NoWindow;
 
 /// Pip package that provides the `mlx_lm` module (`python -m mlx_lm server`).
 pub const PIP_PACKAGE: &str = "mlx-lm";

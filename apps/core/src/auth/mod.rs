@@ -434,3 +434,81 @@ fn write_secret_file(path: &std::path::Path, body: &str) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(user_id: &str, token: &str) -> Account {
+        Account {
+            token: token.to_owned(),
+            user_id: user_id.to_owned(),
+            email: format!("{user_id}@x.io"),
+            name: Some(user_id.to_owned()),
+            image: None,
+        }
+    }
+
+    #[test]
+    fn active_resolves_the_pointer_or_none() {
+        let vault = AccountVault {
+            accounts: vec![account("u1", "t1"), account("u2", "t2")],
+            active_user_id: Some("u2".to_owned()),
+        };
+        assert_eq!(vault.active().unwrap().user_id, "u2");
+        assert_eq!(vault.active().unwrap().token, "t2");
+
+        // A dangling pointer resolves to None (not the first account).
+        let dangling = AccountVault {
+            accounts: vec![account("u1", "t1")],
+            active_user_id: Some("ghost".to_owned()),
+        };
+        assert!(dangling.active().is_none());
+
+        // No pointer at all → None.
+        let unset = AccountVault {
+            accounts: vec![account("u1", "t1")],
+            active_user_id: None,
+        };
+        assert!(unset.active().is_none());
+
+        // Empty vault → None.
+        assert!(AccountVault::default().active().is_none());
+    }
+
+    #[test]
+    fn vault_serde_round_trips_and_renames_active_pointer() {
+        let vault = AccountVault {
+            accounts: vec![account("u1", "t1")],
+            active_user_id: Some("u1".to_owned()),
+        };
+        let json = serde_json::to_value(&vault).unwrap();
+        // The pointer serializes under the camelCase wire name.
+        assert_eq!(json["activeUserId"], "u1");
+        assert_eq!(json["accounts"][0]["userId"], "u1");
+
+        let back: AccountVault = serde_json::from_value(json).unwrap();
+        assert_eq!(back.active_user_id.as_deref(), Some("u1"));
+        assert_eq!(back.accounts.len(), 1);
+    }
+
+    #[test]
+    fn account_deserializes_with_missing_optionals() {
+        // email/name/image default when absent; userId is the wire rename.
+        let raw = r#"{ "token": "tok", "userId": "u9" }"#;
+        let a: Account = serde_json::from_str(raw).unwrap();
+        assert_eq!(a.user_id, "u9");
+        assert_eq!(a.email, "");
+        assert!(a.name.is_none());
+        assert!(a.image.is_none());
+    }
+
+    #[test]
+    fn malformed_vault_json_falls_back_to_default_via_unwrap_or_default() {
+        // Mirrors load_accounts' `unwrap_or_default()` on a corrupt file.
+        let vault: AccountVault = serde_json::from_slice(b"not json").unwrap_or_default();
+        assert!(vault.accounts.is_empty());
+        assert!(vault.active_user_id.is_none());
+    }
+
+}

@@ -11,8 +11,7 @@
 // companion overlay window has no provider, so it gates with its own inline
 // locked panel rather than this badge.
 
-import { SparklesIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { PlanBadge } from "@ryu/ui/components/plan-badge";
 import {
 	Tooltip,
 	TooltipContent,
@@ -36,19 +35,11 @@ export function ProLockedBadge({ feature, className }: ProLockedBadgeProps) {
 			<TooltipTrigger
 				render={
 					<button
-						className={cn(
-							"inline-flex h-5 w-fit shrink-0 items-center gap-1 rounded-3xl border border-warning/40 bg-warning/10 px-2 py-0.5 font-medium text-warning text-xs transition-colors hover:bg-warning/20",
-							className
-						)}
+						className={cn("cursor-pointer", className)}
 						onClick={requestUpgrade}
 						type="button"
 					>
-						<HugeiconsIcon
-							className="size-3"
-							icon={SparklesIcon}
-							strokeWidth={2}
-						/>
-						Pro
+						<PlanBadge plan="pro" size="sm" />
 					</button>
 				}
 			/>

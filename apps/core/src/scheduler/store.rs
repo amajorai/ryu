@@ -183,3 +183,130 @@ pub fn delete_job(id: &str) -> std::io::Result<bool> {
         Err(e) => Err(e),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(outcome: ExecOutcome, at: &str) -> ExecRecord {
+        ExecRecord {
+            started_at: at.to_string(),
+            finished_at: at.to_string(),
+            outcome,
+            run_id: None,
+            error: None,
+        }
+    }
+
+    fn job() -> ScheduledJob {
+        ScheduledJob {
+            id: "j1".into(),
+            name: "n".into(),
+            schedule: Schedule::Cron {
+                expr: "* * * * *".into(),
+            },
+            target: JobTarget::IdentityHealth,
+            enabled: true,
+            require_approval: false,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            last_run_at: None,
+            last_outcome: None,
+            history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn record_execution_updates_rollups_and_appends() {
+        let mut j = job();
+        j.record_execution(record(ExecOutcome::Failure, "2026-02-02T00:00:00Z"));
+        assert_eq!(j.last_run_at.as_deref(), Some("2026-02-02T00:00:00Z"));
+        assert_eq!(j.last_outcome, Some(ExecOutcome::Failure));
+        assert_eq!(j.history.len(), 1);
+        // updated_at is refreshed off the wall clock, away from the seed value.
+        assert_ne!(j.updated_at, "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn record_execution_trims_history_to_bound_keeping_newest() {
+        let mut j = job();
+        for i in 0..(MAX_HISTORY + 10) {
+            j.record_execution(record(
+                ExecOutcome::Success,
+                &format!("2026-03-{:02}T00:00:00Z", i % 28 + 1),
+            ));
+        }
+        assert_eq!(j.history.len(), MAX_HISTORY);
+        // The oldest entries were drained from the front — the last push is retained.
+        assert_eq!(j.last_outcome, Some(ExecOutcome::Success));
+    }
+
+    #[test]
+    fn job_target_serde_tags_round_trip() {
+        // Workflow with a default (absent) input map.
+        let wf: JobTarget =
+            serde_json::from_value(serde_json::json!({"type":"workflow","workflow_id":"w1"}))
+                .unwrap();
+        assert_eq!(
+            wf,
+            JobTarget::Workflow {
+                workflow_id: "w1".into(),
+                input: std::collections::HashMap::new(),
+            }
+        );
+        // Agent, monitor, quest, and the two unit variants.
+        assert_eq!(
+            serde_json::from_value::<JobTarget>(
+                serde_json::json!({"type":"agent","agent_id":"a","prompt":"p"})
+            )
+            .unwrap(),
+            JobTarget::Agent {
+                agent_id: "a".into(),
+                prompt: "p".into()
+            }
+        );
+        assert_eq!(
+            serde_json::from_value::<JobTarget>(
+                serde_json::json!({"type":"identity_health"})
+            )
+            .unwrap(),
+            JobTarget::IdentityHealth
+        );
+        assert_eq!(
+            serde_json::from_value::<JobTarget>(serde_json::json!({"type":"learning_cycle"}))
+                .unwrap(),
+            JobTarget::LearningCycle
+        );
+    }
+
+    #[test]
+    fn scheduled_job_serde_defaults_enabled_true_and_empty_history() {
+        // A minimal job doc (pre-dating enabled/require_approval/history) must
+        // deserialize with enabled=true, require_approval=false, empty history.
+        let raw = serde_json::json!({
+            "id": "old",
+            "name": "legacy",
+            "schedule": {"kind":"every","interval":"5m"},
+            "target": {"type":"monitor","monitor_id":"m1"},
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        });
+        let j: ScheduledJob = serde_json::from_value(raw).unwrap();
+        assert!(j.enabled, "enabled must default to true");
+        assert!(!j.require_approval);
+        assert!(j.history.is_empty());
+        assert!(matches!(j.schedule, Schedule::Every { .. }));
+    }
+
+    #[test]
+    fn exec_outcome_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ExecOutcome::Success).unwrap(),
+            "\"success\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ExecOutcome::Failure).unwrap(),
+            "\"failure\""
+        );
+    }
+}

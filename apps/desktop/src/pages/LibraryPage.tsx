@@ -13,14 +13,15 @@
 
 import {
 	Add01Icon,
-	BubbleChatIcon,
+	AudioWave01Icon,
+	BookOpen01Icon,
 	Clock01Icon,
+	DeliverySecure01Icon,
 	LibraryIcon,
-	Mic01Icon,
-	Robot01Icon,
 	StarIcon,
+	Target01Icon,
 	UserGroupIcon,
-	WorkflowSquare01Icon,
+	WorkflowCircle06Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import {
@@ -53,6 +54,7 @@ import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useAgents } from "@/src/hooks/useAgents.ts";
+import { useApps } from "@/src/hooks/useApps.ts";
 import { useMeetings } from "@/src/hooks/useMeetings.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
 import { useWorkflows } from "@/src/hooks/useWorkflows.ts";
@@ -75,25 +77,36 @@ const SECTIONS: {
 }[] = [
 	{ value: "recents", label: "Recents", icon: Clock01Icon },
 	{ value: "favorites", label: "Favorites", icon: StarIcon },
-	{ value: "agent", label: "Agents", icon: Robot01Icon },
-	{ value: "workflow", label: "Workflows", icon: WorkflowSquare01Icon },
-	{ value: "chat", label: "Chats", icon: BubbleChatIcon },
-	{ value: "space", label: "Spaces", icon: LibraryIcon },
+	{ value: "agent", label: "Agents", icon: Target01Icon },
+	{ value: "workflow", label: "Workflows", icon: WorkflowCircle06Icon },
+	{ value: "chat", label: "Chats", icon: BookOpen01Icon },
+	{ value: "space", label: "Spaces", icon: DeliverySecure01Icon },
 	{ value: "team", label: "Teams", icon: UserGroupIcon },
-	{ value: "meeting", label: "Meetings", icon: Mic01Icon },
+	{ value: "meeting", label: "Meetings", icon: AudioWave01Icon },
 ];
+
+/** The app that owns each collection. A tab shows only when its owning app is
+ *  enabled — so an uninstalled Workflows/Teams/Meetings app leaves no empty tab.
+ *  Sections absent here (recents/favorites/chat) are host surfaces, always shown. */
+const SECTION_PLUGIN: Partial<Record<LibrarySection, string>> = {
+	agent: "com.ryu.agents",
+	workflow: "com.ryu.workflows",
+	space: "com.ryu.spaces",
+	team: "com.ryu.teams",
+	meeting: "com.ryu.meetings",
+};
 
 /** Per-type display metadata for the synthetic (mixed) tabs and filter chips. */
 const TYPE_META: Record<
 	LibraryItemType,
 	{ label: string; icon: IconSvgElement }
 > = {
-	agent: { label: "Agent", icon: Robot01Icon },
-	workflow: { label: "Workflow", icon: WorkflowSquare01Icon },
-	chat: { label: "Chat", icon: BubbleChatIcon },
-	space: { label: "Space", icon: LibraryIcon },
+	agent: { label: "Agent", icon: Target01Icon },
+	workflow: { label: "Workflow", icon: WorkflowCircle06Icon },
+	chat: { label: "Chat", icon: BookOpen01Icon },
+	space: { label: "Space", icon: DeliverySecure01Icon },
 	team: { label: "Team", icon: UserGroupIcon },
-	meeting: { label: "Meeting", icon: Mic01Icon },
+	meeting: { label: "Meeting", icon: AudioWave01Icon },
 };
 
 const SORT_OPTIONS: LibrarySortOption[] = [
@@ -196,6 +209,35 @@ function LibraryCollections({
 	} = useSpacesContext();
 	const { conversations } = useChatHistoryContext();
 
+	// Only show a collection tab when its owning app is enabled — an uninstalled
+	// Workflows/Teams/Meetings app should leave no empty tab. Host surfaces
+	// (recents/favorites/chat) have no owner and always show.
+	const { apps, loading: appsLoading } = useApps();
+	const enabledPlugins = useMemo(
+		() => new Set(apps.filter((a) => a.enabled).map((a) => a.id)),
+		[apps]
+	);
+	// While the app list is still loading, show every tab — gating on an empty set
+	// would flash the default-on collections (Agents/Spaces/Teams) off then on.
+	const visibleSections = useMemo(
+		() =>
+			appsLoading
+				? SECTIONS
+				: SECTIONS.filter((s) => {
+						const plugin = SECTION_PLUGIN[s.value];
+						return !plugin || enabledPlugins.has(plugin);
+					}),
+		[enabledPlugins, appsLoading]
+	);
+
+	// If the active tab's app was just disabled, fall back to Recents so the page
+	// never sits on a now-hidden collection.
+	useEffect(() => {
+		if (!visibleSections.some((s) => s.value === section)) {
+			setSection("recents");
+		}
+	}, [visibleSections, section]);
+
 	// Create-dialog state for the collections that need a name before they exist.
 	const [spaceDialogOpen, setSpaceDialogOpen] = useState(false);
 	const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -229,7 +271,7 @@ function LibraryCollections({
 				name: a.name,
 				subtitle: engineLabel(a.engine) ?? a.description,
 				badge: a.builtIn ? "Built-in" : null,
-				icon: Robot01Icon,
+				icon: Target01Icon,
 				updatedAt: normalizeTimestamp(a.createdAt),
 				// openTab stamps recents from the route; no explicit stamp needed.
 				open: () => openTab(`/agents/${a.id}/edit`, { title: a.name }),
@@ -248,7 +290,7 @@ function LibraryCollections({
 					w.description ??
 					`${w.nodes.length} ${w.nodes.length === 1 ? "node" : "nodes"}`,
 				badge: null,
-				icon: WorkflowSquare01Icon,
+				icon: WorkflowCircle06Icon,
 				updatedAt: normalizeTimestamp(w.updatedAt ?? w.createdAt),
 				open: () => openTab(`/workflows/${w.id}`, { title: w.name }),
 				preview: (
@@ -270,7 +312,7 @@ function LibraryCollections({
 				name: c.title || "Untitled chat",
 				subtitle: c.folderPath ?? null,
 				badge: c.archived ? "Archived" : null,
-				icon: BubbleChatIcon,
+				icon: BookOpen01Icon,
 				updatedAt: normalizeTimestamp(c.updatedAt ?? c.createdAt),
 				open: () => openTab("/chat", { conversationId: c.id }),
 			})),
@@ -290,7 +332,7 @@ function LibraryCollections({
 						s.description ??
 						`${s.documentCount} ${s.documentCount === 1 ? "doc" : "docs"}`,
 					badge: null,
-					icon: LibraryIcon,
+					icon: DeliverySecure01Icon,
 					updatedAt: normalizeTimestamp(s.updatedAt ?? s.createdAt),
 					open: () => {
 						stampRecent("space", s.id);
@@ -330,7 +372,7 @@ function LibraryCollections({
 				name: m.title,
 				subtitle: m.status === "recording" ? "Recording…" : null,
 				badge: m.status === "recording" ? "Live" : null,
-				icon: Mic01Icon,
+				icon: AudioWave01Icon,
 				updatedAt: normalizeTimestamp(m.updated_at ?? m.created_at),
 				open: () => openTab(`/meetings/${m.id}`, { title: m.title }),
 			})),
@@ -544,7 +586,7 @@ function LibraryCollections({
 		<div className="relative flex h-full flex-col overflow-hidden">
 			<StoreSectionNav
 				active={section}
-				onSelect={(value) => {
+				onSelect={(value: string) => {
 					if (isLibrarySection(value)) {
 						setSection(value);
 					}
@@ -595,40 +637,45 @@ function LibraryCollections({
 					onChange: setQuery,
 					placeholder: `Search ${sectionMeta?.label.toLowerCase() ?? "items"}…`,
 				}}
-				sections={SECTIONS}
+				sections={visibleSections}
 			/>
 
 			{/* Single scroll viewport → content scrolls UNDER the frosted, transparent
 			    titlebar (Layout no longer reserves its height for /library — see
 			    pathScrollsUnderTitlebar). `pt-12` clears the bar. */}
+			{/* Centered, capped-width column mirroring the Store/Customize catalog
+			    layout — the cards read as the same 2-column grid rather than a
+			    full-bleed wall. */}
 			<div className="min-h-0 flex-1 overflow-y-auto px-4 pt-12 pb-24">
-				{loading ? (
-					<LibraryLoading />
-				) : visibleItems.length === 0 ? (
-					<LibraryEmpty
-						description={
-							query ? "Nothing matches your search." : emptyCopy[section]
-						}
-						icon={sectionMeta?.icon ?? LibraryIcon}
-						title={
-							query
-								? "No results"
-								: `No ${sectionMeta?.label.toLowerCase() ?? "items"} yet`
-						}
-					/>
-				) : (
-					<LibraryGrid view={view}>
-						{visibleItems.map((item) => (
-							<LibraryCard
-								item={toCardData(item)}
-								key={refKey(item.type, item.id)}
-								onOpen={item.open}
-								onToggleFavorite={() => toggleFavorite(item.type, item.id)}
-								view={view}
-							/>
-						))}
-					</LibraryGrid>
-				)}
+				<div className="mx-auto w-full max-w-4xl">
+					{loading ? (
+						<LibraryLoading />
+					) : visibleItems.length === 0 ? (
+						<LibraryEmpty
+							description={
+								query ? "Nothing matches your search." : emptyCopy[section]
+							}
+							icon={sectionMeta?.icon ?? LibraryIcon}
+							title={
+								query
+									? "No results"
+									: `No ${sectionMeta?.label.toLowerCase() ?? "items"} yet`
+							}
+						/>
+					) : (
+						<LibraryGrid columns={2} view={view}>
+							{visibleItems.map((item) => (
+								<LibraryCard
+									item={toCardData(item)}
+									key={refKey(item.type, item.id)}
+									onOpen={item.open}
+									onToggleFavorite={() => toggleFavorite(item.type, item.id)}
+									view={view}
+								/>
+							))}
+						</LibraryGrid>
+					)}
+				</div>
 			</div>
 
 			<CreateSpaceDialog

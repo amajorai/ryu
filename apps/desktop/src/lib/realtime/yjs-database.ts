@@ -20,7 +20,7 @@
 // {@link snapshotDatabase} on every `observeDeep` and routes edits back through
 // the mutators here (each wrapped in a `doc.transact` so it ships as one update).
 
-import { getEmptyCellValue } from "@ryu/ui/lib/data-grid";
+import { getEmptyCellValue } from "@ryu/ui/lib/data-grid.ts";
 import type { CellOpts } from "@ryu/ui/types/data-grid";
 import { type Doc, type Array as YArray, Map as YMap } from "yjs";
 

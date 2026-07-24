@@ -343,12 +343,38 @@ fn append_capped(
 
 /// Spawn a child process for `terminal/create` and register it. Returns the new
 /// terminal id, or an error if the process could not be spawned.
+///
+/// The command is pre-scanned through the gateway command-approval scanner
+/// first: `terminal/create` has no `request_permission` step, so without this
+/// scan it would be an ungoverned second exec path beside the scanned
+/// permission seam. There is no prompt seam here, so `ApprovalRequired` rejects
+/// (fail closed) in interactive and headless mode alike.
 async fn terminal_create(
     registry: &TerminalRegistry,
     req: &CreateTerminalRequest,
     session_cwd: &std::path::Path,
+    scan_agent: &str,
 ) -> anyhow::Result<String> {
     use std::process::Stdio;
+
+    let line = if req.args.is_empty() {
+        req.command.clone()
+    } else {
+        format!("{} {}", req.command, req.args.join(" "))
+    };
+    match check_exec_scan("acp", &line, None, Some(scan_agent)).await {
+        ExecScanOutcome::Allow => {}
+        ExecScanOutcome::Deny(reason) => {
+            return Err(anyhow::anyhow!(
+                "terminal command denied by gateway policy: {reason}"
+            ))
+        }
+        ExecScanOutcome::ApprovalRequired(reason) => {
+            return Err(anyhow::anyhow!(
+                "terminal command requires approval and terminal/create has no prompt seam: {reason}"
+            ))
+        }
+    }
 
     let mut cmd = tokio::process::Command::new(&req.command);
     cmd.args(&req.args);
@@ -535,15 +561,55 @@ impl<T, E: std::fmt::Display> WithContextMsg<T> for Result<T, E> {
 // ── Client-hosted file system (ACP `fs/read_text_file`, `fs/write_text_file`) ────
 //
 // ACP agents (Claude Code / Codex) route file reads and edits through the *client*
-// rather than touching disk directly, so the client is the single mediation point.
-// Ryu serves these directly against the local filesystem — ACP agents are first-
-// party binaries running as the user (SECURITY.md), so this is parity, not a new
-// trust boundary. Read honours ACP's 1-based `line` + `limit` window.
+// rather than touching disk directly, so the client is the single mediation point
+// — and the confinement point: requests are scoped to the session's workspace
+// root. ACP agents are first-party binaries running as the user (SECURITY.md),
+// so this is accident prevention (a prompt-injected turn must not read
+// `~/.ssh/id_ed25519` or write `~/.zshrc` through the client seam), not process
+// containment. Read honours ACP's 1-based `line` + `limit` window.
+
+/// True when `path` stays inside `root` after LEXICAL normalization (`.`/`..`
+/// resolved without touching the filesystem, so a not-yet-created target still
+/// checks). A relative path is joined to `root` first. Symlink-following escapes
+/// are out of scope here — this is the accident-prevention layer; the gateway
+/// exec-scan's path deny rules govern the exec plane separately.
+fn path_within_root(root: &std::path::Path, path: &std::path::Path) -> bool {
+    use std::path::Component;
+    fn normalize(p: &std::path::Path) -> std::path::PathBuf {
+        let mut out = std::path::PathBuf::new();
+        for c in p.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    out.pop();
+                }
+                other => out.push(other),
+            }
+        }
+        out
+    }
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    normalize(&abs).starts_with(normalize(root))
+}
 
 /// Serve `fs/read_text_file`, applying the optional 1-based `line` offset and
-/// `limit`. Returns `""` on any read error (the ACP response carries only
-/// `content`; a missing file degrades to empty rather than failing the turn).
-fn read_text_file_scoped(req: &ReadTextFileRequest) -> String {
+/// `limit`. Confined to the session workspace root: an out-of-root path returns
+/// `""` (the ACP response carries only `content`; degrading to empty matches how
+/// a missing file behaves, and never feeds out-of-workspace secrets to the
+/// model). Returns `""` on any read error likewise.
+fn read_text_file_scoped(req: &ReadTextFileRequest, root: &std::path::Path) -> String {
+    if !path_within_root(root, &req.path) {
+        tracing::warn!(
+            path = %req.path.display(),
+            root = %root.display(),
+            "fs/read_text_file refused: path escapes the session workspace"
+        );
+        return String::new();
+    }
     let Ok(content) = std::fs::read_to_string(&req.path) else {
         return String::new();
     };
@@ -562,8 +628,17 @@ fn read_text_file_scoped(req: &ReadTextFileRequest) -> String {
     lines[start..end].join("\n")
 }
 
-/// Serve `fs/write_text_file`, creating parent directories as needed.
-fn write_text_file_scoped(req: &WriteTextFileRequest) -> anyhow::Result<()> {
+/// Serve `fs/write_text_file`, creating parent directories as needed. Confined
+/// to the session workspace root — an out-of-root path is refused (no directory
+/// is created, nothing is written).
+fn write_text_file_scoped(req: &WriteTextFileRequest, root: &std::path::Path) -> anyhow::Result<()> {
+    if !path_within_root(root, &req.path) {
+        return Err(anyhow::anyhow!(
+            "refusing write outside the session workspace: {} (root {})",
+            req.path.display(),
+            root.display()
+        ));
+    }
     if let Some(parent) = req.path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -704,7 +779,10 @@ pub fn observed_tools_for(agent_id: &str) -> Vec<ToolInfo> {
 /// another user's pending tool-permission prompt — a human-in-the-loop integrity
 /// bypass. `None` for an ephemeral (no-conversation) instance.
 type PermissionWaiters = Mutex<
-    std::collections::HashMap<String, (tokio::sync::oneshot::Sender<Option<String>>, Option<String>)>,
+    std::collections::HashMap<
+        String,
+        (tokio::sync::oneshot::Sender<Option<String>>, Option<String>),
+    >,
 >;
 
 fn pending_permissions() -> &'static PermissionWaiters {
@@ -728,10 +806,7 @@ fn register_permission(
 ) -> tokio::sync::oneshot::Receiver<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     if let Ok(mut map) = pending_permissions().lock() {
-        map.insert(
-            request_id,
-            (tx, conversation_id.filter(|s| !s.is_empty())),
-        );
+        map.insert(request_id, (tx, conversation_id.filter(|s| !s.is_empty())));
     }
     rx
 }
@@ -1937,6 +2012,11 @@ pub async fn run_acp_instance(
                             let terms_kill = Arc::clone(&terminals);
                             let terms_release = Arc::clone(&terminals);
                             let term_cwd = terminal_cwd.clone();
+                            // Workspace roots for the confined fs handlers + the
+                            // terminal exec-scan's agent attribution.
+                            let fs_cwd_read = terminal_cwd.clone();
+                            let fs_cwd_write = terminal_cwd.clone();
+                            let term_scan_agent = scan_agent.clone();
                             MatchDispatch::new(message)
                                 .if_notification(async move |notification: SessionNotification| {
                                     match notification.update {
@@ -2193,8 +2273,15 @@ pub async fn run_acp_instance(
                                                 None => RequestPermissionOutcome::Cancelled,
                                             }
                                         } else {
-                                            // Headless: preserve the prior auto-approve
-                                            // behaviour so tool use works without a UI.
+                                            // Headless: auto-approve the first offered
+                                            // option so tool use works without a UI —
+                                            // GOVERNED by the scan above, which is armed
+                                            // by default (`exec_approval_enabled`) and
+                                            // fail-closed: a Deny or ApprovalRequired
+                                            // verdict already rejected before this arm.
+                                            // Only an operator's explicit
+                                            // `RYU_EXEC_APPROVAL_MODE=off` restores the
+                                            // old ungoverned auto-approve.
                                             req.options.first().map_or(
                                                 RequestPermissionOutcome::Cancelled,
                                                 |opt| {
@@ -2214,21 +2301,33 @@ pub async fn run_acp_instance(
                                 .await
                                 // ── fs/read_text_file ──────────────────────────
                                 .if_request(async move |req: ReadTextFileRequest, responder| {
-                                    let text = read_text_file_scoped(&req);
+                                    let text = read_text_file_scoped(&req, &fs_cwd_read);
                                     responder.respond(ReadTextFileResponse::new(text))?;
                                     Ok(())
                                 })
                                 .await
                                 // ── fs/write_text_file ─────────────────────────
                                 .if_request(async move |req: WriteTextFileRequest, responder| {
-                                    let _ = write_text_file_scoped(&req);
+                                    // A refused (out-of-workspace) or failed write is
+                                    // logged; the ACP response shape carries no error
+                                    // channel, so the agent sees the write as a no-op.
+                                    if let Err(e) = write_text_file_scoped(&req, &fs_cwd_write) {
+                                        tracing::warn!("fs/write_text_file: {e}");
+                                    }
                                     responder.respond(WriteTextFileResponse::new())?;
                                     Ok(())
                                 })
                                 .await
                                 // ── terminal/create ────────────────────────────
                                 .if_request(async move |req: CreateTerminalRequest, responder| {
-                                    match terminal_create(&terms_read, &req, &term_cwd).await {
+                                    match terminal_create(
+                                        &terms_read,
+                                        &req,
+                                        &term_cwd,
+                                        &term_scan_agent,
+                                    )
+                                    .await
+                                    {
                                         Ok(id) => {
                                             responder.respond(CreateTerminalResponse::new(
                                                 TerminalId::new(id.as_str()),
@@ -2482,9 +2581,16 @@ fn extract_file_write(tool_call: &serde_json::Value) -> Option<String> {
     // A write is a path PLUS a mutating payload; without the payload it may be a
     // read (Read/Grep take a path too), which must not be treated as a write.
     fn is_write(obj: &serde_json::Value) -> bool {
-        ["content", "new_string", "newString", "edits", "new_source", "newSource"]
-            .iter()
-            .any(|k| obj.get(k).is_some())
+        [
+            "content",
+            "new_string",
+            "newString",
+            "edits",
+            "new_source",
+            "newSource",
+        ]
+        .iter()
+        .any(|k| obj.get(k).is_some())
     }
     fn write_path(obj: &serde_json::Value) -> Option<String> {
         if is_write(obj) {
@@ -2933,9 +3039,8 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
         } else {
             String::new()
         };
-        let mut mcp_env = format!(
-            "set RYU_MCP_CORE_URL={core_url}&& set RYU_MCP_AGENT_ID={mcp_agent_id}&& "
-        );
+        let mut mcp_env =
+            format!("set RYU_MCP_CORE_URL={core_url}&& set RYU_MCP_AGENT_ID={mcp_agent_id}&& ");
         if let Some(t) = &core_token {
             mcp_env.push_str(&format!("set RYU_MCP_CORE_TOKEN={t}&& "));
         }
@@ -2950,8 +3055,7 @@ pub fn ryu_pi_acp_cmd() -> Option<String> {
         } else {
             String::new()
         };
-        let mut mcp_env =
-            format!("RYU_MCP_CORE_URL={core_url} RYU_MCP_AGENT_ID={mcp_agent_id} ");
+        let mut mcp_env = format!("RYU_MCP_CORE_URL={core_url} RYU_MCP_AGENT_ID={mcp_agent_id} ");
         if let Some(t) = &core_token {
             mcp_env.push_str(&format!("RYU_MCP_CORE_TOKEN={t} "));
         }
@@ -3771,7 +3875,10 @@ mod tests {
             "ryu".to_owned(),
         )
         .await;
-        assert!(event.is_none(), "isError result must not synthesize a widget");
+        assert!(
+            event.is_none(),
+            "isError result must not synthesize a widget"
+        );
     }
 
     #[test]
@@ -3807,15 +3914,63 @@ mod tests {
 
         // Full read.
         let full = req(serde_json::json!({ "path": path }));
-        assert_eq!(read_text_file_scoped(&full), "l1\nl2\nl3\nl4\nl5");
+        assert_eq!(read_text_file_scoped(&full, &dir), "l1\nl2\nl3\nl4\nl5");
 
         // 1-based line offset + limit window.
         let windowed = req(serde_json::json!({ "path": path, "line": 2, "limit": 2 }));
-        assert_eq!(read_text_file_scoped(&windowed), "l2\nl3");
+        assert_eq!(read_text_file_scoped(&windowed, &dir), "l2\nl3");
 
         // Missing file → empty, never panics.
         let missing = req(serde_json::json!({ "path": dir.join("nope.txt") }));
-        assert_eq!(read_text_file_scoped(&missing), "");
+        assert_eq!(read_text_file_scoped(&missing, &dir), "");
+
+        // Out-of-root read → empty (workspace confinement), even when the file
+        // exists.
+        let outside = req(serde_json::json!({ "path": path }));
+        assert_eq!(read_text_file_scoped(&outside, &dir.join("sub")), "");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fs_confinement_rejects_escapes_lexically() {
+        let root = std::path::Path::new("/ws/project");
+        // In-root, `.`/`..` that stay inside, and relative paths all pass.
+        assert!(path_within_root(root, std::path::Path::new("/ws/project/a.txt")));
+        assert!(path_within_root(
+            root,
+            std::path::Path::new("/ws/project/sub/../a.txt")
+        ));
+        assert!(path_within_root(root, std::path::Path::new("rel/b.txt")));
+        // Escapes — absolute elsewhere, `..` climbing out, sibling-prefix trick.
+        assert!(!path_within_root(root, std::path::Path::new("/etc/passwd")));
+        assert!(!path_within_root(
+            root,
+            std::path::Path::new("/ws/project/../other/c.txt")
+        ));
+        assert!(!path_within_root(
+            root,
+            std::path::Path::new("/ws/project2/d.txt")
+        ));
+    }
+
+    #[test]
+    fn write_text_file_scoped_refuses_out_of_root() {
+        let dir = std::env::temp_dir().join(format!("ryu-acp-fsw-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let target = dir.join("escape.txt");
+        let req: WriteTextFileRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "s",
+            "path": target,
+            "content": "nope",
+        }))
+        .expect("valid WriteTextFileRequest");
+        // Root is a SIBLING dir, so the write must be refused and nothing created.
+        let err = write_text_file_scoped(&req, &dir.join("inner")).unwrap_err();
+        assert!(err.to_string().contains("outside the session workspace"));
+        assert!(!target.exists());
+        // Same request against the real root succeeds.
+        write_text_file_scoped(&req, &dir).expect("in-root write");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "nope");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -4335,5 +4490,326 @@ mod tests {
                 });
             }
         }
+    }
+
+    // ── ACP wire-shape mappers (kind/status/exit) ───────────────────────────
+
+    use agent_client_protocol::schema::{Diff, ToolCallUpdateFields};
+
+    #[test]
+    fn tool_kind_str_serializes_snake_case_variants() {
+        assert_eq!(tool_kind_str(&ToolKind::Read), "read");
+        assert_eq!(tool_kind_str(&ToolKind::Edit), "edit");
+        assert_eq!(tool_kind_str(&ToolKind::Execute), "execute");
+        assert_eq!(tool_kind_str(&ToolKind::SwitchMode), "switch_mode");
+        // The `#[default] #[serde(other)]` variant maps to "other".
+        assert_eq!(tool_kind_str(&ToolKind::Other), "other");
+        assert_eq!(tool_kind_str(&ToolKind::default()), "other");
+    }
+
+    #[test]
+    fn tool_status_str_serializes_snake_case_variants() {
+        assert_eq!(tool_status_str(&ToolCallStatus::Pending), "pending");
+        assert_eq!(tool_status_str(&ToolCallStatus::InProgress), "in_progress");
+        assert_eq!(tool_status_str(&ToolCallStatus::Completed), "completed");
+        assert_eq!(tool_status_str(&ToolCallStatus::Failed), "failed");
+    }
+
+    #[test]
+    fn exit_status_value_carries_code_and_signal() {
+        let clean = exit_status_value(Some(0), None);
+        assert_eq!(clean["exitCode"], serde_json::json!(0));
+        assert_eq!(clean["signal"], serde_json::Value::Null);
+
+        let killed = exit_status_value(None, Some("SIGKILL".to_owned()));
+        assert_eq!(killed["exitCode"], serde_json::Value::Null);
+        assert_eq!(killed["signal"], serde_json::json!("SIGKILL"));
+    }
+
+    // ── Tool content → output collapsing ────────────────────────────────────
+
+    fn text_content(text: &str) -> ToolCallContent {
+        ToolCallContent::from(text.to_owned())
+    }
+
+    #[test]
+    fn tool_content_to_output_empty_is_none() {
+        assert!(tool_content_to_output(&[]).is_none());
+    }
+
+    #[test]
+    fn tool_content_to_output_text_only_is_a_string() {
+        let out = tool_content_to_output(&[text_content("hello "), text_content("world")])
+            .expect("text content collapses to a string");
+        assert_eq!(out, serde_json::Value::String("hello world".to_owned()));
+    }
+
+    #[test]
+    fn tool_content_to_output_diff_becomes_structured_array() {
+        // A non-text block (a Diff) forces the structured-array branch.
+        let diff = ToolCallContent::Diff(Diff::new("/tmp/f.rs", "new").old_text("old"));
+        let out = tool_content_to_output(&[diff]).expect("structured content");
+        let arr = out.as_array().expect("diff yields a JSON array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], serde_json::json!("diff"));
+    }
+
+    #[test]
+    fn tool_content_to_output_mixed_appends_text_after_structured() {
+        // Text + a structured block: the text is appended as the LAST array entry.
+        let diff = ToolCallContent::Diff(Diff::new("/tmp/f.rs", "new"));
+        let out = tool_content_to_output(&[text_content("note"), diff])
+            .expect("mixed content is structured");
+        let arr = out.as_array().expect("array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], serde_json::json!("diff"));
+        assert_eq!(arr[1], serde_json::Value::String("note".to_owned()));
+    }
+
+    // ── Diff extraction (desktop edit card) ─────────────────────────────────
+
+    #[test]
+    fn extract_diff_output_maps_old_new_path() {
+        let content = vec![ToolCallContent::Diff(
+            Diff::new("/repo/src/lib.rs", "after").old_text("before"),
+        )];
+        let out = extract_diff_output(&content).expect("diff present");
+        assert_eq!(out["old_content"], serde_json::json!("before"));
+        assert_eq!(out["content"], serde_json::json!("after"));
+        assert_eq!(out["path"], serde_json::json!("/repo/src/lib.rs"));
+    }
+
+    #[test]
+    fn extract_diff_output_new_file_has_empty_old_content() {
+        // A brand-new file has no `old_text`; the card must still render (empty old).
+        let content = vec![ToolCallContent::Diff(Diff::new("/repo/new.rs", "created"))];
+        let out = extract_diff_output(&content).expect("diff present");
+        assert_eq!(out["old_content"], serde_json::json!(""));
+        assert_eq!(out["content"], serde_json::json!("created"));
+    }
+
+    #[test]
+    fn extract_diff_output_none_for_non_edit_tools() {
+        assert!(extract_diff_output(&[text_content("just text")]).is_none());
+        assert!(extract_diff_output(&[]).is_none());
+    }
+
+    // ── Location JSON ───────────────────────────────────────────────────────
+
+    #[test]
+    fn locations_json_includes_line_only_when_present() {
+        let with_line: ToolCallLocation =
+            serde_json::from_value(serde_json::json!({ "path": "/a/b.rs", "line": 12 })).unwrap();
+        let without: ToolCallLocation =
+            serde_json::from_value(serde_json::json!({ "path": "/a/c.rs" })).unwrap();
+        let out = locations_json(&[with_line, without]);
+        assert_eq!(out[0]["path"], serde_json::json!("/a/b.rs"));
+        assert_eq!(out[0]["line"], serde_json::json!(12));
+        assert_eq!(out[1]["path"], serde_json::json!("/a/c.rs"));
+        assert!(out[1].get("line").is_none(), "absent line is omitted");
+    }
+
+    // ── Tool call/update → AcpEvent ─────────────────────────────────────────
+
+    #[test]
+    fn tool_call_event_carries_kind_locations_and_input() {
+        let loc: ToolCallLocation =
+            serde_json::from_value(serde_json::json!({ "path": "/x.rs", "line": 3 })).unwrap();
+        let call = ToolCall::new("call-1", "Edit x.rs")
+            .kind(ToolKind::Edit)
+            .locations(vec![loc])
+            .raw_input(serde_json::json!({ "path": "/x.rs" }));
+        match tool_call_event(&call) {
+            AcpEvent::ToolCall {
+                id,
+                title,
+                kind,
+                input,
+                locations,
+            } => {
+                assert_eq!(id, "call-1");
+                assert_eq!(title, "Edit x.rs");
+                assert_eq!(kind, "edit");
+                assert_eq!(input, Some(serde_json::json!({ "path": "/x.rs" })));
+                assert_eq!(locations.len(), 1);
+                assert_eq!(locations[0]["line"], serde_json::json!(3));
+            }
+            other => panic!("expected ToolCall event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_update_event_none_when_nothing_actionable() {
+        // A bare title tweak carries no status and no output → nothing to surface.
+        let update = ToolCallUpdate::new("c1", ToolCallUpdateFields::new().title("renamed"));
+        assert!(tool_update_event(&update).is_none());
+    }
+
+    #[test]
+    fn tool_update_event_prefers_diff_over_raw_output() {
+        // Both a Diff content block AND a raw_output are present; the diff wins so
+        // the desktop's edit card renders old↔new (not the opaque raw output).
+        let fields = ToolCallUpdateFields::new()
+            .status(ToolCallStatus::Completed)
+            .content(vec![ToolCallContent::Diff(
+                Diff::new("/f.rs", "new").old_text("old"),
+            )])
+            .raw_output(serde_json::json!({ "ignored": true }));
+        let update = ToolCallUpdate::new("c2", fields);
+        match tool_update_event(&update).expect("actionable update") {
+            AcpEvent::ToolResult { id, status, output } => {
+                assert_eq!(id, "c2");
+                assert_eq!(status, "completed");
+                let out = output.expect("diff output");
+                assert_eq!(out["old_content"], serde_json::json!("old"));
+                assert_eq!(out["content"], serde_json::json!("new"));
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_update_event_falls_back_to_raw_output_then_content() {
+        // No diff: raw_output is used verbatim.
+        let raw = ToolCallUpdate::new(
+            "c3",
+            ToolCallUpdateFields::new().raw_output(serde_json::json!({ "rows": 2 })),
+        );
+        match tool_update_event(&raw).expect("update") {
+            AcpEvent::ToolResult { status, output, .. } => {
+                // No status supplied → defaults to "in_progress".
+                assert_eq!(status, "in_progress");
+                assert_eq!(output, Some(serde_json::json!({ "rows": 2 })));
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+
+        // No diff, no raw_output: collapse the plain text content instead.
+        let text = ToolCallUpdate::new(
+            "c4",
+            ToolCallUpdateFields::new().content(vec![text_content("plain result")]),
+        );
+        match tool_update_event(&text).expect("update") {
+            AcpEvent::ToolResult { output, .. } => {
+                assert_eq!(output, Some(serde_json::json!("plain result")));
+            }
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    // ── Agent capability round-trip ─────────────────────────────────────────
+
+    #[test]
+    fn read_agent_caps_and_json_reflect_initialize_response() {
+        let init: InitializeResponse = serde_json::from_value(serde_json::json!({
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "loadSession": true,
+                "promptCapabilities": { "image": true, "audio": false, "embeddedContext": true },
+                "mcpCapabilities": { "http": true, "sse": false },
+            }
+        }))
+        .expect("valid InitializeResponse");
+        let caps = read_agent_caps(&init);
+        assert!(caps.load_session);
+        assert!(caps.prompt_image);
+        assert!(!caps.prompt_audio);
+        assert!(caps.prompt_embedded_context);
+        assert!(caps.mcp_http);
+        assert!(!caps.mcp_sse);
+
+        let json = agent_caps_json(&caps);
+        assert_eq!(json["loadSession"], serde_json::json!(true));
+        assert_eq!(json["promptCapabilities"]["image"], serde_json::json!(true));
+        assert_eq!(json["promptCapabilities"]["audio"], serde_json::json!(false));
+        assert_eq!(json["mcpCapabilities"]["http"], serde_json::json!(true));
+        assert_eq!(json["mcpCapabilities"]["sse"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn read_agent_caps_defaults_to_all_false() {
+        // A minimal initialize response (no agentCapabilities) advertises nothing.
+        let init: InitializeResponse =
+            serde_json::from_value(serde_json::json!({ "protocolVersion": 1 })).unwrap();
+        let caps = read_agent_caps(&init);
+        assert!(!caps.load_session);
+        assert!(!caps.prompt_image);
+        assert!(!caps.mcp_http);
+    }
+
+    // ── CLI version parsing ─────────────────────────────────────────────────
+
+    #[test]
+    fn parse_cli_version_extracts_semver_forms() {
+        assert_eq!(parse_cli_version("v1.2.3"), Some("1.2.3".to_owned()));
+        assert_eq!(parse_cli_version("mytool 0.10.4"), Some("0.10.4".to_owned()));
+        assert_eq!(
+            parse_cli_version("codex-acp version 2.0.0-beta.1"),
+            Some("2.0.0-beta.1".to_owned())
+        );
+        assert_eq!(
+            parse_cli_version("build 1.0.0+abc123"),
+            Some("1.0.0+abc123".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_cli_version_none_without_semver() {
+        assert_eq!(parse_cli_version(""), None);
+        assert_eq!(parse_cli_version("no version here"), None);
+        // A two-part "1.2" is not a full semver and must not match.
+        assert_eq!(parse_cli_version("version 1.2"), None);
+    }
+
+    // ── Observed-tool registry (per-agent, process-global) ──────────────────
+
+    #[test]
+    fn record_observed_tool_dedups_by_title_and_maps_kind() {
+        // Use a process-unique agent id so the global registry cannot collide with
+        // any other test running in the same process.
+        let agent = format!("obs-test-{}-{}", std::process::id(), line!());
+        assert!(observed_tools_for(&agent).is_empty());
+
+        record_observed_tool(&agent, "Search files", "search");
+        record_observed_tool(&agent, "Run command", "other"); // "other" → no description
+        record_observed_tool(&agent, "Search files", "search"); // dup title → no growth
+        record_observed_tool(&agent, "", "read"); // empty title → ignored
+
+        let mut tools = observed_tools_for(&agent);
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(tools.len(), 2, "empty title ignored, dup title collapsed");
+        let search = tools.iter().find(|t| t.name == "Search files").unwrap();
+        assert_eq!(search.description.as_deref(), Some("search"));
+        let run = tools.iter().find(|t| t.name == "Run command").unwrap();
+        assert!(
+            run.description.is_none(),
+            "the 'other' kind is not surfaced as a description"
+        );
+    }
+
+    // ── Permission back-channel ─────────────────────────────────────────────
+
+    #[test]
+    fn resolve_permission_is_false_for_unknown_request() {
+        // No waiter was ever registered for this id → nothing to resolve.
+        let unknown = format!("perm-unknown-{}", std::process::id());
+        assert!(!resolve_permission(&unknown, Some("allow".to_owned())));
+        assert!(peek_permission_scope(&unknown).is_none());
+    }
+
+    // ── Gateway command wrapping ────────────────────────────────────────────
+
+    #[test]
+    fn claude_gateway_cmd_injects_only_base_url_not_api_key() {
+        // Subscription-preservation: inject ANTHROPIC_BASE_URL but NEVER an API key
+        // (an API key would flip Claude Code off the user's Pro/Max OAuth billing).
+        let cmd = claude_gateway_cmd("npx -y @zed-industries/claude-code-acp");
+        assert!(cmd.contains("ANTHROPIC_BASE_URL="));
+        assert!(cmd.contains("/passthrough/anthropic"));
+        assert!(
+            !cmd.contains("ANTHROPIC_API_KEY") && !cmd.contains("ANTHROPIC_AUTH_TOKEN"),
+            "must not inject an API key or auth token: {cmd}"
+        );
+        assert!(cmd.contains("claude-code-acp"), "base command is preserved");
     }
 }

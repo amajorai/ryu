@@ -1419,7 +1419,11 @@ Do something minimal.
             .into_iter()
             .map(|s| s.id)
             .collect();
-        assert_eq!(ids, vec!["gamma".to_owned()], "flat .md ignored under agents root");
+        assert_eq!(
+            ids,
+            vec!["gamma".to_owned()],
+            "flat .md ignored under agents root"
+        );
 
         // The same tree WITH flat support enabled picks up both.
         let mut both: Vec<String> = scan_skill_dir_opts(root, true)

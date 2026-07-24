@@ -619,14 +619,14 @@ export default function ChatPage({
 	// Workspace panel open/close state (bottom + right panels)
 	const [bottomPanelOpen, setBottomPanelOpen] = useState(false);
 	const [rightPanelOpen, setRightPanelOpen] = useState(false);
-	// User's intent for the floating "Pinned summary" card (project ▸ branch ▸
-	// worktree + git changes + commit&push). This is only the preference; the
-	// card also auto-hides while the right panel is open (see pinnedSummaryVisible
-	// below) and auto-reopens when it closes — unless the user hid it here.
+	// User's intent for the "Pinned summary" sidebar (project ▸ branch ▸
+	// worktree + git changes + commit&push). It docks as its own column stacked
+	// with the right panel (both can be open at once); WorkspacePanels
+	// auto-demotes it to a floating overlay when the chat gets too narrow.
 	const [pinnedSummaryOpen, setPinnedSummaryOpen] = useState(true);
-	// The floating pinned-summary card overlaps the message column, so it
-	// dismisses on a press-away (the titlebar toggle brings it back). Stable so
-	// the panel's outside-press listener isn't re-bound each render.
+	// Only the floating (auto-demoted) overlay overlaps the message column, so
+	// only it dismisses on a press-away (the titlebar toggle brings it back).
+	// Stable so the panel's outside-press listener isn't re-bound each render.
 	const dismissPinnedSummary = useCallback(
 		() => setPinnedSummaryOpen(false),
 		[]
@@ -2805,19 +2805,19 @@ export default function ChatPage({
 			autoSubmitFired.current = true;
 			return;
 		}
-		if (composerBlocked || status !== "ready") {
-			return;
-		}
 		autoSubmitFired.current = true;
+		// Hand the seeded message to the SAME entry point a manual send uses.
+		// `handleComposerSubmit` already routes every state safely — it sends when
+		// ready, ENQUEUES when the turn isn't ready yet (the queue drains on ready),
+		// and records into `blockedMessages` (visible error state) when the
+		// gateway/Core is down. The previous `if (composerBlocked || status !==
+		// "ready") return` guard dropped the message in exactly those two cases:
+		// the launchpad text is never placed in the composer (`seedDraft` is
+		// suppressed for `initialSubmit`), so a bailed effect made the message
+		// silently vanish after the redirect from the empty-tabs shell — the user
+		// landed on an empty new chat with nothing sent.
 		handleComposerSubmit({ role: "user", content });
-	}, [
-		initialSubmit,
-		initialPrompt,
-		initialImages,
-		composerBlocked,
-		status,
-		handleComposerSubmit,
-	]);
+	}, [initialSubmit, initialPrompt, initialImages, handleComposerSubmit]);
 
 	useEffect(() => {
 		const conv = activeConversationId
@@ -3263,12 +3263,10 @@ export default function ChatPage({
 	// summary strictly on rendered messages — never on the new-chat page.
 	const hasMessages = processedMessages.length > 0;
 
-	// The floating Pinned summary card shows only on a history page, and auto-hides
-	// while the full-height right panel is open (they'd overlap and duplicate the
-	// project/branch info) and auto-reopens when it closes — unless the user has
-	// explicitly hidden it via the titlebar toggle (`pinnedSummaryOpen`).
-	const pinnedSummaryVisible =
-		hasMessages && pinnedSummaryOpen && !rightPanelOpen;
+	// The Pinned summary sidebar shows only on a history page. It stacks with
+	// the right panel (both docked columns can be open at once) — visibility is
+	// just the user's titlebar toggle (`pinnedSummaryOpen`).
+	const pinnedSummaryVisible = hasMessages && pinnedSummaryOpen;
 
 	// The Cowork context (Progress / Artifacts / Changes / Sources / Side chats),
 	// shared by the right panel's Context tab and the floating Pinned summary card.
@@ -3346,6 +3344,19 @@ export default function ChatPage({
 			folder={folder}
 			onBottomOpenChange={setBottomPanelOpen}
 			onRightOpenChange={setRightPanelOpen}
+			renderPinnedSummary={
+				pinnedSummaryVisible
+					? ({ floating }) => (
+							<PinnedSummaryPanel
+								conversationId={activeConversationId ?? draftConvId.current}
+								cowork={coworkData}
+								folder={folder}
+								onDismiss={floating ? dismissPinnedSummary : undefined}
+								target={chatTarget}
+							/>
+						)
+					: null
+			}
 			rightOpen={rightPanelOpen}
 			subagentRequest={subagentReq}
 		>
@@ -3431,20 +3442,10 @@ export default function ChatPage({
 							versions={versions}
 						/>
 					</WidgetHostContext.Provider>
-					{/* Floating Pinned summary card (project ▸ branch ▸ worktree + git
-					    changes + commit & push), pinned top-right below the titlebar.
-					    Auto-hidden while the right panel is open — see pinnedSummaryVisible. */}
-					{pinnedSummaryVisible && (
-						<div className="pointer-events-none absolute top-14 right-3 z-20">
-							<PinnedSummaryPanel
-								conversationId={activeConversationId ?? draftConvId.current}
-								cowork={coworkData}
-								folder={folder}
-								onDismiss={dismissPinnedSummary}
-								target={chatTarget}
-							/>
-						</div>
-					)}
+					{/* The Pinned summary sidebar (project ▸ branch ▸ worktree + git
+					    changes + commit & push) is rendered by WorkspacePanels via
+					    renderPinnedSummary — docked column stacked with the right panel,
+					    auto-demoted to a floating overlay when the chat gets narrow. */}
 					{/* Multi-user presence: who else is in this conversation, and whether
 					    they are typing. Hidden when alone (single-user flow unchanged). */}
 					{presenceLabel && (

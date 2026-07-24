@@ -419,7 +419,7 @@ function MainApp() {
 				dragRegion.remove();
 			}
 			if (container) {
-				container.style.setProperty("top", "10px", "important");
+				container.style.setProperty("top", "16px", "important");
 				container.style.setProperty("right", "12px", "important");
 				container.style.setProperty("left", "auto", "important");
 				container.style.setProperty("width", "auto", "important");
@@ -495,7 +495,10 @@ function MainApp() {
 				</PageWrapper>
 			) : (isPending && !sessionSettledOnce) || waitlistResolving ? (
 				<PageWrapper>
-					<div className="flex h-full w-full items-center justify-center">
+					<div
+						className="flex h-full w-full items-center justify-center"
+						data-tauri-drag-region
+					>
 						<OrbLogo size="56px" variant="shimmer" />
 					</div>
 				</PageWrapper>

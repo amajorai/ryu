@@ -24,14 +24,6 @@
     },
     "clean": {
       "cache": false
-    },
-    "@ryu/apps#gen": {
-      "dependsOn": ["build"],
-      "cache": false
-    },
-    "@ryu/apps#gen:check": {
-      "dependsOn": ["build"],
-      "cache": false
     }
   }
 }

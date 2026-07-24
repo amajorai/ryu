@@ -37,7 +37,6 @@ pub use ryu_gw_contracts::AlertTier;
 pub enum BudgetAction {
     /// Allow the request through but flag it (observable via response headers
     /// and metrics) so the client can surface a warning. Never blocks.
-    #[default]
     Notify,
     /// Swap the requested model for the rule's `downgrade_to` (a cheaper model)
     /// and continue. Falls back to `Restrict` if no downgrade model is set.
@@ -45,7 +44,10 @@ pub enum BudgetAction {
     /// Allow the request but clamp it: strip tool definitions and cap
     /// `max_tokens` so an over-budget caller can still get a minimal answer.
     Restrict,
-    /// Reject the request with `402 budget_exceeded`. The hard stop.
+    /// Reject the request with `402 budget_exceeded`. The hard stop, and the
+    /// **default**: a rule that configures a `limit` without an `action` must
+    /// actually stop spend at that limit; the never-blocking `notify` is opt-in.
+    #[default]
     Stop,
 }
 
@@ -54,7 +56,8 @@ pub enum BudgetAction {
 pub struct BudgetRule {
     /// Lifetime token cap (input + output combined) for this scope. 0 = unlimited.
     pub limit: u64,
-    /// Action to take once `limit` is reached. Defaults to `notify`.
+    /// Action to take once `limit` is reached. Defaults to `stop` so a
+    /// configured limit blocks without an explicit action.
     #[serde(default)]
     pub action: BudgetAction,
     /// Model to route to when `action = downgrade`. Required for downgrade to
@@ -109,7 +112,8 @@ pub struct SessionBudgetConfig {
     /// 0 = unlimited (the feature is off).
     #[serde(default)]
     pub limit: u64,
-    /// Action to take once a session reaches `limit`. Defaults to `notify`.
+    /// Action to take once a session reaches `limit`. Defaults to `stop` so a
+    /// configured cap blocks without an explicit action.
     #[serde(default)]
     pub action: BudgetAction,
     /// Model to route to when `action = downgrade`. Required for downgrade to
@@ -686,6 +690,25 @@ mod tests {
             session: cfg,
             ..BudgetConfig::default()
         }
+    }
+
+    #[test]
+    fn rule_without_action_defaults_to_stop() {
+        // A configured `limit` with `action` omitted must block, not merely
+        // notify: the enum default and the serde default are both `stop`.
+        assert_eq!(BudgetAction::default(), BudgetAction::Stop);
+
+        let r: BudgetRule = serde_json::from_str(r#"{ "limit": 10 }"#).expect("rule deserializes");
+        assert_eq!(r.action, BudgetAction::Stop);
+        let s: SessionBudgetConfig =
+            serde_json::from_str(r#"{ "limit": 10 }"#).expect("session cfg deserializes");
+        assert_eq!(s.action, BudgetAction::Stop);
+
+        // And the enforcer actually stops at the limit.
+        let e = BudgetEnforcer::new(config_with_user("u1", r));
+        e.record(Some("u1"), None, 20);
+        let d = e.evaluate(Some("u1"), None).expect("limit reached");
+        assert_eq!(d.action, BudgetAction::Stop);
     }
 
     #[test]

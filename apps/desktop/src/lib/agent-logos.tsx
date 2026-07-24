@@ -1,3 +1,9 @@
+import {
+	DitherGradient,
+	type GradientDirection,
+} from "@ryu/ui/components/dither-kit/gradient";
+import { isDitherColor } from "@ryu/ui/components/dither-kit/palette";
+import { Icon } from "@ryu/ui/components/icon";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ComponentType } from "react";
@@ -38,9 +44,11 @@ const ENGINE_LOGOS: Record<string, LogoConfig> = {
 		invert: false,
 	},
 	pi: {
-		kind: "themed",
-		light: "/assets/logos/inflectionai_light.svg",
-		dark: "/assets/logos/inflectionai_dark.svg",
+		// pi.dev (the coding agent, `pi-acp`), NOT Inflection AI's Pi assistant. The
+		// mark is a monochrome `currentColor` glyph → `invert` flips it white on dark.
+		kind: "single",
+		src: "/assets/logos/pi.svg",
+		invert: true,
 	},
 	inflection: {
 		kind: "themed",
@@ -170,25 +178,41 @@ export function AgentLogo({
 	);
 }
 
+/** A dither-gradient avatar spec as stored on `persona.dither`. Kept structural
+ * (not the `AgentPersona` type) so this leaf module stays free of the API layer. */
+export interface AvatarDitherSpec {
+	direction?: string | null;
+	from?: string | null;
+	to?: string | null;
+}
+
+const DITHER_DIRECTIONS: GradientDirection[] = ["up", "down", "left", "right"];
+
 /**
- * Renders an agent's avatar: the user's custom image (a data URL on
- * `persona.avatar_url`) when set, otherwise the branded engine logo. Use this at
- * every call site that shows "an agent" so a custom avatar wins over the engine
- * default consistently (sidebar rows, picker items, etc.).
+ * Renders an agent's avatar, resolving the persona's avatar source in priority
+ * order: an uploaded image (`persona.avatar_url`), then a custom icon
+ * (`persona.icon`), then a dither gradient (`persona.dither`), and finally the
+ * branded engine logo. Use this at every call site that shows "an agent" so a
+ * custom avatar wins over the engine default consistently (sidebar rows, picker
+ * items, etc.).
  */
 export function AgentAvatar({
 	avatarUrl,
+	icon,
+	dither,
 	engine,
 	className,
 	size,
 }: {
 	avatarUrl?: string | null;
+	icon?: string | null;
+	dither?: AvatarDitherSpec | null;
 	engine?: string | null;
 	className?: string;
 	size?: string;
 }) {
+	const style = size ? { width: size, height: size } : undefined;
 	if (avatarUrl) {
-		const style = size ? { width: size, height: size } : undefined;
 		return (
 			// biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: user avatar data URL
 			<img
@@ -200,6 +224,30 @@ export function AgentAvatar({
 			/>
 		);
 	}
+	if (icon) {
+		const parsed = size ? Number.parseInt(size, 10) : Number.NaN;
+		const px = Number.isNaN(parsed) ? undefined : parsed;
+		return <Icon className={className} icon={icon} size={px} />;
+	}
+	if (dither) {
+		// DitherGradient is `position:absolute; inset:0` and fills its nearest
+		// positioned ancestor, so it needs a sized `relative` box clipped round.
+		const from = isDitherColor(dither.from) ? dither.from : "grey";
+		const to = isDitherColor(dither.to) ? dither.to : "transparent";
+		const direction =
+			DITHER_DIRECTIONS.find((d) => d === dither.direction) ?? "up";
+		return (
+			<span
+				className={cn(
+					"relative inline-block shrink-0 overflow-hidden rounded-full",
+					className
+				)}
+				style={style}
+			>
+				<DitherGradient direction={direction} from={from} to={to} />
+			</span>
+		);
+	}
 	return <AgentLogo className={className} engine={engine} size={size} />;
 }
 
@@ -209,28 +257,38 @@ const agentIconCache = new Map<string, ComponentType<{ className?: string }>>();
 
 /**
  * Stable ComponentType<{ className? }> for use in ModeOption.icon that honors a
- * custom avatar, falling back to the engine logo. Mirrors getEngineIcon.
+ * custom avatar (image, icon, or dither gradient), falling back to the engine
+ * logo. Mirrors getEngineIcon.
  */
 export function getAgentIcon(
 	avatarUrl: string | null | undefined,
-	engine: string | null | undefined
+	engine: string | null | undefined,
+	icon?: string | null,
+	dither?: AvatarDitherSpec | null
 ): ComponentType<{ className?: string }> {
-	if (!avatarUrl) {
+	if (!(avatarUrl || icon || dither)) {
 		return getEngineIcon(engine);
 	}
-	const cacheKey = `avatar:${avatarUrl}`;
+	const ditherKey = dither
+		? `${dither.from ?? ""}:${dither.to ?? ""}:${dither.direction ?? ""}`
+		: "";
+	const cacheKey = `avatar:${avatarUrl ?? ""}|icon:${icon ?? ""}|dither:${ditherKey}`;
 	if (!agentIconCache.has(cacheKey)) {
 		const url = avatarUrl;
+		const iconId = icon;
+		const ditherSpec = dither;
 		const eng = engine;
-		const Icon = ({ className }: { className?: string }) => (
+		const AvatarIcon = ({ className }: { className?: string }) => (
 			<AgentAvatar
 				avatarUrl={url}
 				className={className}
+				dither={ditherSpec}
 				engine={eng}
+				icon={iconId}
 				size="16px"
 			/>
 		);
-		agentIconCache.set(cacheKey, Icon);
+		agentIconCache.set(cacheKey, AvatarIcon);
 	}
 	// biome-ignore lint/style/noNonNullAssertion: just set above when missing
 	return agentIconCache.get(cacheKey)!;
@@ -238,7 +296,9 @@ export function getAgentIcon(
 
 export interface AgentAvatarMember {
 	avatarUrl?: string | null;
+	dither?: AvatarDitherSpec | null;
 	engine?: string | null;
+	icon?: string | null;
 	id: string;
 }
 
@@ -281,7 +341,9 @@ export function AgentAvatarStack({
 					<AgentAvatar
 						avatarUrl={member.avatarUrl}
 						className="object-contain"
+						dither={member.dither}
 						engine={member.engine}
+						icon={member.icon}
 						size={shown.length === 1 && size === "sm" ? "16px" : logo}
 					/>
 				</span>

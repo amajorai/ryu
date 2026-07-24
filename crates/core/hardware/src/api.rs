@@ -122,9 +122,7 @@ fn to_list_item(record: &DeviceRecord) -> DeviceListItem {
     summary = "list paired devices with presence + battery.",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-pub async fn list_devices(
-    State(ctx): State<HardwareCtx>,
-) -> (StatusCode, Json<serde_json::Value>) {
+pub async fn list_devices(State(ctx): State<HardwareCtx>) -> (StatusCode, Json<serde_json::Value>) {
     match ctx.hardware.list().await {
         Ok(records) => {
             let items: Vec<DeviceListItem> = records.iter().map(to_list_item).collect();
@@ -226,8 +224,7 @@ async fn device_authorized(ctx: &HardwareCtx, device_id: &str, headers: &HeaderM
             return true;
         }
     }
-    ctx
-        .hardware
+    ctx.hardware
         .verify_token(device_id, &token)
         .await
         .unwrap_or(false)
@@ -471,12 +468,7 @@ pub async fn set_device_dashboard(
         Ok(r) => r,
         // A bad widget batch is a client error (the feed validates the source
         // allowlist); everything else is a store failure.
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": e })),
-            )
-        }
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))),
     };
 
     // Nudge: tell a connected device its dashboard changed so it re-polls now.

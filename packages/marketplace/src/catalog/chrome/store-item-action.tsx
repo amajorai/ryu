@@ -15,16 +15,20 @@
 import {
 	CheckmarkCircle02Icon,
 	Delete01Icon,
-	Download01Icon,
+	MoreHorizontalIcon,
 	PauseIcon,
 	PlayIcon,
 } from "@hugeicons/core-free-icons";
-import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { InstallProgressButton } from "@ryu/blocks/desktop/install-button";
+import { InstallProgressButton } from "@ryu/blocks/desktop/install-button.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
-import { useState } from "react";
 
 export interface StoreItemActionProps {
 	/** Rendered instead of the lifecycle buttons on a read-only surface (web). */
@@ -60,9 +64,6 @@ export default function StoreItemAction({
 	affordance,
 	className,
 }: StoreItemActionProps) {
-	// Hover/focus "arms" the rest-state pill into its destructive/secondary action.
-	const [armed, setArmed] = useState(false);
-
 	if (affordance) {
 		return <>{affordance}</>;
 	}
@@ -71,12 +72,11 @@ export default function StoreItemAction({
 		return (
 			<InstallProgressButton
 				className={className}
-				idleVariant="secondary"
+				idleVariant="default"
 				installing={busy}
 				onClick={onInstall}
 				percent={percent}
 			>
-				<HugeiconsIcon className="size-3.5" icon={Download01Icon} />
 				Install
 			</InstallProgressButton>
 		);
@@ -94,72 +94,64 @@ export default function StoreItemAction({
 		);
 	}
 
-	// Resolve the rest label and the armed (hover/focus) label + action + look.
-	// Three morphs, no nested ternaries:
-	//   enabled            → "Enabled"  → Disable   (outline)
-	//   disabled/installed + onUninstall → rest → "Uninstall" (destructive)
-	//   disabled + onEnable only          → "Disabled" → "Enable" (default)
+	// Installed items collapse to a single 3-dot menu instead of a morphing pill,
+	// so the row stays quiet at rest and the lifecycle actions (enable/disable +
+	// uninstall) live behind one deliberate click. `enabled === undefined` means
+	// the item has no enable/disable concept (Models per-file, Agents, MCP, and
+	// Skills whose CLI can't toggle) — the menu then holds only Uninstall.
 	const hasEnableConcept = enabled !== undefined;
 	const isEnabled = enabled === true;
 
-	let restLabel = "Installed";
-	if (hasEnableConcept) {
-		restLabel = isEnabled ? "Enabled" : "Disabled";
-	}
-
-	let armedLabel: string;
-	let armedAction: (() => void) | undefined;
-	let armedIcon: IconSvgElement;
-	let armedVariant: "outline" | "destructive" | "default";
-	let busyLabel: string;
-	if (isEnabled) {
-		armedLabel = "Disable";
-		armedAction = onDisable;
-		armedIcon = PauseIcon;
-		armedVariant = "outline";
-		busyLabel = "Disabling…";
-	} else if (onUninstall) {
-		armedLabel = "Uninstall";
-		armedAction = onUninstall;
-		armedIcon = Delete01Icon;
-		armedVariant = "destructive";
-		busyLabel = "Removing…";
-	} else {
-		armedLabel = "Enable";
-		armedAction = onEnable;
-		armedIcon = PlayIcon;
-		armedVariant = "default";
-		busyLabel = "Enabling…";
-	}
-
-	let label = restLabel;
+	// While a lifecycle call is in flight the trigger shows a spinner and locks,
+	// so a second click can't race the first.
 	if (busy) {
-		label = busyLabel;
-	} else if (armed) {
-		label = armedLabel;
+		return (
+			<Button
+				aria-label="Working…"
+				className={className}
+				disabled
+				size="icon-sm"
+				variant="ghost"
+			>
+				<Spinner className="size-4" />
+			</Button>
+		);
 	}
 
 	return (
-		<Button
-			className={className}
-			disabled={busy}
-			onBlur={() => setArmed(false)}
-			onClick={armedAction}
-			onFocus={() => setArmed(true)}
-			onMouseEnter={() => setArmed(true)}
-			onMouseLeave={() => setArmed(false)}
-			size="sm"
-			variant={armed ? armedVariant : "secondary"}
-		>
-			{busy ? (
-				<Spinner className="size-4" />
-			) : (
-				<HugeiconsIcon
-					className={armed ? "size-3.5" : "size-3.5 text-success"}
-					icon={armed ? armedIcon : CheckmarkCircle02Icon}
-				/>
-			)}
-			{label}
-		</Button>
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						aria-label="Manage"
+						className={className}
+						size="icon-sm"
+						variant="ghost"
+					>
+						<HugeiconsIcon className="size-4" icon={MoreHorizontalIcon} />
+					</Button>
+				}
+			/>
+			<DropdownMenuContent align="end">
+				{hasEnableConcept &&
+					(isEnabled ? (
+						<DropdownMenuItem onClick={onDisable}>
+							<HugeiconsIcon className="size-4" icon={PauseIcon} />
+							Disable
+						</DropdownMenuItem>
+					) : (
+						<DropdownMenuItem onClick={onEnable}>
+							<HugeiconsIcon className="size-4" icon={PlayIcon} />
+							Enable
+						</DropdownMenuItem>
+					))}
+				{onUninstall ? (
+					<DropdownMenuItem onClick={onUninstall} variant="destructive">
+						<HugeiconsIcon className="size-4" icon={Delete01Icon} />
+						Uninstall
+					</DropdownMenuItem>
+				) : null}
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }

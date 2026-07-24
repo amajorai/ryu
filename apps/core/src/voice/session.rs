@@ -31,13 +31,13 @@ use super::vad::{Vad, VadEvent, VAD_RATE};
 use crate::agents::AgentStore;
 use crate::server::conversations::ConversationStore;
 use crate::server::memory::MemoryStore;
-use ryu_tracing::TraceStore;
 use crate::sidecar::adapters::{
     stream_text_reply, AcpAgentRegistry, ChatStreamRequest, UiContent, UiMessage,
 };
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::SidecarManager;
 use ryu_skills::SkillRegistry;
+use ryu_tracing::TraceStore;
 
 /// TTS downlink sample rate advertised to the client (informational — WAV frames
 /// are self-describing). RyuTTS/OuteTTS emit 24 kHz.
@@ -454,6 +454,7 @@ async fn synthesize_sentence(
         let resp = deps
             .client
             .post(&url)
+            .bearer_auth(crate::sidecar::providers::ryutts::bearer())
             .json(&body)
             .send()
             .await
@@ -494,5 +495,45 @@ fn build_chat_request(cfg: &VoiceConfig, prompt: String) -> ChatStreamRequest {
         persist: true,
         background: false,
         ..ChatStreamRequest::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> VoiceConfig {
+        VoiceConfig {
+            conversation_id: "conv-1".into(),
+            agent_id: Some("agent-x".into()),
+            stt_engine: None,
+            tts_engine: None,
+            tts_voice: None,
+            client_rate: 48_000,
+        }
+    }
+
+    #[test]
+    fn build_chat_request_is_persisted_interactive_single_user_turn() {
+        let req = build_chat_request(&cfg(), "hello there".into());
+        assert!(req.persist, "voice turns persist to conversation history");
+        assert!(!req.background, "voice is interactive, not a background run");
+        assert_eq!(req.conversation_id.as_deref(), Some("conv-1"));
+        assert_eq!(req.agent_id.as_deref(), Some("agent-x"));
+        assert_eq!(req.messages.len(), 1);
+        let msg = &req.messages[0];
+        assert_eq!(msg.role, "user");
+        match &msg.content {
+            UiContent::Text(t) => assert_eq!(t, "hello there"),
+            _ => panic!("expected text content"),
+        }
+    }
+
+    #[test]
+    fn build_chat_request_without_agent_uses_default_path() {
+        let mut c = cfg();
+        c.agent_id = None;
+        let req = build_chat_request(&c, "hi".into());
+        assert!(req.agent_id.is_none(), "None agent = default LLM path");
     }
 }

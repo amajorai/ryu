@@ -23,7 +23,8 @@
   "scripts": {
     "build": "tsup",
     "check-types": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "bun test"
   },
   "devDependencies": {
     "tsup": "^8.5.0",

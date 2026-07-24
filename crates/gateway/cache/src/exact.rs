@@ -114,9 +114,11 @@ impl Cache {
         if !self.config.enabled {
             return;
         }
-        // Simple cap: if at limit, remove ~10 % of entries (oldest by insertion time)
+        // Simple cap: if at limit, remove ~10 % of entries (oldest by insertion time).
+        // `.max(1)` keeps the cap enforced for small `max_entries` (< 10), where the
+        // 10 % share would otherwise floor to 0 and let the cache grow unbounded.
         if self.entries.len() >= self.config.max_entries {
-            self.evict_oldest(self.config.max_entries / 10);
+            self.evict_oldest((self.config.max_entries / 10).max(1));
         }
         self.entries.insert(
             key,
@@ -279,6 +281,256 @@ impl CacheRegistry {
 }
 
 #[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use serde_json::json;
+    use std::thread;
+
+    fn cfg(enabled: bool, ttl_secs: u64, max_entries: usize) -> CacheConfig {
+        CacheConfig {
+            enabled,
+            ttl_secs,
+            max_entries,
+        }
+    }
+
+    // ─── CacheConfig defaults / serde ────────────────────────────────────────
+
+    #[test]
+    fn default_config_matches_documented_values() {
+        let c = CacheConfig::default();
+        assert!(c.enabled);
+        assert_eq!(c.ttl_secs, 300);
+        assert_eq!(c.max_entries, 1000);
+    }
+
+    #[test]
+    fn serde_fills_defaults_for_missing_fields() {
+        // Empty object => every field falls back to its serde default.
+        let c: CacheConfig = serde_json::from_value(json!({})).unwrap();
+        assert!(c.enabled);
+        assert_eq!(c.ttl_secs, 300);
+        assert_eq!(c.max_entries, 1000);
+
+        // Partial object => only the given field overrides.
+        let c: CacheConfig = serde_json::from_value(json!({ "ttl_secs": 7 })).unwrap();
+        assert!(c.enabled);
+        assert_eq!(c.ttl_secs, 7);
+        assert_eq!(c.max_entries, 1000);
+    }
+
+    // ─── make_key: determinism, tenant scoping, field sensitivity ────────────
+
+    #[test]
+    fn make_key_is_deterministic() {
+        let msgs = json!([{ "role": "user", "content": "hi" }]);
+        let a = Cache::make_key(Some("org1"), "gpt-4", &msgs);
+        let b = Cache::make_key(Some("org1"), "gpt-4", &msgs);
+        assert_eq!(a, b);
+        // SHA-256 hex is 64 chars.
+        assert_eq!(a.len(), 64);
+    }
+
+    #[test]
+    fn make_key_is_whitespace_invariant() {
+        // Compact serialisation means JSON whitespace can't change the key.
+        let compact: Value = serde_json::from_str(r#"[{"role":"user","content":"hi"}]"#).unwrap();
+        let spaced: Value =
+            serde_json::from_str("[ { \"role\" : \"user\" , \"content\" : \"hi\" } ]").unwrap();
+        assert_eq!(
+            Cache::make_key(Some("org1"), "gpt-4", &compact),
+            Cache::make_key(Some("org1"), "gpt-4", &spaced),
+        );
+    }
+
+    #[test]
+    fn make_key_separates_tenants() {
+        let msgs = json!([{ "role": "user", "content": "hi" }]);
+        let org1 = Cache::make_key(Some("org1"), "m", &msgs);
+        let org2 = Cache::make_key(Some("org2"), "m", &msgs);
+        let none = Cache::make_key(None, "m", &msgs);
+        assert_ne!(org1, org2, "distinct orgs must not share a key");
+        assert_ne!(org1, none, "an org must not collide with the no-org bucket");
+        assert_ne!(org2, none);
+    }
+
+    #[test]
+    fn make_key_none_bucket_is_stable() {
+        let msgs = json!([{ "role": "user", "content": "hi" }]);
+        assert_eq!(
+            Cache::make_key(None, "m", &msgs),
+            Cache::make_key(None, "m", &msgs),
+        );
+    }
+
+    #[test]
+    fn make_key_discriminant_prevents_prefix_collision() {
+        // The [1u8] tag + separator keep an org named like a model/message run
+        // from colliding with the no-org bucket. Any change to org, model or
+        // messages must move the key.
+        let msgs = json!([{ "role": "user", "content": "hi" }]);
+        let base = Cache::make_key(Some("org1"), "gpt-4", &msgs);
+        assert_ne!(base, Cache::make_key(Some("org1"), "gpt-5", &msgs));
+        let other = json!([{ "role": "user", "content": "bye" }]);
+        assert_ne!(base, Cache::make_key(Some("org1"), "gpt-4", &other));
+    }
+
+    // ─── get / insert: hit, miss, disabled, TTL ──────────────────────────────
+
+    #[test]
+    fn insert_then_get_round_trips() {
+        let cache = Cache::new(cfg(true, 3600, 1000));
+        cache.insert("k".into(), json!({ "answer": 42 }));
+        assert_eq!(cache.get("k"), Some(json!({ "answer": 42 })));
+    }
+
+    #[test]
+    fn get_missing_key_is_none() {
+        let cache = Cache::new(cfg(true, 3600, 1000));
+        assert_eq!(cache.get("absent"), None);
+    }
+
+    #[test]
+    fn disabled_cache_never_stores_or_serves() {
+        let cache = Cache::new(cfg(false, 3600, 1000));
+        cache.insert("k".into(), json!({ "a": 1 }));
+        // insert was a no-op...
+        assert_eq!(cache.entries.len(), 0);
+        // ...and get short-circuits to None even if something were present.
+        assert_eq!(cache.get("k"), None);
+    }
+
+    #[test]
+    fn expired_entry_is_not_served() {
+        // ttl_secs = 0 => TTL is Duration::ZERO, so any elapsed time is >= TTL
+        // and the entry reads as expired without a sleep.
+        let cache = Cache::new(cfg(true, 0, 1000));
+        cache.insert("k".into(), json!({ "a": 1 }));
+        assert_eq!(cache.get("k"), None, "zero-TTL entry must read as expired");
+        // The stale row is still physically present until a sweep runs.
+        assert_eq!(cache.entries.len(), 1);
+    }
+
+    // ─── evict_expired ───────────────────────────────────────────────────────
+
+    #[test]
+    fn evict_expired_drops_stale_rows() {
+        let cache = Cache::new(cfg(true, 0, 1000));
+        cache.insert("a".into(), json!(1));
+        cache.insert("b".into(), json!(2));
+        assert_eq!(cache.entries.len(), 2);
+        cache.evict_expired();
+        assert_eq!(cache.entries.len(), 0, "all zero-TTL rows should be swept");
+    }
+
+    #[test]
+    fn evict_expired_keeps_fresh_rows() {
+        let cache = Cache::new(cfg(true, 3600, 1000));
+        cache.insert("a".into(), json!(1));
+        cache.evict_expired();
+        assert_eq!(cache.get("a"), Some(json!(1)));
+    }
+
+    #[test]
+    fn evict_expired_is_a_noop_when_disabled() {
+        // Disabled sweep must not touch the map (it also can't insert, so seed
+        // directly to prove the retain() branch is skipped).
+        let cache = Cache::new(cfg(false, 0, 1000));
+        cache.entries.insert(
+            "k".into(),
+            CachedEntry {
+                response: json!(1),
+                inserted_at: Instant::now(),
+            },
+        );
+        cache.evict_expired();
+        assert_eq!(cache.entries.len(), 1, "disabled sweep must be a no-op");
+    }
+
+    // ─── eviction / capacity ─────────────────────────────────────────────────
+
+    #[test]
+    fn insert_caps_at_max_entries() {
+        // max_entries = 20 => at capacity, evict 20/10 = 2 oldest, then insert.
+        let cache = Cache::new(cfg(true, 3600, 20));
+        for i in 0..200 {
+            cache.insert(format!("k{i}"), json!(i));
+        }
+        assert!(
+            cache.entries.len() <= 20,
+            "len {} should stay within max_entries",
+            cache.entries.len()
+        );
+        assert!(cache.entries.len() > 0);
+    }
+
+    #[test]
+    fn small_max_entries_still_bounds_the_cache() {
+        // Regression: max_entries < 10 made 10 % floor to 0, so evict_oldest(0)
+        // removed nothing and the cache grew without bound. `.max(1)` fixes it.
+        let cache = Cache::new(cfg(true, 3600, 5));
+        for i in 0..100 {
+            cache.insert(format!("k{i}"), json!(i));
+        }
+        assert!(
+            cache.entries.len() <= 5,
+            "len {} must respect a small max_entries",
+            cache.entries.len()
+        );
+    }
+
+    #[test]
+    fn eviction_removes_oldest_first() {
+        // Fill to capacity with keys inserted in a known order, then push one
+        // more; the earliest-inserted key should be the one evicted.
+        let cache = Cache::new(cfg(true, 3600, 10));
+        for i in 0..10 {
+            cache.insert(format!("k{i}"), json!(i));
+            // Nudge the clock so inserted_at ordering is unambiguous.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // At capacity; this insert evicts 1 oldest (k0) before adding k10.
+        cache.insert("k10".into(), json!(10));
+        assert_eq!(cache.get("k0"), None, "oldest key should be evicted first");
+        assert_eq!(cache.get("k10"), Some(json!(10)), "newest key present");
+    }
+
+    // ─── concurrency ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn concurrent_inserts_and_reads_are_consistent() {
+        // High cap so eviction never fires mid-run and the final count is exact.
+        let cache = Arc::new(Cache::new(cfg(true, 3600, 100_000)));
+        let threads = 8;
+        let per_thread = 500;
+
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                let cache = Arc::clone(&cache);
+                thread::spawn(move || {
+                    for i in 0..per_thread {
+                        let key = format!("t{t}-{i}");
+                        cache.insert(key.clone(), json!(i));
+                        // Read-back under contention must see our own write.
+                        assert_eq!(cache.get(&key), Some(json!(i)));
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("worker thread panicked");
+        }
+
+        assert_eq!(
+            cache.entries.len(),
+            threads * per_thread,
+            "every distinct key should survive with no eviction"
+        );
+    }
+}
+
+#[cfg(test)]
 mod registry_tests {
     use super::*;
     use serde_json::json;
@@ -342,5 +594,26 @@ mod registry_tests {
         // Unknown id is a no-op that keeps the current active backend.
         assert!(!reg.set_active("nope"));
         assert_eq!(reg.active_id(), "stub");
+    }
+
+    #[test]
+    fn registry_delegates_evict_and_exposes_backends() {
+        // Drive the built-in through the registry across every delegating verb,
+        // including the background sweep (exercises Cache's CacheBackend impl too).
+        let reg = CacheRegistry::new(CacheConfig {
+            enabled: true,
+            ttl_secs: 0, // zero-TTL => rows read as expired without sleeping
+            max_entries: 100,
+        });
+        reg.insert("k".to_string(), json!({ "a": 1 }));
+        // Zero-TTL: the row is present but reads as expired.
+        assert_eq!(reg.get("k"), None);
+        // The sweep drops it via the active backend.
+        reg.evict_expired();
+
+        // backend() resolves the built-in; an unknown id yields None.
+        assert!(reg.backend(CacheRegistry::BUILTIN).is_some());
+        assert!(reg.backend("absent").is_none());
+        assert_eq!(reg.available(), vec![CacheRegistry::BUILTIN.to_string()]);
     }
 }

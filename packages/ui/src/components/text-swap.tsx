@@ -59,6 +59,9 @@ export function TextSwap({ children, className }: TextSwapProps) {
 
 	// Phase 2/3: after the new text has committed to the DOM, jump it below
 	// (no transition), force a reflow, then release so it animates back to rest.
+	// Depends on `shown` so it re-runs on every committed swap — with `[]` it only
+	// fired on mount, so `is-exit` was never cleared and swapped-in text stayed
+	// invisible (stuck up + blurred + transparent).
 	useLayoutEffect(() => {
 		if (!entering.current) {
 			return;
@@ -72,7 +75,7 @@ export function TextSwap({ children, className }: TextSwapProps) {
 		el.classList.add("is-enter-start");
 		el.getBoundingClientRect();
 		el.classList.remove("is-enter-start");
-	}, []);
+	}, [shown]);
 
 	return (
 		<span className={cn("t-text-swap", className)} ref={ref}>

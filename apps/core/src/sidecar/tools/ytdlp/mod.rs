@@ -132,8 +132,8 @@ fn find_downloaded_video(work_dir: &Path) -> Result<PathBuf> {
     const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "webm", "mov", "m4v"];
 
     let mut candidate: Option<PathBuf> = None;
-    let entries = std::fs::read_dir(work_dir)
-        .with_context(|| format!("reading {}", work_dir.display()))?;
+    let entries =
+        std::fs::read_dir(work_dir).with_context(|| format!("reading {}", work_dir.display()))?;
     for entry in entries.flatten() {
         let path = entry.path();
         let stem_ok = path
@@ -249,12 +249,7 @@ pub fn parse_vtt_cues(vtt: &str) -> Vec<CaptionCue> {
 fn flush_cue(cur: &mut Option<(u64, u64)>, buf: &mut Vec<String>, cues: &mut Vec<CaptionCue>) {
     if let Some((start_ms, end_ms)) = cur.take() {
         let text = buf.join(" ").trim().to_string();
-        if !text.is_empty()
-            && cues
-                .last()
-                .map(|c| c.text != text)
-                .unwrap_or(true)
-        {
+        if !text.is_empty() && cues.last().map(|c| c.text != text).unwrap_or(true) {
             cues.push(CaptionCue {
                 start_ms,
                 end_ms,
@@ -357,5 +352,187 @@ mod tests {
         assert!(!text.contains("<c>"));
         // consecutive duplicate "Hello there" collapses to one occurrence.
         assert_eq!(text.matches("Hello there").count(), 1);
+    }
+
+    #[test]
+    fn parse_vtt_skips_header_and_note_lines_and_blanks() {
+        // The header prefixes (WEBVTT/NOTE/Kind:/Language:) and blank lines never
+        // contribute transcript text; the caption body does.
+        let vtt = "WEBVTT\nKind: captions\nLanguage: en\n\nNOTE this is metadata\n\n00:00:01.000 --> 00:00:02.000\nreal caption\n";
+        let text = parse_vtt(vtt);
+        assert_eq!(text, "real caption");
+    }
+
+    #[test]
+    fn parse_vtt_empty_input_yields_empty_string() {
+        assert_eq!(parse_vtt(""), "");
+        assert_eq!(parse_vtt("WEBVTT\n\n"), "");
+    }
+
+    #[test]
+    fn strip_tags_removes_angle_markup_only() {
+        assert_eq!(strip_tags("plain"), "plain");
+        assert_eq!(strip_tags("<c>hi</c>"), "hi");
+        assert_eq!(strip_tags("<00:00:01.000>word"), "word");
+        // Unclosed tag: everything after `<` is swallowed until a `>` (none here).
+        assert_eq!(strip_tags("keep<unclosed"), "keep");
+        // Nested/adjacent tags all vanish, surrounding text preserved.
+        assert_eq!(strip_tags("a<b><i>c</i></b>d"), "acd");
+    }
+
+    #[test]
+    fn parse_vtt_timestamp_handles_all_colon_arities() {
+        // [h,m,s] full form.
+        assert_eq!(parse_vtt_timestamp("01:02:03.500"), Some(3_723_500));
+        // [m,s] form (no hours).
+        assert_eq!(parse_vtt_timestamp("02:03.000"), Some(123_000));
+        // [s] bare seconds.
+        assert_eq!(parse_vtt_timestamp("03.250"), Some(3_250));
+        // Zero.
+        assert_eq!(parse_vtt_timestamp("00:00:00.000"), Some(0));
+    }
+
+    #[test]
+    fn parse_vtt_timestamp_accepts_comma_millis_and_rejects_garbage() {
+        // SRT-style comma decimal is normalised to a dot.
+        assert_eq!(parse_vtt_timestamp("00:00:01,500"), Some(1_500));
+        // Non-numeric component → None (not a panic).
+        assert_eq!(parse_vtt_timestamp("aa:bb:cc.ddd"), None);
+        // Too many colon segments → None.
+        assert_eq!(parse_vtt_timestamp("1:2:3:4.000"), None);
+    }
+
+    #[test]
+    fn parse_cue_timing_reads_endpoints_and_ignores_settings() {
+        // Trailing cue settings after the end timestamp are ignored.
+        let (start, end) =
+            parse_cue_timing("00:00:01.000 --> 00:00:03.500 align:start position:0%").unwrap();
+        assert_eq!(start, 1_000);
+        assert_eq!(end, 3_500);
+        // Missing `-->` arrow → None (guarded by the caller's `contains("-->")`, but
+        // the parser must still fail closed if handed a malformed line).
+        assert_eq!(parse_cue_timing("00:00:01.000 00:00:03.000"), None);
+    }
+
+    #[test]
+    fn parse_vtt_cues_yields_timed_cues_and_dedups_consecutive() {
+        let vtt = "WEBVTT\n\n1\n00:00:00.000 --> 00:00:02.000\nHello <c>world</c>\n\n\
+                   2\n00:00:02.000 --> 00:00:04.000\nHello world\n\n\
+                   3\n00:00:04.000 --> 00:00:06.000\nsecond cue\n";
+        let cues = parse_vtt_cues(vtt);
+        // The two identical "Hello world" cues collapse to one; "second cue" survives.
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].text, "Hello world");
+        assert_eq!(cues[0].start_ms, 0);
+        assert_eq!(cues[0].end_ms, 2_000);
+        assert_eq!(cues[1].text, "second cue");
+        assert_eq!(cues[1].start_ms, 4_000);
+    }
+
+    #[test]
+    fn parse_vtt_cues_multiline_text_joins_with_spaces() {
+        let vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nline one\nline two\n";
+        let cues = parse_vtt_cues(vtt);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "line one line two");
+    }
+
+    #[test]
+    fn parse_vtt_cues_empty_when_no_timings() {
+        // Header-only / caption-less input yields no cues (unsubtitled video).
+        assert!(parse_vtt_cues("WEBVTT\nKind: captions\n").is_empty());
+        assert!(parse_vtt_cues("").is_empty());
+    }
+
+    #[test]
+    fn find_downloaded_video_prefers_merged_mp4() {
+        let dir = std::env::temp_dir().join(format!("ryu-ytdlp-vid-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Both an intermediate webm and the merged mp4 exist; mp4 must win.
+        std::fs::write(dir.join("video.webm"), b"x").unwrap();
+        std::fs::write(dir.join("video.mp4"), b"x").unwrap();
+        // A non-`video` stem must be ignored entirely.
+        std::fs::write(dir.join("thumbnail.jpg"), b"x").unwrap();
+        let found = find_downloaded_video(&dir).unwrap();
+        assert_eq!(found.file_name().unwrap(), "video.mp4");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_downloaded_video_falls_back_to_other_container() {
+        let dir = std::env::temp_dir().join(format!("ryu-ytdlp-mkv-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("video.mkv"), b"x").unwrap();
+        let found = find_downloaded_video(&dir).unwrap();
+        assert_eq!(found.file_name().unwrap(), "video.mkv");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_downloaded_video_errors_when_absent() {
+        let dir = std::env::temp_dir().join(format!("ryu-ytdlp-none-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Only a subtitle, no video file at all.
+        std::fs::write(dir.join("video.vtt"), b"WEBVTT\n").unwrap();
+        assert!(find_downloaded_video(&dir).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn first_vtt_and_captions_text_read_the_subtitle() {
+        let dir = std::env::temp_dir().join(format!("ryu-ytdlp-cap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("video.en.vtt"),
+            "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\ncaption body\n",
+        )
+        .unwrap();
+        assert!(first_vtt(&dir).is_some());
+        assert_eq!(find_captions_text(&dir).as_deref(), Some("caption body"));
+        let segs = find_caption_segments(&dir);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "caption body");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn caption_helpers_are_none_when_no_vtt() {
+        let dir = std::env::temp_dir().join(format!("ryu-ytdlp-novtt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("video.mp4"), b"x").unwrap();
+        assert!(first_vtt(&dir).is_none());
+        assert!(find_captions_text(&dir).is_none());
+        assert!(find_caption_segments(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn download_video_refuses_non_http_url() {
+        // The arg-injection guard: a URL that is not http(s) must bail BEFORE spawning
+        // yt-dlp, so a `--exec=…`-style value can never be read as a flag.
+        let dir = std::env::temp_dir().join(format!("ryu-ytdlp-guard-{}", uuid::Uuid::new_v4()));
+        for evil in ["--exec=rm -rf /", "file:///etc/passwd", "-o/tmp/x", "ftp://h/x"] {
+            // `DownloadedVideo` is not `Debug`, so avoid `expect_err`; inspect the Err.
+            let err = download_video(evil, &dir, None, None)
+                .await
+                .err()
+                .expect("non-http(s) url must be refused");
+            assert!(
+                err.to_string().contains("refusing to download non-http(s)"),
+                "got: {err}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ytdlp_bin_path_lives_under_ryu_bin() {
+        let p = ytdlp_bin_path();
+        assert!(p.ends_with(if cfg!(target_os = "windows") {
+            "yt-dlp.exe"
+        } else {
+            "yt-dlp"
+        }));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
     }
 }

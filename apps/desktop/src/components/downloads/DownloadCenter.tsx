@@ -26,6 +26,7 @@ import { cn } from "@ryu/ui/lib/utils";
 import { useCallback, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import { useAvailableUpdates } from "@/src/hooks/useAvailableUpdates.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { clearDownload } from "@/src/lib/api/downloads.ts";
@@ -44,10 +45,25 @@ import { DownloadRow } from "./DownloadRow.tsx";
  * so the transitions.dev notification-badge (03) can pop the dot in/out and
  * slide it diagonally as the count appears/clears, rather than hard-mounting.
  */
-function DownloadBadge({ aggregate }: { aggregate: DownloadsAggregate }) {
-	const open = aggregate.inFlight > 0 || aggregate.failed > 0;
+function DownloadBadge({
+	aggregate,
+	updatesCount,
+}: {
+	aggregate: DownloadsAggregate;
+	updatesCount: number;
+}) {
+	const open =
+		aggregate.inFlight > 0 || aggregate.failed > 0 || updatesCount > 0;
 	const isFailed = aggregate.inFlight === 0 && aggregate.failed > 0;
-	const count = aggregate.inFlight > 0 ? aggregate.inFlight : aggregate.failed;
+	// Priority: active downloads → failed downloads → available updates. The badge
+	// surfaces the count that most needs attention; a plain available-updates count
+	// (e.g. "3 newer versions") shows even when nothing is downloading.
+	let count = updatesCount;
+	if (aggregate.inFlight > 0) {
+		count = aggregate.inFlight;
+	} else if (aggregate.failed > 0) {
+		count = aggregate.failed;
+	}
 	return (
 		<span
 			aria-hidden={!open}
@@ -82,6 +98,10 @@ export function DownloadCenter() {
 	// update loop.
 	const aggregate = useDownloadsStore(useShallow(selectAggregate));
 	const tasks = useDownloadsStore(useShallow(selectOrderedTasks));
+	// Available updates (newer versions of installed agents/engines/tools/plugins)
+	// feed the badge too, so the count shows even when nothing is actively
+	// downloading — matching the "Available updates N" panel body.
+	const { updates } = useAvailableUpdates();
 	const getNode = useNodeStore((s) => s.getActiveNode);
 	const [friendly] = useFriendlyMode();
 	const { openTab } = useTabsContext();
@@ -115,7 +135,10 @@ export function DownloadCenter() {
 							className="gooey-tap relative flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						>
 							<HugeiconsIcon icon={Download01Icon} size={15} />
-							<DownloadBadge aggregate={aggregate} />
+							<DownloadBadge
+								aggregate={aggregate}
+								updatesCount={updates.length}
+							/>
 						</PopoverTrigger>
 					}
 				/>

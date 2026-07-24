@@ -292,33 +292,27 @@ fn python_on_path() -> bool {
         .unwrap_or(false)
 }
 
-async fn run_python_subprocess(
-    script: &str,
-    payload: &[u8],
-    timeout: Duration,
-) -> CodeEvalOutcome {
+async fn run_python_subprocess(script: &str, payload: &[u8], timeout: Duration) -> CodeEvalOutcome {
     use std::process::Stdio;
     use tokio::io::AsyncWriteExt;
 
     // Scrub secrets from the inherited env (mirrors the Deno spawn) but keep the
     // non-secret vars python needs (PATH so the interpreter resolves, etc.).
     let scrubbed = crate::env_scrub::scrub_child_env(std::env::vars(), &[]);
-    let mut child = match tokio::process::Command::new(
-        bootstrap_python(),
-    )
-    // `-I` = isolated mode: ignore PYTHON* env, don't add cwd/script dir to
-    // sys.path, no user site. Hardens the (unavoidably un-sandboxed) host run.
-    .arg("-I")
-    .arg("-c")
-    .arg(script)
-    .env_clear()
-    .envs(scrubbed)
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
-    .kill_on_drop(true)
-    .no_window()
-    .spawn()
+    let mut child = match tokio::process::Command::new(bootstrap_python())
+        // `-I` = isolated mode: ignore PYTHON* env, don't add cwd/script dir to
+        // sys.path, no user site. Hardens the (unavoidably un-sandboxed) host run.
+        .arg("-I")
+        .arg("-c")
+        .arg(script)
+        .env_clear()
+        .envs(scrubbed)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .no_window()
+        .spawn()
     {
         Ok(c) => c,
         Err(e) => return CodeEvalOutcome::skipped(format!("failed to spawn python: {e}")),
@@ -331,11 +325,9 @@ async fn run_python_subprocess(
     }
 
     match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(out)) => outcome_from_python(
-            out.status.code().unwrap_or(-1),
-            &out.stdout,
-            &out.stderr,
-        ),
+        Ok(Ok(out)) => {
+            outcome_from_python(out.status.code().unwrap_or(-1), &out.stdout, &out.stderr)
+        }
         Ok(Err(e)) => CodeEvalOutcome::failed(format!("python subprocess error: {e}")),
         // The future (and the child it owns) drops here → `kill_on_drop` fires.
         Err(_) => CodeEvalOutcome::failed(

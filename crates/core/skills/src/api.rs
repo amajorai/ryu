@@ -114,7 +114,11 @@ struct SkillsApiDoc;
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn list_skills() -> Json<serde_json::Value> {
-    let summaries: Vec<SkillSummary> = registry().list_all().iter().map(SkillSummary::from).collect();
+    let summaries: Vec<SkillSummary> = registry()
+        .list_all()
+        .iter()
+        .map(SkillSummary::from)
+        .collect();
     Json(json!({ "skills": summaries }))
 }
 

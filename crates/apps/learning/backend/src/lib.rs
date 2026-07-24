@@ -32,21 +32,25 @@ pub mod engine;
 pub mod host;
 pub mod store;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub use api::{openapi, routes};
 pub use engine::{
-    build_jsonl, build_skill_md, parse_reward, resolve_base_model, resolve_config, resolve_enabled,
-    resolve_excluded, resolve_feedback_down_negative, resolve_feedback_memory_enabled,
-    resolve_in_sleep_window, resolve_min_reward, resolve_require_approval, resolve_skill_generation,
-    resolve_skills_enabled, run_cycle, run_skills_pass, scheduled_cycle_due, score_buffer, slugify,
-    sweep_into_buffer, synthesize_skill, write_synthesized_skill, mark_cycle_ran, CyclePlan,
-    LearningConfig, LearningCtx, SftMessage,
-    SftSample, SynthOutcome, FEEDBACK_DOWN_NEGATIVE_PREF, FEEDBACK_MEMORY_ENABLED_PREF,
+    build_jsonl, build_skill_md, mark_cycle_ran, parse_reward, resolve_base_model, resolve_config,
+    resolve_enabled, resolve_excluded, resolve_feedback_down_negative,
+    resolve_feedback_memory_enabled, resolve_in_sleep_window, resolve_min_reward,
+    resolve_require_approval, resolve_skill_generation, resolve_skills_enabled, run_cycle,
+    run_skills_pass, scheduled_cycle_due, score_buffer, slugify, sweep_into_buffer,
+    synthesize_skill, write_synthesized_skill, CyclePlan, LearningConfig, LearningCtx, SftMessage,
+    SftSample, SkillProvenance, SynthOutcome, FEEDBACK_DOWN_NEGATIVE_PREF,
+    FEEDBACK_MEMORY_ENABLED_PREF,
     LEARNING_BASE_MODEL_PREF, LEARNING_ENABLED_PREF, LEARNING_EXCLUDE_PREFIX,
     LEARNING_LAST_CYCLE_PREF, LEARNING_MIN_GAP_HOURS_PREF, LEARNING_MIN_REWARD_PREF,
-    LEARNING_PRM_EFFORT_PREF, LEARNING_PRM_KEY_PREF, LEARNING_PRM_MODEL_PREF, LEARNING_PRM_URL_PREF,
-    LEARNING_REQUIRE_APPROVAL_PREF, LEARNING_SKILL_GENERATION_PREF, LEARNING_SKILLS_ENABLED_PREF,
-    LEARNING_SKILLS_WATERMARK_PREF, LEARNING_SLEEP_END_PREF, LEARNING_SLEEP_START_PREF,
-    LEARNING_SYNTH_EFFORT_PREF, LEARNING_SYNTH_MODEL_PREF,
+    LEARNING_PRM_EFFORT_PREF, LEARNING_PRM_KEY_PREF, LEARNING_PRM_MODEL_PREF,
+    LEARNING_PRM_URL_PREF, LEARNING_REQUIRE_APPROVAL_PREF, LEARNING_SKILLS_ENABLED_PREF,
+    LEARNING_SKILLS_WATERMARK_PREF, LEARNING_SKILL_GENERATION_PREF, LEARNING_SLEEP_END_PREF,
+    LEARNING_SLEEP_START_PREF, LEARNING_SYNTH_EFFORT_PREF, LEARNING_SYNTH_MODEL_PREF,
 };
 pub use host::{ConvMeta, LearningHost, Msg, QueuedApproval};
 pub use store::{Experience, ExperienceStore};

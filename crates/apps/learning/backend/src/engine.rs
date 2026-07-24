@@ -32,7 +32,11 @@ pub struct LearningCtx {
 }
 
 impl LearningCtx {
-    pub fn new(store: ExperienceStore, host: Arc<dyn LearningHost>, client: reqwest::Client) -> Self {
+    pub fn new(
+        store: ExperienceStore,
+        host: Arc<dyn LearningHost>,
+        client: reqwest::Client,
+    ) -> Self {
         Self {
             store,
             host,
@@ -79,10 +83,11 @@ pub const LEARNING_MIN_REWARD_PREF: &str = "learning.min-reward";
 pub const LEARNING_BASE_MODEL_PREF: &str = "learning.base-model";
 /// Current skill-library generation; bumped when auto-evolution lands a skill.
 pub const LEARNING_SKILL_GENERATION_PREF: &str = "learning.skill-generation";
-/// Whether an autonomously-synthesized skill must be approved in the inbox before
-/// it joins the active library. Default ON — the loop *proposes*, the user
-/// *disposes*. A deliberate `force` synth ("make a skill from this chat") always
-/// bypasses the gate. Set falsy to restore silent auto-activation.
+/// Whether a synthesized skill must be approved in the inbox before it joins the
+/// active library. Default ON — the loop *proposes*, the user *disposes*. Applies
+/// to a `force` synth too: `force` only bypasses the opt-in/quality gates, never
+/// the approval gate (an activated skill is node-global context, so the write must
+/// always pass the inbox). Set falsy to restore silent auto-activation.
 pub const LEARNING_REQUIRE_APPROVAL_PREF: &str = "learning.require-approval";
 
 /// Optional idle/sleep-window bounds (UTC hour, 0-23) for the scheduled cycle.
@@ -173,8 +178,9 @@ pub async fn resolve_skills_enabled(host: &dyn LearningHost) -> bool {
         .unwrap_or(true)
 }
 
-/// Whether an autonomously-synthesized skill needs inbox approval before it goes
-/// live. Default ON. A `force` synth bypasses this at the call site.
+/// Whether a synthesized skill needs inbox approval before it goes live. Default
+/// ON. Applies to every synthesis path, `force` included — see
+/// [`LEARNING_REQUIRE_APPROVAL_PREF`].
 pub async fn resolve_require_approval(host: &dyn LearningHost) -> bool {
     match pref(host, LEARNING_REQUIRE_APPROVAL_PREF).await {
         Some(v) => truthy(&v),
@@ -311,7 +317,9 @@ pub async fn resolve_prm(host: &dyn LearningHost) -> ModelSource {
         .or_else(|| std::env::var("RYU_LEARNING_PRM_MODEL").ok())
         .or_else(|| std::env::var("RYU_DEFAULT_LLM_MODEL").ok())
         .unwrap_or_else(|| host.default_prm_model());
-    let effort = pref(host, LEARNING_PRM_EFFORT_PREF).await.unwrap_or_default();
+    let effort = pref(host, LEARNING_PRM_EFFORT_PREF)
+        .await
+        .unwrap_or_default();
     let url = pref(host, LEARNING_PRM_URL_PREF).await;
     let key = pref(host, LEARNING_PRM_KEY_PREF).await;
     ModelSource {
@@ -598,6 +606,29 @@ pub struct SynthOutcome {
     pub reason: String,
 }
 
+/// Provenance stamped into a synthesized skill's front-matter. An approved skill
+/// becomes node-global active context for every user and agent, so the approver
+/// (the `skill_md` rides in the approval request) and anyone auditing the library
+/// later must be able to see where it came from. Extra front-matter keys are
+/// ignored by `ryu_skills::parse_skill_md`, so these fields are audit metadata
+/// only — they never change how the skill loads or runs.
+#[derive(Debug, Clone, Default)]
+pub struct SkillProvenance {
+    /// The conversation the skill was distilled from.
+    pub conversation_id: String,
+    /// The agent that drove the source conversation, when its messages carry one.
+    pub agent_id: Option<String>,
+    /// Verified user who requested the synthesis, when the call site has an
+    /// identity (Core's `/api/learn/synthesize`). `None` for the autonomous
+    /// skills pass and the identity-less sidecar surface.
+    pub requested_by: Option<String>,
+    /// `true` for a deliberate `force` synth ("make a skill from this chat");
+    /// `false` when the autonomous skills pass proposed it.
+    pub user_requested: bool,
+    /// RFC 3339 synthesis time.
+    pub synthesized_at: String,
+}
+
 /// Build the conversation transcript fed to the synthesis model.
 fn transcript(messages: &[Msg]) -> String {
     let mut out = String::new();
@@ -627,9 +658,36 @@ pub fn slugify(name: &str) -> String {
     slug.chars().take(60).collect()
 }
 
-/// Render a validated `SKILL.md` body from synthesized fields.
-pub fn build_skill_md(name: &str, description: &str, instructions: &str) -> String {
-    format!("---\nname: {name}\ndescription: {description}\n---\n\n{instructions}\n")
+/// Render a validated `SKILL.md` body from synthesized fields, with the skill's
+/// [`SkillProvenance`] stamped into the front-matter (M17: a node-global skill
+/// must record who/what originated it).
+pub fn build_skill_md(
+    name: &str,
+    description: &str,
+    instructions: &str,
+    provenance: &SkillProvenance,
+) -> String {
+    let mut front = format!("---\nname: {name}\ndescription: {description}\n");
+    front.push_str(&format!(
+        "source-conversation: {}\n",
+        provenance.conversation_id
+    ));
+    if let Some(agent) = &provenance.agent_id {
+        front.push_str(&format!("source-agent: {agent}\n"));
+    }
+    if let Some(user) = &provenance.requested_by {
+        front.push_str(&format!("requested-by: {user}\n"));
+    }
+    let origin = if provenance.user_requested {
+        "user-requested"
+    } else {
+        "auto"
+    };
+    front.push_str(&format!(
+        "origin: {origin}\nsynthesized-at: {}\n---\n\n{instructions}\n",
+        provenance.synthesized_at
+    ));
+    front
 }
 
 /// Extract the first balanced `{...}` that parses as JSON from a possibly-fenced
@@ -687,16 +745,27 @@ fn balanced_object_end(bytes: &[u8], start: usize) -> Option<usize> {
     None
 }
 
-/// Distill a skill from one conversation and, if worthwhile, write + activate it.
+/// Distill a skill from one conversation and, if worthwhile, propose it for
+/// approval (or write + activate it directly when the approval gate is off).
 /// Consent-gated: runs only when the skills opt-in is on OR `force` is set by a
 /// deliberate per-conversation user action ("make a skill from this chat"). With
 /// skills off and `force` false this is a no-op — conversation content is never
 /// processed and no global skill is written, so collection can't precede consent.
 /// Always respects per-conversation exclude.
+///
+/// `force` bypasses ONLY the skills opt-in — never the approval inbox. An
+/// activated skill is node-global system-prompt context for every user and agent,
+/// and `force` is reachable via `POST /api/learn/synthesize` with just the
+/// per-conversation READ ACL, so the write + activate must always go through the
+/// same approval flow as the autonomous path (H13).
+///
+/// `requested_by` is the verified caller's user id when the call site has one
+/// (Core's HTTP handler); it is stamped into the skill's provenance front-matter.
 pub async fn synthesize_skill(
     ctx: &LearningCtx,
     conversation_id: &str,
     force: bool,
+    requested_by: Option<&str>,
 ) -> Result<SynthOutcome> {
     // Gated by the *skills* opt-in (default ON, on-device), not the training
     // opt-in — distilling a local skill never sends conversation text off-device.
@@ -756,23 +825,39 @@ pub async fn synthesize_skill(
     }
 
     let slug = slugify(&name);
-    let skill_md = build_skill_md(&name, &description, &instructions);
+    // Provenance rides in the front-matter so the approver sees where this
+    // node-global skill came from, and the record survives on disk (M17).
+    let provenance = SkillProvenance {
+        conversation_id: conversation_id.to_string(),
+        agent_id: messages.iter().find_map(|m| m.agent_id.clone()),
+        requested_by: requested_by.map(str::to_string),
+        user_requested: force,
+        synthesized_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let skill_md = build_skill_md(&name, &description, &instructions, &provenance);
     // Validate before writing — a malformed skill must never reach the library.
     ryu_skills::parse_skill_md(&slug, &skill_md)
         .map_err(|e| anyhow::anyhow!("synthesized skill failed validation: {e}"))?;
 
-    // Gate autonomous synthesis behind the approval inbox: the loop *proposes* a
-    // skill and the user approves it before it joins the active library (the
-    // Hermes `skills.write_approval` stage→review→approve model). A deliberate
-    // `force` synth (the user explicitly asked to make a skill from this chat)
-    // skips the gate. Falls back to direct activation when no approval engine is
-    // wired (headless/tests) or the user opted out via the pref. Nothing is
-    // written to disk until approve, so a rejected suggestion never touches the
-    // library.
-    if !force && resolve_require_approval(ctx.host()).await {
+    // Gate synthesis behind the approval inbox: the loop *proposes* a skill and
+    // the user approves it before it joins the active library (the Hermes
+    // `skills.write_approval` stage→review→approve model). This applies to a
+    // `force` synth too — force bypasses the opt-in, never the inbox (H13): the
+    // route is reachable with only the per-conversation READ ACL, and an
+    // activated skill is node-global context. Falls back to direct activation
+    // when no approval engine is wired (headless/tests) or the user opted out via
+    // the pref. Nothing is written to disk until approve, so a rejected
+    // suggestion never touches the library.
+    if resolve_require_approval(ctx.host()).await {
         match ctx
             .host()
-            .queue_skill_approval(&slug, &name, &description, conversation_id, skill_md.clone())
+            .queue_skill_approval(
+                &slug,
+                &name,
+                &description,
+                conversation_id,
+                skill_md.clone(),
+            )
             .await
             .map_err(|e| anyhow::anyhow!("queueing synthesized skill for approval: {e}"))?
         {
@@ -871,7 +956,9 @@ pub async fn run_skills_pass(ctx: &LearningCtx, max: usize) -> Result<usize> {
     let mut high = watermark;
     for c in convos.into_iter().take(max) {
         high = high.max(c.updated_at);
-        match synthesize_skill(ctx, &c.id, false).await {
+        // Autonomous pass: no verified caller, so provenance carries only the
+        // source conversation (+ its agent) and `origin: auto`.
+        match synthesize_skill(ctx, &c.id, false, None).await {
             // `slug` is Some whenever a reusable skill was produced (queued for
             // approval or, with the gate off, activated). None = nothing reusable.
             Ok(outcome) if outcome.slug.is_some() => proposed += 1,
@@ -1225,10 +1312,44 @@ mod tests {
             "Reverse a string",
             "When you need to reverse a string in Rust",
             "Use `s.chars().rev().collect::<String>()`.",
+            &SkillProvenance {
+                conversation_id: "conv-1".into(),
+                agent_id: Some("agent-7".into()),
+                requested_by: Some("user-42".into()),
+                user_requested: true,
+                synthesized_at: "2026-07-23T00:00:00Z".into(),
+            },
         );
         let parsed = ryu_skills::parse_skill_md("learned-x", &md).expect("valid skill");
         assert_eq!(parsed.name, "Reverse a string");
         assert!(parsed.instructions.contains("rev()"));
+        // Provenance is stamped into the front-matter (never the instruction
+        // body), so the approver/auditor sees origin without the skill's runtime
+        // behavior changing.
+        assert!(md.contains("source-conversation: conv-1\n"));
+        assert!(md.contains("source-agent: agent-7\n"));
+        assert!(md.contains("requested-by: user-42\n"));
+        assert!(md.contains("origin: user-requested\n"));
+        assert!(md.contains("synthesized-at: 2026-07-23T00:00:00Z\n"));
+        assert!(!parsed.instructions.contains("source-conversation"));
+    }
+
+    #[test]
+    fn build_skill_md_omits_absent_provenance_fields() {
+        let md = build_skill_md(
+            "Skill",
+            "Desc",
+            "Body",
+            &SkillProvenance {
+                conversation_id: "conv-2".into(),
+                synthesized_at: "2026-07-23T00:00:00Z".into(),
+                ..Default::default()
+            },
+        );
+        ryu_skills::parse_skill_md("learned-y", &md).expect("valid skill");
+        assert!(md.contains("origin: auto\n"));
+        assert!(!md.contains("source-agent"));
+        assert!(!md.contains("requested-by"));
     }
 
     #[test]
@@ -1275,5 +1396,599 @@ mod tests {
         let parsed: SftSample = serde_json::from_str(jsonl.lines().next().unwrap()).unwrap();
         assert_eq!(parsed.messages[0].role, "user");
         assert_eq!(parsed.messages[1].content, "hello");
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    //! Resolver + flow-function coverage over the [`MockHost`] seam. Each test is
+    //! hermetic: an in-memory host and a unique tempfile-backed store, no network,
+    //! no real skills dir, no env mutation (defaults are asserted only where the
+    //! ambient env is guaranteed unset under a clean `cargo test`).
+
+    use super::*;
+    use crate::store::ExperienceStore;
+    use crate::test_support::MockHost;
+    use std::sync::Arc;
+
+    fn store(tag: &str) -> ExperienceStore {
+        let dir = std::env::temp_dir().join(format!(
+            "ryu-learn-flow-{}-{tag}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        ExperienceStore::open(dir.join("experience.db")).expect("open store")
+    }
+
+    fn ctx(host: MockHost, store: ExperienceStore) -> LearningCtx {
+        LearningCtx::new(store, Arc::new(host), reqwest::Client::new())
+    }
+
+    /// Like [`ctx`] but also hands back the typed mock so a test can read its
+    /// side-effect counters (e.g. `reload_skills` calls) after the fact.
+    fn ctx_arc(host: MockHost, store: ExperienceStore) -> (LearningCtx, Arc<MockHost>) {
+        let h = Arc::new(host);
+        let c = LearningCtx::new(store, h.clone(), reqwest::Client::new());
+        (c, h)
+    }
+
+    // ---- two-flag consent gating ------------------------------------------
+
+    #[tokio::test]
+    async fn training_opt_in_defaults_off_skills_opt_in_defaults_on() {
+        // The load-bearing default posture: training OFF (PRM can route
+        // off-device), skills ON (on-device + inbox-gated). Both prefs unset, so
+        // this exercises the default branch (env is unset under a clean test run).
+        let host = MockHost::new();
+        assert!(!resolve_enabled(&host).await);
+        assert!(resolve_skills_enabled(&host).await);
+    }
+
+    #[tokio::test]
+    async fn training_opt_in_honors_pref_truthy_and_falsy() {
+        for v in ["1", "true", "YES", "on"] {
+            let host = MockHost::new().with_pref(LEARNING_ENABLED_PREF, v);
+            assert!(resolve_enabled(&host).await, "{v} should be truthy");
+        }
+        for v in ["0", "false", "no", "off", "  "] {
+            let host = MockHost::new().with_pref(LEARNING_ENABLED_PREF, v);
+            assert!(!resolve_enabled(&host).await, "{v:?} should be falsy");
+        }
+    }
+
+    #[tokio::test]
+    async fn skills_opt_in_can_be_turned_off() {
+        let host = MockHost::new().with_pref(LEARNING_SKILLS_ENABLED_PREF, "false");
+        assert!(!resolve_skills_enabled(&host).await);
+    }
+
+    #[tokio::test]
+    async fn approval_and_feedback_flags_default_on() {
+        let host = MockHost::new();
+        assert!(resolve_require_approval(&host).await);
+        assert!(resolve_feedback_memory_enabled(&host).await);
+        assert!(resolve_feedback_down_negative(&host).await);
+    }
+
+    #[tokio::test]
+    async fn approval_and_feedback_flags_respect_falsy_pref() {
+        let host = MockHost::new()
+            .with_pref(LEARNING_REQUIRE_APPROVAL_PREF, "0")
+            .with_pref(FEEDBACK_MEMORY_ENABLED_PREF, "no")
+            .with_pref(FEEDBACK_DOWN_NEGATIVE_PREF, "off");
+        assert!(!resolve_require_approval(&host).await);
+        assert!(!resolve_feedback_memory_enabled(&host).await);
+        assert!(!resolve_feedback_down_negative(&host).await);
+    }
+
+    #[tokio::test]
+    async fn per_conversation_exclude_resolves_from_prefixed_pref() {
+        let key = format!("{LEARNING_EXCLUDE_PREFIX}conv-9");
+        let host = MockHost::new().with_pref(&key, "true");
+        assert!(resolve_excluded(&host, "conv-9").await);
+        assert!(!resolve_excluded(&host, "conv-other").await);
+    }
+
+    #[tokio::test]
+    async fn min_reward_clamps_to_unit_range_else_default() {
+        assert_eq!(resolve_min_reward(&MockHost::new()).await, DEFAULT_MIN_REWARD);
+        let ok = MockHost::new().with_pref(LEARNING_MIN_REWARD_PREF, "0.4");
+        assert_eq!(resolve_min_reward(&ok).await, 0.4);
+        // Out of [0,1] and non-numeric both fall back to the default.
+        let hi = MockHost::new().with_pref(LEARNING_MIN_REWARD_PREF, "1.5");
+        assert_eq!(resolve_min_reward(&hi).await, DEFAULT_MIN_REWARD);
+        let junk = MockHost::new().with_pref(LEARNING_MIN_REWARD_PREF, "abc");
+        assert_eq!(resolve_min_reward(&junk).await, DEFAULT_MIN_REWARD);
+    }
+
+    #[tokio::test]
+    async fn skill_generation_and_base_model_resolve() {
+        assert_eq!(resolve_skill_generation(&MockHost::new()).await, 0);
+        let host = MockHost::new()
+            .with_pref(LEARNING_SKILL_GENERATION_PREF, "5")
+            .with_pref(LEARNING_BASE_MODEL_PREF, "gemma-base");
+        assert_eq!(resolve_skill_generation(&host).await, 5);
+        assert_eq!(
+            resolve_base_model(&host).await,
+            Some("gemma-base".to_string())
+        );
+        assert_eq!(resolve_base_model(&MockHost::new()).await, None);
+    }
+
+    // ---- sleep window + schedule gating -----------------------------------
+
+    #[tokio::test]
+    async fn sleep_window_unset_is_unrestricted_full_window_true_empty_false() {
+        // Neither bound -> no restriction.
+        assert!(resolve_in_sleep_window(&MockHost::new()).await);
+        // [0,24) contains every hour.
+        let full = MockHost::new()
+            .with_pref(LEARNING_SLEEP_START_PREF, "0")
+            .with_pref(LEARNING_SLEEP_END_PREF, "24");
+        assert!(resolve_in_sleep_window(&full).await);
+        // start == end is an empty window -> never (independent of wall clock).
+        let empty = MockHost::new()
+            .with_pref(LEARNING_SLEEP_START_PREF, "5")
+            .with_pref(LEARNING_SLEEP_END_PREF, "5");
+        assert!(!resolve_in_sleep_window(&empty).await);
+    }
+
+    #[tokio::test]
+    async fn scheduled_cycle_due_and_mark_ran() {
+        // No prior run recorded -> always due.
+        assert!(scheduled_cycle_due(&MockHost::new()).await);
+        // A run long ago (epoch 0) with the default 20h gap -> due.
+        let old = MockHost::new().with_pref(LEARNING_LAST_CYCLE_PREF, "0");
+        assert!(scheduled_cycle_due(&old).await);
+        // Stamp "now" then re-check: inside the gap -> not due.
+        let host = MockHost::new();
+        mark_cycle_ran(&host).await;
+        assert!(!scheduled_cycle_due(&host).await);
+    }
+
+    // ---- config projection + PRM/synth sources ----------------------------
+
+    #[tokio::test]
+    async fn resolve_config_projects_prefs_without_secrets() {
+        let host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_SKILLS_ENABLED_PREF, "false")
+            .with_pref(LEARNING_PRM_MODEL_PREF, "judge-x")
+            .with_pref(LEARNING_PRM_URL_PREF, "https://byo.example")
+            .with_pref(LEARNING_PRM_KEY_PREF, "sk-secret")
+            .with_pref(LEARNING_SYNTH_MODEL_PREF, "synth-y")
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.6")
+            .with_pref(LEARNING_BASE_MODEL_PREF, "base-z")
+            .with_pref(LEARNING_SKILL_GENERATION_PREF, "3");
+        let cfg = resolve_config(&host).await;
+        assert!(cfg.enabled);
+        assert!(!cfg.skills_enabled);
+        assert_eq!(cfg.prm_model, "judge-x");
+        assert!(cfg.prm_via_byo); // url present
+        assert_eq!(cfg.synth_model, "synth-y");
+        assert_eq!(cfg.min_reward, 0.6);
+        assert_eq!(cfg.base_model, Some("base-z".to_string()));
+        assert_eq!(cfg.skill_generation, 3);
+        // The serialized config must never carry the BYO key.
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(!json.contains("sk-secret"));
+    }
+
+    #[tokio::test]
+    async fn prm_defaults_to_host_model_synth_defaults_local() {
+        // Pref set so the env fallback branch is skipped (determinism).
+        let host = MockHost::new()
+            .with_pref(LEARNING_PRM_MODEL_PREF, "pref-prm")
+            .with_pref(LEARNING_SYNTH_MODEL_PREF, "pref-synth");
+        let prm = resolve_prm(&host).await;
+        assert_eq!(prm.model, "pref-prm");
+        assert!(prm.url.is_none());
+        let synth = resolve_synth(&host).await;
+        assert_eq!(synth.model, "pref-synth");
+        assert!(synth.url.is_none()); // synth never routes BYO
+    }
+
+    // ---- sweep ------------------------------------------------------------
+
+    #[tokio::test]
+    async fn sweep_is_a_noop_when_training_disabled() {
+        let host = MockHost::new()
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "hi"), ("assistant", "yo")]);
+        let c = ctx(host, store("sweep-off"));
+        assert_eq!(sweep_into_buffer(&c).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn sweep_captures_pairs_and_is_idempotent() {
+        let host = MockHost::new().enabled().with_conversation("c1", 10, 4).with_messages(
+            "c1",
+            &[
+                ("user", "q1"),
+                ("assistant", "a1"),
+                ("user", "q2"),
+                ("assistant", "a2"),
+            ],
+        );
+        let c = ctx(host, store("sweep-on"));
+        assert_eq!(sweep_into_buffer(&c).await.unwrap(), 2);
+        // Re-sweep: same assistant message ids -> nothing new.
+        assert_eq!(sweep_into_buffer(&c).await.unwrap(), 0);
+        assert_eq!(c.store.list(10).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn sweep_skips_archived_short_and_excluded_and_empty_turns() {
+        let host = MockHost::new()
+            .enabled()
+            .with_archived_conversation("arch", 4)
+            .with_messages("arch", &[("user", "q"), ("assistant", "a")])
+            // too few messages
+            .with_conversation("short", 10, 1)
+            .with_messages("short", &[("user", "q")])
+            // excluded by pref
+            .with_conversation("excl", 10, 2)
+            .with_messages("excl", &[("user", "q"), ("assistant", "a")])
+            .with_pref(&format!("{LEARNING_EXCLUDE_PREFIX}excl"), "true")
+            // a real one, but with an empty assistant reply (dropped) + a good pair
+            .with_conversation("mix", 10, 4)
+            .with_messages(
+                "mix",
+                &[
+                    ("user", "q1"),
+                    ("assistant", "   "),
+                    ("user", "q2"),
+                    ("assistant", "real"),
+                ],
+            );
+        let c = ctx(host, store("sweep-skips"));
+        // Only the single non-empty pair from "mix" is captured.
+        assert_eq!(sweep_into_buffer(&c).await.unwrap(), 1);
+        let rows = c.store.list(10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].conversation_id, "mix");
+        assert_eq!(rows[0].assistant_text, "real");
+    }
+
+    #[tokio::test]
+    async fn sweep_continues_past_a_conversation_whose_messages_error() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.messages_err = true; // get_messages fails for every conv
+        let c = ctx(host, store("sweep-err"));
+        // The warn-and-continue path yields zero captures without erroring.
+        assert_eq!(sweep_into_buffer(&c).await.unwrap(), 0);
+    }
+
+    // ---- score ------------------------------------------------------------
+
+    #[tokio::test]
+    async fn score_is_a_noop_when_training_disabled() {
+        let c = ctx(MockHost::new(), store("score-off"));
+        assert_eq!(score_buffer(&c, 10).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn score_applies_prm_reward_to_unscored_rows() {
+        let mut host = MockHost::new().enabled();
+        host.prm_reply = Some("0.85".to_string());
+        let c = ctx(host, store("score-on"));
+        // Seed an unscored, non-excluded, completed row.
+        let exp = Experience {
+            id: "row-a".into(),
+            conversation_id: "c1".into(),
+            agent_id: None,
+            user_text: "q".into(),
+            assistant_text: "a".into(),
+            outcome: "completed".into(),
+            reward: None,
+            base_model: None,
+            skill_generation: 0,
+            excluded: false,
+            created_at: "t".into(),
+        };
+        c.store.record_if_absent(&exp).await.unwrap();
+        assert_eq!(score_buffer(&c, 10).await.unwrap(), 1);
+        let rows = c.store.list(10).await.unwrap();
+        assert_eq!(rows[0].reward, Some(0.85));
+    }
+
+    #[tokio::test]
+    async fn score_skips_rows_whose_conversation_is_excluded_by_pref() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(&format!("{LEARNING_EXCLUDE_PREFIX}c1"), "true");
+        host.prm_reply = Some("0.9".to_string());
+        let c = ctx(host, store("score-excl"));
+        let exp = Experience {
+            id: "row-a".into(),
+            conversation_id: "c1".into(),
+            agent_id: None,
+            user_text: "q".into(),
+            assistant_text: "a".into(),
+            outcome: "completed".into(),
+            reward: None,
+            base_model: None,
+            skill_generation: 0,
+            excluded: false,
+            created_at: "t".into(),
+        };
+        c.store.record_if_absent(&exp).await.unwrap();
+        // Defense-in-depth: excluded chat's text never reaches the PRM.
+        assert_eq!(score_buffer(&c, 10).await.unwrap(), 0);
+        assert_eq!(c.store.list(10).await.unwrap()[0].reward, None);
+    }
+
+    async fn seed_unscored(c: &LearningCtx) {
+        let exp = Experience {
+            id: "row-a".into(),
+            conversation_id: "c1".into(),
+            agent_id: None,
+            user_text: "q".into(),
+            assistant_text: "a".into(),
+            outcome: "completed".into(),
+            reward: None,
+            base_model: None,
+            skill_generation: 0,
+            excluded: false,
+            created_at: "t".into(),
+        };
+        c.store.record_if_absent(&exp).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn score_tolerates_unparseable_and_failing_prm() {
+        // Unparseable judge answer -> scored 0, row stays NULL.
+        let mut host = MockHost::new().enabled();
+        host.prm_reply = Some("no number here".to_string());
+        let c = ctx(host, store("score-junk"));
+        seed_unscored(&c).await;
+        assert_eq!(score_buffer(&c, 10).await.unwrap(), 0);
+        assert_eq!(c.store.list(10).await.unwrap()[0].reward, None);
+        // PRM call errors -> scored 0, no panic.
+        let mut host2 = MockHost::new().enabled();
+        host2.side_err = true;
+        let c2 = ctx(host2, store("score-fail"));
+        seed_unscored(&c2).await;
+        assert_eq!(score_buffer(&c2, 10).await.unwrap(), 0);
+    }
+
+    // ---- synthesize: inbox routing + H13 force gate -----------------------
+
+    fn good_synth_json() -> String {
+        r#"{"name":"Reverse a string","description":"reverse in rust","instructions":"use chars().rev()"}"#
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn synth_noop_when_skills_off_and_not_forced() {
+        let host = MockHost::new().with_pref(LEARNING_SKILLS_ENABLED_PREF, "false");
+        let (c, h) = ctx_arc(host, store("synth-off"));
+        let out = synthesize_skill(&c, "c1", false, None).await.unwrap();
+        assert!(!out.created);
+        assert!(out.slug.is_none());
+        assert!(out.reason.contains("disabled"));
+        // Nothing reusable was processed: reload never called.
+        assert_eq!(h.reload_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn synth_excluded_conversation_is_a_noop() {
+        let mut host = MockHost::new().with_pref(&format!("{LEARNING_EXCLUDE_PREFIX}c1"), "true");
+        host.synth_reply = Some(good_synth_json());
+        let c = ctx(host, store("synth-excl"));
+        let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+        assert!(!out.created);
+        assert!(out.reason.contains("excluded"));
+    }
+
+    #[tokio::test]
+    async fn synth_too_few_messages() {
+        let mut host = MockHost::new().with_messages("c1", &[("user", "solo")]);
+        host.synth_reply = Some(good_synth_json());
+        let c = ctx(host, store("synth-few"));
+        let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+        assert!(!out.created);
+        assert!(out.reason.contains("too few"));
+    }
+
+    #[tokio::test]
+    async fn synth_nothing_reusable_and_empty_instructions() {
+        // name empty -> nothing reusable
+        let mut host = MockHost::new().with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.synth_reply = Some(r#"{"name":""}"#.to_string());
+        let c = ctx(host, store("synth-nore"));
+        let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+        assert!(!out.created);
+        assert!(out.reason.contains("nothing reusable"));
+        // name present but instructions empty -> rejected
+        let mut host2 = MockHost::new().with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host2.synth_reply = Some(r#"{"name":"X","description":"d","instructions":"  "}"#.to_string());
+        let c2 = ctx(host2, store("synth-empty"));
+        let out2 = synthesize_skill(&c2, "c1", true, None).await.unwrap();
+        assert!(!out2.created);
+        assert!(out2.reason.contains("empty instructions"));
+    }
+
+    #[tokio::test]
+    async fn force_bypasses_skills_optin_but_never_the_inbox() {
+        // H13: skills OFF + force=true still routes through the approval inbox and
+        // must NOT fall through to direct write/activate. queue -> Queued.
+        let mut host = MockHost::new()
+            .with_pref(LEARNING_SKILLS_ENABLED_PREF, "false")
+            .with_messages("c1", &[("user", "how to reverse"), ("assistant", "use rev()")]);
+        host.synth_reply = Some(good_synth_json());
+        host.queue = QueuedApproval::Queued;
+        let (c, h) = ctx_arc(host, store("synth-force"));
+        let out = synthesize_skill(&c, "c1", true, Some("user-42")).await.unwrap();
+        // created=false because the write is DEFERRED to approval; slug is surfaced.
+        assert!(!out.created);
+        assert!(out.slug.as_deref().unwrap().starts_with("learned-"));
+        assert!(out.reason.contains("queued"));
+        // The teeth: no activation happened (reload_skills never called).
+        assert_eq!(h.reload_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn synth_already_pending_is_deduped() {
+        let mut host =
+            MockHost::new().with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.synth_reply = Some(good_synth_json());
+        host.queue = QueuedApproval::AlreadyPending;
+        let (c, h) = ctx_arc(host, store("synth-dupe"));
+        let out = synthesize_skill(&c, "c1", true, None).await.unwrap();
+        assert!(!out.created);
+        assert!(out.reason.contains("already awaiting"));
+        assert_eq!(h.reload_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn synth_queue_error_propagates() {
+        let mut host =
+            MockHost::new().with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.synth_reply = Some(good_synth_json());
+        host.queue_bail = true;
+        let c = ctx(host, store("synth-qerr"));
+        let err = synthesize_skill(&c, "c1", true, None).await.unwrap_err();
+        assert!(format!("{err:#}").contains("queueing synthesized skill"));
+    }
+
+    #[tokio::test]
+    async fn synth_model_no_json_errors() {
+        let mut host =
+            MockHost::new().with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.synth_reply = Some("sorry, I have no idea".to_string());
+        let c = ctx(host, store("synth-nojson"));
+        let err = synthesize_skill(&c, "c1", true, None).await.unwrap_err();
+        assert!(format!("{err:#}").contains("no JSON object"));
+    }
+
+    // ---- run_skills_pass --------------------------------------------------
+
+    #[tokio::test]
+    async fn skills_pass_noop_when_skills_disabled() {
+        let host = MockHost::new().with_pref(LEARNING_SKILLS_ENABLED_PREF, "false");
+        let c = ctx(host, store("pass-off"));
+        assert_eq!(run_skills_pass(&c, 5).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn skills_pass_proposes_fresh_convos_and_advances_watermark() {
+        let mut host = MockHost::new()
+            .with_conversation("c1", 100, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")])
+            .with_conversation("c2", 200, 2)
+            .with_messages("c2", &[("user", "q"), ("assistant", "a")]);
+        host.synth_reply = Some(good_synth_json());
+        host.queue = QueuedApproval::Queued;
+        let c = ctx(host, store("pass-on"));
+        let proposed = run_skills_pass(&c, 5).await.unwrap();
+        assert_eq!(proposed, 2);
+        // Watermark advanced to the newest updated_at we looked at.
+        let wm = c.host.pref_get(LEARNING_SKILLS_WATERMARK_PREF).await;
+        assert_eq!(wm.as_deref(), Some("200"));
+        // A second pass sees nothing newer than the watermark.
+        assert_eq!(run_skills_pass(&c, 5).await.unwrap(), 0);
+    }
+
+    // ---- run_cycle + dispatch --------------------------------------------
+
+    #[tokio::test]
+    async fn cycle_noop_when_training_disabled() {
+        let c = ctx(MockHost::new(), store("cycle-off"));
+        let plan = run_cycle(&c, false).await.unwrap();
+        assert_eq!(plan.sample_count, 0);
+        assert!(!plan.dispatched);
+        assert!(plan.note.contains("disabled"));
+    }
+
+    #[tokio::test]
+    async fn cycle_dry_run_sweeps_scores_and_assembles() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.5")
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.prm_reply = Some("0.9".to_string());
+        let c = ctx(host, store("cycle-dry"));
+        let plan = run_cycle(&c, false).await.unwrap();
+        assert_eq!(plan.swept, 1);
+        assert_eq!(plan.scored, 1);
+        assert_eq!(plan.sample_count, 1);
+        assert!(!plan.dispatched);
+        assert!(plan.error.is_none());
+        assert!(plan.note.contains("dry run"));
+        assert!(plan.dataset_path.is_some()); // dataset written to temp data dir
+    }
+
+    #[tokio::test]
+    async fn cycle_execute_without_base_model_fails_to_dispatch() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.5")
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.prm_reply = Some("0.9".to_string());
+        let c = ctx(host, store("cycle-nobase"));
+        let plan = run_cycle(&c, true).await.unwrap();
+        assert!(!plan.dispatched);
+        assert!(plan.error.as_deref().unwrap().contains("base-model"));
+    }
+
+    #[tokio::test]
+    async fn cycle_execute_local_dispatches_finetune() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.5")
+            .with_pref(LEARNING_BASE_MODEL_PREF, "orig-base")
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.prm_reply = Some("0.95".to_string());
+        host.finetune = Some(json!({ "job_id": "job-123" }));
+        let c = ctx(host, store("cycle-exec"));
+        let plan = run_cycle(&c, true).await.unwrap();
+        assert!(plan.dispatched);
+        assert_eq!(plan.job_id.as_deref(), Some("job-123"));
+        assert!(plan.error.is_none());
+        assert!(plan.note.contains("fine-tune dispatched"));
+    }
+
+    #[tokio::test]
+    async fn cycle_execute_remote_without_url_is_a_hard_error() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.5")
+            .with_pref(LEARNING_BASE_MODEL_PREF, "orig-base")
+            .with_pref("learning.train-target", "remote")
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.prm_reply = Some("0.95".to_string());
+        host.finetune = Some(json!({ "job_id": "job-x" }));
+        let c = ctx(host, store("cycle-remote-misconfig"));
+        let plan = run_cycle(&c, true).await.unwrap();
+        assert!(!plan.dispatched);
+        assert!(plan.error.as_deref().unwrap().contains("remote-url is unset"));
+    }
+
+    #[tokio::test]
+    async fn cycle_execute_remote_inlines_samples_and_dispatches() {
+        let mut host = MockHost::new()
+            .enabled()
+            .with_pref(LEARNING_MIN_REWARD_PREF, "0.5")
+            .with_pref(LEARNING_BASE_MODEL_PREF, "orig-base")
+            .with_pref("learning.train-target", "remote")
+            .with_pref("learning.remote-url", "https://gpu.example")
+            .with_pref("learning.remote-token", "tok-secret")
+            .with_conversation("c1", 10, 2)
+            .with_messages("c1", &[("user", "q"), ("assistant", "a")]);
+        host.prm_reply = Some("0.95".to_string());
+        host.finetune = Some(json!({ "job_id": "job-remote" }));
+        let c = ctx(host, store("cycle-remote-ok"));
+        let plan = run_cycle(&c, true).await.unwrap();
+        assert!(plan.dispatched);
+        assert_eq!(plan.job_id.as_deref(), Some("job-remote"));
     }
 }

@@ -101,13 +101,46 @@ pub struct MemorySlot {
     pub write_enabled: bool,
 }
 
+/// Dither-gradient avatar spec: two palette colours (or hues) plus a direction,
+/// rendered entirely client-side by the shared dither-kit. Core stores it
+/// verbatim inside the persona JSON and never interprets it — the field names
+/// match the frontend `{ from, to, direction }` shape one-for-one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DitherSpec {
+    /// The colour the gradient starts solid as — a palette name (e.g. `"green"`)
+    /// or a hue number rendered as a string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// What it dissolves into — another palette colour, or absent for a fade to
+    /// transparent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// Where `to` ends up: `"up" | "down" | "left" | "right"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<String>,
+}
+
 /// Persona slot: name, avatar, and tone instructions.
+///
+/// The avatar can be any one of three mutually-exclusive sources, resolved in
+/// priority order by the client: an uploaded image ([`avatar_url`]), a custom
+/// icon id ([`icon`], resolved through the shared Icon primitive), or a
+/// dither-gradient ([`dither`]). Setting one clears the others on save; Core
+/// stores whichever are present and never interprets them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PersonaSlot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
+    /// Custom icon id (Iconify / icons0 / Hugeicons), an alternative avatar
+    /// source to an uploaded image or a dither gradient.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Dither-gradient avatar, an alternative avatar source to an uploaded image
+    /// or a custom icon.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dither: Option<DitherSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tone: Option<String>,
 }
@@ -1409,6 +1442,8 @@ mod tests {
         let persona = PersonaSlot {
             display_name: Some("Aria".into()),
             avatar_url: None,
+            icon: None,
+            dither: None,
             tone: Some("friendly".into()),
         };
         let policy = PolicyRef {
@@ -1907,6 +1942,8 @@ mod tests {
         let persona = PersonaSlot {
             display_name: Some("Aria".to_owned()),
             avatar_url: None,
+            icon: None,
+            dither: None,
             tone: Some("pirate".to_owned()),
         };
         // Build the prefix the same way route_chat_stream does (inline logic test).
@@ -1941,6 +1978,8 @@ mod tests {
         let persona = PersonaSlot {
             display_name: None,
             avatar_url: None,
+            icon: None,
+            dither: None,
             tone: Some("pirate".to_owned()),
         };
         let prefix = {
@@ -1963,6 +2002,42 @@ mod tests {
             !prefix.contains("Your name is"),
             "no name line when display_name is None: {prefix}"
         );
+    }
+
+    #[test]
+    fn persona_icon_and_dither_roundtrip_json() {
+        // Icon avatar source survives a serialize → parse round-trip.
+        let icon_persona = PersonaSlot {
+            icon: Some("lucide:sparkles".to_owned()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&icon_persona).unwrap();
+        let parsed: PersonaSlot = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, icon_persona);
+        assert_eq!(parsed.icon.as_deref(), Some("lucide:sparkles"));
+        assert!(parsed.dither.is_none());
+
+        // Dither avatar source (nested spec) survives the same round-trip and
+        // preserves the camelCase-agnostic {from,to,direction} shape.
+        let dither_persona = PersonaSlot {
+            dither: Some(DitherSpec {
+                from: Some("green".to_owned()),
+                to: Some("blue".to_owned()),
+                direction: Some("up".to_owned()),
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&dither_persona).unwrap();
+        assert!(
+            json.contains("\"direction\":\"up\""),
+            "dither spec keys stay verbatim: {json}"
+        );
+        let parsed: PersonaSlot = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, dither_persona);
+
+        // An empty persona serializes without any of the optional keys.
+        let empty = serde_json::to_string(&PersonaSlot::default()).unwrap();
+        assert_eq!(empty, "{}");
     }
 
     #[tokio::test]

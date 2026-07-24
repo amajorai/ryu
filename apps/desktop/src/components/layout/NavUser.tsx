@@ -75,7 +75,6 @@ import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 import { useAppStore } from "../../store/useAppStore.ts";
 import { DownloadCenter } from "../downloads/DownloadCenter.tsx";
 import { SettingsDialog } from "../settings/SettingsDialog.tsx";
-import { CreateMenu } from "./CreateMenu.tsx";
 import { UpdatesSubmenu } from "./UpdatesSubmenu.tsx";
 
 type FooterChromeKey = "inbox" | "user" | "downloads" | "settings";
@@ -700,7 +699,8 @@ export function NavUser({
 					    release build. Sits beside the account button. */}
 					<BuildBadge className="ml-1.5" />
 					<div className="ml-auto flex items-center gap-0.5">
-						<CreateMenu />
+						{/* Create menu ("+") temporarily hidden per request. Restore by
+						    re-adding the CreateMenu import and <CreateMenu /> here. */}
 						{showInbox && (
 							<ContextMenu>
 								<ContextMenuTrigger>

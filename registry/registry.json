@@ -7,10 +7,15 @@
       "version": "1.0.0",
       "description": "Desktop automation: 29 screen perception and input control tools. Windows-first.",
       "source": "builtin",
-      "kinds": ["tool"],
+      "kinds": [
+        "tool"
+      ],
       "permission_grants": [],
       "built_in": true,
-      "tags": ["automation", "desktop"]
+      "tags": [
+        "automation",
+        "desktop"
+      ]
     },
     {
       "id": "shadow",
@@ -18,10 +23,15 @@
       "version": "1.0.0",
       "description": "Screen and audio capture, OCR, proactive engine, semantic memory and search.",
       "source": "builtin",
-      "kinds": ["tool"],
+      "kinds": [
+        "tool"
+      ],
       "permission_grants": [],
       "built_in": true,
-      "tags": ["capture", "memory"]
+      "tags": [
+        "capture",
+        "memory"
+      ]
     },
     {
       "id": "spider",
@@ -29,10 +39,17 @@
       "version": "1.0.0",
       "description": "High-performance web crawler and scraper.",
       "source": "builtin",
-      "kinds": ["tool"],
-      "permission_grants": ["mcp:web_scrape"],
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "mcp:web_scrape"
+      ],
       "built_in": true,
-      "tags": ["web", "scraping"]
+      "tags": [
+        "web",
+        "scraping"
+      ]
     },
     {
       "id": "exa",
@@ -40,109 +57,33 @@
       "version": "1.0.0",
       "description": "Neural search: find any content on the web. Requires EXA_API_KEY.",
       "source": "builtin",
-      "kinds": ["tool"],
-      "permission_grants": ["mcp:web_search"],
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "mcp:web_search"
+      ],
       "built_in": true,
-      "tags": ["search", "web"]
+      "tags": [
+        "search",
+        "web"
+      ]
     },
     {
       "id": "headroom",
       "name": "Headroom",
       "version": "1.0.0",
       "description": "Context compression (chopratejas/headroom): compress tool outputs, logs, files, and RAG chunks. 60-95% fewer tokens, reversible retrieval. Requires headroom-ai[mcp].",
-      "source": "https://raw.githubusercontent.com/amajorai/ryu/main/packages/headroom/ryu.json",
-      "kinds": ["tool"],
-      "permission_grants": [],
-      "built_in": false,
-      "tags": ["context", "compression"]
-    },
-    {
-      "id": "checklist",
-      "name": "Checklist",
-      "version": "1.0.0",
-      "description": "Interactive checklist widget: tick off, edit inline, and approve items in chat.",
       "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": ["chat.sendFollowUp"],
-      "built_in": true,
-      "tags": ["app", "widget", "productivity"]
-    },
-    {
-      "id": "smart-intake-form",
-      "name": "Smart Intake Form",
-      "version": "1.0.0",
-      "description": "Pre-filled intake form widget with native pickers and validation.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
+      "kinds": [
+        "tool"
+      ],
       "permission_grants": [],
       "built_in": true,
-      "tags": ["app", "widget", "forms"]
-    },
-    {
-      "id": "data-grid-explorer",
-      "name": "Data Grid Explorer",
-      "version": "1.0.0",
-      "description": "Sortable, filterable, virtualized data grid widget; full rows stay out of model context.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": ["chat.sendFollowUp"],
-      "built_in": true,
-      "tags": ["app", "widget", "data"]
-    },
-    {
-      "id": "chart-studio",
-      "name": "Chart Studio",
-      "version": "1.0.0",
-      "description": "Interactive chart widget (line/bar/area/scatter) with legend toggles and brush select.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": ["chat.sendFollowUp"],
-      "built_in": true,
-      "tags": ["app", "widget", "charts"]
-    },
-    {
-      "id": "decision-wizard",
-      "name": "Decision Wizard",
-      "version": "1.0.0",
-      "description": "Step-by-step decision flow widget (quiz/weighted/compare) with a running tally.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": ["chat.sendFollowUp"],
-      "built_in": true,
-      "tags": ["app", "widget", "decisions"]
-    },
-    {
-      "id": "quest-board",
-      "name": "Quest Board",
-      "version": "1.0.0",
-      "description": "Kanban quest board widget backed by the quests subsystem.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": [],
-      "built_in": true,
-      "tags": ["app", "widget", "quests"]
-    },
-    {
-      "id": "worktree-diff-review",
-      "name": "Worktree Diff Review",
-      "version": "1.0.0",
-      "description": "Per-file, per-hunk diff review widget backed by Core's git-native worktree/diff/apply.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": ["chat.sendFollowUp"],
-      "built_in": true,
-      "tags": ["app", "widget", "git"]
-    },
-    {
-      "id": "gateway-budget-dial",
-      "name": "Gateway Budget Dial",
-      "version": "1.0.0",
-      "description": "Radial spent-vs-limit budget meter widget; the literal Gateway moat surface.",
-      "source": "builtin",
-      "kinds": ["app", "tool"],
-      "permission_grants": [],
-      "built_in": true,
-      "tags": ["app", "widget", "gateway"]
+      "tags": [
+        "context",
+        "compression"
+      ]
     }
   ]
 }

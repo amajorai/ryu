@@ -157,8 +157,7 @@ mod stamp_tests {
     /// a `PolicyAlert` on the response extensions.
     #[tokio::test]
     async fn stamps_header_when_extension_present() {
-        let alert =
-            PolicyAlert::budget("user", "u1", "notify", AlertTier::Fanout, 10, 10, "org1");
+        let alert = PolicyAlert::budget("user", "u1", "notify", AlertTier::Fanout, 10, 10, "org1");
         let mut resp = Response::new(axum::body::Body::empty());
         resp.extensions_mut().insert(alert.clone());
         let stamped = stamp_policy_alert(resp).await;

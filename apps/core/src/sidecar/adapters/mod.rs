@@ -17,19 +17,20 @@ use crate::server::memory::{
     DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
 };
 use crate::server::retrieval::{ChunkSource, RetrievalOptions, RetrievalStore, ScoredChunk};
-use ryu_tracing::{hash_args, TraceStore};
-use ryu_workspace::worktree::{create_worktree_in, find_git_root, is_git_repo, WorktreeGuard};
 use crate::sidecar::active_engine::{is_local_engine, local_engine_base_url};
 use crate::sidecar::mcp::McpRegistry;
+use crate::sidecar::untrusted;
 use crate::sidecar::BoxFuture;
 use crate::sidecar::SidecarManager;
-use ryu_skills::SkillRegistry;
 use axum::{
     body::Body,
     http::{HeaderValue, StatusCode},
     response::Response,
 };
 use futures_util::StreamExt;
+use ryu_skills::SkillRegistry;
+use ryu_tracing::{hash_args, TraceStore};
+use ryu_workspace::worktree::{create_worktree_in, find_git_root, is_git_repo, WorktreeGuard};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1808,15 +1809,26 @@ async fn assemble_long_term_system_message(
         return None;
     }
     // Render oldest-first so the model reads facts in the order learned.
-    let mut lines = String::from(
-        "The following are durable facts remembered about the user from previous sessions:\n",
-    );
+    let mut facts = String::new();
     for entry in entries.iter().rev() {
-        lines.push_str("- ");
-        lines.push_str(entry.content.trim());
-        lines.push('\n');
+        facts.push_str("- ");
+        facts.push_str(entry.content.trim());
+        facts.push('\n');
     }
-    Some(lines)
+    // Recalled memory is STORED text: a fact captured from an earlier turn can
+    // carry whatever untrusted content that turn contained (pasted web text,
+    // poisoned tool output echoed by the user), and this block re-enters at
+    // system rank next session. Neutralize like any other external result —
+    // template tokens stripped + boundary-wrapped — so stored injection cannot
+    // impersonate the transcript at the highest privilege.
+    let facts = if untrusted::is_enabled() {
+        untrusted::neutralize(facts.trim_end())
+    } else {
+        facts
+    };
+    Some(format!(
+        "The following are durable facts remembered about the user from previous sessions:\n{facts}",
+    ))
 }
 
 /// Decide whether a via-gateway request should actually forward to the gateway
@@ -1926,12 +1938,20 @@ fn assemble_recall_block(
     if lines.is_empty() {
         return None;
     }
-    let mut block = String::from(
+    // Cross-conversation recall is STORED text (prior tool/web output, other
+    // conversations); folding it into system context verbatim is a stored /
+    // indirect injection channel. Neutralize the assembled snippet block the
+    // same way tool results are neutralized at the model edges.
+    let joined = lines.join("\n");
+    let joined = if untrusted::is_enabled() {
+        untrusted::neutralize(&joined)
+    } else {
+        joined
+    };
+    Some(format!(
         "Relevant context from memory and past conversations \
-         (ignore if irrelevant):\n",
-    );
-    block.push_str(&lines.join("\n"));
-    Some(block)
+         (ignore if irrelevant):\n{joined}"
+    ))
 }
 
 /// Drop `Memory`-source chunks whose id is in `recency_ids` (the long-term facts
@@ -2067,13 +2087,22 @@ async fn run_auto_recall(
     // into the model context. The memory principal is the HOST CONVERSATION'S OWNER
     // (already stamped by `gate_and_claim_conversation`). Unbound node → `node_bound`
     // false → no filter (byte-identical). `node`/`project`-scope facts stay shared.
-    let node_bound = crate::sidecar::control_plane::registered_org().is_some();
+    let registered_org = crate::sidecar::control_plane::registered_org();
+    let node_bound = registered_org.is_some();
+    // `caller_org_id` ALWAYS falls back to the node's own registered org when bound
+    // (never left `None`), even if the conversation lookup is empty (no conversation
+    // id yet / a not-yet-created chat). A bound node has exactly one org, so this is
+    // lossless — but it matters now: `space_tenancy_allows` gates explicit org/team
+    // shared content (OKF bundles) on `caller_org_id` matching the chunk's stamped
+    // org, and a `None` here would silently drop OKF grounding out of every first-turn
+    // auto-recall on a bound node.
+    let node_org_id = registered_org.map(|o| o.id);
     let (caller_user_id, caller_org_id) = match current_conversation_id {
         Some(cid) => match conversations.get_access_meta(cid).await {
-            Ok(Some(t)) => (t.owner_user_id, t.org_id),
-            _ => (None, None),
+            Ok(Some(t)) => (t.owner_user_id, t.org_id.or_else(|| node_org_id.clone())),
+            _ => (None, node_org_id.clone()),
         },
-        None => (None, None),
+        None => (None, node_org_id.clone()),
     };
 
     // Memory + Space half, gated by the agent's readable levels + Space allowlist
@@ -2143,8 +2172,9 @@ async fn run_auto_recall(
     // Belt and braces on a bound node: post-filter every hit against the same id set
     // so a stale index row (e.g. orphaned by a re-tenanted conversation) can never
     // leak a snippet even if the index-side filter were bypassed.
-    let chat_allowed: Option<std::collections::HashSet<&str>> =
-        visible_convo_ids.as_ref().map(|ids| ids.iter().map(String::as_str).collect());
+    let chat_allowed: Option<std::collections::HashSet<&str>> = visible_convo_ids
+        .as_ref()
+        .map(|ids| ids.iter().map(String::as_str).collect());
     let hit_allowed = |cid: &str| chat_allowed.as_ref().is_none_or(|set| set.contains(cid));
 
     // Past-chat half (current conversation excluded). `search_messages` returns
@@ -3395,8 +3425,13 @@ pub async fn route_chat_stream(
     // field later in the desktop Memory Library.
     if req.enable_long_term && !user_text.is_empty() {
         let scope = long_term_agent_scope(effective_agent_id.as_deref());
+        // Sanitize at WRITE time too: the raw turn is stored verbatim and will
+        // re-enter a future session's system context, so template tokens are
+        // stripped here (the recall side additionally boundary-wraps). Belt and
+        // braces on both sides of the persistence boundary.
+        let sanitized_text = crate::sidecar::untrusted::strip_template_tokens(&user_text);
         let new = infer_new_memory(
-            &user_text,
+            &sanitized_text,
             req.cwd.as_deref(),
             effective_agent_id.as_deref(),
         );
@@ -3639,17 +3674,11 @@ pub async fn route_chat_stream(
                     let tool_allowlist = effective_agent_id
                         .as_deref()
                         .and_then(|id| registry.allowlist_for(id));
-                    // Offer tools only for an agent whose id resolves to a
-                    // registered agent — Core's `call_mcp_tool` gate rejects a tool
-                    // call whose `agent_id` is empty/unknown (a fail-closed
-                    // security invariant). Gating here means the model is never
-                    // handed tools it cannot actually dispatch, so the bare
-                    // anonymous default stays a clean single-shot chat rather than
-                    // emitting tool calls that would be denied at Core.
-                    let agent_registered = effective_agent_id
-                        .as_deref()
-                        .is_some_and(|id| registry.find_by_prefix(id).is_some());
-                    let chat_tools_enabled = apps_chat_tools_enabled() && agent_registered;
+                    // The governed chat tool loop has no built-in widget producers
+                    // left (the in-process Ryu Apps provider was removed), so the
+                    // loop is permanently inert; the generic emit/host machinery
+                    // stays dormant. Keep the param wired as `false`.
+                    let chat_tools_enabled = false;
                     // Per-agent Plane A override (spec §1): only for an agent that
                     // has a stored `SmartRoutingConfig`; injected into the outbound
                     // body as `ryu_smart_route` for the gateway to read and strip.
@@ -3787,8 +3816,7 @@ pub async fn route_chat_stream(
             // Pi with an actionable error so the user is told what to do rather than
             // shown input-independent garbage. Conservative — fails open on any
             // servable configuration (see `ryu_default_unservable`).
-            if ryu_default_unservable(&manager, &provider_reg, effective_agent_id.as_deref())
-                .await
+            if ryu_default_unservable(&manager, &provider_reg, effective_agent_id.as_deref()).await
             {
                 return error_stream(
                     "No model is configured yet, so the default Ryu agent can't reply. \
@@ -4412,19 +4440,13 @@ where
     // attribution and budgets are live. `None` on anonymous/loopback turns.
     let user_id = req.author_user_id.clone();
 
-    // Governed chat tool loop (R1): resolve the app render tools to offer. Only
-    // render tools (those with a widget binding) are offered to the model;
-    // companion (`widgetAccessible`) tools are called BY a mounted widget over the
-    // D5 `callTool` path, never by the model. Empty when the loop is disabled for
-    // this route, which reduces to the exact prior single-shot behaviour.
-    let tools_payload: Vec<Value> = if tools_enabled {
-        app_render_tools(tool_allowlist.as_deref())
-            .iter()
-            .map(tool_to_function_spec)
-            .collect()
-    } else {
-        Vec::new()
-    };
+    // Governed chat tool loop (R1): there are no built-in widget render tools left
+    // to offer (the in-process Ryu Apps provider was removed), so the payload is
+    // always empty and the loop reduces to the exact prior single-shot behaviour.
+    // The generic loop machinery below stays dormant for future third-party
+    // widget producers.
+    let _ = &tool_allowlist;
+    let tools_payload: Vec<Value> = Vec::new();
     // A loop with no tools to offer is just a plain single-shot chat.
     let tool_loop_active = tools_enabled && !tools_payload.is_empty();
 
@@ -4749,11 +4771,17 @@ where
                 {
                     yield Ok::<_, std::convert::Infallible>(ui_tool_widget(&ev));
                 }
-                // Feed the result back to the model as a `tool` message.
+                // Feed the result back to the model as a `tool` message —
+                // neutralized first, exactly like the ACP fold and the gateway
+                // loop: raw web/tool output re-entering the model can carry
+                // template-token transcript spoofing and prompt injection. This
+                // closes the gap `widget_payload`'s doc comment flagged.
                 let content = match &result {
                     Value::String(s) => s.clone(),
                     other => other.to_string(),
                 };
+                let content =
+                    mcp_bridge::neutralize_external_result(&t.name, content);
                 oai_messages.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": t.id,
@@ -4782,53 +4810,6 @@ struct AccToolCall {
 fn shared_http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new).clone()
-}
-
-/// The widget-render app tools offered to the governed chat tool loop (R1 / A3).
-/// Only render tools (those carrying a widget binding) are returned — companion
-/// (`widgetAccessible`) tools are called BY a mounted widget over the D5 callTool
-/// path, not offered to the model. Narrowed by the agent allowlist when set
-/// (matching a fully-qualified id, bare name, or owning server, per
-/// `tools_for_agent`'s documented semantics).
-fn app_render_tools(allowlist: Option<&[String]>) -> Vec<crate::sidecar::mcp::RegistryTool> {
-    crate::sidecar::mcp::apps::tools()
-        .into_iter()
-        .filter(|t| t.widget.is_some())
-        .filter(|t| match allowlist {
-            None => true,
-            Some(list) => list
-                .iter()
-                .any(|e| e == &t.id || e == &t.name || e == &t.server),
-        })
-        .collect()
-}
-
-/// Whether the governed chat tool loop (R1) is enabled. Default-on: the flagship
-/// value is a widget-emitting default agent that works on install. A swappable
-/// default, never a lock (AGENTS.md) — an operator can disable it with
-/// `RYU_APPS_CHAT_TOOLS=0` (also `false`/`no`) without a rebuild.
-fn apps_chat_tools_enabled() -> bool {
-    !matches!(
-        std::env::var("RYU_APPS_CHAT_TOOLS").as_deref(),
-        Ok("0") | Ok("false") | Ok("no")
-    )
-}
-
-/// Map a [`crate::sidecar::mcp::RegistryTool`] to an OpenAI `tools[]` function
-/// spec. A tool with no input schema advertises an empty object schema so the
-/// provider accepts it.
-fn tool_to_function_spec(t: &crate::sidecar::mcp::RegistryTool) -> Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": t.id,
-            "description": t.description.clone().unwrap_or_default(),
-            "parameters": t
-                .input_schema
-                .clone()
-                .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} })),
-        }
-    })
 }
 
 // ── ACP subprocess streaming ───────────────────────────────────────────────────
@@ -5898,7 +5879,11 @@ mod tests {
     #[tokio::test]
     async fn backfill_indexes_new_facts_then_is_idempotent() {
         let memory = MemoryStore::open_in_memory().unwrap();
-        let retrieval = RetrievalStore::open_in_memory(crate::registry::DEFAULT_EMBED_DIMS, crate::registry::DEFAULT_RERANKER_MODEL.to_owned()).unwrap();
+        let retrieval = RetrievalStore::open_in_memory(
+            crate::registry::DEFAULT_EMBED_DIMS,
+            crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+        )
+        .unwrap();
         let scope = "default";
 
         let fact_id = memory
@@ -5955,7 +5940,11 @@ mod tests {
     #[tokio::test]
     async fn run_auto_recall_fts_source_gated_by_flag() {
         let memory = MemoryStore::open_in_memory().unwrap();
-        let retrieval = RetrievalStore::open_in_memory(crate::registry::DEFAULT_EMBED_DIMS, crate::registry::DEFAULT_RERANKER_MODEL.to_owned()).unwrap();
+        let retrieval = RetrievalStore::open_in_memory(
+            crate::registry::DEFAULT_EMBED_DIMS,
+            crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+        )
+        .unwrap();
         let fts = ryu_search::MessageFtsIndex::open_in_memory().unwrap();
         // Conversation store WITHOUT a semantic message index (so the only past-chat
         // contribution can come from the FTS source), WITH the FTS index wired.
@@ -6932,5 +6921,111 @@ mod tests {
         // Either an Ok(empty-or-error-text) or an Err — both are acceptable here;
         // what matters is no panic occurred.
         let _ = result;
+    }
+
+    // ── PartsAccumulator: streaming-chunk reduction into persisted parts ─────
+    //
+    // The accumulator mirrors the AI SDK client's frame reduction so the row
+    // persisted to `messages.parts` is byte-for-byte what the client built live.
+    // These pin that reduction directly (the big streaming loop exercises it only
+    // end-to-end).
+
+    #[test]
+    fn parts_text_deltas_coalesce_per_block_id() {
+        let mut acc = PartsAccumulator::default();
+        assert!(acc.is_empty());
+        acc.text_delta("0", "Hel");
+        acc.text_delta("0", "lo");
+        acc.text_delta("0", " world");
+        // One text part for block "0", concatenated in order.
+        assert_eq!(acc.parts.len(), 1);
+        assert_eq!(acc.parts[0]["type"], serde_json::json!("text"));
+        assert_eq!(acc.parts[0]["text"], serde_json::json!("Hello world"));
+        assert!(!acc.is_empty());
+    }
+
+    #[test]
+    fn parts_distinct_block_ids_open_distinct_text_parts() {
+        let mut acc = PartsAccumulator::default();
+        acc.text_delta("0", "first");
+        acc.text_delta("1", "second");
+        acc.text_delta("0", "-more");
+        assert_eq!(acc.parts.len(), 2);
+        assert_eq!(acc.parts[0]["text"], serde_json::json!("first-more"));
+        assert_eq!(acc.parts[1]["text"], serde_json::json!("second"));
+    }
+
+    #[test]
+    fn parts_tool_input_opens_static_vs_dynamic_shape() {
+        let mut acc = PartsAccumulator::default();
+        acc.tool_input("call-a", "search", &serde_json::json!({ "q": "x" }), false);
+        acc.tool_input("call-b", "custom", &serde_json::json!({ "n": 1 }), true);
+
+        // Static tool → `tool-<name>` type, no `toolName` field.
+        assert_eq!(acc.parts[0]["type"], serde_json::json!("tool-search"));
+        assert_eq!(acc.parts[0]["toolCallId"], serde_json::json!("call-a"));
+        assert_eq!(acc.parts[0]["state"], serde_json::json!("input-available"));
+        assert!(acc.parts[0].get("toolName").is_none());
+
+        // Dynamic tool → `dynamic-tool` type carrying `toolName`.
+        assert_eq!(acc.parts[1]["type"], serde_json::json!("dynamic-tool"));
+        assert_eq!(acc.parts[1]["toolName"], serde_json::json!("custom"));
+        assert_eq!(acc.parts[1]["toolCallId"], serde_json::json!("call-b"));
+    }
+
+    #[test]
+    fn parts_tool_input_reemit_updates_input_in_place() {
+        // Re-emitting the same id (plan/thinking snapshots) refreshes `input`
+        // without appending a second part.
+        let mut acc = PartsAccumulator::default();
+        acc.tool_input("plan", "TodoWrite", &serde_json::json!({ "todos": [1] }), false);
+        acc.tool_input("plan", "TodoWrite", &serde_json::json!({ "todos": [1, 2] }), false);
+        assert_eq!(acc.parts.len(), 1);
+        assert_eq!(acc.parts[0]["input"], serde_json::json!({ "todos": [1, 2] }));
+    }
+
+    #[test]
+    fn parts_tool_output_patches_matching_input_part() {
+        let mut acc = PartsAccumulator::default();
+        acc.tool_input("call-a", "search", &serde_json::json!({}), false);
+        acc.tool_output("call-a", &serde_json::json!({ "hits": 3 }), false);
+        assert_eq!(acc.parts[0]["state"], serde_json::json!("output-available"));
+        assert_eq!(acc.parts[0]["output"], serde_json::json!({ "hits": 3 }));
+
+        // An error output flips the state to `output-error`.
+        acc.tool_input("call-b", "run", &serde_json::json!({}), false);
+        acc.tool_output("call-b", &serde_json::json!("boom"), true);
+        assert_eq!(acc.parts[1]["state"], serde_json::json!("output-error"));
+    }
+
+    #[test]
+    fn parts_tool_output_without_matching_input_is_dropped() {
+        // A bare output frame with no opened input part is not renderable and must
+        // be dropped (no phantom part appears).
+        let mut acc = PartsAccumulator::default();
+        acc.tool_output("orphan", &serde_json::json!({ "x": 1 }), false);
+        assert!(acc.is_empty(), "orphan output must not create a part");
+    }
+
+    #[test]
+    fn parts_file_appends_media_part_and_to_json_roundtrips() {
+        let mut acc = PartsAccumulator::default();
+        acc.text_delta("0", "see image");
+        acc.file("image/png", "data:image/png;base64,AAAA");
+        assert_eq!(acc.parts[1]["type"], serde_json::json!("file"));
+        assert_eq!(acc.parts[1]["mediaType"], serde_json::json!("image/png"));
+
+        // to_json serializes the exact parts array persisted to the DB column.
+        let json = acc.to_json();
+        let round: Vec<Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(round.len(), 2);
+        assert_eq!(round[0]["text"], serde_json::json!("see image"));
+        assert_eq!(round[1]["url"], serde_json::json!("data:image/png;base64,AAAA"));
+    }
+
+    #[test]
+    fn parts_empty_accumulator_serializes_to_empty_array() {
+        let acc = PartsAccumulator::default();
+        assert_eq!(acc.to_json(), "[]");
     }
 }

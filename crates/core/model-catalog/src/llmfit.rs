@@ -245,4 +245,71 @@ mod tests {
         ];
         assert_eq!(best_path(&paths).unwrap().path.as_deref(), Some("gpu"));
     }
+
+    #[test]
+    fn best_path_falls_back_to_first_feasible_then_first_entry() {
+        // No canonical gpu/cpu_offload/cpu_only path, but a feasible custom one.
+        let custom = vec![RunPath {
+            path: Some("npu".into()),
+            feasible: true,
+            estimated_tps: Some(5.0),
+            fit_level: None,
+            minimum: Some(HwReq { vram_gb: Some(8.0) }),
+        }];
+        assert_eq!(best_path(&custom).unwrap().path.as_deref(), Some("npu"));
+
+        // Nothing feasible → the first entry is returned as a last resort.
+        let infeasible = vec![RunPath {
+            path: Some("gpu".into()),
+            feasible: false,
+            estimated_tps: None,
+            fit_level: None,
+            minimum: None,
+        }];
+        assert_eq!(best_path(&infeasible).unwrap().path.as_deref(), Some("gpu"));
+
+        // Empty list → None.
+        assert!(best_path(&[]).is_none());
+    }
+
+    #[test]
+    fn plan_out_parses_defensively() {
+        let json = r#"{
+            "model_name": "Qwen3-4B",
+            "run_paths": [
+                { "path": "gpu", "feasible": true, "estimated_tps": 180.0,
+                  "fit_level": "Perfect", "minimum": { "vram_gb": 8.0 } }
+            ]
+        }"#;
+        let p: PlanOut = serde_json::from_str(json).unwrap();
+        assert_eq!(p.model_name.as_deref(), Some("Qwen3-4B"));
+        let rp = best_path(&p.run_paths).unwrap();
+        assert_eq!(rp.estimated_tps, Some(180.0));
+        assert_eq!(rp.minimum.as_ref().and_then(|m| m.vram_gb), Some(8.0));
+
+        // Every field is optional — an empty object parses with defaults.
+        let empty: PlanOut = serde_json::from_str("{}").unwrap();
+        assert!(empty.model_name.is_none());
+        assert!(empty.run_paths.is_empty());
+    }
+
+    #[test]
+    fn estimate_shape_constructors() {
+        let ni = LlmFitEstimate::not_installed();
+        assert!(!ni.installed && !ni.matched && ni.tps.is_none());
+        let um = LlmFitEstimate::unmatched();
+        assert!(um.installed && !um.matched && um.model_name.is_none());
+    }
+
+    #[tokio::test]
+    async fn estimate_reports_not_installed_without_binary() {
+        crate::ensure_test_host();
+        // The test host's `~/.ryu/bin` has no llmfit binary → not installed, and
+        // the candidate loop is never entered.
+        let e = estimate("unsloth/Qwen3-4B-Instruct-GGUF", None, None).await;
+        assert!(!e.installed);
+        assert!(!e.matched);
+        assert!(e.tps.is_none());
+        assert!(e.model_name.is_none());
+    }
 }

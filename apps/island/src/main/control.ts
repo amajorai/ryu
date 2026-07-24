@@ -7,16 +7,30 @@
 // mirroring how the island itself talks to Core/Shadow over local HTTP.
 //
 // Bound to 127.0.0.1 exclusively: no remote origin can reach it, matching the
-// Shadow sidecar's loopback-only posture. Capture pause/resume is NOT handled
+// Shadow sidecar's loopback-only posture. Loopback alone does not stop the
+// user's browser from being used as a confused deputy, so every request is
+// additionally gated by `isTrustedLocalRequest` (no `Origin` header, exact
+// loopback `Host`) and POST bodies must declare `application/json`.
+// Capture pause/resume is NOT handled
 // here — that is a Shadow concern (`/capture/control` on :3030) the desktop calls
 // directly. This server only owns the island's own window + lifecycle.
 
-import { createServer, type Server } from "node:http";
+import {
+	createServer,
+	type IncomingMessage,
+	type Server,
+	type ServerResponse,
+} from "node:http";
 import { app } from "electron";
 import {
-	type GhostCursorEvent,
-	pushGhostCursorEvent,
-} from "./ghost-cursor.ts";
+	type ControlAction,
+	isControlAction,
+	isJsonRequest,
+	isTrustedLocalRequest,
+	parseGhostCursorEvent,
+	resolveControlPort,
+} from "./control-protocol.ts";
+import { pushGhostCursorEvent } from "./ghost-cursor.ts";
 import {
 	hideWindow,
 	isVisible,
@@ -30,38 +44,13 @@ import {
  * without both binding the same port: an explicit `ISLAND_CONTROL_PORT` env var
  * wins (so `bun run dev` can set both sides at once), else `RYU_PROFILE=dev`
  * shifts the base by +1000 (→ 8989), matching the desktop tray dialer's
- * `profile::island_control_port()` in `desktop/src-tauri/src/tray.rs`.
+ * `profile::island_control_port()` in `desktop/src-tauri/src/tray.rs`. The pure
+ * resolution + request guards live in {@link ./control-protocol.ts} so they can
+ * be tested without Electron.
  */
-const ISLAND_CONTROL_BASE_PORT = 7989;
-const DEV_PORT_OFFSET = 1000;
-
-function resolveControlPort(): number {
-	const explicit = Number.parseInt(process.env.ISLAND_CONTROL_PORT ?? "", 10);
-	if (Number.isInteger(explicit) && explicit > 0) {
-		return explicit;
-	}
-	const isDev = (process.env.RYU_PROFILE ?? "").trim().toLowerCase() === "dev";
-	return isDev
-		? ISLAND_CONTROL_BASE_PORT + DEV_PORT_OFFSET
-		: ISLAND_CONTROL_BASE_PORT;
-}
-
 export const ISLAND_CONTROL_PORT = resolveControlPort();
 
-type ControlAction = "toggle" | "show" | "hide" | "quit";
-
-const VALID_ACTIONS = new Set<ControlAction>([
-	"toggle",
-	"show",
-	"hide",
-	"quit",
-]);
-
 let server: Server | null = null;
-
-function isControlAction(value: unknown): value is ControlAction {
-	return typeof value === "string" && VALID_ACTIONS.has(value as ControlAction);
-}
 
 function applyAction(action: ControlAction): void {
 	switch (action) {
@@ -83,51 +72,19 @@ function applyAction(action: ControlAction): void {
 	}
 }
 
-const GHOST_PHASES = new Set([
-	"move",
-	"down",
-	"up",
-	"type",
-	"scroll",
-	"done",
-]);
-
-/**
- * Validate a raw `/ghost-cursor` body into a {@link GhostCursorEvent}. The agent id
- * is not in the body — it rides the `x-ghost-agent` header (the emitting pid) — so it
- * is threaded in separately. Returns `null` when the shape is wrong.
- */
-function parseGhostCursorEvent(raw: string, agent: string): GhostCursorEvent | null {
-	let parsed: unknown;
-	try {
-		parsed = raw ? JSON.parse(raw) : null;
-	} catch {
-		return null;
-	}
-	if (!parsed || typeof parsed !== "object") {
-		return null;
-	}
-	const e = parsed as Record<string, unknown>;
-	if (typeof e.phase !== "string" || !GHOST_PHASES.has(e.phase)) {
-		return null;
-	}
-	if (typeof e.x !== "number" || typeof e.y !== "number") {
-		return null;
-	}
-	return {
-		seq: typeof e.seq === "number" ? e.seq : 0,
-		phase: e.phase as GhostCursorEvent["phase"],
-		x: e.x,
-		y: e.y,
-		tool: typeof e.tool === "string" ? e.tool : "",
-		ts: typeof e.ts === "number" ? e.ts : 0,
-		agent,
-	};
+function rejectForbidden(res: ServerResponse): void {
+	res.writeHead(403, { "Content-Type": "application/json" });
+	res.end(JSON.stringify({ ok: false, error: "forbidden" }));
 }
 
-async function readBody(
-	req: Parameters<Parameters<typeof createServer>[1]>[0]
-): Promise<string> {
+function rejectNonJson(res: ServerResponse): void {
+	res.writeHead(415, { "Content-Type": "application/json" });
+	res.end(
+		JSON.stringify({ ok: false, error: "application/json body required" })
+	);
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of req) {
 		chunks.push(chunk as Buffer);
@@ -145,6 +102,13 @@ export function startControlServer(): void {
 		return;
 	}
 	server = createServer((req, res) => {
+		// Loopback-only is not enough: any web page can POST here (CSRF via
+		// CORS-safelisted content types) and a DNS-rebound page can read state.
+		// Reject anything that is not a plain local-process request.
+		if (!isTrustedLocalRequest(req, ISLAND_CONTROL_PORT)) {
+			rejectForbidden(res);
+			return;
+		}
 		// GET /control → current visibility, so the desktop can label its menu.
 		if (req.method === "GET" && req.url === "/control") {
 			res.writeHead(200, { "Content-Type": "application/json" });
@@ -152,6 +116,10 @@ export function startControlServer(): void {
 			return;
 		}
 		if (req.method === "POST" && req.url === "/control") {
+			if (!isJsonRequest(req)) {
+				rejectNonJson(res);
+				return;
+			}
 			readBody(req)
 				.then((raw) => {
 					const parsed = raw ? (JSON.parse(raw) as { action?: unknown }) : {};
@@ -174,6 +142,10 @@ export function startControlServer(): void {
 		// loopback-only posture as /control (the server binds 127.0.0.1). The
 		// emitting Ghost agent's pid rides the x-ghost-agent header (per-agent hue).
 		if (req.method === "POST" && req.url === "/ghost-cursor") {
+			if (!isJsonRequest(req)) {
+				rejectNonJson(res);
+				return;
+			}
 			const agentHeader = req.headers["x-ghost-agent"];
 			const agent = Array.isArray(agentHeader)
 				? (agentHeader[0] ?? "0")

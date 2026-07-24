@@ -1,13 +1,10 @@
 import {
 	Add01Icon,
-	AiBrain01Icon,
-	AiImageIcon,
 	Archive01Icon,
 	ArchiveRestoreIcon,
 	ArrowDown01Icon,
 	ArrowUp01Icon,
 	ArrowUpRight01Icon,
-	AudioWave01Icon,
 	BookOpen01Icon,
 	BubbleChatIcon,
 	Cancel01Icon,
@@ -23,7 +20,6 @@ import {
 	Folder03Icon,
 	FolderOpenIcon,
 	GridIcon,
-	Home01Icon,
 	ImageAdd01Icon,
 	Key01Icon,
 	LibraryIcon,
@@ -50,6 +46,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	isCoreApiPath,
+	renderActionHttp,
+	renderTemplate,
+	type SourceItem,
+	sourceItemsFromResponse,
+	type ViewActionHttp,
+} from "@ryu/app-host/views";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -79,6 +83,7 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu";
+import { Icon } from "@ryu/ui/components/icon";
 import {
 	Popover,
 	PopoverContent,
@@ -108,11 +113,11 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useQuery } from "@tanstack/react-query";
 import {
 	type DragEvent as ReactDragEvent,
 	type ReactNode,
+	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
@@ -120,6 +125,11 @@ import {
 } from "react";
 import { UsageBar } from "@/components/agent-elements/input/usage-bar.tsx";
 import { ImportThreadsDialog } from "@/src/components/chat/ImportThreadsDialog.tsx";
+import { NodeFolderBrowser } from "@/src/components/chat/NodeFolderBrowser.tsx";
+import {
+	CreateFolderDialog,
+	ProjectPickerContent,
+} from "@/src/components/chat/ProjectPicker.tsx";
 import {
 	ProjectGlyph,
 	ProjectIconDialog,
@@ -132,13 +142,16 @@ import {
 } from "@/src/components/teams/TeamDialog.tsx";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useSpacesContext } from "@/src/contexts/SpacesContext.tsx";
-import type { Tab } from "@/src/contexts/TabsContext.tsx";
-import { findSplit, useTabsContext } from "@/src/contexts/TabsContext.tsx";
+import type { Split, Tab } from "@/src/contexts/TabsContext.tsx";
+import {
+	findSplit,
+	splitPaneTabs,
+	useTabsContext,
+} from "@/src/contexts/TabsContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import { useApps } from "@/src/hooks/useApps.ts";
 import { useAutoThreadImport } from "@/src/hooks/useAutoThreadImport.ts";
-import { useCanvasDocs } from "@/src/hooks/useCanvasDocs.ts";
 import { useChannels } from "@/src/hooks/useChannels.ts";
 import { useChatDateGrouping } from "@/src/hooks/useChatDateGrouping.ts";
 import {
@@ -149,7 +162,6 @@ import {
 import { useEngines } from "@/src/hooks/useEngines.ts";
 import { useIdentities } from "@/src/hooks/useIdentities.ts";
 import { useMcp } from "@/src/hooks/useMcp.ts";
-import { useMeetings } from "@/src/hooks/useMeetings.ts";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import {
 	pluginCompanionPath,
@@ -161,7 +173,6 @@ import { useSidebarVariant } from "@/src/hooks/useSidebarVariant.ts";
 import { setTabLayout, useTabLayout } from "@/src/hooks/useTabLayout.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
 import { useUsageBarPrefs } from "@/src/hooks/useUsageBarPrefs.ts";
-import { useWhiteboardDocs } from "@/src/hooks/useWhiteboardDocs.ts";
 import { useWorkflows } from "@/src/hooks/useWorkflows.ts";
 import {
 	AgentAvatar,
@@ -172,16 +183,18 @@ import type { BtwEntry } from "@/src/lib/api/btw.ts";
 import { listBtw } from "@/src/lib/api/btw.ts";
 import { CHANNEL_LABELS } from "@/src/lib/api/channels.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import { toTarget } from "@/src/lib/api/client.ts";
+import { apiUrl, makeHeaders, toTarget } from "@/src/lib/api/client.ts";
 import {
 	setConversationArchived,
 	setConversationPinned,
 } from "@/src/lib/api/conversation-flags.ts";
 import { synthesizeSkill } from "@/src/lib/api/learn.ts";
-import type { Meeting } from "@/src/lib/api/meetings.ts";
+import type {
+	PluginSidebarButton,
+	PluginSidebarSection,
+} from "@/src/lib/api/plugins.ts";
 import { listSkills } from "@/src/lib/api/skills.ts";
 import type { Space, SpaceDocument } from "@/src/lib/api/spaces.ts";
-import { canvasDocPath } from "@/src/lib/canvas/app.ts";
 import {
 	DEFAULT_HIDDEN_CHROME,
 	DEFAULT_HIDDEN_SECTIONS,
@@ -192,7 +205,6 @@ import {
 	persistHiddenSections,
 } from "@/src/lib/features.ts";
 import { compactAge } from "@/src/lib/time.ts";
-import { whiteboardDocPath } from "@/src/lib/whiteboard/app.ts";
 import {
 	scheduleJobFor,
 	WorkflowTriggerIcons,
@@ -206,6 +218,7 @@ import { NavUser } from "./NavUser.tsx";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import { SidebarSectionNav } from "./SidebarSectionNav.tsx";
 import { TabGlyph } from "./TitleBar.tsx";
+import { useTabDnd, useTabDragProps } from "./tabDnd.tsx";
 
 const UNREAD_KEY = "ryu:unread-convs";
 const PINNED_KEY = "ryu:pinned-convs";
@@ -223,17 +236,16 @@ const CHROME_ORDER_KEY = "ryu:sidebar-chrome-order";
 // the section-reorder drag, which uses "text/plain"). The payload is the agent id.
 const AGENT_DND_FORMAT = "application/x-ryu-agent";
 
-// The reserved Space name Core auto-creates for saved meeting notes. It's surfaced
-// via the Meetings section, so it's filtered out of the general Spaces list.
-const MEETINGS_SPACE_NAME = "Meetings";
-
 // Sidebar sections whose backing routes are gated by a Core App (the two Core
 // wraps in `require_app_enabled`: /api/meetings/* and /api/spaces/*). When that
 // App is disabled the routes 503, so we hide the section rather than leave a nav
 // entry that leads to a dead page. Ids mirror `apps/core/src/plugins/builtins.rs`
 // (MEETINGS_PLUGIN_ID / SPACES_PLUGIN_ID).
 const SECTION_PLUGIN_OWNER: Partial<Record<SectionKey, string>> = {
-	meetings: "com.ryu.meetings",
+	// meetings/canvas/whiteboard are NOT here anymore — each is a fully app-registered
+	// `sidebar_sections` contribution (com.ryu.{meetings,canvas,whiteboard}), so its
+	// visibility follows the contributions feed (served only when the app is enabled),
+	// not a hardcoded owner gate. Only Spaces stays a hardcoded, owner-gated section.
 	spaces: "com.ryu.spaces",
 };
 
@@ -264,7 +276,6 @@ type BuiltinSectionKey =
 	| "agents"
 	| "teams"
 	| "spaces"
-	| "meetings"
 	| "workflows"
 	| "channels"
 	| "integrations"
@@ -278,12 +289,16 @@ type BuiltinSectionKey =
 	| "pinned"
 	| "projects"
 	| "chats"
-	| "canvas"
-	| "whiteboard"
 	| "archived";
 
-/** The reorderable top-level sidebar sections. */
-export type SectionKey = BuiltinSectionKey;
+/** A dynamic, app-registered section key: `plugin:<pluginId>:<sectionId>`, minted
+ *  from a `sidebar_sections` contribution. Namespaced so it never collides with a
+ *  built-in key and is recognisable by prefix in the order/persistence machinery. */
+export type DynamicSectionKey = `plugin:${string}`;
+
+/** The reorderable top-level sidebar sections — the fixed built-ins plus any
+ *  app-registered dynamic sections from the contributions feed. */
+export type SectionKey = BuiltinSectionKey | DynamicSectionKey;
 
 const DEFAULT_SECTION_ORDER: BuiltinSectionKey[] = [
 	"tabs",
@@ -292,9 +307,6 @@ const DEFAULT_SECTION_ORDER: BuiltinSectionKey[] = [
 	"projects",
 	"pinned",
 	"chats",
-	"canvas",
-	"whiteboard",
-	"meetings",
 	"spaces",
 	"channels",
 	"integrations",
@@ -315,7 +327,6 @@ const LEGACY_DEFAULT_SECTION_ORDER: BuiltinSectionKey[] = [
 	"teams",
 	"projects",
 	"chats",
-	"meetings",
 	"spaces",
 	"channels",
 	"integrations",
@@ -348,8 +359,18 @@ function projectName(path: string): string {
 	return path.split(PATH_SEP_RE).pop() ?? path;
 }
 
+/** A dynamic app-registered section key (`plugin:<pluginId>:<sectionId>`). */
+function isDynamicSectionKey(value: string): value is DynamicSectionKey {
+	return value.startsWith("plugin:");
+}
+
 function isSectionKey(value: string): value is SectionKey {
-	return (DEFAULT_SECTION_ORDER as string[]).includes(value);
+	// Accept dynamic `plugin:` keys too, so a persisted order keeps an app's section
+	// in place across reloads (it renders nothing when that app is disabled/absent).
+	return (
+		isDynamicSectionKey(value) ||
+		(DEFAULT_SECTION_ORDER as string[]).includes(value)
+	);
 }
 
 /** Human labels for the built-in sections, shared by the customize dialog. */
@@ -358,7 +379,6 @@ const SECTION_LABELS: Record<BuiltinSectionKey, string> = {
 	agents: "Agents",
 	teams: "Teams",
 	spaces: "Spaces",
-	meetings: "Meetings",
 	workflows: "Workflows",
 	channels: "Channels",
 	integrations: "Integrations",
@@ -372,8 +392,6 @@ const SECTION_LABELS: Record<BuiltinSectionKey, string> = {
 	pinned: "Pinned",
 	projects: "Projects",
 	chats: "Chats",
-	canvas: "Canvas",
-	whiteboard: "Whiteboard",
 	archived: "Archived",
 };
 
@@ -383,7 +401,6 @@ const SECTION_ICONS: Record<BuiltinSectionKey, IconSvgElement> = {
 	agents: Target01Icon,
 	teams: UserGroupIcon,
 	spaces: DeliverySecure01Icon,
-	meetings: AudioWave01Icon,
 	workflows: WorkflowCircle06Icon,
 	channels: BubbleChatIcon,
 	integrations: ConnectIcon,
@@ -397,8 +414,6 @@ const SECTION_ICONS: Record<BuiltinSectionKey, IconSvgElement> = {
 	pinned: PinIcon,
 	projects: FolderOpenIcon,
 	chats: BookOpen01Icon,
-	canvas: AiImageIcon,
-	whiteboard: AiImageIcon,
 	archived: Archive01Icon,
 };
 
@@ -438,7 +453,7 @@ const SECTION_TAB_ICONS: Record<BuiltinSectionKey, IconComponent> =
 
 // The fixed sidebar "chrome" (header + footer) the user can hide, distinct from
 // the reorderable content sections above. These don't reorder; they only hide.
-export type ChromeKey =
+type BuiltinChromeKey =
 	| "logo"
 	| "node-selector"
 	| "home"
@@ -461,6 +476,12 @@ export type ChromeKey =
 	| "downloads"
 	| "settings";
 
+/** A dynamic, app-registered chrome-button key (`plugin:<pluginId>:<buttonId>`),
+ *  minted from a `sidebar_buttons` contribution and rendered via DynamicSidebarButton. */
+export type DynamicChromeKey = `plugin:${string}`;
+
+export type ChromeKey = BuiltinChromeKey | DynamicChromeKey;
+
 // Marketplace, Apps, and Extensions folded into the Customize (Store) shell as
 // sections — they no longer get their own sidebar buttons. The keys stay in
 // ChromeKey/CHROME_LABELS so any persisted user layout referencing them is
@@ -479,11 +500,11 @@ export type ChromeKey =
 // not enumerate Apps.
 const CHROME_ORDER: ChromeKey[] = [
 	"node-selector",
-	"home",
+	// "home" removed — app-registered by com.ryu.dashboards (sidebar_buttons).
 	"new-chat",
 	"search",
 	"library",
-	"memory",
+	// "memory" removed — now app-registered by com.ryu.memory (sidebar_buttons).
 	"store",
 	"inbox",
 	"announcements",
@@ -492,7 +513,7 @@ const CHROME_ORDER: ChromeKey[] = [
 	"settings",
 ];
 
-const CHROME_LABELS: Record<ChromeKey, string> = {
+const CHROME_LABELS: Record<BuiltinChromeKey, string> = {
 	logo: "Logo",
 	"node-selector": "Node selector",
 	home: "Home",
@@ -536,19 +557,29 @@ const FOOTER_CHROME: ReadonlySet<ChromeKey> = new Set([
 // below, since they ride a separate drag state. The logo + node-selector row
 // stays fixed (it is a horizontal row, not a stacked button).
 const HEADER_BUTTON_CHROME: ChromeKey[] = [
-	"home",
+	// "home" removed — app-registered by com.ryu.dashboards (sidebar_buttons).
 	"new-chat",
 	"store",
 	"library",
-	"memory",
+	// "memory" removed — app-registered by com.ryu.memory (sidebar_buttons).
 ];
 
 // Distinct drag-data format for reordering header buttons, so a button drag is
 // never confused with the section-reorder drag ("text/plain") or the agent drag.
 const CHROME_DND_FORMAT = "application/x-ryu-chrome";
 
+/** A dynamic app-registered chrome-button key (`plugin:<pluginId>:<buttonId>`). */
+function isDynamicChromeKey(value: string): value is DynamicChromeKey {
+	return value.startsWith("plugin:");
+}
+
 function isHeaderButtonChrome(value: string): value is ChromeKey {
-	return (HEADER_BUTTON_CHROME as string[]).includes(value);
+	// Accept dynamic `plugin:` keys too, so a persisted order keeps an app's button
+	// in place across reloads (it renders nothing when that app is disabled/absent).
+	return (
+		isDynamicChromeKey(value) ||
+		(HEADER_BUTTON_CHROME as string[]).includes(value)
+	);
 }
 
 // Reconcile a stored header-button order against the code, mirroring
@@ -1861,6 +1892,10 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	const inSplit = !!tab.splitId;
 	const activeSplit = findSplit(tabs, splits, activeTabId);
 	const inActiveSplit = inSplit && tab.splitId === activeSplit?.id;
+	const { isDragging, showBefore, showAfter, dragHandlers } = useTabDragProps(
+		tab.id,
+		"y"
+	);
 	const rowState = isActive ? "bg-muted" : "hover:bg-muted/60";
 	const textState = isActive ? "text-foreground" : "text-muted-foreground";
 
@@ -1870,7 +1905,7 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 				<ContextMenuTrigger>
 					{/* biome-ignore lint/a11y/useSemanticElements: sidebar row combines nested controls with drag/middle-click */}
 					<div
-						className={`group/row relative flex h-8 cursor-pointer items-center gap-2 rounded-md pr-2 pl-2 transition-colors ${rowState} ${tab.unloaded ? "opacity-60" : ""}`}
+						className={`group/row relative flex h-8 cursor-pointer items-center gap-2 rounded-md pr-2 pl-2 transition-colors ${rowState} ${tab.unloaded ? "opacity-60" : ""} ${isDragging ? "opacity-40" : ""}`}
 						onClick={() => activateTab(tab.id)}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {
@@ -1885,7 +1920,20 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 						}}
 						role="button"
 						tabIndex={0}
+						{...dragHandlers}
 					>
+						{showBefore && (
+							<span
+								aria-hidden
+								className="pointer-events-none absolute inset-x-1 -top-0.5 z-20 h-0.5 rounded-full bg-primary"
+							/>
+						)}
+						{showAfter && (
+							<span
+								aria-hidden
+								className="pointer-events-none absolute inset-x-1 -bottom-0.5 z-20 h-0.5 rounded-full bg-primary"
+							/>
+						)}
 						{inSplit && (
 							<span
 								aria-hidden
@@ -1971,6 +2019,83 @@ function VerticalTabRow({ tab, isActive }: { tab: Tab; isActive: boolean }) {
 	);
 }
 
+/** A contiguous split's members in the vertical list, bracketed as one block
+    (the vertical answer to the strip's split bracket): a header row names the
+    split's arrangement and takes drops to add panes; member rows render in
+    PANE order so the list mirrors the on-screen tiling. */
+function VerticalSplitBlock({
+	split,
+	members,
+	activeTabId,
+}: {
+	activeTabId: string;
+	members: Tab[];
+	split: Split;
+}) {
+	const { tabs, addTabToSplit, unsplit } = useTabsContext();
+	const dnd = useTabDnd();
+	const [joinHover, setJoinHover] = useState(false);
+	const canJoin =
+		!!dnd.draggingId &&
+		tabs.find((t) => t.id === dnd.draggingId)?.splitId !== split.id;
+	// Show rows in pane order (the tree's leaf order), not strip order, so the
+	// list reads top-to-bottom the way the panes tile.
+	const ordered = splitPaneTabs(tabs, split).filter((t) =>
+		members.some((m) => m.id === t.id)
+	);
+	const label =
+		split.root.orientation === "columns" ? "Side by side" : "Stacked";
+	return (
+		<div className="rounded-lg bg-primary/5 p-0.5 ring-1 ring-primary/25">
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop join target; the same action exists in the tab context menus */}
+			<div
+				className={`flex h-6 items-center gap-1.5 rounded-md px-2 text-primary/70 ${joinHover ? "bg-primary/20 text-primary" : ""}`}
+				onDragLeave={() => setJoinHover(false)}
+				onDragOver={(e: ReactDragEvent) => {
+					if (!canJoin) {
+						return;
+					}
+					e.preventDefault();
+					e.stopPropagation();
+					e.dataTransfer.dropEffect = "move";
+					setJoinHover(true);
+				}}
+				onDrop={(e: ReactDragEvent) => {
+					setJoinHover(false);
+					if (!(canJoin && dnd.draggingId)) {
+						return;
+					}
+					e.preventDefault();
+					e.stopPropagation();
+					addTabToSplit(split.id, dnd.draggingId);
+					dnd.onEnd();
+				}}
+			>
+				<HugeiconsIcon className="size-3" icon={GridIcon} />
+				<span className="font-medium text-xs">
+					{canJoin && joinHover
+						? "Drop to add"
+						: `${label} · ${members.length}`}
+				</span>
+				<button
+					className="ml-auto rounded px-1 text-muted-foreground text-xs hover:text-foreground"
+					onClick={() => unsplit(members[0]?.id ?? "")}
+					type="button"
+				>
+					Unsplit
+				</button>
+			</div>
+			{ordered.map((tab) => (
+				<VerticalTabRow
+					isActive={tab.id === activeTabId}
+					key={tab.id}
+					tab={tab}
+				/>
+			))}
+		</div>
+	);
+}
+
 /** Vertical list of open tabs (Zen-style). Only rendered when the tab layout is
     "vertical"; in that mode the horizontal title-bar strip is hidden. Tabs are
     already normalized so grouped/split members render contiguously. */
@@ -1982,7 +2107,41 @@ function TabsSection({
 	pageSize,
 	sort,
 }: SectionProps) {
-	const { tabs, activeTabId, openTab } = useTabsContext();
+	const { tabs, splits, activeTabId, openTab } = useTabsContext();
+	// Bracket contiguous split runs (tabs are normalized, so members are always
+	// adjacent) the way the horizontal strip does; everything else stays a row.
+	const items: ReactNode[] = [];
+	let i = 0;
+	while (i < tabs.length) {
+		const tab = tabs[i];
+		const split = tab.splitId
+			? splits.find((s) => s.id === tab.splitId)
+			: undefined;
+		if (split) {
+			const members: Tab[] = [];
+			while (i < tabs.length && tabs[i].splitId === split.id) {
+				members.push(tabs[i]);
+				i += 1;
+			}
+			items.push(
+				<VerticalSplitBlock
+					activeTabId={activeTabId}
+					key={split.id}
+					members={members}
+					split={split}
+				/>
+			);
+		} else {
+			items.push(
+				<VerticalTabRow
+					isActive={tab.id === activeTabId}
+					key={tab.id}
+					tab={tab}
+				/>
+			);
+			i += 1;
+		}
+	}
 	return (
 		<SidebarSection
 			action={
@@ -2004,15 +2163,7 @@ function TabsSection({
 			{tabs.length === 0 ? (
 				<p className="px-2 py-2 text-muted-foreground text-xs">No tabs open</p>
 			) : (
-				<SidebarMenu className="gap-0.5">
-					{tabs.map((tab) => (
-						<VerticalTabRow
-							isActive={tab.id === activeTabId}
-							key={tab.id}
-							tab={tab}
-						/>
-					))}
-				</SidebarMenu>
+				<SidebarMenu className="gap-0.5">{items}</SidebarMenu>
 			)}
 		</SidebarSection>
 	);
@@ -2608,12 +2759,17 @@ function SidebarSpaceDocs({
  *  space page or deletes it. */
 function SpaceSidebarRow({
 	space,
+	appIcon,
 	listDocuments,
 	onOpen,
 	onOpenInNewTab,
 	onOpenDoc,
 	onRequestDelete,
 }: {
+	/** Icon id registered by the space's owning app (Iconify/icons0/Hugeicons id),
+	 *  resolved through the shared <Icon> primitive. Undefined for a plain
+	 *  user-created space, which keeps the default glyph. */
+	appIcon?: string;
 	listDocuments: (spaceId: string) => Promise<SpaceDocument[]>;
 	onOpen: () => void;
 	onOpenDoc: (doc: SpaceDocument) => void;
@@ -2649,14 +2805,26 @@ function SpaceSidebarRow({
 						    space icon at rest and morphs to a chevron on hover / once
 						    expanded, so the row reads as an expandable folder. */}
 						<span className="relative flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-							<HugeiconsIcon
-								className={`absolute inset-0 m-auto size-4 transition-opacity ${
-									expanded
-										? "opacity-0"
-										: "opacity-100 group-hover/row:opacity-0"
-								}`}
-								icon={DeliverySecure01Icon}
-							/>
+							{appIcon ? (
+								<Icon
+									className={`absolute inset-0 m-auto transition-opacity ${
+										expanded
+											? "opacity-0"
+											: "opacity-100 group-hover/row:opacity-0"
+									}`}
+									icon={appIcon}
+									size={16}
+								/>
+							) : (
+								<HugeiconsIcon
+									className={`absolute inset-0 m-auto size-4 transition-opacity ${
+										expanded
+											? "opacity-0"
+											: "opacity-100 group-hover/row:opacity-0"
+									}`}
+									icon={DeliverySecure01Icon}
+								/>
+							)}
 							<HugeiconsIcon
 								className={`size-3 transition-all ${
 									expanded
@@ -2726,9 +2894,25 @@ function SpacesSection({
 		name: string;
 	} | null>(null);
 	const [deleting, setDeleting] = useState(false);
-	// The auto-created "Meetings" space is surfaced through the Meetings section,
-	// not here — hide it from the general Spaces list so it isn't duplicated.
-	const visibleSpaces = spaces.filter((s) => s.name !== MEETINGS_SPACE_NAME);
+	// The "Meetings" system space is shown here as its own space (per request) — no
+	// longer name-filtered out of the list.
+	const visibleSpaces = spaces;
+	// Map an app companion's label → the icon id it registered, so a system space
+	// (Canvas/Whiteboard/Meetings/…) shows its owning app's icon, resolved through
+	// the shared <Icon> primitive. Data-driven off /api/plugins/contributions — no
+	// hardcoded name→icon map in the shell. A space with no matching app keeps the
+	// default glyph.
+	const { companions } = usePluginContributions();
+	const appIconBySpaceName = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const companion of companions) {
+			const key = (companion.label || companion.name)?.toLowerCase();
+			if (key && companion.icon) {
+				map.set(key, companion.icon);
+			}
+		}
+		return map;
+	}, [companions]);
 	const paged = usePaged(
 		sortItems(visibleSpaces, sort, NAMED_SORT_ACCESSORS),
 		pageSize
@@ -2771,6 +2955,7 @@ function SpacesSection({
 	const renderSpaceRows = (list: typeof visibleSpaces) =>
 		list.map((space) => (
 			<SpaceSidebarRow
+				appIcon={appIconBySpaceName.get(space.name.toLowerCase())}
 				key={space.id}
 				listDocuments={listDocuments}
 				onOpen={() => openSpace(space)}
@@ -2874,136 +3059,6 @@ function SpacesSection({
 				</AlertDialogContent>
 			</AlertDialog>
 		</>
-	);
-}
-
-/** Meetings list in the sidebar — mirrors Spaces. A finalized meeting's notes
- *  live in a Space document, so its row opens that editable doc directly (reusing
- *  the Spaces editor); an in-progress meeting opens the live Meetings page. The
- *  "+" records a new meeting. */
-function MeetingsSection({
-	collapsed,
-	dnd,
-	menu,
-	onToggleCollapsed,
-	pageSize,
-	sort,
-}: SectionProps) {
-	const { openTab } = useTabsContext();
-	const queryClient = useQueryClient();
-	const { meetings, loading, error } = useMeetings();
-	// Meetings arrive newest-first from Core; just window the list.
-	const paged = usePaged(meetings, pageSize);
-
-	const openMeetings = (forceNew = false) =>
-		openTab("/meetings", { title: "Meetings", forceNew });
-
-	const openMeeting = (meeting: Meeting) =>
-		openTab(`/meetings/${meeting.id}`, { title: meeting.title });
-
-	// The list is a react-query cache; invalidating it triggers a fresh fetch.
-	const retryMeetings = () =>
-		queryClient
-			.invalidateQueries({ queryKey: ["meetings"] })
-			.catch(() => undefined);
-
-	const emptyMessage = loading ? "Loading…" : "No meetings yet";
-
-	const renderMeetingRows = (list: typeof meetings) =>
-		list.map((meeting) => (
-			<SidebarMenuItem key={meeting.id}>
-				<ContextMenu>
-					<ContextMenuTrigger>
-						{/* biome-ignore lint/a11y/useSemanticElements: sidebar row combines nested controls with drag/middle-click */}
-						<div
-							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
-							onClick={() => openMeeting(meeting)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									openMeeting(meeting);
-								}
-							}}
-							role="button"
-							tabIndex={0}
-						>
-							<HugeiconsIcon
-								className="size-4 shrink-0 text-muted-foreground"
-								icon={AudioWave01Icon}
-							/>
-							<OverflowTooltip
-								className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
-								fade
-								text={meeting.title}
-							/>
-							{/* Only a live recording gets a dot — a pulsing red one.
-											    Done/idle meetings show no dot (it carried no signal). */}
-							{meeting.status === "recording" && (
-								<span className="size-2 shrink-0 animate-pulse rounded-full bg-destructive" />
-							)}
-						</div>
-					</ContextMenuTrigger>
-					<ContextMenuContent>
-						<ContextMenuItem onClick={() => openMeetings(true)}>
-							<HugeiconsIcon
-								className="mr-2 size-4"
-								icon={ArrowUpRight01Icon}
-							/>
-							Open Meetings page
-						</ContextMenuItem>
-					</ContextMenuContent>
-				</ContextMenu>
-			</SidebarMenuItem>
-		));
-
-	return (
-		<SidebarSection
-			action={
-				<SectionAddButton
-					onClick={() => openMeetings()}
-					title="Open Meetings"
-				/>
-			}
-			collapsed={collapsed}
-			dnd={dnd}
-			label="Meetings"
-			menu={menu}
-			onToggleCollapsed={onToggleCollapsed}
-			pageSize={pageSize}
-			sectionKey="meetings"
-			sort={sort}
-		>
-			{error && meetings.length === 0 && (
-				<SectionLoadError
-					message="Couldn't load your meetings."
-					onRetry={retryMeetings}
-				/>
-			)}
-			{!error && meetings.length === 0 && (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
-					{emptyMessage}
-				</p>
-			)}
-			{meetings.length > 0 && (
-				<>
-					<SidebarMenu className="gap-0.5">
-						{renderMeetingRows(paged.visible)}
-					</SidebarMenu>
-					<SectionPagingControls
-						overflow={{
-							getSearchText: (meeting) => meeting.title ?? "",
-							items: paged.items,
-							label: "meetings",
-							renderList: (list) => (
-								<SidebarMenu className="gap-0.5">
-									{renderMeetingRows(list)}
-								</SidebarMenu>
-							),
-						}}
-						paged={paged}
-					/>
-				</>
-			)}
-		</SidebarSection>
 	);
 }
 
@@ -3974,9 +4029,11 @@ function AppsSection({
 								tabIndex={0}
 							>
 								{c.icon ? (
-									<span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground text-sm">
-										{c.icon}
-									</span>
+									<Icon
+										className="size-4 shrink-0 text-muted-foreground"
+										icon={c.icon}
+										size={16}
+									/>
 								) : (
 									<HugeiconsIcon
 										className="size-4 shrink-0 text-muted-foreground"
@@ -3988,6 +4045,244 @@ function AppsSection({
 									text={label}
 								/>
 							</div>
+						</SidebarMenuItem>
+					);
+				})}
+			</SidebarMenu>
+		</SidebarSection>
+	);
+}
+
+/**
+ * An app-REGISTERED sidebar section, rendered generically from a `sidebar_sections`
+ * contribution (the dynamic counterpart to the hardcoded Canvas/Whiteboard/Meetings
+ * sections). Its live rows come from the contribution's declared `spec.source` — a
+ * Core `/api/` path the shell fetches through the authenticated node seam, mapped via
+ * {@link sourceItemsFromResponse} — so nothing is hardcoded per app. Clicking a row
+ * opens `spec.itemTarget` (a `{{item.<key>}}` route template) via `openTab`. Returns
+ * null when empty, mirroring {@link AppsSection}, so a disabled/empty app never leaves
+ * a phantom header. (Per-row actions + create-and-open land with the Canvas migration.)
+ */
+function DynamicSidebarSection({
+	contribution,
+	collapsed,
+	dnd,
+	menu,
+	onToggleCollapsed,
+	pageSize,
+	sort,
+}: SectionProps & { contribution: PluginSidebarSection }) {
+	const { openTab } = useTabsContext();
+	const node = useActiveNode();
+	const [rows, setRows] = useState<SourceItem[]>([]);
+	const spec = contribution.spec;
+	const source = spec?.source;
+	const sourcePath = source?.http.path;
+	const sourceMethod = source?.http.method ?? "GET";
+
+	// Re-fetch the section's live rows through the authenticated node seam. Reused by
+	// the initial load and after a create/delete so the list reflects the new state.
+	const reload = useCallback(async () => {
+		if (!(source && sourcePath && isCoreApiPath(sourcePath))) {
+			setRows([]);
+			return;
+		}
+		try {
+			const target = toTarget(node);
+			const resp = await fetch(apiUrl(target, sourcePath), {
+				method: sourceMethod,
+				headers: makeHeaders(target.token),
+			});
+			setRows(
+				resp.ok ? sourceItemsFromResponse(source, await resp.json()) : []
+			);
+		} catch {
+			setRows([]);
+		}
+	}, [node, source, sourcePath, sourceMethod]);
+
+	useEffect(() => {
+		void reload();
+	}, [reload]);
+
+	const openTarget = (
+		item: Record<string, unknown>,
+		title: string,
+		forceNew = false
+	) => {
+		if (spec?.itemTarget) {
+			openTab(renderTemplate(spec.itemTarget, { item }, { uriEncode: true }), {
+				title,
+				forceNew,
+			});
+		}
+	};
+
+	// Run a per-row `http` action (delete/…) templated with the row, then re-fetch.
+	const runAction = async (
+		http: ViewActionHttp,
+		item: Record<string, unknown>
+	) => {
+		try {
+			const target = toTarget(node);
+			const rendered = renderActionHttp(http, { item });
+			const resp = await fetch(apiUrl(target, rendered.path), {
+				method: rendered.method,
+				headers: makeHeaders(target.token),
+				body:
+					rendered.body === undefined
+						? undefined
+						: JSON.stringify(rendered.body),
+			});
+			if (resp.ok) {
+				await reload();
+			}
+		} catch {
+			// best-effort
+		}
+	};
+
+	// The "+" create-and-open: POST the create request, read the new id from the
+	// response (`targetFrom`) and open it via `itemTarget`; else just re-fetch.
+	const runCreate = async () => {
+		if (!spec?.create) {
+			return;
+		}
+		try {
+			const target = toTarget(node);
+			const rendered = renderActionHttp(spec.create.http, {});
+			const resp = await fetch(apiUrl(target, rendered.path), {
+				method: rendered.method,
+				headers: makeHeaders(target.token),
+				body:
+					rendered.body === undefined
+						? undefined
+						: JSON.stringify(rendered.body),
+			});
+			if (!resp.ok) {
+				return;
+			}
+			const created = (await resp.json()) as Record<string, unknown>;
+			const newId = spec.create.targetFrom
+				? created[spec.create.targetFrom]
+				: undefined;
+			if (spec.itemTarget && newId !== undefined) {
+				openTarget(
+					created,
+					String(created.title ?? created.name ?? "Untitled")
+				);
+			} else {
+				await reload();
+			}
+		} catch {
+			// best-effort
+		}
+	};
+
+	// A section with nothing to list AND no way to create renders nothing (mirrors
+	// AppsSection) — no phantom header for a disabled/empty app.
+	if (rows.length === 0 && !spec?.create) {
+		return null;
+	}
+
+	const sectionKey: SectionKey = `plugin:${contribution.plugin}:${contribution.id}`;
+	const itemActions = spec?.itemActions ?? [];
+
+	return (
+		<SidebarSection
+			action={
+				spec?.create ? (
+					<SectionAddButton
+						onClick={runCreate}
+						title={spec.create.label ?? `New ${contribution.title}`}
+					/>
+				) : undefined
+			}
+			collapsed={collapsed}
+			dnd={dnd}
+			label={contribution.title}
+			menu={menu}
+			onToggleCollapsed={onToggleCollapsed}
+			pageSize={pageSize}
+			sectionKey={sectionKey}
+			sort={sort}
+		>
+			<SidebarMenu className="gap-0.5">
+				{rows.map((row) => {
+					const title = row.item.title;
+					const open = (forceNew = false) =>
+						openTarget(row.raw, title, forceNew);
+					return (
+						<SidebarMenuItem key={row.item.id}>
+							<ContextMenu>
+								<ContextMenuTrigger>
+									{/* biome-ignore lint/a11y/useSemanticElements: sidebar row combines nested controls with drag/middle-click */}
+									<div
+										className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
+										onAuxClick={(e) => {
+											if (e.button === 1) {
+												e.preventDefault();
+												open(true);
+											}
+										}}
+										onClick={() => open()}
+										onKeyDown={(e) => {
+											if (e.key === "Enter") {
+												open();
+											}
+										}}
+										role="button"
+										tabIndex={0}
+									>
+										{contribution.icon ? (
+											<Icon
+												className="size-4 shrink-0 text-muted-foreground"
+												icon={contribution.icon}
+												size={16}
+											/>
+										) : null}
+										<OverflowTooltip
+											className="min-w-0 flex-1 truncate text-sm"
+											text={title}
+										/>
+									</div>
+								</ContextMenuTrigger>
+								<ContextMenuContent>
+									{spec?.itemTarget ? (
+										<ContextMenuItem onClick={() => open(true)}>
+											<HugeiconsIcon
+												className="mr-2 size-4"
+												icon={ArrowUpRight01Icon}
+											/>
+											Open in new tab
+										</ContextMenuItem>
+									) : null}
+									{itemActions.map((action) =>
+										action.http ? (
+											<ContextMenuItem
+												key={action.id}
+												onClick={() => {
+													if (action.http) {
+														void runAction(action.http, row.raw);
+													}
+												}}
+												variant={
+													action.style === "danger" ? "destructive" : undefined
+												}
+											>
+												{action.icon ? (
+													<Icon
+														className="mr-2 size-4"
+														icon={action.icon}
+														size={16}
+													/>
+												) : null}
+												{action.label}
+											</ContextMenuItem>
+										) : null
+									)}
+								</ContextMenuContent>
+							</ContextMenu>
 						</SidebarMenuItem>
 					);
 				})}
@@ -4719,267 +5014,6 @@ function ChatsSection({
 	);
 }
 
-/** Canvas list in the sidebar — each row is a creative-canvas board (image/
- *  video/text node graph). The board is now a Ryu App (`com.ryu.canvas`); rows open
- *  the app-doc route `/spaces/<canvasSpace>/app/com.ryu.canvas/<docId>` and "+"
- *  creates a new board document via the plugin host bridge. */
-function CanvasSection({
-	collapsed,
-	dnd,
-	menu,
-	onToggleCollapsed,
-	pageSize,
-	sort,
-}: SectionProps) {
-	const { openTab } = useTabsContext();
-	const { canvases, createCanvas, deleteCanvas } = useCanvasDocs();
-	const paged = usePaged(canvases, pageSize);
-
-	const openCanvas = (
-		c: { id: string; name: string; spaceId: string },
-		forceNew = false
-	) =>
-		openTab(canvasDocPath(c.spaceId, c.id), {
-			title: c.name || "Untitled canvas",
-			forceNew,
-		});
-
-	const handleNew = async () => {
-		const created = await createCanvas();
-		if (created) {
-			openCanvas({
-				id: created.id,
-				name: "Untitled canvas",
-				spaceId: created.spaceId,
-			});
-		}
-	};
-
-	const renderCanvasRows = (list: typeof canvases) =>
-		list.map((c) => (
-			<SidebarMenuItem key={c.id}>
-				<ContextMenu>
-					<ContextMenuTrigger>
-						{/* biome-ignore lint/a11y/useSemanticElements: sidebar row combines nested controls with drag/middle-click */}
-						<div
-							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
-							onAuxClick={(e) => {
-								if (e.button === 1) {
-									e.preventDefault();
-									openCanvas(c, true);
-								}
-							}}
-							onClick={() => openCanvas(c)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									openCanvas(c);
-								}
-							}}
-							role="button"
-							tabIndex={0}
-						>
-							<HugeiconsIcon
-								className="size-4 shrink-0 text-muted-foreground"
-								icon={AiImageIcon}
-							/>
-							<OverflowTooltip
-								className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
-								fade
-								text={c.name}
-							/>
-						</div>
-					</ContextMenuTrigger>
-					<ContextMenuContent>
-						<ContextMenuItem onClick={() => openCanvas(c, true)}>
-							<HugeiconsIcon
-								className="mr-2 size-4"
-								icon={ArrowUpRight01Icon}
-							/>
-							Open in new tab
-						</ContextMenuItem>
-						<ContextMenuItem
-							onClick={() => deleteCanvas(c.id)}
-							variant="destructive"
-						>
-							<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
-							Delete
-						</ContextMenuItem>
-					</ContextMenuContent>
-				</ContextMenu>
-			</SidebarMenuItem>
-		));
-
-	return (
-		<SidebarSection
-			action={<SectionAddButton onClick={handleNew} title="New canvas" />}
-			collapsed={collapsed}
-			dnd={dnd}
-			label="Canvas"
-			menu={menu}
-			onToggleCollapsed={onToggleCollapsed}
-			pageSize={pageSize}
-			sectionKey="canvas"
-			sort={sort}
-		>
-			{canvases.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
-					No canvases yet
-				</p>
-			) : (
-				<>
-					<SidebarMenu className="gap-0.5">
-						{renderCanvasRows(paged.visible)}
-					</SidebarMenu>
-					<SectionPagingControls
-						overflow={{
-							getSearchText: (c) => c.name ?? "",
-							items: paged.items,
-							label: "canvases",
-							renderList: (list) => (
-								<SidebarMenu className="gap-0.5">
-									{renderCanvasRows(list)}
-								</SidebarMenu>
-							),
-						}}
-						paged={paged}
-					/>
-				</>
-			)}
-		</SidebarSection>
-	);
-}
-
-/** Whiteboard list in the sidebar — each row is a freeform whiteboard. The board is
- *  a Ryu App (`com.ryu.whiteboard`); rows open the app-doc route
- *  `/spaces/<whiteboardSpace>/app/com.ryu.whiteboard/<docId>` and "+" creates a new
- *  board document via the plugin host bridge. Mirrors `CanvasSection`. */
-function WhiteboardSection({
-	collapsed,
-	dnd,
-	menu,
-	onToggleCollapsed,
-	pageSize,
-	sort,
-}: SectionProps) {
-	const { openTab } = useTabsContext();
-	const { whiteboards, createWhiteboard, deleteWhiteboard } =
-		useWhiteboardDocs();
-	const paged = usePaged(whiteboards, pageSize);
-
-	const openWhiteboard = (
-		w: { id: string; name: string; spaceId: string },
-		forceNew = false
-	) =>
-		openTab(whiteboardDocPath(w.spaceId, w.id), {
-			title: w.name || "Untitled whiteboard",
-			forceNew,
-		});
-
-	const handleNew = async () => {
-		const created = await createWhiteboard();
-		if (created) {
-			openWhiteboard({
-				id: created.id,
-				name: "Untitled whiteboard",
-				spaceId: created.spaceId,
-			});
-		}
-	};
-
-	const renderWhiteboardRows = (list: typeof whiteboards) =>
-		list.map((w) => (
-			<SidebarMenuItem key={w.id}>
-				<ContextMenu>
-					<ContextMenuTrigger>
-						{/* biome-ignore lint/a11y/useSemanticElements: sidebar row combines nested controls with drag/middle-click */}
-						<div
-							className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
-							onAuxClick={(e) => {
-								if (e.button === 1) {
-									e.preventDefault();
-									openWhiteboard(w, true);
-								}
-							}}
-							onClick={() => openWhiteboard(w)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") {
-									openWhiteboard(w);
-								}
-							}}
-							role="button"
-							tabIndex={0}
-						>
-							<HugeiconsIcon
-								className="size-4 shrink-0 text-muted-foreground"
-								icon={AiImageIcon}
-							/>
-							<OverflowTooltip
-								className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm"
-								fade
-								text={w.name}
-							/>
-						</div>
-					</ContextMenuTrigger>
-					<ContextMenuContent>
-						<ContextMenuItem onClick={() => openWhiteboard(w, true)}>
-							<HugeiconsIcon
-								className="mr-2 size-4"
-								icon={ArrowUpRight01Icon}
-							/>
-							Open in new tab
-						</ContextMenuItem>
-						<ContextMenuItem
-							onClick={() => deleteWhiteboard(w.id)}
-							variant="destructive"
-						>
-							<HugeiconsIcon className="mr-2 size-4" icon={Delete01Icon} />
-							Delete
-						</ContextMenuItem>
-					</ContextMenuContent>
-				</ContextMenu>
-			</SidebarMenuItem>
-		));
-
-	return (
-		<SidebarSection
-			action={<SectionAddButton onClick={handleNew} title="New whiteboard" />}
-			collapsed={collapsed}
-			dnd={dnd}
-			label="Whiteboard"
-			menu={menu}
-			onToggleCollapsed={onToggleCollapsed}
-			pageSize={pageSize}
-			sectionKey="whiteboard"
-			sort={sort}
-		>
-			{whiteboards.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
-					No whiteboards yet
-				</p>
-			) : (
-				<>
-					<SidebarMenu className="gap-0.5">
-						{renderWhiteboardRows(paged.visible)}
-					</SidebarMenu>
-					<SectionPagingControls
-						overflow={{
-							getSearchText: (w) => w.name ?? "",
-							items: paged.items,
-							label: "whiteboards",
-							renderList: (list) => (
-								<SidebarMenu className="gap-0.5">
-									{renderWhiteboardRows(list)}
-								</SidebarMenu>
-							),
-						}}
-						paged={paged}
-					/>
-				</>
-			)}
-		</SidebarSection>
-	);
-}
-
 // Per-project expand/collapse inside the single Projects section, persisted so a
 // folder you opened stays open across reloads (independent of the Projects
 // section's own collapse). Keyed by folder path.
@@ -5145,7 +5179,7 @@ function ProjectsSection({
 	handlers: ChatRowHandlers;
 	projects: ProjectBucket[];
 }) {
-	const { setFolder, clearFolder, removeProject } = useWorkspaceStore();
+	const { setFolder, removeProject } = useWorkspaceStore();
 	const { openTab } = useTabsContext();
 	// Folders default collapsed; the section's Sort-by seeds their order, and the
 	// user can drag to override it (persisted per folder path).
@@ -5166,27 +5200,36 @@ function ProjectsSection({
 	);
 	const paged = usePaged(nested.orderedKeys, pageSize);
 
-	const handleImport = async () => {
-		const selected = await open({ directory: true, multiple: false });
-		if (typeof selected === "string") {
-			await setFolder(selected).catch(() => clearFolder());
-		}
+	// The `+` opens the SAME dropdown as the composer's folder picker — recent
+	// folders, "Open existing folder" (the node-aware NodeFolderBrowser), and
+	// "Start from scratch" — by reusing ProjectPickerContent. The create/browse
+	// dialogs live OUTSIDE the menu so they survive it closing on select.
+	const [menuOpen, setMenuOpen] = useState(false);
+	const [createOpen, setCreateOpen] = useState(false);
+	const [browseOpen, setBrowseOpen] = useState(false);
+	const handleSelectBrowsed = (selected: string) => {
+		// no-op on failure: never drop the folder here (removal is explicit only).
+		setFolder(selected).catch(() => {
+			// no-op
+		});
 	};
 
-	// Activating a folder that no longer exists on disk removes it from the app
-	// rather than leaving a dead row.
+	// Activating a folder must NOT remove it on failure — removal is the row's
+	// explicit remove action only. A transient failure leaves the row in place.
 	const handleSetActive = (path: string) => {
-		setFolder(path).catch(() => removeProject(path));
+		setFolder(path).catch(() => {
+			// no-op
+		});
 	};
 
 	// Start a fresh chat rooted in a folder: activate it (so the composer's
 	// project picker and the run's cwd point at it), then open a new chat tab.
 	// Awaiting `setFolder` first guarantees the new chat's first message runs
-	// against this folder, not whatever was previously active.
+	// against this folder, not whatever was previously active. A failed activation
+	// still opens the chat and never removes the folder.
 	const handleNewChatInFolder = async (path: string) => {
 		await setFolder(path).catch(() => {
-			// Folder gone from disk: drop the dead row but still open a fresh chat.
-			removeProject(path);
+			// no-op
 		});
 		openTab("/chat", { forceNew: true });
 	};
@@ -5213,56 +5256,96 @@ function ProjectsSection({
 		});
 
 	return (
-		<SidebarSection
-			action={
-				<SectionAddButton onClick={handleImport} title="Import project" />
-			}
-			collapsed={collapsed}
-			dnd={dnd}
-			label="Projects"
-			menu={menu}
-			onToggleCollapsed={onToggleCollapsed}
-			pageSize={pageSize}
-			sectionKey="projects"
-			sort={sort}
-			wrapHeader={(header) => (
-				<DeleteAllChatsMenu
-					conversationIds={projects.flatMap((p) =>
-						p.conversations.map((c) => c.id)
-					)}
-					groupLabel="Projects"
-					onDelete={handlers.onDeleteConversation}
-					scope="all"
-				>
-					{header}
-				</DeleteAllChatsMenu>
-			)}
-		>
-			{projects.length === 0 ? (
-				<p className="px-2 py-2 text-muted-foreground text-xs">
-					No projects yet. Click + to import a folder.
-				</p>
-			) : (
-				<>
-					<div className="ml-2 space-y-0.5">
-						{renderProjectRows(paged.visible)}
-					</div>
-					<SectionPagingControls
-						overflow={{
-							getSearchText: (path) => path,
-							items: paged.items,
-							label: "projects",
-							renderList: (list) => (
-								<div className="ml-2 space-y-0.5">
-									{renderProjectRows(list)}
-								</div>
-							),
-						}}
-						paged={paged}
-					/>
-				</>
-			)}
-		</SidebarSection>
+		<>
+			<SidebarSection
+				action={
+					<span className="mr-1">
+						<DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
+							<DropdownMenuTrigger
+								render={
+									<button
+										aria-label="Add project"
+										className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100 data-[popup-open]:opacity-100"
+										type="button"
+									/>
+								}
+							>
+								<HugeiconsIcon icon={Add01Icon} size={14} />
+							</DropdownMenuTrigger>
+							<DropdownMenuContent
+								align="start"
+								className="max-h-[60vh] w-64 overflow-y-auto"
+								side="bottom"
+								sideOffset={6}
+							>
+								<ProjectPickerContent
+									onBrowse={() => {
+										setMenuOpen(false);
+										setBrowseOpen(true);
+									}}
+									onClose={() => setMenuOpen(false)}
+									onStartFromScratch={() => {
+										setMenuOpen(false);
+										setCreateOpen(true);
+									}}
+								/>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</span>
+				}
+				collapsed={collapsed}
+				dnd={dnd}
+				label="Projects"
+				menu={menu}
+				onToggleCollapsed={onToggleCollapsed}
+				pageSize={pageSize}
+				sectionKey="projects"
+				sort={sort}
+				wrapHeader={(header) => (
+					<DeleteAllChatsMenu
+						conversationIds={projects.flatMap((p) =>
+							p.conversations.map((c) => c.id)
+						)}
+						groupLabel="Projects"
+						onDelete={handlers.onDeleteConversation}
+						scope="all"
+					>
+						{header}
+					</DeleteAllChatsMenu>
+				)}
+			>
+				{projects.length === 0 ? (
+					<p className="px-2 py-2 text-muted-foreground text-xs">
+						No projects yet. Click + to import a folder.
+					</p>
+				) : (
+					<>
+						<div className="ml-2 space-y-0.5">
+							{renderProjectRows(paged.visible)}
+						</div>
+						<SectionPagingControls
+							overflow={{
+								getSearchText: (path) => path,
+								items: paged.items,
+								label: "projects",
+								renderList: (list) => (
+									<div className="ml-2 space-y-0.5">
+										{renderProjectRows(list)}
+									</div>
+								),
+							}}
+							paged={paged}
+						/>
+					</>
+				)}
+			</SidebarSection>
+			<CreateFolderDialog onOpenChange={setCreateOpen} open={createOpen} />
+			<NodeFolderBrowser
+				onOpenChange={setBrowseOpen}
+				onSelect={handleSelectBrowsed}
+				open={browseOpen}
+			/>
+		</>
 	);
 }
 
@@ -5557,6 +5640,62 @@ function NavTabButton({
 	);
 }
 
+/**
+ * An app-REGISTERED header button, rendered generically from a `sidebar_buttons`
+ * contribution — the dynamic counterpart to the hardcoded Home/Memory/Library
+ * NavTabButtons. Opens the contribution's `target` route; its glyph resolves
+ * through the string-`icon` primitive (Iconify/Hugeicons) rather than a compiled
+ * IconSvgElement. Present only while the owning app is enabled (the aggregator
+ * filters the feed), so a disabled/absent app leaves no button behind.
+ */
+function DynamicSidebarButton({
+	button,
+	menu,
+}: {
+	button: PluginSidebarButton;
+	menu: ChromeMenu;
+}) {
+	const { openTab } = useTabsContext();
+	const chromeKey = `plugin:${button.plugin}:${button.id}` as ChromeKey;
+	const open = (forceNew: boolean) =>
+		openTab(button.target, { title: button.title, forceNew });
+	return (
+		<ContextMenu>
+			<ContextMenuTrigger>
+				<SidebarMenuButton
+					className="h-8 rounded-md"
+					onAuxClick={(e) => {
+						if (e.button === 1) {
+							e.preventDefault();
+							open(true);
+						}
+					}}
+					onClick={() => open(false)}
+				>
+					{button.icon ? (
+						<Icon className="size-4" icon={button.icon} size={16} />
+					) : (
+						<HugeiconsIcon className="size-4" icon={GridIcon} />
+					)}
+					<span>{button.title}</span>
+				</SidebarMenuButton>
+			</ContextMenuTrigger>
+			<ContextMenuContent>
+				<ContextMenuItem onClick={() => open(true)}>
+					<HugeiconsIcon className="mr-2 size-4" icon={ArrowUpRight01Icon} />
+					Open in new tab
+				</ContextMenuItem>
+				<ContextMenuSeparator />
+				<ChromeMenuItems
+					chromeKey={chromeKey}
+					label={button.title}
+					menu={menu}
+				/>
+			</ContextMenuContent>
+		</ContextMenu>
+	);
+}
+
 interface AppSidebarProps {
 	activeConversationId?: string | null;
 	onDeleteConversation?: (id: string) => void;
@@ -5674,6 +5813,25 @@ export function SidebarPanelContent({
 	);
 	const [sectionOrder, setSectionOrder] =
 		useState<SectionKey[]>(loadSectionOrder);
+	// App-registered sidebar sections from the contributions feed. Namespaced keys
+	// (`plugin:<pluginId>:<sectionId>`) that render via DynamicSidebarSection and are
+	// appended to the persisted order (see `effectiveOrder`). Empty when no enabled
+	// app contributes one, so this is inert until a fixture declares a section.
+	const {
+		sidebar_sections: contributedSections,
+		sidebar_buttons: contributedButtons,
+	} = usePluginContributions();
+	const dynamicSectionKeys = useMemo<SectionKey[]>(
+		() =>
+			[...contributedSections]
+				.sort(
+					(a, b) =>
+						(a.order ?? Number.MAX_SAFE_INTEGER) -
+						(b.order ?? Number.MAX_SAFE_INTEGER)
+				)
+				.map((s) => `plugin:${s.plugin}:${s.id}` as SectionKey),
+		[contributedSections]
+	);
 	const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
 		() => {
 			// Default the Archived section to collapsed on first run, so it stays out
@@ -5691,6 +5849,24 @@ export function SidebarPanelContent({
 		loadHiddenChrome()
 	);
 	const [chromeOrder, setChromeOrder] = useState<ChromeKey[]>(loadChromeOrder);
+	// App-registered header buttons (`sidebar_buttons`), appended to the persisted
+	// chrome order the same way dynamic sections are. Empty until an enabled app
+	// contributes one, so this is inert by default.
+	const dynamicChromeKeys = useMemo<ChromeKey[]>(
+		() =>
+			[...contributedButtons]
+				.sort(
+					(a, b) =>
+						(a.order ?? Number.MAX_SAFE_INTEGER) -
+						(b.order ?? Number.MAX_SAFE_INTEGER)
+				)
+				.map((b) => `plugin:${b.plugin}:${b.id}` as ChromeKey),
+		[contributedButtons]
+	);
+	const effectiveChromeOrder = useMemo<ChromeKey[]>(() => {
+		const missing = dynamicChromeKeys.filter((k) => !chromeOrder.includes(k));
+		return missing.length > 0 ? [...chromeOrder, ...missing] : chromeOrder;
+	}, [chromeOrder, dynamicChromeKeys]);
 	const [chromeDraggingKey, setChromeDraggingKey] = useState<ChromeKey | null>(
 		null
 	);
@@ -5897,7 +6073,13 @@ export function SidebarPanelContent({
 	// Projects now live nested under the single Projects section, so the rendered
 	// order is just the persisted built-in order (loadSectionOrder already drops any
 	// stale per-project keys from older versions and splices in "projects").
-	const effectiveOrder: SectionKey[] = sectionOrder;
+	// The persisted built-in order, plus any app-contributed dynamic sections not yet
+	// in it (appended in `order` order). A dynamic key the user has already arranged
+	// stays in its stored position (loadSectionOrder preserves `plugin:` keys).
+	const effectiveOrder: SectionKey[] = useMemo(() => {
+		const missing = dynamicSectionKeys.filter((k) => !sectionOrder.includes(k));
+		return missing.length > 0 ? [...sectionOrder, ...missing] : sectionOrder;
+	}, [sectionOrder, dynamicSectionKeys]);
 
 	// The single writer for section order: every reorder path (drag, the per-section
 	// move-up/down menu, and the customize dialog) funnels through here so they can
@@ -6173,9 +6355,19 @@ export function SidebarPanelContent({
 		onNewConversation?.();
 	};
 
-	// Labels for every section in the customize dialog (all built-in now that
-	// projects are nested under the single Projects section).
+	// Labels for every section in the customize dialog: the built-in set plus each
+	// app-contributed section's own title (keyed by its `plugin:<id>:<sectionId>`
+	// key), so a contributed row reads as "Canvas", not the raw namespaced key.
 	const sectionLabels: Record<string, string> = { ...SECTION_LABELS };
+	for (const section of contributedSections) {
+		sectionLabels[`plugin:${section.plugin}:${section.id}`] = section.title;
+	}
+	// Same idea for app-contributed header buttons (Memory, Home): the dialog's
+	// "Top buttons" list needs their titles or the row shows the namespaced key.
+	const chromeButtonLabels: Record<string, string> = {};
+	for (const button of contributedButtons) {
+		chromeButtonLabels[`plugin:${button.plugin}:${button.id}`] = button.title;
+	}
 
 	// One reorderable header button, by key. Returns the button's inner content;
 	// ChromeButtonShell (below) supplies the draggable SidebarMenuItem wrapper.
@@ -6199,16 +6391,10 @@ export function SidebarPanelContent({
 				);
 			// "search" now renders as an icon next to the node selector (see the
 			// SidebarHeader row below), not as a header button.
-			case "home":
-				return (
-					<NavTabButton
-						chromeKey="home"
-						icon={Home01Icon}
-						label="Home"
-						menu={chromeMenu}
-						path="/home"
-					/>
-				);
+			// "home" is app-registered by `com.ryu.dashboards` (the Home dashboard's
+			// owning app, default-on) via a `sidebar_buttons` contribution; no hardcoded
+			// case. The key stays in BuiltinChromeKey/CHROME_LABELS for graceful
+			// filtering of any stale persisted layout.
 			case "library":
 				return (
 					<NavTabButton
@@ -6219,16 +6405,11 @@ export function SidebarPanelContent({
 						path="/library"
 					/>
 				);
-			case "memory":
-				return (
-					<NavTabButton
-						chromeKey="memory"
-						icon={AiBrain01Icon}
-						label="Memory"
-						menu={chromeMenu}
-						path="/library/memory"
-					/>
-				);
+			// "memory" is no longer a hardcoded button — it is app-registered by
+			// `com.ryu.memory` via a `sidebar_buttons` contribution, so it appears in
+			// the header ONLY when that app is enabled (default-off ⇒ absent). The key
+			// stays in BuiltinChromeKey/CHROME_LABELS so a stale persisted layout is
+			// filtered out gracefully rather than crashing.
 			case "store":
 				return (
 					<NavTabButton
@@ -6273,8 +6454,19 @@ export function SidebarPanelContent({
 			// Tasks/Timeline/Activity/Calendar deliberately have NO case here: they are
 			// Ryu Apps, listed by `AppsSection` from the enabled-companion feed. See
 			// the note above CHROME_ORDER.
-			default:
+			default: {
+				// App-registered header button (`plugin:<pluginId>:<buttonId>`): resolve
+				// the contribution from the feed and render it generically.
+				if (isDynamicChromeKey(key)) {
+					const button = contributedButtons.find(
+						(b) => `plugin:${b.plugin}:${b.id}` === key
+					);
+					return button ? (
+						<DynamicSidebarButton button={button} menu={chromeMenu} />
+					) : null;
+				}
 				return null;
+			}
 		}
 	};
 
@@ -6282,14 +6474,16 @@ export function SidebarPanelContent({
 		if (hiddenSections.has(key)) {
 			return null;
 		}
-		// Hide a plugin-owned section only once its App is CONFIRMED disabled (the
-		// record exists and `enabled === false`). While the plugin list is loading
-		// or unreachable (`pluginApps` empty) we show the section — never flicker a
+		// A plugin-owned section shows ONLY when its App is installed AND enabled.
+		// Once the plugin list has loaded (`pluginApps` non-empty), an owner that is
+		// absent (not installed — the default-off apps) or disabled hides the section,
+		// so Canvas/Whiteboard/Meetings don't render until their app is turned on.
+		// While the list is still loading (empty) we show it, to never flicker a
 		// working section away on a slow/failed /api/plugins fetch.
 		const ownerPluginId = SECTION_PLUGIN_OWNER[key];
-		if (ownerPluginId) {
+		if (ownerPluginId && pluginApps.length > 0) {
 			const owner = pluginApps.find((a) => a.id === ownerPluginId);
-			if (owner && !owner.enabled) {
+			if (!owner?.enabled) {
 				return null;
 			}
 		}
@@ -6316,8 +6510,8 @@ export function SidebarPanelContent({
 				return <TeamsSection key={key} {...sectionProps} />;
 			case "spaces":
 				return <SpacesSection key={key} {...sectionProps} />;
-			case "meetings":
-				return <MeetingsSection key={key} {...sectionProps} />;
+			// "meetings" is app-registered (com.ryu.meetings `sidebar_sections`),
+			// rendered via DynamicSidebarSection — no hardcoded case.
 			case "workflows":
 				return <WorkflowsSection key={key} {...sectionProps} />;
 			case "channels":
@@ -6367,10 +6561,9 @@ export function SidebarPanelContent({
 						onNew={handleNewConversation}
 					/>
 				);
-			case "canvas":
-				return <CanvasSection key={key} {...sectionProps} />;
-			case "whiteboard":
-				return <WhiteboardSection key={key} {...sectionProps} />;
+			// canvas + whiteboard are app-registered (com.ryu.{canvas,whiteboard}
+			// `sidebar_sections`, backed by /api/apps/<id>/docs), rendered via
+			// DynamicSidebarSection — no hardcoded cases.
 			case "archived":
 				return (
 					<ArchivedSection
@@ -6380,8 +6573,23 @@ export function SidebarPanelContent({
 						handlers={chatRowHandlers}
 					/>
 				);
-			default:
+			default: {
+				// App-registered dynamic section (`plugin:<pluginId>:<sectionId>`):
+				// resolve the contribution from the feed and render it generically.
+				if (isDynamicSectionKey(key)) {
+					const contribution = contributedSections.find(
+						(s) => `plugin:${s.plugin}:${s.id}` === key
+					);
+					return contribution ? (
+						<DynamicSidebarSection
+							contribution={contribution}
+							key={key}
+							{...sectionProps}
+						/>
+					) : null;
+				}
 				return null;
+			}
 		}
 	};
 
@@ -6437,7 +6645,7 @@ export function SidebarPanelContent({
 					</div>
 				)}
 				<SidebarMenu>
-					{chromeOrder
+					{effectiveChromeOrder
 						.filter((key) => !hiddenChrome.has(key))
 						.map((key) => (
 							<ChromeButtonShell chromeKey={key} dnd={chromeDnd} key={key}>
@@ -6556,11 +6764,17 @@ export function SidebarPanelContent({
 			<CustomizeSidebarDialog
 				bottomChromeItems={CHROME_ORDER.filter((key) =>
 					FOOTER_CHROME.has(key)
-				).map((key) => ({ key, label: CHROME_LABELS[key] }))}
+				).map((key) => ({
+					key,
+					label: CHROME_LABELS[key as BuiltinChromeKey] ?? key,
+				}))}
 				chromeHidden={hiddenChrome}
 				fixedTopChromeItems={CHROME_ORDER.filter(
 					(key) => !(FOOTER_CHROME.has(key) || isHeaderButtonChrome(key))
-				).map((key) => ({ key, label: CHROME_LABELS[key] }))}
+				).map((key) => ({
+					key,
+					label: CHROME_LABELS[key as BuiltinChromeKey] ?? key,
+				}))}
 				hidden={hiddenSections}
 				labels={sectionLabels}
 				onClose={() => setCustomizeOpen(false)}
@@ -6579,9 +6793,12 @@ export function SidebarPanelContent({
 				}
 				open={customizeOpen}
 				order={effectiveOrder}
-				topButtonItems={chromeOrder.map((key) => ({
+				topButtonItems={effectiveChromeOrder.map((key) => ({
 					key,
-					label: CHROME_LABELS[key],
+					label:
+						CHROME_LABELS[key as BuiltinChromeKey] ??
+						chromeButtonLabels[key] ??
+						key,
 				}))}
 			/>
 			<ImportThreadsDialog

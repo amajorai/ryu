@@ -265,14 +265,15 @@ function AgentList({
 							onUninstall={() => onUninstall(entry.id)}
 						/>
 					}
-					description={entry.description}
-					icon={
+					brandIcon={
 						<AgentCatalogLogo
 							className="size-5 opacity-90"
 							entry={entry}
 							size="20px"
 						/>
 					}
+					description={entry.description}
+					icon={<HugeiconsIcon icon={Robot01Icon} />}
 					key={entry.id}
 					name={entry.name}
 					onClick={() => onSelect(entry.id)}

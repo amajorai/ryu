@@ -89,3 +89,65 @@ impl Provider for LocalProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{MockResponse, MockServer};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn complete_injects_model_and_sends_no_auth_header() {
+        let server = MockServer::always(MockResponse::ok_json(r#"{"id":"local"}"#)).await;
+        let p = LocalProvider::new(reqwest::Client::new(), server.base_url().to_string());
+        let out = p
+            .complete("qwen2.5", &json!({ "messages": [] }))
+            .await
+            .unwrap();
+        assert_eq!(out["id"], json!("local"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/chat/completions");
+        // A local server (Ollama/llama.cpp) takes no bearer key.
+        assert!(reqs[0].header("authorization").is_none());
+        assert_eq!(reqs[0].json()["model"], json!("qwen2.5"));
+    }
+
+    #[tokio::test]
+    async fn complete_maps_client_error_without_retry() {
+        // 4xx is not a server error, so send_with_retry returns it immediately
+        // (no back-off sleeps) and check_response_status maps it.
+        let server = MockServer::always(MockResponse::json(
+            404,
+            r#"{"error":{"message":"model not found"}}"#,
+        ))
+        .await;
+        let p = LocalProvider::new(reqwest::Client::new(), server.base_url().to_string());
+        let err = p
+            .complete("missing", &json!({ "messages": [] }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("model not found"));
+        assert_eq!(server.request_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn discover_models_returns_data_entries() {
+        let server = MockServer::always(MockResponse::ok_json(
+            r#"{"data":[{"id":"qwen2.5"},{"id":"llama3.2"}]}"#,
+        ))
+        .await;
+        let p = LocalProvider::new(reqwest::Client::new(), server.base_url().to_string());
+        let models = p.discover_models().await.expect("some models");
+        assert_eq!(models.len(), 2);
+        assert_eq!(server.requests()[0].path, "/models");
+    }
+
+    #[tokio::test]
+    async fn discover_models_none_on_non_2xx() {
+        let server = MockServer::always(MockResponse::json(500, "boom")).await;
+        let p = LocalProvider::new(reqwest::Client::new(), server.base_url().to_string());
+        // Discovery is infallible: a server error yields None (fall back to static list).
+        assert!(p.discover_models().await.is_none());
+    }
+}

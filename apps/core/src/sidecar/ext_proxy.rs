@@ -177,12 +177,28 @@ fn route_matches(pattern: &str, actual: &str) -> bool {
     pat.len() == act.len()
 }
 
+/// Reject any path carrying a `.` or `..` segment. The auth decision is taken from
+/// the pattern matching the RAW sub-path, but reqwest normalizes `..` on the URL it
+/// forwards — so `/webhook/..%2fadmin` could match a Public `/webhook/*rest` route
+/// (no node bearer) yet reach the sidecar's protected `/admin` mount carrying a valid
+/// Core-stamped bearer. Reject dot-segments up front so match and forward can never
+/// disagree. `%2e`/`%2E` are already decoded to `.` by the axum path extractor.
+fn has_dot_segment(sub_path: &str) -> bool {
+    sub_path
+        .trim_start_matches('/')
+        .split('/')
+        .any(|seg| seg == "." || seg == "..")
+}
+
 /// Find the first sidecar on `manifest` whose declared http routes match `sub_path`,
 /// returning the matched sidecar spec, its http spec, and the route's auth posture.
 fn resolve_route<'a>(
     manifest: &'a crate::plugin_manifest::PluginManifest,
     sub_path: &str,
 ) -> Option<(&'a SidecarSpec, &'a HttpProxySpec, RouteAuth)> {
+    if has_dot_segment(sub_path) {
+        return None;
+    }
     for spec in &manifest.sidecars {
         let Some(http) = &spec.http else { continue };
         for route in &http.routes {
@@ -203,9 +219,19 @@ fn is_hop_by_hop(name: &str) -> bool {
     )
 }
 
+/// Browser-context headers describing the ORIGINAL caller (the desktop webview's
+/// cross-origin `fetch` to Core), not the Core→sidecar hop. Sidecar loopback
+/// control servers 403 any request carrying a non-empty `Origin` as CSRF /
+/// DNS-rebind defense (the island-pattern hardening, e.g. the browser sidecar's
+/// `isTrustedLocalRequest`), so forwarding it would make Core's own
+/// authenticated proxy hop indistinguishable from a drive-by browser request.
+fn is_browser_context(name: &str) -> bool {
+    matches!(name.to_ascii_lowercase().as_str(), "origin" | "referer")
+}
+
 fn copy_headers(src: &HeaderMap, dst: &mut reqwest::header::HeaderMap) {
     for (name, value) in src.iter() {
-        if is_hop_by_hop(name.as_str()) {
+        if is_hop_by_hop(name.as_str()) || is_browser_context(name.as_str()) {
             continue;
         }
         if let (Ok(n), Ok(v)) = (
@@ -306,7 +332,14 @@ async fn ext_proxy(
     Extension(expected_node_token): Extension<Option<String>>,
     req: Request,
 ) -> Response {
-    proxy_for_plugin(&state, &plugin_id, &format!("/{rest}"), expected_node_token, req).await
+    proxy_for_plugin(
+        &state,
+        &plugin_id,
+        &format!("/{rest}"),
+        expected_node_token,
+        req,
+    )
+    .await
 }
 
 /// Same as [`ext_proxy`] but for the bare `/api/ext/:plugin_id` root: a separate handler
@@ -332,7 +365,14 @@ async fn public_mount_proxy(
     Path(rest): Path<String>,
     req: Request,
 ) -> Response {
-    proxy_for_plugin(&state, &plugin_id, &format!("/{rest}"), expected_node_token, req).await
+    proxy_for_plugin(
+        &state,
+        &plugin_id,
+        &format!("/{rest}"),
+        expected_node_token,
+        req,
+    )
+    .await
 }
 
 /// Same as [`public_mount_proxy`] but for the bare `<mount>` root: a separate handler
@@ -400,8 +440,7 @@ async fn proxy_for_plugin(
         .unwrap_or_default();
     let max_body = http.max_body_bytes.unwrap_or(DEFAULT_MAX_PROXY_BYTES);
     // The manager key for this sidecar.
-    let sidecar_name =
-        crate::sidecar::manifest_sidecar::namespaced_name(plugin_id, &spec.name);
+    let sidecar_name = crate::sidecar::manifest_sidecar::namespaced_name(plugin_id, &spec.name);
     drop(manifests);
     // Whether this sidecar opted into on-demand start — resolved from the manager's
     // registered state (lazy-registered, or carrying an idle-stop timeout so it may
@@ -464,7 +503,10 @@ async fn proxy_for_plugin(
     let body_bytes = match axum::body::to_bytes(body, max_body).await {
         Ok(b) => b,
         Err(_) => {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "ext proxy: request body too large")
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "ext proxy: request body too large",
+            )
                 .into_response()
         }
     };
@@ -729,9 +771,7 @@ async fn host_model_complete(
     let (plugin_id, grants) =
         match authorize_host_call(&state, &headers, GRANT_MODEL_COMPLETE).await {
             Ok(v) => v,
-            Err((status, msg)) => {
-                return (status, Json(json!({ "error": msg }))).into_response()
-            }
+            Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
         };
 
     let bridge = crate::plugin_host::PluginHookBridge::new(plugin_id, grants, state);
@@ -782,7 +822,9 @@ async fn host_rpc(
     let Some(bridge_path) = crate::plugin_host::dispatch_path_for(method) else {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": format!("host method '{method}' is not dispatchable over rpc") })),
+            Json(
+                json!({ "error": format!("host method '{method}' is not dispatchable over rpc") }),
+            ),
         )
             .into_response();
     };
@@ -933,7 +975,11 @@ async fn host_capability(
                     BindingError::Unprovided { .. } => StatusCode::NOT_FOUND,
                     _ => StatusCode::CONFLICT,
                 };
-                Err((status, Json(json!({ "error": e.to_string(), "code": e.code() }))).into_response())
+                Err((
+                    status,
+                    Json(json!({ "error": e.to_string(), "code": e.code() })),
+                )
+                    .into_response())
             }
         }
     };
@@ -1089,7 +1135,7 @@ mod tests {
         assert!(route_matches("/inboxes/:id", "/inboxes/abc"));
         assert!(!route_matches("/inboxes/:id", "/inboxes")); // too short
         assert!(!route_matches("/inboxes/:id", "/inboxes/abc/extra")); // too long
-        // Undeclared subpath of a declared prefix is NOT admitted (no wildcard).
+                                                                       // Undeclared subpath of a declared prefix is NOT admitted (no wildcard).
         assert!(!route_matches("/inboxes", "/inboxes/abc"));
         // Trailing wildcard matches the remainder.
         assert!(route_matches("/files/*rest", "/files/a/b/c"));
@@ -1097,6 +1143,22 @@ mod tests {
         // Multi-segment literal + param.
         assert!(route_matches("/inboxes/:id/send", "/inboxes/xyz/send"));
         assert!(!route_matches("/inboxes/:id/send", "/inboxes/xyz/recv"));
+    }
+
+    #[test]
+    fn dot_segments_are_rejected() {
+        // The traversal-to-auth-confusion guard: any `.`/`..` segment is refused so a
+        // raw sub-path can never match a Public route yet normalize onto a Protected
+        // mount after reqwest collapses `..`.
+        assert!(has_dot_segment("/webhook/../admin"));
+        assert!(has_dot_segment("/webhook/..")); // trailing
+        assert!(has_dot_segment("/a/./b"));
+        assert!(has_dot_segment("..")); // no leading slash
+        // Legitimate paths (including a dot INSIDE a segment) are untouched.
+        assert!(!has_dot_segment("/webhook/abc"));
+        assert!(!has_dot_segment("/files/a.b.c/d"));
+        assert!(!has_dot_segment("/inboxes/:id"));
+        assert!(!has_dot_segment(""));
     }
 
     // ── Kill-isolation (the behavioral seam test) ───────────────────────────────
@@ -1331,7 +1393,10 @@ mod tests {
     #[test]
     fn upstream_path_root_forwards_bare_mount() {
         assert_eq!(upstream_path_for("/api/monitors", "/"), "/api/monitors");
-        assert_eq!(upstream_path_for("/api/monitors", "/alerts"), "/api/monitors/alerts");
+        assert_eq!(
+            upstream_path_for("/api/monitors", "/alerts"),
+            "/api/monitors/alerts"
+        );
         // No mount declared: the root forwards to the sidecar's own root.
         assert_eq!(upstream_path_for("", "/"), "");
         assert_eq!(upstream_path_for("", "/health"), "/health");
@@ -1450,8 +1515,71 @@ mod tests {
             .find(|r| r.path == "/inbound/:id")
             .expect("declares inbound route");
         assert_eq!(inbound.auth, RouteAuth::Public);
-        assert!(http.routes.iter().any(|r| r.path == "/status"
-            && r.auth == RouteAuth::Protected));
+        assert!(http
+            .routes
+            .iter()
+            .any(|r| r.path == "/status" && r.auth == RouteAuth::Protected));
+    }
+
+    // ── Hop-by-hop + browser-context header handling (defense-in-depth) ─────────
+
+    #[test]
+    fn hop_by_hop_headers_are_recognized_case_insensitively() {
+        for h in [
+            "host",
+            "Content-Length",
+            "CONNECTION",
+            "transfer-encoding",
+            "Keep-Alive",
+            "upgrade",
+        ] {
+            assert!(is_hop_by_hop(h), "{h} must be treated hop-by-hop");
+        }
+        // End-to-end headers survive.
+        for h in ["authorization", "content-type", "x-ryu-plugin-id", "accept"] {
+            assert!(!is_hop_by_hop(h), "{h} must NOT be hop-by-hop");
+        }
+    }
+
+    #[test]
+    fn browser_context_headers_are_origin_and_referer() {
+        // These name the ORIGINAL cross-origin caller; forwarding them would make Core's
+        // authenticated proxy hop indistinguishable from a drive-by browser request, so a
+        // loopback sidecar's CSRF / DNS-rebind gate would 403 it.
+        assert!(is_browser_context("origin"));
+        assert!(is_browser_context("Referer"));
+        assert!(is_browser_context("REFERER"));
+        assert!(!is_browser_context("authorization"));
+        assert!(!is_browser_context("content-type"));
+    }
+
+    #[test]
+    fn copy_headers_strips_hop_and_browser_context_keeps_the_rest() {
+        let mut src = HeaderMap::new();
+        src.insert("content-type", "application/json".parse().unwrap());
+        src.insert("origin", "https://evil.example".parse().unwrap());
+        src.insert("referer", "https://evil.example/p".parse().unwrap());
+        src.insert("host", "127.0.0.1:9999".parse().unwrap());
+        src.insert("connection", "keep-alive".parse().unwrap());
+        src.insert("x-ryu-plugin-id", "com.acme.app".parse().unwrap());
+
+        let mut dst = reqwest::header::HeaderMap::new();
+        copy_headers(&src, &mut dst);
+
+        // End-to-end app headers are forwarded.
+        assert_eq!(
+            dst.get("content-type").map(|v| v.to_str().unwrap()),
+            Some("application/json")
+        );
+        assert_eq!(
+            dst.get("x-ryu-plugin-id").map(|v| v.to_str().unwrap()),
+            Some("com.acme.app")
+        );
+        // Browser-context + hop-by-hop headers are dropped.
+        assert!(dst.get("origin").is_none(), "Origin must be stripped");
+        assert!(dst.get("referer").is_none(), "Referer must be stripped");
+        assert!(dst.get("host").is_none(), "Host must be stripped");
+        assert!(dst.get("connection").is_none(), "Connection must be stripped");
     }
 
     #[test]

@@ -14,8 +14,7 @@
 
 use ryu_kernel_contracts::host_api::{HOST_API_METHODS, HOST_API_VERSION};
 
-const CONTRACT_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/schemas/host-api.json");
+const CONTRACT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/schemas/host-api.json");
 
 /// The contract exactly as it must appear on disk (pretty JSON + trailing newline).
 fn generated_contract() -> String {

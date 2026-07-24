@@ -12,24 +12,18 @@
 //! org/team is Gateway/control-plane — out of scope (U30). The one allowlist we
 //! honor here is the per-agent `tools` list, which is part of "what runs."
 
-pub mod advisor;
-pub mod apps;
+pub mod artifact_tool;
 pub mod catalog;
 pub mod channel_tool;
 pub mod client;
 pub mod composio;
 pub mod delegate;
-pub mod exa;
-pub mod artifact_tool;
 pub mod notify_tool;
 pub mod orchestrator;
 pub mod research;
-pub mod rtk;
 pub mod sandbox;
 pub mod search_conversations;
-pub mod shadow;
 pub mod skills_tool;
-pub mod spider;
 pub mod threads;
 pub mod ui_tool;
 pub mod web_fetch;
@@ -326,6 +320,63 @@ impl McpServerConfig {
     }
 }
 
+/// Lower a manifest [`McpServerDecl`] (pure kernel-contracts data) into the
+/// runtime [`McpServerConfig`] the registry spawns.
+///
+/// Resolves `command_env`: when the declaration names an env var and that var is
+/// set to a non-empty value (e.g. a `~/.ryu/bin` path a downloader wrote to
+/// `RYU_GHOST_BIN`), it OVERRIDES the bare `command`; otherwise `command` is used
+/// verbatim. `version`/`catalog_id` are always `None` — a plugin-declared server
+/// is versioned by its owning plugin, not the MCP catalog.
+pub fn mcp_server_config_from_decl(
+    decl: &crate::plugin_manifest::McpServerDecl,
+) -> McpServerConfig {
+    let command = decl
+        .command_env
+        .as_ref()
+        .and_then(|var| std::env::var(var).ok())
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| decl.command.clone());
+    McpServerConfig {
+        command,
+        args: decl.args.clone(),
+        env: decl.env.clone(),
+        description: decl.description.clone(),
+        enabled: decl.enabled,
+        version: None,
+        catalog_id: None,
+    }
+}
+
+/// Register every MCP server a plugin's manifest declares into `registry`.
+///
+/// The plugin enable/activation seam (`activate_plugin` + the boot
+/// `fire_activation_event` loop). A no-op for the common case (a manifest with no
+/// `mcp_servers`). Returns the server names registered, for logging. Idempotent:
+/// re-activation re-registers the same names (overwriting in place).
+pub fn register_manifest_mcp_servers(
+    registry: &McpRegistry,
+    manifest: &PluginManifest,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    for (name, decl) in &manifest.mcp_servers {
+        registry.register_server(name.clone(), mcp_server_config_from_decl(decl));
+        names.push(name.clone());
+    }
+    names
+}
+
+/// Deregister every MCP server a plugin's manifest declares from `registry`.
+///
+/// The symmetric teardown seam (`deactivate_plugin`, reached by both disable and
+/// uninstall). A no-op for a manifest with no `mcp_servers`.
+pub fn deregister_manifest_mcp_servers(registry: &McpRegistry, manifest: &PluginManifest) {
+    for name in manifest.mcp_servers.keys() {
+        registry.deregister_server(name);
+    }
+}
+
 /// On-disk config shape. Matches the de-facto `mcpServers` map used by Claude
 /// Desktop, Cursor, and friends, so users can paste an existing config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -337,6 +388,20 @@ struct McpConfigFile {
         alias = "mcp_servers"
     )]
     mcp_servers: BTreeMap<String, McpServerConfig>,
+}
+
+/// Which declarative backend an `app__` tool resolved to, tagged onto its
+/// [`RegistryTool`] at registration so the catalog can surface a `command` tool as
+/// its own [`catalog::ToolKind`]. `None` on a row means "not an app tool, or
+/// untagged" — the http/inline_deno/alias app backends stay classified as
+/// [`catalog::ToolKind::App`]; only `Command` is surfaced distinctly (a
+/// deliberate, task-mandated asymmetry, not an oversight).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AppToolBackendTag {
+    Alias,
+    InlineDeno,
+    Http,
+    Command,
 }
 
 /// A tool exposed through the registry, tagged with its owning server.
@@ -369,6 +434,12 @@ pub struct RegistryTool {
     /// Flat mirror of `widget.template_uri` (the `ui://widget/<slug>.html` uri).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_template: Option<String>,
+    /// Set when this row is an app tool (tool-as-Runnable), tagging its resolved
+    /// backend so the catalog surfaces a `command` tool as
+    /// [`catalog::ToolKind::Command`]. `None` on non-app rows and on untagged
+    /// registrations (which classify as [`catalog::ToolKind::App`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_backend: Option<AppToolBackendTag>,
 }
 
 impl RegistryTool {
@@ -388,6 +459,7 @@ impl RegistryTool {
             widget: None,
             widget_accessible: false,
             output_template: None,
+            app_backend: None,
         }
     }
 }
@@ -554,15 +626,27 @@ pub struct ServerSummary {
     pub available: Option<bool>,
 }
 
-/// Name under which the built-in Ghost desktop-automation MCP server (U14) is
-/// registered. Ghost is Windows-first; on other OSes the binary may be absent
-/// and the registry degrades gracefully (see `builtin_servers`).
+/// Name under which the Ghost desktop-automation MCP server (U14) is registered.
+/// Ghost declares this server under `mcp_servers` in its plugin manifest
+/// (fixtures/ghost.plugin.json) and it registers on activation. Ghost is
+/// Windows-first; on other OSes the binary may be absent and the registry degrades
+/// gracefully (a failed spawn is logged-and-skipped, never hiding other servers).
+///
+/// Canonical server-name constant. Since Ghost moved off `builtin_servers()` its
+/// only in-crate references are tests, so the non-test build sees it as unused.
+#[allow(dead_code)]
 pub const GHOST_SERVER: &str = "ghost";
 
-/// Name under which the built-in Agent Browser MCP server is registered. Agent
-/// Browser is the default web-browsing tool (npm `agentbrowser`), launched via
-/// `npx`. Like Ghost, the registry degrades gracefully when the package can't be
-/// spawned (not installed / no Node), so registering it unconditionally is safe.
+/// Name under which the Agent Browser MCP server is registered. Agent Browser is
+/// the default web-browsing tool (npm `agentbrowser`, launched via `npx`),
+/// declared under `mcp_servers` in its plugin manifest
+/// (fixtures/agentbrowser.plugin.json) and registered on activation. Like Ghost,
+/// the registry degrades gracefully when the package can't be spawned (not
+/// installed / no Node).
+///
+/// Canonical server-name constant; test-only references in the non-test build now
+/// that Agent Browser is manifest-declared rather than a `builtin_servers()` entry.
+#[allow(dead_code)]
 pub const AGENTBROWSER_SERVER: &str = "agentbrowser";
 
 /// Separator between server name and tool name in a fully-qualified tool id.
@@ -575,6 +659,32 @@ const APP_TOOL_SERVER: &str = "app";
 
 /// Id prefix for app-registered tools (`APP_TOOL_SERVER` + `TOOL_ID_SEP`).
 const APP_TOOL_PREFIX: &str = "app__";
+
+/// The id under which a Tool runnable is REGISTERED and dispatched — the single
+/// source of truth both registration (server handler) and resolution
+/// (`resolve_app_tool_backend`) call, so they can never disagree.
+///
+/// A declarative tool plugin that ships NEW behavior (a non-`Alias` backend) AND
+/// already namespaces its slug with the tool-id separator (`__`) keeps its NATIVE
+/// id verbatim (`exa__search`, `spider__crawl`, `rtk__run`), so allowlists and the
+/// gateway/ACP tool descriptors that name that id resolve unchanged end-to-end.
+///
+/// Everything else stays `app__<slug>`: an `Alias` tool (the other-apps re-expose
+/// path, which MUST keep the prefix), or a bare slug lacking the `__` separator
+/// that `split_tool_id` requires (a native id without a separator is unroutable, so
+/// `weather` correctly stays `app__weather`). This preserves the exact current
+/// behavior for every non-namespaced declarative tool.
+pub(crate) fn app_tool_registered_id(cfg: &crate::plugin_manifest::schema::ToolConfig) -> String {
+    use crate::plugin_manifest::schema::ToolBackend;
+    match cfg.resolve_backend() {
+        Ok(backend)
+            if !matches!(backend, ToolBackend::Alias { .. }) && cfg.slug.contains(TOOL_ID_SEP) =>
+        {
+            cfg.slug.clone()
+        }
+        _ => format!("{APP_TOOL_PREFIX}{}", cfg.slug),
+    }
+}
 
 /// A plugin app tool resolved to its dispatch-ready backend + the owning plugin's
 /// grant set. Produced by [`McpRegistry::resolve_app_tool_backend`] from the LIVE
@@ -607,6 +717,14 @@ pub struct McpRegistry {
     /// chat tool loop) are not blocked by the rare write (registry reload after
     /// a POST /api/mcp/servers).
     servers: RwLock<BTreeMap<String, McpServerConfig>>,
+    /// MCP servers registered by ENABLED plugins from their manifest
+    /// `mcp_servers` block (the manifest-owned successor to hardcoded built-in
+    /// servers). Tracked separately from `servers` so a `reload()` — which
+    /// rebuilds `servers` from built-ins + `mcp.json` — re-overlays them instead
+    /// of dropping them within a session. Precedence when merged into `servers`:
+    /// built-in < plugin < user `mcp.json` (a user entry with the same name still
+    /// wins). Written only by `register_server`/`deregister_server`.
+    plugin_servers: RwLock<BTreeMap<String, McpServerConfig>>,
     /// Cache of `tools/list` results, keyed by server name. Populated lazily so
     /// startup never blocks on spawning every MCP server.
     tool_cache: Mutex<BTreeMap<String, Vec<RegistryTool>>>,
@@ -643,10 +761,12 @@ pub struct McpRegistry {
     /// disclosure). Cheap to clone (`Arc` inside). `None` in test/CLI contexts
     /// that don't wire it (the tools then report skills unavailable).
     pub skills: Option<ryu_skills::SkillRegistry>,
-    /// Preferences store, wired so the built-in `advisor` tool can resolve the
-    /// configured `advisor-model` (the stronger reviewer model). Cheap to clone
-    /// (`Arc` inside). `None` in test/CLI contexts; the tool then falls back to
-    /// env / the bundled default.
+    /// Preferences store, wired at boot. Cheap to clone (`Arc` inside). Currently
+    /// unread by the registry: the former native `advisor` provider used it to
+    /// resolve the `advisor-model` preference, but `advisor__consult` is now a
+    /// declarative `http` tool whose Core bridge (`/api/advisor/consult`) reads the
+    /// preference off `ServerState` directly. Kept as a wired seam for a future
+    /// registry-local reader rather than churning the boot path.
     pub preferences: Option<crate::server::preferences::PreferencesStore>,
     /// Loopback client for the out-of-process `ryu-teams` sidecar, wired so the
     /// `agent_builder__create_agent_team` tool can persist a team (over HTTP) after
@@ -654,11 +774,6 @@ pub struct McpRegistry {
     /// then reports the team sink unavailable rather than partially creating agents
     /// with no team.
     pub teams_client: Option<crate::teams_client::TeamsClient>,
-    /// Per-run worktree diff store, wired so the in-process `ryu.worktree` app
-    /// (worktree-diff-review widget) resolves a run's diff and applies/discards it.
-    /// Cheap to clone (`Arc` inside). `None` in test/CLI contexts; the app then
-    /// reports its store unavailable rather than acting on the wrong tree.
-    pub worktree_diffs: Option<crate::server::WorktreeDiffStore>,
     /// Spaces store, wired so the built-in `artifact__create` tool can save a
     /// generated file into a Space (default: the Artifacts system space) and the
     /// ACP auto-file hook can persist assistant-message media. Cheap to clone
@@ -672,6 +787,7 @@ impl McpRegistry {
     pub fn empty() -> Self {
         Self {
             servers: RwLock::new(BTreeMap::new()),
+            plugin_servers: RwLock::new(BTreeMap::new()),
             tool_cache: Mutex::new(BTreeMap::new()),
             resource_cache: Mutex::new(HashMap::new()),
             app_tools: Mutex::new(Vec::new()),
@@ -683,7 +799,6 @@ impl McpRegistry {
             skills: None,
             preferences: None,
             teams_client: None,
-            worktree_diffs: None,
             spaces: None,
         }
     }
@@ -692,6 +807,7 @@ impl McpRegistry {
     pub fn from_servers(servers: BTreeMap<String, McpServerConfig>) -> Self {
         Self {
             servers: RwLock::new(servers),
+            plugin_servers: RwLock::new(BTreeMap::new()),
             tool_cache: Mutex::new(BTreeMap::new()),
             resource_cache: Mutex::new(HashMap::new()),
             app_tools: Mutex::new(Vec::new()),
@@ -703,7 +819,6 @@ impl McpRegistry {
             skills: None,
             preferences: None,
             teams_client: None,
-            worktree_diffs: None,
             spaces: None,
         }
     }
@@ -735,14 +850,6 @@ impl McpRegistry {
         self
     }
 
-    /// Wire the per-run worktree diff store into the registry. Must be called after
-    /// construction to let the in-process `ryu.worktree` app resolve a run's diff
-    /// and apply/discard it (the worktree-diff-review widget).
-    pub fn with_worktree_diffs(mut self, store: crate::server::WorktreeDiffStore) -> Self {
-        self.worktree_diffs = Some(store);
-        self
-    }
-
     /// Wire the conversation store into the registry. Must be called after
     /// construction to enable the `search_conversations` built-in tool (semantic
     /// search over past chat messages).
@@ -770,9 +877,9 @@ impl McpRegistry {
         self
     }
 
-    /// Wire the preferences store into the registry. Must be called after
-    /// construction to let the built-in `advisor` tool resolve the configured
-    /// `advisor-model` (the stronger reviewer model).
+    /// Wire the preferences store into the registry. Retained boot-path seam; see
+    /// the [`Self::preferences`] field doc — no registry code currently reads it
+    /// (the advisor tool moved to the `/api/advisor/consult` bridge).
     pub fn with_preferences(
         mut self,
         preferences: crate::server::preferences::PreferencesStore,
@@ -791,66 +898,23 @@ impl McpRegistry {
 
     /// Built-in MCP servers Core always registers — no config file required.
     ///
-    /// Today this is just **Ghost** (U14), the desktop-automation server (29
-    /// tools) shipped in `apps/ghost`. It is spawned per request as
-    /// `~/.ryu/bin/ghost mcp` (the same binary + subcommand the `GhostManager`
-    /// sidecar uses), so the registry's short-lived stdio client can list and
-    /// call its tools without a long-lived process.
+    /// **Empty by design.** The two former hardcoded built-ins — **Ghost** (U14,
+    /// desktop automation) and **Agent Browser** (`npx agentbrowser`) — moved to
+    /// the manifest-owned path: they are declared under `mcp_servers` in their
+    /// plugin fixtures (`fixtures/{ghost,agentbrowser}.plugin.json`) and register
+    /// via [`register_manifest_mcp_servers`] on plugin activation (both are
+    /// default-on, so the boot `fire_activation_event("onStartup")` loop re-adds
+    /// them on every start). Ghost's profile-aware values that a static manifest
+    /// can't express — the `~/.ryu{profile}/bin/ghost` binary path
+    /// (`command_env: "RYU_GHOST_BIN"`), the island overlay URL, and the
+    /// per-profile `GHOST_DATA_DIR` — are seeded into Core's process env in
+    /// `main.rs` (see `seed_ghost_sidecar_env`) and reach the child via the
+    /// `RYU_GHOST_BIN` lowering + the `mcp_safe_env` allowlist.
     ///
-    /// Ghost is **Windows-first**: its perception/input backend targets Windows
-    /// first, with partial support elsewhere. When the binary isn't installed
-    /// (the common case off Windows, or before first install) the registry
-    /// degrades gracefully — `tools/list` simply fails to spawn and the server
-    /// is logged-and-skipped, so one unavailable built-in never hides the rest.
+    /// Kept as a seam (rather than deleted) so `load_merged_servers` still has a
+    /// base map and a future non-plugin built-in has a home.
     fn builtin_servers() -> BTreeMap<String, McpServerConfig> {
-        // Point Ghost at the island's loopback control server so its pointer/keyboard
-        // actions drive the visible ghost-cursor overlay (POST /ghost-cursor). Always
-        // injected — Core cannot know whether an island is running, but the sidecar's
-        // POSTs are fire-and-forget, so a dead port is a harmless no-op. Profile-shifted
-        // to match the island's own port math (control.ts: base 7989, +1000 for dev).
-        let mut ghost_env = BTreeMap::new();
-        ghost_env.insert(
-            "RYU_GHOST_OVERLAY_URL".to_owned(),
-            format!("http://127.0.0.1:{}/ghost-cursor", crate::profile::port(7989)),
-        );
-        let ghost = McpServerConfig {
-            command: crate::sidecar::tools::ghost::ghost_bin_path()
-                .to_string_lossy()
-                .into_owned(),
-            args: vec!["mcp".to_owned()],
-            env: ghost_env,
-            description: Some(
-                "Ghost — desktop automation (29 tools: screen perception + input control). \
-                 Windows-first; install the `ghost` sidecar to enable. Unavailable until installed."
-                    .to_owned(),
-            ),
-            enabled: true,
-            version: None,
-            catalog_id: None,
-        };
-        // Agent Browser — default web-browsing tool, launched via `npx agentbrowser`.
-        // Best-effort: the exact package entrypoint is provided by the npm package;
-        // if it isn't installed (or Node/npx is absent) the stdio client fails to
-        // spawn and this server is logged-and-skipped, so it never hides the rest.
-        // A user config entry named `agentbrowser` overrides this (see `load`).
-        let agentbrowser = McpServerConfig {
-            command: "npx".to_owned(),
-            args: vec!["-y".to_owned(), "agentbrowser".to_owned()],
-            env: BTreeMap::new(),
-            description: Some(
-                "Agent Browser — AI-powered web browsing (navigate, extract, interact). \
-                 Launched via `npx agentbrowser`; unavailable until the package (and Node) \
-                 are installed."
-                    .to_owned(),
-            ),
-            enabled: true,
-            version: None,
-            catalog_id: None,
-        };
-        let mut servers = BTreeMap::new();
-        servers.insert(GHOST_SERVER.to_owned(), ghost);
-        servers.insert(AGENTBROWSER_SERVER.to_owned(), agentbrowser);
-        servers
+        BTreeMap::new()
     }
 
     /// Load the registry. Always starts from the built-in servers (Ghost, U14),
@@ -859,9 +923,12 @@ impl McpRegistry {
     /// the built-ins. A user entry with the same name as a built-in **wins**,
     /// so operators can repoint or disable a built-in deterministically.
     pub fn load() -> Self {
-        let servers = Self::load_merged_servers();
+        // No plugin-declared servers at construction — those are overlaid later by
+        // `register_server` as enabled plugins activate (and re-applied by `reload`).
+        let servers = Self::load_merged_servers(&BTreeMap::new());
         Self {
             servers: RwLock::new(servers),
+            plugin_servers: RwLock::new(BTreeMap::new()),
             tool_cache: Mutex::new(BTreeMap::new()),
             resource_cache: Mutex::new(HashMap::new()),
             app_tools: Mutex::new(Vec::new()),
@@ -873,15 +940,24 @@ impl McpRegistry {
             skills: None,
             preferences: None,
             teams_client: None,
-            worktree_diffs: None,
             spaces: None,
         }
     }
 
-    /// Internal: compute the merged server map (built-ins + user file). Used by
-    /// both `load()` and `reload()`.
-    fn load_merged_servers() -> BTreeMap<String, McpServerConfig> {
+    /// Internal: compute the merged server map. Precedence, lowest first:
+    /// built-ins → plugin-declared (`plugin_servers`) → user `mcp.json`. A plugin
+    /// server overrides a built-in of the same name (the whole point of the
+    /// manifest-owned successor), and a user config entry still overrides both.
+    /// Used by both `load()` and `reload()`.
+    fn load_merged_servers(
+        plugin_servers: &BTreeMap<String, McpServerConfig>,
+    ) -> BTreeMap<String, McpServerConfig> {
         let mut servers = Self::builtin_servers();
+
+        // Plugin-declared servers overlay built-ins (user config below still wins).
+        for (name, cfg) in plugin_servers {
+            servers.insert(name.clone(), cfg.clone());
+        }
 
         let path = Self::config_path();
         match std::fs::read_to_string(&path) {
@@ -919,33 +995,83 @@ impl McpRegistry {
 
     /// Reload the server map from disk without restarting the process.
     ///
-    /// Re-derives built-ins then re-overlays the user's `mcp.json`, exactly as
-    /// `load()` does. The `tool_cache` is cleared so freshly registered servers
-    /// advertise their tools on the next `/api/mcp/tools` request.
+    /// Re-derives built-ins, re-overlays the plugin-declared servers (so a session
+    /// reload never drops a plugin's MCP server), then re-overlays the user's
+    /// `mcp.json`, exactly as `load()` + the active registrations do. The
+    /// `tool_cache` is cleared so freshly registered servers advertise their tools
+    /// on the next `/api/mcp/tools` request.
     pub fn reload(&self) {
-        let fresh = Self::load_merged_servers();
-        let mut servers = self.servers.write().expect("mcp servers RwLock poisoned");
-        *servers = fresh;
-        drop(servers);
+        self.rebuild_servers();
+        tracing::info!("McpRegistry: reloaded from disk");
+    }
+
+    /// Recompute the live `servers` map from built-ins + `plugin_servers` + the
+    /// user `mcp.json`, and clear the tool/resource caches. The single place that
+    /// re-derives `servers`, shared by `reload()` and
+    /// `register_server`/`deregister_server` so plugin overlays are applied
+    /// consistently. Never holds a lock across the recompute (the file read + the
+    /// plugin-map snapshot both complete before the `servers` write lock is taken).
+    fn rebuild_servers(&self) {
+        let plugin_snapshot = self
+            .plugin_servers
+            .read()
+            .expect("mcp plugin_servers RwLock poisoned")
+            .clone();
+        let fresh = Self::load_merged_servers(&plugin_snapshot);
+        {
+            let mut servers = self.servers.write().expect("mcp servers RwLock poisoned");
+            *servers = fresh;
+        }
         if let Ok(mut cache) = self.tool_cache.lock() {
             cache.clear();
         }
         if let Ok(mut cache) = self.resource_cache.lock() {
             cache.clear();
         }
-        tracing::info!("McpRegistry: reloaded from disk");
+    }
+
+    /// Register a plugin-declared MCP server into the live registry.
+    ///
+    /// Records it in `plugin_servers` (so a session `reload()` re-applies it) and
+    /// rebuilds `servers`. Idempotent: registering the same name again overwrites
+    /// the prior declaration. A user `mcp.json` entry of the same name still wins
+    /// after the rebuild (user-overrides-plugin precedence). Called from the plugin
+    /// enable/activation path via [`register_manifest_mcp_servers`].
+    pub fn register_server(&self, name: String, cfg: McpServerConfig) {
+        {
+            let mut plugins = self
+                .plugin_servers
+                .write()
+                .expect("mcp plugin_servers RwLock poisoned");
+            plugins.insert(name, cfg);
+        }
+        self.rebuild_servers();
+    }
+
+    /// Deregister a plugin-declared MCP server. Removes it from `plugin_servers`
+    /// and rebuilds `servers` (so a built-in of the same name, if any, resurfaces).
+    /// Returns whether a plugin server by that name was present. Called from the
+    /// plugin disable/uninstall path via [`deregister_manifest_mcp_servers`].
+    pub fn deregister_server(&self, name: &str) -> bool {
+        let removed = {
+            let mut plugins = self
+                .plugin_servers
+                .write()
+                .expect("mcp plugin_servers RwLock poisoned");
+            plugins.remove(name).is_some()
+        };
+        if removed {
+            self.rebuild_servers();
+        }
+        removed
     }
 
     /// Whether a server with the given `name` is already registered (built-ins
-    /// included). The built-in Shadow, Spider, and Exa providers are synthesized
+    /// included). The built-in Shadow and Exa providers are synthesized
     /// only in `server_summaries()` and are NOT in `servers`, so they are checked
     /// by name explicitly.
     pub fn contains_server(&self, name: &str) -> bool {
-        if name == shadow::SERVER_NAME
-            || name == spider::SERVER_NAME
-            || name == rtk::SERVER_NAME
-            || name == exa::SERVER_NAME
-            || name == web_fetch::SERVER_NAME
+        if name == web_fetch::SERVER_NAME
             || name == sandbox::SERVER_NAME
             || name == notify_tool::SERVER_NAME
             || name == artifact_tool::SERVER_NAME
@@ -955,10 +1081,8 @@ impl McpRegistry {
             || name == delegate::SERVER_NAME
             || name == orchestrator::SERVER_NAME
             || name == skills_tool::SERVER_NAME
-            || name == advisor::SERVER_NAME
             || name == ui_tool::SERVER_NAME
             || name == research::SERVER_NAME
-            || apps::owns(name)
         {
             return true;
         }
@@ -969,33 +1093,12 @@ impl McpRegistry {
     }
 
     /// Summaries of every registered server (for `GET /api/mcp/servers`).
-    /// Includes the built-in Shadow, Spider, and Exa providers alongside config
+    /// Includes the built-in Shadow and Exa providers alongside config
     /// servers.
     pub fn server_summaries(&self) -> Vec<ServerSummary> {
-        let spider_bin = spider::spider_bin_path();
         let sandbox_enabled = sandbox::is_enabled();
         let sandbox_available = cfg!(feature = "sandbox-wasmtime");
         let mut summaries = vec![
-            ServerSummary {
-                name: shadow::SERVER_NAME.to_owned(),
-                command: "(built-in HTTP)".to_owned(),
-                args: vec![],
-                description: Some(
-                    "Built-in Shadow capture + search (Windows-first). Reachable when the Shadow sidecar is running on :3030.".to_owned(),
-                ),
-                enabled: true,
-                available: Some(true),
-            },
-            ServerSummary {
-                name: spider::SERVER_NAME.to_owned(),
-                command: spider_bin.to_string_lossy().into_owned(),
-                args: vec!["crawl".to_owned()],
-                description: Some(
-                    "Built-in Spider web crawler. Install the Spider sidecar to enable. Degrades gracefully when not installed.".to_owned(),
-                ),
-                enabled: true,
-                available: Some(spider_bin.exists()),
-            },
             ServerSummary {
                 name: research::SERVER_NAME.to_owned(),
                 command: "(built-in HTTP)".to_owned(),
@@ -1005,28 +1108,6 @@ impl McpRegistry {
                 ),
                 enabled: true,
                 available: Some(crate::sidecar::tools::research::is_installed()),
-            },
-            ServerSummary {
-                name: rtk::SERVER_NAME.to_owned(),
-                command: rtk::rtk_bin_path()
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "rtk".to_owned()),
-                args: vec!["run".to_owned()],
-                description: Some(
-                    "Built-in RTK (Rust Token Killer): runs a dev command and returns a token-compressed version of its output. BYO — detected on PATH (or RYU_RTK_BIN). Degrades gracefully when not installed.".to_owned(),
-                ),
-                enabled: true,
-                available: Some(rtk::is_available()),
-            },
-            ServerSummary {
-                name: exa::SERVER_NAME.to_owned(),
-                command: "(built-in HTTP)".to_owned(),
-                args: vec![],
-                description: Some(
-                    "Built-in Exa neural web search (BYOK: set RYU_EXA_API_KEY). Degrades gracefully when key is absent.".to_owned(),
-                ),
-                enabled: true,
-                available: Some(true),
             },
             ServerSummary {
                 name: web_fetch::SERVER_NAME.to_owned(),
@@ -1144,19 +1225,6 @@ impl McpRegistry {
                 available: Some(true),
             },
             ServerSummary {
-                name: advisor::SERVER_NAME.to_owned(),
-                command: "(built-in)".to_owned(),
-                args: vec![],
-                description: Some(
-                    "Built-in advisor: consult a stronger model for a second opinion on the \
-                     current task (advisor__consult) — before committing to an approach, when \
-                     stuck, or before declaring done."
-                        .to_owned(),
-                ),
-                enabled: true,
-                available: Some(true),
-            },
-            ServerSummary {
                 name: ui_tool::SERVER_NAME.to_owned(),
                 command: "(built-in)".to_owned(),
                 args: vec![],
@@ -1236,6 +1304,7 @@ impl McpRegistry {
                     widget,
                     widget_accessible,
                     output_template,
+                    app_backend: None,
                 }
             })
             .collect();
@@ -1252,13 +1321,7 @@ impl McpRegistry {
     /// resolved via `list_all_tools` (cached). Returns `None` for tools that do
     /// not render a widget.
     pub async fn widget_binding(&self, tool_id: &str) -> Option<WidgetBinding> {
-        let (server, _tool) = Self::split_tool_id(tool_id)?;
-        if apps::owns(server) {
-            return apps::tools()
-                .into_iter()
-                .find(|t| t.id == tool_id)
-                .and_then(|t| t.widget);
-        }
+        let (_server, _tool) = Self::split_tool_id(tool_id)?;
         self.list_all_tools()
             .await
             .into_iter()
@@ -1386,19 +1449,15 @@ impl McpRegistry {
                     .iter()
                     .any(|w| w.tool_id == tool_id)
                     .then(|| {
-                        let has_grant = m
-                            .permission_grants
-                            .iter()
-                            .any(|g| g == WIDGET_RENDER_GRANT);
+                        let has_grant =
+                            m.permission_grants.iter().any(|g| g == WIDGET_RENDER_GRANT);
                         (m.id.clone(), has_grant)
                     })
             });
             let synth_owner = server.as_ref().and_then(|srv| {
                 guard
                     .iter()
-                    .find(|m| {
-                        m.id == *srv && m.category.as_deref() == Some(MCP_SERVER_CATEGORY)
-                    })
+                    .find(|m| m.id == *srv && m.category.as_deref() == Some(MCP_SERVER_CATEGORY))
                     .map(|m| m.id.clone())
             });
             (declared, synth_owner)
@@ -1453,9 +1512,6 @@ impl McpRegistry {
     /// MCP server is asked over `resources/read`. Never holds the cache lock
     /// across an `.await`.
     pub async fn widget_resource(&self, server: &str, uri: &str) -> Option<WidgetResource> {
-        if apps::owns(server) {
-            return apps::read_resource(uri);
-        }
         // Cache hit?
         if let Ok(cache) = self.resource_cache.lock() {
             if let Some(res) = cache.get(server).and_then(|m| m.get(uri)) {
@@ -1493,9 +1549,6 @@ impl McpRegistry {
     /// Prewarm every widget resource a server advertises so the emit path can
     /// resolve HTML without a round-trip. In-process apps are already warm.
     pub async fn prewarm_widgets(&self, server: &str) -> Result<()> {
-        if apps::owns(server) {
-            return Ok(());
-        }
         let cmd = {
             let servers = self.servers.read().expect("mcp servers RwLock poisoned");
             let Some(cfg) = servers.get(server) else {
@@ -1518,9 +1571,6 @@ impl McpRegistry {
     /// The fully-qualified ids of the widget-accessible (companion) tools on
     /// `server` — used to bound which tools a mounted widget may `callTool`.
     pub async fn widget_accessible_tool_ids(&self, server: &str) -> Vec<String> {
-        if apps::owns(server) {
-            return apps::widget_accessible_tool_ids(server);
-        }
         self.tools_for_server(server)
             .await
             .map(|tools| {
@@ -1548,14 +1598,10 @@ impl McpRegistry {
             servers.keys().cloned().collect()
         };
 
-        let mut all = shadow::tools();
-        all.extend(spider::tools());
         // Built-in autoresearch tools — drive the research sidecar's experiment
         // loop. Always listed; dispatch reports unavailable when the sidecar is
         // not running (opt-in / not installed).
-        all.extend(research::tools());
-        all.extend(rtk::tools());
-        all.extend(exa::tools());
+        let mut all = research::tools();
         // Built-in authenticated web fetch (Identity Vault credential consumer).
         all.extend(web_fetch::tools());
         // Built-in wasmtime sandbox tools (M6 / issue #190) — always listed;
@@ -1580,10 +1626,6 @@ impl McpRegistry {
         // Skills on demand). Always listed; dispatch reports unavailable when the
         // skill registry is not wired (test / CLI contexts).
         all.extend(skills_tool::tools());
-        // Built-in advisor tool — consult a stronger reviewer model for a second
-        // opinion. Always listed; dispatch reports a structured error if the
-        // Gateway call fails so the agent's turn continues.
-        all.extend(advisor::tools());
         // Built-in generative-UI tool — render a rich UI inline in chat from a
         // json-render spec. Always listed; client-rendered (Core dispatch is a no-op).
         all.extend(ui_tool::tools());
@@ -1606,10 +1648,6 @@ impl McpRegistry {
                 Err(e) => tracing::warn!("MCP server '{name}' tools/list failed: {e}"),
             }
         }
-        // In-process Ryu Apps provider (widget-rendering tools) — always listed;
-        // dispatch runs in-process. Their widget `_meta` binding drives the
-        // widget-emit path.
-        all.extend(apps::tools());
         // Include in-memory tools registered by enabled apps (tool-as-Runnable).
         if let Ok(app) = self.app_tools.lock() {
             all.extend(app.iter().cloned());
@@ -1698,7 +1736,13 @@ impl McpRegistry {
         // `Unrestricted` — byte-identical to before. (Verified: no such caller
         // invokes a `threads__*` / `search_conversations__*` tool today.)
         self.call_tool_with_identity_no_gate(
-            tool_id, arguments, allowlist, user_id, &[], None, None,
+            tool_id,
+            arguments,
+            allowlist,
+            user_id,
+            &[],
+            None,
+            None,
         )
         .await
     }
@@ -1719,18 +1763,22 @@ impl McpRegistry {
     ///
     /// This is the **gated** entry: before the identity consult it runs the
     /// human-in-the-loop approval gate ([`crate::approvals::gate_tool_call`]). If
-    /// the global approval mode gates this tool, the call is **not** executed —
+    /// the approval policy gates this tool, the call is **not** executed —
     /// a plain `approval_pending` result is returned (queued in the inbox) and the
     /// approval engine runs the tool on approve via
     /// [`call_tool_with_identity_no_gate`](Self::call_tool_with_identity_no_gate).
-    /// Default mode `off` ⇒ the gate never fires ⇒ behavior is identical to before.
+    ///
+    /// `agent_id` identifies the CALLING agent so its configured `approval_tools`
+    /// (policy Layer A) feed the gate; `None` (agent-less caller) skips Layer A.
     ///
     /// `host_conversation_id` is the **server-derived** conversation this agent turn
     /// runs on behalf of (the ACP bridge's `permission_scope_id`). It is lowered to a
     /// [`ToolPrincipal`] at dispatch time and is the ONLY authorization principal on
     /// the agent plane — never `user_id`, which is client-supplied and spoofable.
+    #[allow(clippy::too_many_arguments)]
     pub async fn call_tool_with_identity(
         &self,
+        agent_id: Option<&str>,
         tool_id: &str,
         arguments: Value,
         allowlist: Option<&[String]>,
@@ -1739,9 +1787,42 @@ impl McpRegistry {
         session_id: Option<String>,
         host_conversation_id: Option<&str>,
     ) -> Result<Value> {
+        // Layer A input: the calling agent's configured approval_tools. Missing
+        // store / unknown id degrade to an empty list (Layers B/B′ still apply).
+        let agent_approval_tools: Vec<String> = match (agent_id, &self.agent_store) {
+            (Some(id), Some(store)) => store
+                .get(id)
+                .await
+                .ok()
+                .flatten()
+                .map(|rec| rec.approval_tools)
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        // An `app__…` id's action segment is plugin-chosen and can look benign
+        // while its manifest-fixed alias target is risky (`gmail__send_email`),
+        // so the gate must classify the RESOLVED target — plugin naming must not
+        // launder a risky call past `smart`. Non-alias backends (inline/http)
+        // keep their own grant gates and classify under the outer id.
+        let gate_id: String = if tool_id.starts_with(APP_TOOL_PREFIX) {
+            match self.resolve_app_tool_backend(tool_id).await {
+                Some(resolved) => match resolved.backend {
+                    crate::plugin_manifest::schema::ToolBackend::Alias { target } => target,
+                    _ => tool_id.to_owned(),
+                },
+                // Legacy alias re-enter: the target is the id after the prefix.
+                None => tool_id
+                    .strip_prefix(APP_TOOL_PREFIX)
+                    .unwrap_or(tool_id)
+                    .to_owned(),
+            }
+        } else {
+            tool_id.to_owned()
+        };
         if let Some(err) = crate::approvals::gate_tool_call(
-            tool_id,
+            &gate_id,
             &arguments,
+            &agent_approval_tools,
             allowlist,
             user_id,
             profile_ids,
@@ -1763,7 +1844,9 @@ impl McpRegistry {
         // tool dispatch. Skipped instantly (DB-free) when no tool-hook plugin is
         // loaded (`any_manifest_declares`).
         if let Some(reason) = run_pre_tool_hooks(tool_id, &arguments, session_id.as_deref()).await {
-            return Err(anyhow!("tool '{tool_id}' blocked by a plugin hook: {reason}"));
+            return Err(anyhow!(
+                "tool '{tool_id}' blocked by a plugin hook: {reason}"
+            ));
         }
         // Keep a copy for the (detached) post-hook before `arguments` is consumed.
         let tool_input = arguments.clone();
@@ -1873,8 +1956,8 @@ impl McpRegistry {
 
         // App-registered tool (tool-as-Runnable, M3): an enabled plugin re-exposes
         // an existing registry tool under its own `app__` namespace. The plugin's
-        // Tool Runnable `slug` IS the target tool id (e.g. `app__exa__search` →
-        // `exa__search`), so dispatch resolves the target and re-enters `call_tool`.
+        // Tool Runnable `slug` IS the target tool id (e.g. `app__web_search` →
+        // `web_search`), so dispatch resolves the target and re-enters `call_tool`.
         //
         // The allowlist is enforced HERE, on the `app__` id (the granted
         // capability). The inner dispatch runs with NO allowlist because the
@@ -1883,7 +1966,19 @@ impl McpRegistry {
         // arm an `app__*` id falls through to the generic server lookup and errors
         // with "unknown MCP server: app", so registered app tools were listable
         // and searchable but not callable.
-        if server == APP_TOOL_SERVER {
+        // A declarative tool plugin may register under its NATIVE id (`exa__search`)
+        // instead of `app__<slug>` (see `app_tool_registered_id`). Such an id splits
+        // to a `server` that is NOT `"app"`, so route it through the app-tool arm too
+        // when the id is a registered app tool. The bag is tiny + write-rare, so the
+        // uncontended scan is negligible; a native app tool takes precedence over a
+        // same-named external MCP server (an explicit enabled-plugin registration).
+        let is_native_app_tool = server != APP_TOOL_SERVER
+            && self
+                .app_tools
+                .lock()
+                .map(|tools| tools.iter().any(|t| t.id == tool_id))
+                .unwrap_or(false);
+        if server == APP_TOOL_SERVER || is_native_app_tool {
             // Only dispatch ids an enabled app actually registered — never an
             // arbitrary `app__`-prefixed id a caller invents.
             let known = self
@@ -1895,7 +1990,10 @@ impl McpRegistry {
                 return Err(anyhow!("unknown app tool '{tool_id}'"));
             }
             if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
+                // Build the candidate with the REGISTERED server (`app`), not the
+                // split segment (`exa`), so an `allow:["app"]` entry authorizes
+                // dispatch identically to how it authorizes listing.
+                let candidate = RegistryTool::candidate(tool_id, APP_TOOL_SERVER, tool);
                 if !tool_allowed(&candidate, list) {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
@@ -1912,7 +2010,10 @@ impl McpRegistry {
                     ToolBackend::InlineDeno { code } => {
                         // Grant-gated (same model as a turn hook): the plugin must
                         // hold `tool:execute`.
-                        if !resolved.grants.contains(crate::tool_exec::GRANT_TOOL_EXECUTE) {
+                        if !resolved
+                            .grants
+                            .contains(crate::tool_exec::GRANT_TOOL_EXECUTE)
+                        {
                             return Err(anyhow!(
                                 "inline tool '{tool_id}' requires the '{}' grant",
                                 crate::tool_exec::GRANT_TOOL_EXECUTE
@@ -1928,13 +2029,15 @@ impl McpRegistry {
                                 "inline tool '{tool_id}' unavailable: server state not initialized"
                             ));
                         };
-                        let bridge = std::sync::Arc::new(crate::plugin_host::PluginHookBridge::new(
-                            resolved.plugin_id.clone(),
-                            resolved.grants.clone(),
-                            state,
-                        ));
-                        let invoker =
-                            std::sync::Arc::new(crate::tool_exec::SandboxToolInvoker::bridge(bridge));
+                        let bridge =
+                            std::sync::Arc::new(crate::plugin_host::PluginHookBridge::new(
+                                resolved.plugin_id.clone(),
+                                resolved.grants.clone(),
+                                state,
+                            ));
+                        let invoker = std::sync::Arc::new(
+                            crate::tool_exec::SandboxToolInvoker::bridge(bridge),
+                        );
                         let program =
                             crate::tool_exec::build_inline_tool_program(&arguments, &code);
                         // Lower the owning manifest's unified permission set to the
@@ -2002,14 +2105,62 @@ impl McpRegistry {
                         url,
                         method,
                         header_params,
+                        secret_headers,
+                        fail_open,
+                        unwrap_body,
+                        body_defaults,
                     } => {
                         // Gateway-governed egress; the domain grant is checked first
-                        // (deterministic refusal) inside `run_http_tool`.
+                        // (deterministic refusal) inside `run_http_tool`. The
+                        // `secret_headers` are resolved server-side (env/vault) and
+                        // never model-visible; `profile_ids` thread the vault read.
+                        // `body_defaults` are deep-merged under the model body and
+                        // `unwrap_body` shapes the 2xx result — both are declarative
+                        // manifest knobs, not exa-specific code.
                         return crate::tool_exec::run_http_tool(
                             &url,
                             &method,
                             arguments,
                             &header_params,
+                            &secret_headers,
+                            fail_open,
+                            unwrap_body,
+                            &body_defaults,
+                            &resolved.grants,
+                            profile_ids,
+                            &resolved.plugin_id,
+                            session_id.as_deref(),
+                        )
+                        .await
+                        .map_err(|e| anyhow!(e));
+                    }
+                    ToolBackend::Command {
+                        bin,
+                        args,
+                        env,
+                        cwd,
+                        timeout_secs,
+                        output,
+                        egress_url_arg,
+                        arg_specs,
+                        arg_bounds,
+                    } => {
+                        // Exec an allowlisted local CLI through the governed path.
+                        // The bin grant + allowlist are checked first (deterministic)
+                        // inside `run_command_tool`. The approval gate (if any) has
+                        // already classified under the outer `app__` id (gate_id's
+                        // `_ => tool_id` arm), so no per-target re-gate is needed.
+                        return crate::tool_exec::run_command_tool(
+                            &bin,
+                            &args,
+                            arg_specs.as_deref(),
+                            &env,
+                            cwd.as_deref(),
+                            timeout_secs,
+                            output,
+                            egress_url_arg.as_deref(),
+                            &arg_bounds,
+                            arguments,
                             &resolved.grants,
                             &resolved.plugin_id,
                             session_id.as_deref(),
@@ -2048,49 +2199,6 @@ impl McpRegistry {
             .await;
         }
 
-        // In-process Ryu Apps provider (widget-rendering tools). Allowlist-gated
-        // like the other built-ins. Widget-initiated `callTool`s additionally
-        // require the tool to be `widget_accessible` — enforced upstream at
-        // `/api/widgets/tools/call` (provenance gate), not here.
-        if apps::owns(server) {
-            if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
-                if !tool_allowed(&candidate, list) {
-                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
-                }
-            }
-            let ctx = apps::AppDispatchCtx {
-                http: &self.http,
-                worktree_diffs: self.worktree_diffs.as_ref(),
-                conversation_id: session_id.clone(),
-                agent_id: None,
-                user_id: user_id.map(str::to_owned),
-            };
-            return apps::dispatch(server, tool, arguments, ctx).await;
-        }
-
-        // Built-in Shadow provider (U15): dispatched over HTTP.
-        if server == shadow::SERVER_NAME {
-            if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
-                if !tool_allowed(&candidate, list) {
-                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
-                }
-            }
-            return shadow::dispatch(&self.http, tool, arguments).await;
-        }
-
-        // Built-in Spider provider (U040): dispatched by shelling out to the binary.
-        if server == spider::SERVER_NAME {
-            if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
-                if !tool_allowed(&candidate, list) {
-                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
-                }
-            }
-            return spider::dispatch(tool, arguments).await;
-        }
-
         // Built-in Research provider: dispatched over HTTP to the sidecar.
         // Degrades gracefully to `available: false` when the sidecar is down.
         if server == research::SERVER_NAME {
@@ -2108,29 +2216,6 @@ impl McpRegistry {
                 }
             }
             return research::dispatch(&self.http, tool, arguments).await;
-        }
-
-        // Built-in RTK provider: dispatched by shelling out to the `rtk` binary
-        // (detect-on-PATH). Degrades gracefully to `available: false` when absent.
-        if server == rtk::SERVER_NAME {
-            if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
-                if !tool_allowed(&candidate, list) {
-                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
-                }
-            }
-            return rtk::dispatch(tool, arguments).await;
-        }
-
-        // Built-in Exa provider (U040): dispatched over HTTP with a BYOK key.
-        if server == exa::SERVER_NAME {
-            if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
-                if !tool_allowed(&candidate, list) {
-                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
-                }
-            }
-            return exa::dispatch(&self.http, tool, arguments).await;
         }
 
         // Built-in wasmtime sandbox provider (M6 / issue #190).
@@ -2315,19 +2400,6 @@ impl McpRegistry {
             return skills_tool::dispatch(tool, arguments, skills).await;
         }
 
-        // Built-in advisor tool — consult a stronger reviewer model. Always
-        // available (the Gateway call needs only the registry's http client); the
-        // preferences store, when wired, supplies the configured `advisor-model`.
-        if server == advisor::SERVER_NAME {
-            if let Some(list) = allowlist {
-                let candidate = RegistryTool::candidate(tool_id, server, tool);
-                if !tool_allowed(&candidate, list) {
-                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
-                }
-            }
-            return advisor::dispatch(tool, arguments, &self.http, self.preferences.as_ref()).await;
-        }
-
         // Built-in authenticated web-fetch provider (Identity Vault consumer):
         // fetches a page over HTTPS, injecting the user's sealed session for the
         // URL's domain (resolved by the consult above) server-side. The credential
@@ -2453,8 +2525,23 @@ impl McpRegistry {
     /// The `server` field is set to `"app"` so the tool can be found in
     /// allowlists with the entry `"app"`.
     pub fn register_app_tool(&self, id: String, name: String, description: Option<String>) {
+        self.register_app_tool_tagged(id, name, description, None);
+    }
+
+    /// Like [`register_app_tool`](Self::register_app_tool) but records the resolved
+    /// declarative backend as an [`AppToolBackendTag`] so the catalog can surface a
+    /// `command` tool as [`catalog::ToolKind::Command`]. The server Tool handler
+    /// passes the tag it derives from `ToolConfig::resolve_backend`.
+    pub fn register_app_tool_tagged(
+        &self,
+        id: String,
+        name: String,
+        description: Option<String>,
+        app_backend: Option<AppToolBackendTag>,
+    ) {
         let tool = RegistryTool {
             description,
+            app_backend,
             ..RegistryTool::candidate(&id, APP_TOOL_SERVER, &name)
         };
         if let Ok(mut tools) = self.app_tools.lock() {
@@ -2506,19 +2593,15 @@ impl McpRegistry {
                 if entry.kind != crate::runnable::RunnableKind::Tool {
                     continue;
                 }
-                let Some(cfg) = entry
-                    .config
-                    .as_ref()
-                    .and_then(|v| {
-                        serde_json::from_value::<crate::plugin_manifest::schema::ToolConfig>(
-                            v.clone(),
-                        )
+                let Some(cfg) = entry.config.as_ref().and_then(|v| {
+                    serde_json::from_value::<crate::plugin_manifest::schema::ToolConfig>(v.clone())
                         .ok()
-                    })
-                else {
+                }) else {
                     continue;
                 };
-                if format!("{APP_TOOL_PREFIX}{}", cfg.slug) != tool_id {
+                // Match the SAME id registration mints (native id for a namespaced
+                // non-Alias tool, else `app__<slug>`) so resolution never diverges.
+                if app_tool_registered_id(&cfg) != tool_id {
                     continue;
                 }
                 // A malformed backend was already rejected at manifest validation;
@@ -2593,10 +2676,7 @@ async fn build_cap_shim_augment(plugin_id: &str) -> ryu_tool_exec::SandboxAugmen
                 crate::sidecar::ext_proxy::node_token().as_deref(),
                 plugin_id,
             );
-            env.insert(
-                crate::sidecar::ext_proxy::ENV_EXT_TOKEN.to_owned(),
-                token,
-            );
+            env.insert(crate::sidecar::ext_proxy::ENV_EXT_TOKEN.to_owned(), token);
             env.insert(
                 crate::sidecar::ext_proxy::ENV_EXT_PLUGIN_ID.to_owned(),
                 plugin_id.to_owned(),
@@ -2725,6 +2805,112 @@ mod tests {
         RegistryTool::candidate("fs__read_file", "fs", "read_file")
     }
 
+    // ── plugin-declared mcp_servers registration ───────────────────────────────
+
+    /// A manifest that declares one stdio MCP server under `mcp_servers`.
+    fn manifest_with_mcp_server(id: &str, server: &str) -> PluginManifest {
+        let mut mcp_servers = BTreeMap::new();
+        mcp_servers.insert(
+            server.to_owned(),
+            crate::plugin_manifest::McpServerDecl {
+                command: "npx".to_owned(),
+                command_env: None,
+                args: vec!["-y".to_owned(), "some-mcp".to_owned()],
+                env: BTreeMap::new(),
+                description: Some("a plugin-declared server".to_owned()),
+                enabled: true,
+            },
+        );
+        PluginManifest {
+            id: id.to_owned(),
+            name: "Test".to_owned(),
+            version: "1.0.0".to_owned(),
+            mcp_servers,
+            ..Default::default()
+        }
+    }
+
+    /// Enable seam: registering a manifest's `mcp_servers` puts each declared
+    /// server into the live registry (spawnable + listable).
+    #[test]
+    fn install_registers_a_manifest_mcp_server() {
+        let reg = McpRegistry::empty();
+        assert!(!reg.contains_server("com.test.srv"));
+
+        let manifest = manifest_with_mcp_server("com.test.plugin", "com.test.srv");
+        let names = register_manifest_mcp_servers(&reg, &manifest);
+
+        assert_eq!(names, vec!["com.test.srv"]);
+        assert!(reg.contains_server("com.test.srv"));
+        let servers = reg.servers.read().expect("lock");
+        let cfg = servers.get("com.test.srv").expect("server registered");
+        assert_eq!(cfg.command, "npx");
+        assert_eq!(cfg.args, vec!["-y", "some-mcp"]);
+    }
+
+    /// Uninstall/disable seam: deregistering a manifest's `mcp_servers` removes
+    /// each declared server from the live registry.
+    #[test]
+    fn uninstall_deregisters_a_manifest_mcp_server() {
+        let reg = McpRegistry::empty();
+        let manifest = manifest_with_mcp_server("com.test.plugin", "com.test.srv");
+        register_manifest_mcp_servers(&reg, &manifest);
+        assert!(reg.contains_server("com.test.srv"));
+
+        deregister_manifest_mcp_servers(&reg, &manifest);
+        assert!(!reg.contains_server("com.test.srv"));
+        assert!(reg
+            .servers
+            .read()
+            .expect("lock")
+            .get("com.test.srv")
+            .is_none());
+    }
+
+    /// A `reload()` (rebuild from built-ins + `mcp.json`) must NOT drop a
+    /// plugin-registered server — it is tracked in `plugin_servers` and re-overlaid.
+    #[test]
+    fn reload_preserves_plugin_registered_servers() {
+        let _guard = lock_mcp_env();
+        let missing = std::env::temp_dir().join(format!("ryu-no-mcp-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        std::env::set_var("RYU_MCP_CONFIG", &missing);
+
+        let reg = McpRegistry::empty();
+        let manifest = manifest_with_mcp_server("com.test.plugin", "com.test.srv");
+        register_manifest_mcp_servers(&reg, &manifest);
+        assert!(reg.contains_server("com.test.srv"));
+
+        reg.reload();
+        assert!(
+            reg.contains_server("com.test.srv"),
+            "reload must re-overlay plugin-registered servers"
+        );
+
+        std::env::remove_var("RYU_MCP_CONFIG");
+    }
+
+    /// `command_env`, when set to a non-empty value, overrides the bare `command`.
+    #[test]
+    fn command_env_overrides_command_when_set() {
+        std::env::set_var("RYU_TEST_MCP_BIN", "/opt/ryu/bin/thing");
+        let decl = crate::plugin_manifest::McpServerDecl {
+            command: "thing".to_owned(),
+            command_env: Some("RYU_TEST_MCP_BIN".to_owned()),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            description: None,
+            enabled: true,
+        };
+        let cfg = mcp_server_config_from_decl(&decl);
+        assert_eq!(cfg.command, "/opt/ryu/bin/thing");
+        std::env::remove_var("RYU_TEST_MCP_BIN");
+
+        // Unset env var ⇒ fall back to the bare command.
+        let cfg2 = mcp_server_config_from_decl(&decl);
+        assert_eq!(cfg2.command, "thing");
+    }
+
     #[test]
     fn allowlist_none_allows_all() {
         let t = sample_tool();
@@ -2763,25 +2949,68 @@ mod tests {
         assert_eq!(McpRegistry::split_tool_id(&id), Some(("git", "commit")));
     }
 
+    /// Ghost moved from a hardcoded `builtin_servers()` entry to its plugin
+    /// manifest's `mcp_servers` (fixtures/ghost.plugin.json). Installing/activating
+    /// the plugin registers the MCP server via `register_manifest_mcp_servers`, and
+    /// its `command_env` (RYU_GHOST_BIN) resolves the bare `ghost` command to the
+    /// absolute `~/.ryu/bin/ghost` path at lowering time. This is the task's
+    /// "installing the plugin registers the MCP" verification.
     #[test]
-    fn builtin_includes_ghost_with_mcp_subcommand() {
-        let builtins = McpRegistry::builtin_servers();
-        let ghost = builtins
+    fn ghost_manifest_registers_with_mcp_subcommand() {
+        let _lock = lock_mcp_env();
+        let ghost_manifest = crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .find(|m| m.id == "ghost")
+            .expect("ghost built-in manifest present");
+
+        // RYU_GHOST_BIN (the profile-scoped path Core seeds in main.rs) overrides
+        // the bare `ghost` command at lowering time.
+        let bin = if cfg!(windows) {
+            "C:\\ryu\\bin\\ghost.exe"
+        } else {
+            "/ryu/bin/ghost"
+        };
+        std::env::set_var("RYU_GHOST_BIN", bin);
+        let reg = McpRegistry::empty();
+        let names = register_manifest_mcp_servers(&reg, &ghost_manifest);
+        std::env::remove_var("RYU_GHOST_BIN");
+
+        assert_eq!(names, vec![GHOST_SERVER.to_owned()]);
+        let servers = reg.servers.read().expect("lock");
+        let ghost = servers
             .get(GHOST_SERVER)
-            .expect("ghost built-in is registered");
+            .expect("ghost registered from manifest");
         assert_eq!(ghost.args, vec!["mcp".to_owned()]);
         assert!(ghost.enabled);
-        // Command must resolve to the ghost binary, not a bare name.
-        let cmd = ghost.command.to_lowercase();
-        assert!(
-            cmd.ends_with("ghost") || cmd.ends_with("ghost.exe"),
-            "unexpected ghost command: {}",
-            ghost.command
+        assert_eq!(
+            ghost.command, bin,
+            "RYU_GHOST_BIN must override the bare `ghost` command"
         );
     }
 
+    /// Agent Browser also moved from `builtin_servers()` to its plugin manifest's
+    /// `mcp_servers` (fixtures/agentbrowser.plugin.json). Activating the plugin
+    /// registers the `npx agentbrowser` stdio server.
     #[test]
-    fn load_survives_missing_config_and_keeps_builtins() {
+    fn agentbrowser_manifest_registers_via_npx() {
+        let manifest = crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .find(|m| m.id == "agentbrowser")
+            .expect("agentbrowser built-in manifest present");
+        let reg = McpRegistry::empty();
+        let names = register_manifest_mcp_servers(&reg, &manifest);
+        assert_eq!(names, vec![AGENTBROWSER_SERVER.to_owned()]);
+        let servers = reg.servers.read().expect("lock");
+        let ab = servers
+            .get(AGENTBROWSER_SERVER)
+            .expect("agentbrowser registered from manifest");
+        assert_eq!(ab.command, "npx");
+        assert_eq!(ab.args, vec!["-y".to_owned(), "agentbrowser".to_owned()]);
+        assert!(ab.enabled);
+    }
+
+    #[test]
+    fn load_survives_missing_config() {
         let _lock = lock_mcp_env();
         // Point at a path that cannot exist so `load()` takes the NotFound arm.
         let missing = std::env::temp_dir().join("ryu-mcp-does-not-exist-u14.json");
@@ -2789,10 +3018,15 @@ mod tests {
         std::env::set_var("RYU_MCP_CONFIG", &missing);
         let reg = McpRegistry::load();
         std::env::remove_var("RYU_MCP_CONFIG");
+        // `builtin_servers()` is now empty — ghost/agentbrowser moved to their
+        // plugin manifests and are added later by the activation seam — so a
+        // missing config yields no hardcoded stdio servers. The always-present
+        // built-in providers (web_fetch, …) still resolve.
         assert!(
-            reg.servers.read().expect("lock").contains_key(GHOST_SERVER),
-            "ghost built-in must survive a missing config"
+            reg.servers.read().expect("lock").is_empty(),
+            "no hardcoded built-in stdio servers remain"
         );
+        assert!(reg.contains_server(web_fetch::SERVER_NAME));
     }
 
     #[test]
@@ -2822,17 +3056,20 @@ mod tests {
         assert!(!file.mcp_servers["git"].enabled);
         let reg = McpRegistry::from_servers(file.mcp_servers);
         assert_eq!(reg.len(), 2);
-        // Two config servers plus the 16 always-present built-in providers
-        // (shadow, spider, research, rtk, exa, web_fetch, sandbox, notify,
-        // channel, search_conversations, threads, delegate, orchestrator,
-        // skills, advisor, ui) — all unconditionally listed by
-        // `server_summaries`. `research` (the autoresearch experiment runner)
-        // was added in 94060a75 alongside the research sidecar.
+        // Two config servers plus the 11 always-present built-in providers
+        // (research, web_fetch, sandbox, notify, channel, search_conversations,
+        // threads, delegate, orchestrator, skills, ui) — all unconditionally
+        // listed by `server_summaries`. `research` (the autoresearch experiment
+        // runner) was added in 94060a75 alongside the research sidecar. `exa`,
+        // `spider` and `rtk` were retired from the built-in registry when they
+        // became declarative plugins (see fixtures/exa.plugin.json,
+        // fixtures/spider.plugin.json, fixtures/rtk.plugin.json — spider and rtk
+        // are `command` tools); `shadow` and `advisor` were retired the same way
+        // (see fixtures/shadow.plugin.json + fixtures/advisor.plugin.json — both
+        // declarative `http` tools reaching a Core loopback bridge).
         let summaries = reg.server_summaries();
-        assert_eq!(summaries.len(), 18);
-        assert!(summaries.iter().any(|s| s.name == shadow::SERVER_NAME));
-        assert!(summaries.iter().any(|s| s.name == spider::SERVER_NAME));
-        assert!(summaries.iter().any(|s| s.name == exa::SERVER_NAME));
+        assert_eq!(summaries.len(), 13);
+        assert!(!summaries.iter().any(|s| s.name == "shadow"));
         assert!(summaries.iter().any(|s| s.name == sandbox::SERVER_NAME));
         assert!(summaries
             .iter()
@@ -2844,18 +3081,6 @@ mod tests {
         let reg = McpRegistry::empty();
         // `list_all_tools` is async but built-in tools are produced synchronously
         // (no I/O for listing); verify each provider surface directly.
-        let shadow_tools = shadow::tools();
-        assert!(!shadow_tools.is_empty());
-        assert!(shadow_tools.iter().all(|t| t.server == shadow::SERVER_NAME));
-
-        let spider_tools = spider::tools();
-        assert!(!spider_tools.is_empty());
-        assert!(spider_tools.iter().all(|t| t.server == spider::SERVER_NAME));
-
-        let exa_tools = exa::tools();
-        assert!(!exa_tools.is_empty());
-        assert!(exa_tools.iter().all(|t| t.server == exa::SERVER_NAME));
-
         let web_fetch_tools = web_fetch::tools();
         assert!(!web_fetch_tools.is_empty());
         assert!(web_fetch_tools
@@ -2864,9 +3089,6 @@ mod tests {
 
         // The built-in servers are always summarized.
         let summaries = reg.server_summaries();
-        assert!(summaries.iter().any(|s| s.name == shadow::SERVER_NAME));
-        assert!(summaries.iter().any(|s| s.name == spider::SERVER_NAME));
-        assert!(summaries.iter().any(|s| s.name == exa::SERVER_NAME));
         assert!(summaries.iter().any(|s| s.name == web_fetch::SERVER_NAME));
         // web_fetch is recognized as a built-in server (allowlist/catalog).
         assert!(reg.contains_server(web_fetch::SERVER_NAME));
@@ -2909,36 +3131,39 @@ mod tests {
                 .contains_key("testserver2"),
             "reload must pick up new testserver2 entry"
         );
-        // Built-ins survive reload.
-        assert!(
-            reg.servers.read().expect("lock").contains_key(GHOST_SERVER),
-            "ghost built-in must survive reload"
-        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn contains_server_includes_shadow_spider_exa_and_ghost() {
+    fn contains_server_includes_builtin_and_ghost() {
         let reg = McpRegistry::empty();
-        // Shadow, Spider, and Exa are special built-ins not in `servers`.
-        assert!(reg.contains_server(shadow::SERVER_NAME));
-        assert!(reg.contains_server(spider::SERVER_NAME));
-        assert!(reg.contains_server(exa::SERVER_NAME));
-        // empty() has no ghost (no builtins), so it should not be found.
+        // `web_fetch` is a special built-in not in `servers` (reserved by name).
+        assert!(reg.contains_server(web_fetch::SERVER_NAME));
+        // empty() has no ghost, so it should not be found.
         assert!(!reg.contains_server(GHOST_SERVER));
-        // A loaded registry includes ghost.
-        let loaded = McpRegistry::from_servers(McpRegistry::builtin_servers());
-        assert!(loaded.contains_server(GHOST_SERVER));
+        // Ghost now arrives via its plugin manifest's `mcp_servers` (the activation
+        // seam), not `builtin_servers()`.
+        let ghost_manifest = crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .find(|m| m.id == "ghost")
+            .expect("ghost built-in manifest present");
+        register_manifest_mcp_servers(&reg, &ghost_manifest);
+        assert!(reg.contains_server(GHOST_SERVER));
     }
 
     #[test]
     fn duplicate_server_name_detected() {
-        let reg = McpRegistry::from_servers(McpRegistry::builtin_servers());
-        // ghost is already in the built-ins.
+        let reg = McpRegistry::empty();
+        // Ghost is registered via its manifest (no longer a hardcoded built-in).
+        let ghost_manifest = crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .find(|m| m.id == "ghost")
+            .expect("ghost built-in manifest present");
+        register_manifest_mcp_servers(&reg, &ghost_manifest);
         assert!(reg.contains_server(GHOST_SERVER));
-        // shadow is always reserved.
-        assert!(reg.contains_server(shadow::SERVER_NAME));
+        // web_fetch is always reserved.
+        assert!(reg.contains_server(web_fetch::SERVER_NAME));
     }
 
     /// Small helper to generate a unique ID for test directories without pulling
@@ -3216,6 +3441,220 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn plugin_command_tool_ungranted_bin_is_refused() {
+        // A plugin ships a `command` tool but holds NO `tool:command:echo` grant →
+        // refused deterministically through the real dispatch path (proves the
+        // Command arm is wired and the gate applies to the outer `app__` id).
+        let reg = registry_with_plugin(
+            "com.test.cmd",
+            vec![], // no tool:command:echo
+            vec![tool_entry(
+                "echoer",
+                serde_json::json!({
+                    "slug": "echoer",
+                    "backend": "command",
+                    "bin": "echo",
+                    "command_args": ["{msg}"],
+                }),
+            )],
+        )
+        .await;
+        reg.register_app_tool_tagged(
+            "app__echoer".into(),
+            "echoer".into(),
+            None,
+            Some(AppToolBackendTag::Command),
+        );
+
+        // It resolves to the Command backend — NOT an alias.
+        let resolved = reg
+            .resolve_app_tool_backend("app__echoer")
+            .await
+            .expect("enabled plugin owns app__echoer");
+        assert!(
+            matches!(
+                resolved.backend,
+                crate::plugin_manifest::schema::ToolBackend::Command { .. }
+            ),
+            "must resolve to command, not alias"
+        );
+
+        let err = reg
+            .call_tool("app__echoer", serde_json::json!({ "msg": "hi" }), None)
+            .await
+            .expect_err("ungranted command exec must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not granted") && msg.contains("tool:command:echo"),
+            "expected a deterministic grant refusal, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_command_tool_unknown_bin_refused_via_allowlist() {
+        // Grant present, but the bin is not in the (empty) allowlist → refused at
+        // the allowlist resolution step (before any spawn), through real dispatch.
+        // Shares the gateway env lock with the tool_exec command tests (both touch
+        // RYU_COMMAND_TOOL_ALLOWLIST); they must serialize on ONE lock.
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        std::env::remove_var(crate::tool_exec::ENV_COMMAND_TOOL_ALLOWLIST);
+        let reg = registry_with_plugin(
+            "com.test.cmd2",
+            vec!["tool:command:echo"],
+            vec![tool_entry(
+                "echoer",
+                serde_json::json!({
+                    "slug": "echoer",
+                    "backend": "command",
+                    "bin": "echo",
+                    "command_args": ["{msg}"],
+                }),
+            )],
+        )
+        .await;
+        reg.register_app_tool_tagged(
+            "app__echoer".into(),
+            "echoer".into(),
+            None,
+            Some(AppToolBackendTag::Command),
+        );
+
+        let err = reg
+            .call_tool("app__echoer", serde_json::json!({ "msg": "hi" }), None)
+            .await
+            .expect_err("unknown bin must be refused");
+        assert!(
+            err.to_string().contains("command allowlist"),
+            "expected a fail-closed allowlist refusal, got: {err}"
+        );
+    }
+
+    // ── Native tool-id preservation (declarative tool plugins keep their id) ─────
+
+    /// Parse a `tool_entry` config into a `ToolConfig` (mirrors what the server
+    /// Tool handler does before registering).
+    fn tool_cfg(cfg: serde_json::Value) -> crate::plugin_manifest::schema::ToolConfig {
+        serde_json::from_value(cfg).unwrap()
+    }
+
+    #[tokio::test]
+    async fn native_command_tool_keeps_native_id() {
+        let cfg = serde_json::json!({
+            "slug": "spider__crawl",
+            "backend": "command",
+            "bin": "spider",
+            "command_args": ["crawl", "--", "{url}"],
+            "egress_url_arg": "url",
+        });
+        // No egress/exec grant → deterministic refusal, but ONLY reachable if the
+        // native id routed to the command backend (not the generic MCP lookup).
+        let reg = registry_with_plugin("com.test.spider", vec![], vec![tool_entry("tool-spider-crawl", cfg.clone())]).await;
+        // The id the handler mints for this config is the NATIVE id.
+        let id = app_tool_registered_id(&tool_cfg(cfg));
+        assert_eq!(id, "spider__crawl");
+        reg.register_app_tool_tagged(id.clone(), "spider__crawl".into(), None, Some(AppToolBackendTag::Command));
+
+        // Listed under the native id, NOT the app__ form.
+        let all = reg.list_all_tools().await;
+        assert!(all.iter().any(|t| t.id == "spider__crawl"));
+        assert!(all.iter().all(|t| t.id != "app__spider__crawl"));
+
+        // Resolves to the Command backend under the native id.
+        let resolved = reg
+            .resolve_app_tool_backend("spider__crawl")
+            .await
+            .expect("enabled plugin owns spider__crawl");
+        assert!(matches!(
+            resolved.backend,
+            crate::plugin_manifest::schema::ToolBackend::Command { .. }
+        ));
+
+        // Dispatch reaches the command backend (grant refusal), never "unknown MCP
+        // server: spider" — the failure the routing change prevents.
+        let err = reg
+            .call_tool("spider__crawl", serde_json::json!({ "url": "http://93.184.216.34/" }), None)
+            .await
+            .expect_err("ungranted command exec must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not granted") && msg.contains("tool:command:spider"),
+            "expected a deterministic grant refusal, got: {msg}"
+        );
+        assert!(!msg.contains("unknown MCP server"), "native id must route to the app arm, got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn native_http_tool_keeps_native_id() {
+        let cfg = serde_json::json!({
+            "slug": "exa__search",
+            "backend": "http",
+            "url": "https://api.exa.ai/search",
+        });
+        let reg = registry_with_plugin("com.test.exa", vec![], vec![tool_entry("tool-exa-search", cfg.clone())]).await;
+        assert_eq!(app_tool_registered_id(&tool_cfg(cfg)), "exa__search");
+        reg.register_app_tool_tagged("exa__search".into(), "exa__search".into(), None, Some(AppToolBackendTag::Http));
+
+        let all = reg.list_all_tools().await;
+        assert!(all.iter().any(|t| t.id == "exa__search"));
+        let resolved = reg.resolve_app_tool_backend("exa__search").await.expect("owns exa__search");
+        assert!(matches!(resolved.backend, crate::plugin_manifest::schema::ToolBackend::Http { .. }));
+
+        let err = reg
+            .call_tool("exa__search", serde_json::json!({ "q": "hi" }), None)
+            .await
+            .expect_err("ungranted http egress must be refused");
+        let msg = err.to_string();
+        assert!(msg.contains("not granted") && msg.contains("api.exa.ai"), "got: {msg}");
+        assert!(!msg.contains("unknown MCP server"), "native id must route to the app arm, got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn native_rtk_run_resolves_to_command_with_arg_specs() {
+        let cfg = serde_json::json!({
+            "slug": "rtk__run",
+            "backend": "command",
+            "bin": "rtk",
+            "args": [
+                { "from": "mode", "map": { "wrap": [], "proxy": ["proxy"] }, "default": "wrap" },
+                { "from": "command", "split": "shell", "required": true }
+            ]
+        });
+        assert_eq!(app_tool_registered_id(&tool_cfg(cfg.clone())), "rtk__run");
+        let reg = registry_with_plugin("com.test.rtk", vec!["tool:command:rtk"], vec![tool_entry("tool-rtk-run", cfg)]).await;
+        reg.register_app_tool_tagged("rtk__run".into(), "rtk__run".into(), None, Some(AppToolBackendTag::Command));
+        let resolved = reg.resolve_app_tool_backend("rtk__run").await.expect("owns rtk__run");
+        match resolved.backend {
+            crate::plugin_manifest::schema::ToolBackend::Command { arg_specs, .. } => {
+                assert!(arg_specs.is_some());
+            }
+            other => panic!("expected Command, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn alias_and_bare_slug_tools_stay_app_namespaced() {
+        // An Alias tool (other-apps re-expose path) keeps app__<slug>.
+        let alias_cfg = serde_json::json!({ "slug": "web_search" });
+        assert_eq!(app_tool_registered_id(&tool_cfg(alias_cfg.clone())), "app__web_search");
+        // A bare (non-namespaced) inline tool also stays app__<slug> — the `__`
+        // discriminator: a native id must carry the separator to be routable.
+        let bare_inline = serde_json::json!({
+            "slug": "weather",
+            "backend": "inline_deno",
+            "code": "return await ((input, host) => ({ ok: true }))(input, host);",
+        });
+        assert_eq!(app_tool_registered_id(&tool_cfg(bare_inline)), "app__weather");
+
+        // The alias still resolves under app__ and dispatch keeps the legacy re-enter.
+        let reg = registry_with_plugin("com.test.alias", vec![], vec![tool_entry("web_search", alias_cfg)]).await;
+        let resolved = reg.resolve_app_tool_backend("app__web_search").await.expect("owns app__web_search");
+        assert!(matches!(
+            resolved.backend,
+            crate::plugin_manifest::schema::ToolBackend::Alias { target } if target == "web_search"
+        ));
+    }
+
     // ── Unified widget promotion: dedup + the `widget:render` grant gate ──────
 
     /// A plugin manifest that declares `tool_id` in `contributes.widgets` with the
@@ -3251,9 +3690,15 @@ mod tests {
         enabled: bool,
     ) -> McpRegistry {
         let store = crate::plugins::PluginStore::open_in_memory().expect("in-memory store");
-        store.insert(record_id, "1.0.0").await.expect("insert record");
+        store
+            .insert(record_id, "1.0.0")
+            .await
+            .expect("insert record");
         if enabled {
-            store.set_enabled(record_id, &[]).await.expect("enable record");
+            store
+                .set_enabled(record_id, &[])
+                .await
+                .expect("enable record");
         }
         let manifests = std::sync::Arc::new(TokioRwLock::new(vec![manifest]));
         McpRegistry::empty().with_self_build(manifests, std::sync::Arc::new(store))
@@ -3261,9 +3706,9 @@ mod tests {
 
     #[tokio::test]
     async fn builtin_widget_promotes_via_unified_manifest_path() {
-        // checklist__render binds through apps::tools(); with an enabled checklist
-        // plugin record whose manifest holds widget:render, the unified resolver
-        // promotes it — contributes.widgets is the source of record.
+        // A synthetic plugin record whose manifest holds widget:render + a
+        // contributes.widgets entry: the unified resolver promotes it —
+        // contributes.widgets is the source of record (generic host machinery).
         let manifest = widget_manifest("checklist", "checklist__render", &[WIDGET_RENDER_GRANT]);
         let reg = registry_with_governance(manifest, "checklist", true).await;
         assert!(
@@ -3278,8 +3723,7 @@ mod tests {
     #[tokio::test]
     async fn widget_without_grant_is_refused() {
         // Same enabled record, but the manifest does NOT declare widget:render.
-        let manifest =
-            widget_manifest("checklist", "checklist__render", &["chat.sendFollowUp"]);
+        let manifest = widget_manifest("checklist", "checklist__render", &["chat.sendFollowUp"]);
         let reg = registry_with_governance(manifest, "checklist", true).await;
         assert!(
             matches!(

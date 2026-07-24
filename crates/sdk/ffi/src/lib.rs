@@ -322,7 +322,8 @@ pub unsafe extern "C" fn ryu_embedding_client_new(
             None => return std::ptr::null_mut(),
         }
     };
-    match ryu_sdk::EmbeddingClient::new(model, ryu_sdk::EmbeddingClientOptions { base_url, token }) {
+    match ryu_sdk::EmbeddingClient::new(model, ryu_sdk::EmbeddingClientOptions { base_url, token })
+    {
         Ok(inner) => Box::into_raw(Box::new(EmbeddingClientHandle { inner })),
         Err(e) => {
             set_error(e.to_string());
@@ -438,7 +439,9 @@ mod tests {
     #[test]
     fn manifest_parse_and_schema_ffi() {
         unsafe {
-            let good = c(r#"{"id":"com.example.x","name":"X","version":"1.0.0","runnables":[{"id":"t","name":"T","kind":"tool","config":{"slug":"s"}}]}"#);
+            let good = c(
+                r#"{"id":"com.example.x","name":"X","version":"1.0.0","runnables":[{"id":"t","name":"T","kind":"tool","config":{"slug":"s"}}]}"#,
+            );
             let out = take(ryu_parse_and_validate_manifest(good.as_ptr())).expect("ok");
             assert!(out.contains("com.example.x"));
 
@@ -457,9 +460,18 @@ mod tests {
             let url = take(ryu_resolve_gateway_url()).expect("url");
             assert!(url.starts_with("http"));
 
-            assert_eq!(ryu_assert_allowed_egress(c("http://127.0.0.1:7981").as_ptr()), 0);
-            assert_eq!(ryu_assert_allowed_egress(c("https://api.openai.com").as_ptr()), -1);
-            assert!(take(ryu_last_error()).unwrap().to_lowercase().contains("egress"));
+            assert_eq!(
+                ryu_assert_allowed_egress(c("http://127.0.0.1:7981").as_ptr()),
+                0
+            );
+            assert_eq!(
+                ryu_assert_allowed_egress(c("https://api.openai.com").as_ptr()),
+                -1
+            );
+            assert!(take(ryu_last_error())
+                .unwrap()
+                .to_lowercase()
+                .contains("egress"));
         }
     }
 

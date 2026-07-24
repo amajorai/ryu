@@ -91,3 +91,114 @@ pub trait ResearchHost: Send + Sync {
     /// through the Core-owned path resolution (`~/.ryu/research-sidecar`).
     fn is_installed(&self) -> bool;
 }
+
+/// Serializes every test in the LIB test binary that touches the process-global
+/// `RYU_RESEARCH_UPSTREAM` env var (lib.rs + api.rs + mcp.rs compile into ONE test
+/// binary). The bin (`main.rs`) is a separate process touching disjoint vars, so it
+/// keeps its own lock. Poison-resilient: a panicking test must not cascade.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Set `RYU_RESEARCH_UPSTREAM` under [`ENV_LOCK`], clearing it on drop. Held for the
+/// whole test so no concurrent test observes the var mid-flight.
+#[cfg(test)]
+pub(crate) struct UpstreamGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl UpstreamGuard {
+    /// Acquire the lock and set the upstream to `val` (pass `None` to assert the
+    /// unset/default path).
+    pub(crate) fn set(val: Option<&str>) -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        match val {
+            Some(v) => std::env::set_var("RYU_RESEARCH_UPSTREAM", v),
+            None => std::env::remove_var("RYU_RESEARCH_UPSTREAM"),
+        }
+        Self { _lock: lock }
+    }
+}
+
+#[cfg(test)]
+impl Drop for UpstreamGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("RYU_RESEARCH_UPSTREAM");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_url_defaults_to_loopback_when_unset() {
+        let _g = UpstreamGuard::set(None);
+        assert_eq!(research_base_url(), "http://127.0.0.1:8087");
+    }
+
+    #[test]
+    fn base_url_wraps_bare_host_port_in_http() {
+        let _g = UpstreamGuard::set(Some("10.0.0.4:9999"));
+        assert_eq!(research_base_url(), "http://10.0.0.4:9999");
+    }
+
+    #[test]
+    fn base_url_keeps_explicit_http_scheme_and_trims_trailing_slash() {
+        let _g = UpstreamGuard::set(Some("http://example.test:8087/"));
+        assert_eq!(research_base_url(), "http://example.test:8087");
+    }
+
+    #[test]
+    fn base_url_preserves_https_scheme() {
+        let _g = UpstreamGuard::set(Some("https://secure.test/base/"));
+        assert_eq!(research_base_url(), "https://secure.test/base");
+    }
+
+    #[test]
+    fn base_url_treats_whitespace_only_override_as_unset() {
+        let _g = UpstreamGuard::set(Some("   "));
+        assert_eq!(research_base_url(), "http://127.0.0.1:8087");
+    }
+
+    #[test]
+    fn base_url_trims_surrounding_whitespace_before_parsing() {
+        let _g = UpstreamGuard::set(Some("  host.test:1234  "));
+        assert_eq!(research_base_url(), "http://host.test:1234");
+    }
+
+    #[tokio::test]
+    async fn is_running_now_false_when_nothing_listens() {
+        // Port 1 is not a listener; the connect fails fast → reported not-running.
+        let _g = UpstreamGuard::set(Some("127.0.0.1:1"));
+        let client = reqwest::Client::new();
+        assert!(!is_running_now(&client).await);
+    }
+
+    #[tokio::test]
+    async fn is_running_now_true_against_a_healthy_mock() {
+        use axum::{routing::get, Router};
+        let app = Router::new().route("/health", get(|| async { "ok" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let _g = UpstreamGuard::set(Some(&addr.to_string()));
+        let client = reqwest::Client::new();
+        assert!(is_running_now(&client).await);
+    }
+
+    #[tokio::test]
+    async fn is_running_now_false_on_non_success_health() {
+        use axum::{http::StatusCode, routing::get, Router};
+        let app = Router::new()
+            .route("/health", get(|| async { StatusCode::SERVICE_UNAVAILABLE }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let _g = UpstreamGuard::set(Some(&addr.to_string()));
+        let client = reqwest::Client::new();
+        assert!(!is_running_now(&client).await);
+    }
+}

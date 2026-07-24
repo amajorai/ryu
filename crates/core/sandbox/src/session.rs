@@ -202,7 +202,9 @@ pub async fn destroy_sandbox(run_id: &str) -> anyhow::Result<()> {
     }
 
     // Idempotent (Daytona 404 = success).
-    DaytonaSandbox::new().destroy_workspace(&live.workspace).await?;
+    DaytonaSandbox::new()
+        .destroy_workspace(&live.workspace)
+        .await?;
     Ok(())
 }
 

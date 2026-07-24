@@ -320,4 +320,37 @@ describe("parseArgs", () => {
 		const result = parseArgs(["a", "--nope"]);
 		expect("error" in result).toBe(true);
 	});
+
+	it("errors when --template is given without a value", () => {
+		const result = parseArgs(["my-app", "--template"]);
+		expect(result).toEqual({ error: "--template requires a value" });
+	});
+
+	it("treats a trailing --template=<empty> as an empty template string", () => {
+		// The scaffold gate (not parseArgs) rejects an unknown template; parseArgs
+		// only splits on the first '=', so an empty value parses through as "".
+		expect(parseArgs(["my-app", "--template="])).toEqual({
+			name: "my-app",
+			template: "",
+		});
+	});
+
+	it("--template before the name still binds both positionally", () => {
+		expect(parseArgs(["--template", "ryu-app", "my-app"])).toEqual({
+			name: "my-app",
+			template: "ryu-app",
+		});
+	});
+
+	it("returns an undefined name when no positional is given", () => {
+		expect(parseArgs(["--template", "agent"])).toEqual({
+			name: undefined,
+			template: "agent",
+		});
+	});
+
+	it("reports the unknown flag's exact name in the error", () => {
+		const result = parseArgs(["my-app", "--verbose"]);
+		expect(result).toEqual({ error: "unknown option: --verbose" });
+	});
 });

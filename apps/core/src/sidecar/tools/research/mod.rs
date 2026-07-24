@@ -197,7 +197,9 @@ impl Sidecar for ResearchManager {
             // the interpreter — no pip install). Best-effort: a failure here
             // falls through to a bare `python3` on PATH.
             if let Err(e) = ensure_runtime().await {
-                tracing::warn!("ryu-research venv provisioning failed (falling back to PATH python): {e:#}");
+                tracing::warn!(
+                    "ryu-research venv provisioning failed (falling back to PATH python): {e:#}"
+                );
             }
 
             let program = python_program(&dir);
@@ -259,7 +261,10 @@ impl Sidecar for ResearchManager {
                 tracing::info!("ryu-research was an adopted external server — leaving it running");
                 return Ok(());
             }
-            process.stop().await.context("stopping ryu-research process")?;
+            process
+                .stop()
+                .await
+                .context("stopping ryu-research process")?;
             tracing::info!("ryu-research stopped");
             Ok(())
         })

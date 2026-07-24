@@ -200,3 +200,256 @@ async fn pass_through(resp: reqwest::Response) -> (StatusCode, Json<Value>) {
     }
     (StatusCode::OK, Json(value))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
+    use axum::body::to_bytes;
+    use axum::routing::{get, post};
+
+    use crate::UpstreamGuard;
+
+    /// A test double for the kernel coupling: records `start_sidecar` calls and can
+    /// be told to fail that call (to pin that a start error does NOT abort the proxy).
+    struct FakeHost {
+        installed: bool,
+        start_err: bool,
+        start_calls: AtomicUsize,
+    }
+
+    impl FakeHost {
+        fn new(installed: bool, start_err: bool) -> Arc<Self> {
+            Arc::new(Self {
+                installed,
+                start_err,
+                start_calls: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl ResearchHost for FakeHost {
+        async fn start_sidecar(&self) -> anyhow::Result<()> {
+            self.start_calls.fetch_add(1, Ordering::SeqCst);
+            if self.start_err {
+                anyhow::bail!("simulated start failure");
+            }
+            Ok(())
+        }
+        fn is_installed(&self) -> bool {
+            self.installed
+        }
+    }
+
+    /// Spawn `app` on an ephemeral loopback port; return its `host:port` string.
+    async fn spawn(app: Router<()>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        addr.to_string()
+    }
+
+    /// Drain an `IntoResponse` into (status, parsed-json).
+    async fn read(resp: axum::response::Response) -> (StatusCode, Value) {
+        let status = resp.status();
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let value = serde_json::from_slice(&bytes).unwrap_or(json!(null));
+        (status, value)
+    }
+
+    fn ctx(host: Arc<FakeHost>) -> ResearchCtx {
+        ResearchCtx::new(host)
+    }
+
+    #[tokio::test]
+    async fn status_reports_not_running_when_upstream_dead() {
+        // Point at a port with no listener → is_running_now() is false, so
+        // experiments stays [] and running is false; installed mirrors the host.
+        let _g = UpstreamGuard::set(Some("127.0.0.1:1"));
+        let host = FakeHost::new(true, false);
+        let resp = research_status(State(ctx(host))).await.into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["installed"], json!(true));
+        assert_eq!(body["running"], json!(false));
+        assert_eq!(body["experiments"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn status_installed_false_is_reported_through() {
+        let _g = UpstreamGuard::set(Some("127.0.0.1:1"));
+        let host = FakeHost::new(false, false);
+        let resp = research_status(State(ctx(host))).await.into_response();
+        let (_code, body) = read(resp).await;
+        assert_eq!(body["installed"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn status_running_passes_through_experiment_catalog() {
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .route(
+                "/experiments",
+                get(|| async {
+                    Json(json!({ "experiments": [{ "id": "toy" }, { "id": "nanochat" }] }))
+                }),
+            );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        let host = FakeHost::new(true, false);
+        let resp = research_status(State(ctx(host))).await.into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["running"], json!(true));
+        assert_eq!(body["experiments"], json!([{ "id": "toy" }, { "id": "nanochat" }]));
+    }
+
+    #[tokio::test]
+    async fn status_running_but_experiments_errors_yields_empty_list() {
+        let app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .route(
+                "/experiments",
+                get(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "boom") }),
+            );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        let host = FakeHost::new(true, false);
+        let resp = research_status(State(ctx(host))).await.into_response();
+        let (_code, body) = read(resp).await;
+        assert_eq!(body["running"], json!(true));
+        assert_eq!(body["experiments"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn init_workspace_starts_sidecar_and_proxies_body() {
+        let app = Router::new().route(
+            "/workspace/init",
+            post(|Json(b): Json<Value>| async move { Json(json!({ "echo": b })) }),
+        );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        let host = FakeHost::new(true, false);
+        let resp = research_init_workspace(State(ctx(host.clone())), Json(json!({ "experiment": "toy" })))
+            .await
+            .into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["echo"]["experiment"], json!("toy"));
+        // Lazy-start was attempted exactly once.
+        assert_eq!(host.start_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn init_workspace_proceeds_even_if_lazy_start_errors() {
+        let app = Router::new().route(
+            "/workspace/init",
+            post(|| async { Json(json!({ "ok": true })) }),
+        );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        // Host's start_sidecar fails — the request must still proxy through.
+        let host = FakeHost::new(true, true);
+        let resp = research_init_workspace(State(ctx(host.clone())), Json(json!({})))
+            .await
+            .into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["ok"], json!(true));
+        assert_eq!(host.start_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn init_workspace_unreachable_upstream_is_502_with_hint() {
+        let _g = UpstreamGuard::set(Some("127.0.0.1:1"));
+        let host = FakeHost::new(true, false);
+        let resp = research_init_workspace(State(ctx(host)), Json(json!({})))
+            .await
+            .into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::BAD_GATEWAY);
+        let err = body["error"].as_str().unwrap();
+        assert!(err.contains("not reachable"));
+        assert!(err.contains("Store"));
+    }
+
+    #[tokio::test]
+    async fn ledger_read_proxies_and_wakes_sidecar() {
+        let app = Router::new().route(
+            "/workspace/:id/ledger",
+            get(|Path(id): Path<String>| async move { Json(json!({ "ws": id, "rows": [] })) }),
+        );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        let host = FakeHost::new(true, false);
+        let resp = research_ledger(State(ctx(host.clone())), Path("ws-42".to_owned()))
+            .await
+            .into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["ws"], json!("ws-42"));
+        assert_eq!(host.start_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn pass_through_preserves_non_success_status_and_body() {
+        // A 404 from the sidecar must be surfaced with its status, not masked as 200.
+        let app = Router::new().route(
+            "/workspace/:id/ledger",
+            get(|| async { (StatusCode::NOT_FOUND, Json(json!({ "error": "no such workspace" }))) }),
+        );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        let host = FakeHost::new(true, false);
+        let resp = research_ledger(State(ctx(host)), Path("missing".to_owned()))
+            .await
+            .into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"], json!("no such workspace"));
+    }
+
+    #[tokio::test]
+    async fn pass_through_wraps_non_json_body_as_raw() {
+        // Sidecar returns 200 with a plain-text body → wrapped as { "raw": ... }.
+        let app = Router::new().route(
+            "/workspace/init",
+            post(|| async { "not json at all" }),
+        );
+        let addr = spawn(app).await;
+        let _g = UpstreamGuard::set(Some(&addr));
+
+        let host = FakeHost::new(true, false);
+        let resp = research_init_workspace(State(ctx(host)), Json(json!({})))
+            .await
+            .into_response();
+        let (code, body) = read(resp).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body["raw"], json!("not json at all"));
+    }
+
+    #[test]
+    fn routes_builds_a_stateless_router() {
+        // The public router constructor bakes its state and returns Router<()>.
+        let host = FakeHost::new(false, false);
+        let _r: Router<()> = routes(ResearchCtx::new(host));
+    }
+
+    #[test]
+    fn openapi_documents_the_three_research_paths() {
+        let spec = openapi();
+        let paths = &spec.paths.paths;
+        assert!(paths.contains_key("/api/research/status"));
+        assert!(paths.contains_key("/api/research/workspace"));
+        assert!(paths.contains_key("/api/research/workspace/{id}/ledger"));
+    }
+}

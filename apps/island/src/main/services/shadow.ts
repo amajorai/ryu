@@ -19,7 +19,7 @@ import type {
 	ShadowProactiveInboxResult,
 	ShadowProactiveResult,
 } from "../../shared/ipc.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, shadowApiToken } from "./config.ts";
 import { isContextReadAllowed } from "./consent.ts";
 
 /** Shadow probes should be quick; capture runs locally. */
@@ -45,9 +45,17 @@ async function shadowFetch(path: string, init: RequestInit): Promise<Response> {
 	const { shadowBaseUrl } = loadConfig();
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), SHADOW_TIMEOUT_MS);
+	// Shadow's HTTP surface is bearer-gated (everything except /health); attach
+	// the shared-secret token the main process resolves from env / token file.
+	const token = shadowApiToken();
+	const headers: Record<string, string> = {
+		...((init.headers as Record<string, string> | undefined) ?? {}),
+		...(token ? { Authorization: `Bearer ${token}` } : {}),
+	};
 	try {
 		return await fetch(`${shadowBaseUrl}${path}`, {
 			...init,
+			headers,
 			signal: controller.signal,
 		});
 	} finally {

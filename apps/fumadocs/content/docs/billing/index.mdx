@@ -1,0 +1,237 @@
+---
+title: "Plans & Pricing"
+description: "Every plan, what it includes, and the enforced limits behind the marketing copy. Source of truth: packages/auth/src/lib/plans.ts."
+---
+
+Ryu has four self-serve plans and one enterprise tier. The marketing pricing page at [ryuhq.com/pricing](https://ryuhq.com/pricing) shows the headline features; this page covers the enforced limits, credit pools, capability bands, and fine print.
+
+<Callout type="info">
+  The numbers on this page are the **enforced** limits from `packages/auth/src/lib/plans.ts`, not marketing copy. When the code and this page disagree, the code wins.
+</Callout>
+
+## Plans at a glance
+
+| Plan | Price | Billing | AI credit pool | Deposit fee |
+|---|---|---|---|---|
+| **Free** | $0 | — | — | — |
+| **Lifetime** | $29 one-time (launch price) | Once | $0 | 10% |
+| **Pro** | $39/mo ($390/yr) | Monthly or annual | $20/mo | 10% |
+| **Max** | $200/mo ($2,000/yr) | Monthly or annual | $150/mo (75%) | 5% |
+| **Teams** | $49/seat/mo ($490/seat/yr) | Monthly or annual | $24.50/seat/mo (50%) | 5% |
+
+Annual billing gives **two months free** (pay for 10 of 12 months).
+
+---
+
+## Free (no plan)
+
+The desktop shell and local/BYOK chat are **always free**. The paywall is dismissible — closing it drops you into free local chat. Free users get:
+
+- Local and BYOK chat (unlimited)
+- Single agent, tool calling, MCP, skills
+- Basic run-while-open background tasks
+- All the numeric caps listed in [Free-tier limits](/docs/billing/limits)
+
+Free users **cannot** top up credits or use managed inference.
+
+---
+
+## Lifetime (desktop license)
+
+A one-time $29 purchase (launch price, normally $69). A personal, single-device license.
+
+**What you unlock:**
+
+- All Band 2 ("Pro") features forever — council, background runs, prompt studio, fine-tuning, evals, graphrag, companion overlay, clips
+- Unlimited agents, workflows, spaces, plugins, skills, schedules
+- 3 concurrent background runs, 20 GB space storage
+- One year of app updates included (after that, buy again to extend or stay on your last version)
+
+**What you do NOT get (Band 3 — subscription only):**
+
+- Managed inference (no cloud models — you bring your own keys)
+- Cloud sync, cloud nodes, hosted bots, team seats
+- Agent Inboxes
+- Monthly credit pool
+
+**Billing scope:** personal (`"user"`). No org association.
+
+---
+
+## Pro
+
+$39/mo or $390/yr. The entry-level managed plan. **Strictly single-seat** — one person, one price.
+
+**What you unlock over Lifetime:**
+
+- **Managed inference** — 300+ cloud models via OpenRouter, no API keys needed
+- **$20/mo included AI credits** — pooled, use-it-or-lose-it each billing period (not derived from the 50% rule; pinned to a round $20)
+- **Agent Inboxes** — unlimited inboxes, 1,000 sends/mo, 5 GB storage, branding removable
+- **Cloud sync** — sync state across devices
+- Unlimited everything (agents, tabs, workflows, etc.)
+- 3 concurrent background runs, 20 GB space storage
+- 10% deposit fee on credit top-ups
+
+**Billing scope:** personal (`"user"`). Cannot be used by multi-member orgs — if your org has 2+ members, you need Max or Teams.
+
+**Seat model:** `{ kind: "single" }` — always 1, no scaling.
+
+---
+
+## Max
+
+$200/mo or $2,000/yr. The flagship tier for power users and small teams who want 24/7 agents.
+
+**What you unlock over Pro:**
+
+- **$150/mo included AI credits** — 75% of the price (deliberately generous; the only plan that overrides the default 50% fraction)
+- **Free managed cloud node** — 2 vCPU, 4 GB RAM, 40 GB SSD (the BASE tier, `cx23`). Auto-provisioned on subscription activation; auto-removed on cancellation. Your agents run 24/7 even when your computer is off.
+- **Agent Inboxes** — unlimited inboxes, 25,000 sends/mo, 10 GB storage
+- **5% deposit fee** on credit top-ups (half the base rate)
+- **50 GB space storage** (vs Pro's 20 GB)
+- **Seat-scalable** — buy N Max seats for a team (min 1, so solo buyers are unaffected)
+
+**Billing scope:** org or personal. Max checkout supports a `seats` parameter for multi-seat orgs.
+
+**Seat model:** `{ kind: "per_seat", minSeats: 1 }`. Billing and credit pool both scale per seat — 2 Max seats = $400/mo with $300/mo pooled credits.
+
+### Max cloud node lifecycle
+
+1. **Subscription activates** → webhook provisions a free `cx23` node (or reinstates one scheduled for removal)
+2. **Subscription cancels** → node is scheduled for removal (grace period) and gateway tokens are revoked
+3. **Larger instances** → purchased separately as ad-hoc cloud-instance subscriptions (dynamically priced from the Hetzner catalog with a 2.5x markup)
+
+The free BASE node is flagged `includedWithMax: true` in the cloud catalog. It shows as "Included with Max" in the org dashboard — no checkout button.
+
+---
+
+## Teams
+
+$49/seat/mo or $490/seat/yr. Minimum 2 seats. For organizations that want shared billing, pooled credits, and role-based access.
+
+### What you unlock
+
+- **$24.50/seat/mo AI credits** (50% of per-seat price), pooled across the entire org
+- **Agent Inboxes** — unlimited inboxes, 100,000 sends/mo, 20 GB storage (org-wide, not per-seat)
+- **8 concurrent background runs** (org parallelism — vs Pro/Max's 3)
+- **50 GB space storage**
+- **5% deposit fee** on top-ups
+- **Channel users** — limit scales with seat count (1 channel user per seat)
+
+### Billing scope
+
+Teams is always **org-scoped** (`"org"`). Billing is charged under the canonical org billing email (the earliest owner's email). Only **owner** or **admin** members can manage billing.
+
+### Seat model
+
+`{ kind: "per_seat", minSeats: 2 }`. The seat count is validated server-side:
+
+- Must be ≥ the org's live member count
+- Must be ≥ 2 (the catalog minimum)
+- Changing seats requires owner/admin role
+
+The credit pool scales with seats: 5 seats = 5 × $24.50 = $122.50/mo pooled.
+
+### RBAC (role-based access control)
+
+Teams has a full permission system with four built-in roles:
+
+| Role | Billing | Members | Config | Runs | Data |
+|---|---|---|---|---|---|
+| **Owner** | Full | Full | Full | Full | Full |
+| **Admin** | — | Full | Full | Full | Full |
+| **Member** | — | — | View | Run | Read/Write |
+| **Viewer** | — | — | View | — | Read |
+
+**Custom roles** are also supported — you can create roles with any combination of 17 granular permissions:
+
+`gateway.view`, `gateway.configure`, `workflow.view`, `workflow.run`, `workflow.edit`, `workflow.delete`, `space.read`, `space.write`, `space.delete`, `agent.view`, `agent.run`, `agent.edit`, `tool.exec`, `members.manage`, `roles.manage`, `billing.manage`, `audit.view`
+
+### Shared wallet
+
+Teams has a **pooled org wallet** — every member draws from the same balance:
+
+- Monthly plan credits are injected per billing period (use-it-or-lose-it)
+- Top-up credits roll over and never expire
+- All members can see the balance; only owner/admin can top up or change auto-recharge
+- The wallet is visible in **Settings → Billing** (desktop) and **Organizations → Billing** (web)
+
+### Org dashboard
+
+Teams gets an aggregation dashboard at `/organizations/[orgId]/dashboard`:
+
+- Eval leaderboard across all agents
+- Shared budgets and spend tracking
+- Audit table of agent actions
+- Request/error/cost/token stats across all gateways
+
+### Teams management
+
+The org admin can:
+
+- **Invite members** by email with a role (admin/member)
+- **Change member roles** (owner/admin/member/viewer dropdown)
+- **Create teams** (groups of org members, not to be confused with the "Teams" plan name)
+- **Manage seats** — adjust billed seat count, see over-allocation alerts
+- **Config-as-code** — org-wide gateway config with revision history and rollback
+- **Policies** — locked guardrails, approved models, allowed regions
+
+### What Teams does NOT include
+
+- **No free cloud node** — unlike Max, Teams does not bundle a free `cx23` node. Cloud nodes are purchased separately.
+- **No `team_workspace` feature** — that's the agent-team orchestration feature (groups of agents with coordination strategies), which is a separate concept from the Teams billing plan.
+
+---
+
+## Side-by-side comparison
+
+| Feature | Free | Lifetime | Pro | Max | Teams |
+|---|---|---|---|---|---|
+| **Price** | $0 | $29 once | $39/mo | $200/mo | $49/seat/mo |
+| **Credit pool** | — | — | $20/mo | $150/mo | $24.50/seat/mo |
+| **Managed inference** | No | No | Yes | Yes | Yes |
+| **Cloud sync** | No | No | Yes | Yes | Yes |
+| **Cloud node** | No | No | No | **Free cx23** | No (purchasable) |
+| **Agent Inboxes** | No | No | 1k sends, 5 GB | 25k sends, 10 GB | 100k sends, 20 GB |
+| **Concurrent runs** | 1 | 3 | 3 | 3 | **8** |
+| **Space storage** | 2 GB | 20 GB | 20 GB | 50 GB | 50 GB |
+| **Deposit fee** | — | 10% | 10% | 5% | 5% |
+| **Seat model** | — | single | single | per-seat (min 1) | per-seat (min 2) |
+| **RBAC** | No | No | No | No | **Full** |
+| **Org dashboard** | No | No | No | No | **Yes** |
+| **Billing scope** | — | user | user | user/org | org |
+
+## Capability bands
+
+Features are gated in three bands. The rule: runs on the user's machine at zero marginal cost → Band 1/2; Ryu pays a recurring bill → Band 3.
+
+| Band | Name | Unlocked by | Features |
+|---|---|---|---|
+| **1** | Free | Always | Local/BYOK chat, agents, tool calling, MCP, skills, basic runs |
+| **2** | Pro | Subscription, license key, OR trial | Council, local background runs, gateway governance UI, prompt studio, fine-tuning, evals, graphrag, companion overlay, clips |
+| **3** | Subscription | Active recurring plan only | Managed inference, cloud sync, cloud node, hosted bots, team seats, Agent Inboxes |
+
+<Callout type="warn">
+  Lifetime license holders get Band 2 but **not** Band 3. Band 3 features cost Ryu money every month, so they require an active subscription.
+</Callout>
+
+## Deposit fees (credit top-ups)
+
+Credits are prepaid — you spend your balance down as you go. Models are metered **at cost** (no per-token markup). A one-time deposit fee applies on each top-up:
+
+| Plan | Fee rate | Minimum |
+|---|---|---|
+| Free | Cannot top up | — |
+| Lifetime / Pro | 10% | $1.00 |
+| Max / Teams | 5% | $1.00 |
+
+The fee is the **greater of** the percentage and the $1.00 floor. Below $10 the floor dominates (a $5 top-up pays $1 ≈ 20% effective); above $10 the flat percentage takes over.
+
+## Related
+
+<Cards>
+  <DocCard href="/docs/billing/limits" />
+  <DocCard href="/docs/billing/credits" />
+  <DocCard href="/docs/billing/agent-inboxes" />
+  <DocCard href="/docs/billing/trial-and-access" />
+</Cards>

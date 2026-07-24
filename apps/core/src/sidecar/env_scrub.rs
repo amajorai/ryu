@@ -71,6 +71,13 @@ pub const MCP_SAFE_ALLOWLIST: &[&str] = &[
     "PROCESSOR_ARCHITECTURE",
     "NUMBER_OF_PROCESSORS",
     "OS",
+    // Ghost sidecar (moved from a hardcoded built-in MCP server to its plugin
+    // manifest's `mcp_servers`): these profile-aware values are seeded into Core's
+    // process env in `main.rs::seed_ghost_sidecar_env` and must survive the
+    // env-clear allowlist to reach the spawned Ghost child. Neither is a secret —
+    // one is a loopback overlay URL, the other a data-dir path.
+    "RYU_GHOST_OVERLAY_URL",
+    "GHOST_DATA_DIR",
 ];
 
 /// Whether an env KEY is secret-like (contains any [`SENSITIVE_MARKERS`] token,

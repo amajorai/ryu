@@ -110,4 +110,3 @@ pub fn spawn(activity: ActivityStore, approvals: &crate::approvals::ApprovalEngi
         });
     }
 }
-

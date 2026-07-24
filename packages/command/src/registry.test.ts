@@ -30,6 +30,37 @@ describe("groupActions", () => {
 	test("returns no groups for an empty action list", () => {
 		expect(groupActions([])).toEqual([]);
 	});
+
+	test("keeps a single group intact and ordered", () => {
+		const groups = groupActions([
+			action({ id: "a", group: "Nav" }),
+			action({ id: "b", group: "Nav" }),
+			action({ id: "c", group: "Nav" }),
+		]);
+		expect(groups).toHaveLength(1);
+		expect(groups.at(0)?.heading).toBe("Nav");
+		expect(groups.at(0)?.actions.map((a) => a.id)).toEqual(["a", "b", "c"]);
+	});
+
+	test("interleaves many groups by first appearance", () => {
+		const groups = groupActions([
+			action({ id: "1", group: "C" }),
+			action({ id: "2", group: "A" }),
+			action({ id: "3", group: "B" }),
+			action({ id: "4", group: "A" }),
+			action({ id: "5", group: "C" }),
+		]);
+		expect(groups.map((g) => g.heading)).toEqual(["C", "A", "B"]);
+		expect(groups.at(1)?.actions.map((a) => a.id)).toEqual(["2", "4"]);
+	});
+
+	test("does not deduplicate actions with the same id", () => {
+		const groups = groupActions([
+			action({ id: "dup", group: "Nav" }),
+			action({ id: "dup", group: "Nav" }),
+		]);
+		expect(groups.at(0)?.actions).toHaveLength(2);
+	});
 });
 
 describe("actionSearchValue", () => {
@@ -50,6 +81,35 @@ describe("actionSearchValue", () => {
 	test("omits missing keywords cleanly", () => {
 		expect(
 			actionSearchValue(action({ id: "x", group: "Nav", title: "Chat" }))
+		).toBe("Nav Chat");
+	});
+
+	test("falls back when value is an empty string (falsy)", () => {
+		expect(
+			actionSearchValue(
+				action({ id: "x", group: "Nav", title: "Chat", value: "" })
+			)
+		).toBe("Nav Chat");
+	});
+
+	test("includes keywords in the fallback when present", () => {
+		expect(
+			actionSearchValue(
+				action({
+					id: "x",
+					group: "Settings",
+					title: "Theme",
+					keywords: "dark light appearance",
+				})
+			)
+		).toBe("Settings Theme dark light appearance");
+	});
+
+	test("drops an empty-string keyword from the fallback", () => {
+		expect(
+			actionSearchValue(
+				action({ id: "x", group: "Nav", title: "Chat", keywords: "" })
+			)
 		).toBe("Nav Chat");
 	});
 });

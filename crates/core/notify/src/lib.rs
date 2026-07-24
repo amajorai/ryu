@@ -190,3 +190,309 @@ pub async fn push_expo_message(
         tracing::warn!("notify: expo push message failed: {e}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Bytes, extract::State, http::StatusCode, http::Uri, Router};
+    use std::net::SocketAddr;
+    use std::sync::{Arc, Mutex};
+
+    // ---- serde: wire shape of the target enum -----------------------------
+
+    #[test]
+    fn notify_target_tag_is_snake_case_kind() {
+        // The `#[serde(tag = "kind", rename_all = "snake_case")]` contract is
+        // what the Core store + monitors engine persist and exchange; a silent
+        // rename would break every stored channel target.
+        let cases = [
+            (
+                NotifyTarget::Webhook {
+                    url: "https://hooks.example/x".into(),
+                },
+                "webhook",
+            ),
+            (
+                NotifyTarget::Telegram {
+                    bot_token: "abc".into(),
+                    chat_id: "42".into(),
+                },
+                "telegram",
+            ),
+            (
+                NotifyTarget::ExpoPush {
+                    token: "ExponentPushToken[y]".into(),
+                },
+                "expo_push",
+            ),
+            (
+                NotifyTarget::Email {
+                    to: "a@b.co".into(),
+                },
+                "email",
+            ),
+        ];
+        for (target, expected_kind) in cases {
+            let v = serde_json::to_value(&target).unwrap();
+            assert_eq!(
+                v.get("kind").and_then(|k| k.as_str()),
+                Some(expected_kind),
+                "wrong kind tag for {target:?}"
+            );
+            // Round-trips back to an identical value.
+            let back: NotifyTarget = serde_json::from_value(v).unwrap();
+            assert_eq!(back, target);
+        }
+    }
+
+    #[test]
+    fn notify_target_deserializes_from_tagged_json() {
+        let t: NotifyTarget =
+            serde_json::from_str(r#"{"kind":"telegram","bot_token":"T","chat_id":"C"}"#).unwrap();
+        assert_eq!(
+            t,
+            NotifyTarget::Telegram {
+                bot_token: "T".into(),
+                chat_id: "C".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn notify_target_unknown_kind_is_rejected() {
+        let r: Result<NotifyTarget, _> = serde_json::from_str(r#"{"kind":"carrier_pigeon"}"#);
+        assert!(r.is_err(), "unknown channel kind must not deserialize");
+    }
+
+    #[test]
+    fn alert_delivery_targets_default_is_empty() {
+        let d = AlertDeliveryTargets::default();
+        assert!(d.targets.is_empty());
+        assert!(d.emails.is_empty());
+    }
+
+    #[test]
+    fn alert_delivery_targets_fills_missing_fields() {
+        // Both fields are `#[serde(default)]`: an empty object and a partial
+        // object must both parse, so an older stored row without one field
+        // still loads.
+        let empty: AlertDeliveryTargets = serde_json::from_str("{}").unwrap();
+        assert!(empty.targets.is_empty() && empty.emails.is_empty());
+
+        let partial: AlertDeliveryTargets =
+            serde_json::from_str(r#"{"emails":["ops@x.io"]}"#).unwrap();
+        assert!(partial.targets.is_empty());
+        assert_eq!(partial.emails, vec!["ops@x.io".to_string()]);
+
+        let full: AlertDeliveryTargets = serde_json::from_str(
+            r#"{"targets":[{"kind":"webhook","url":"https://h/x"}],"emails":["a@b.co"]}"#,
+        )
+        .unwrap();
+        assert_eq!(full.targets.len(), 1);
+        assert_eq!(
+            full.targets[0],
+            NotifyTarget::Webhook {
+                url: "https://h/x".into()
+            }
+        );
+    }
+
+    // ---- HTTP test harness -------------------------------------------------
+
+    #[derive(Clone)]
+    struct Recorded {
+        path: String,
+        body: serde_json::Value,
+    }
+
+    #[derive(Clone)]
+    struct AppState {
+        recorded: Arc<Mutex<Vec<Recorded>>>,
+        status: StatusCode,
+    }
+
+    async fn record_handler(
+        State(st): State<AppState>,
+        uri: Uri,
+        body: Bytes,
+    ) -> StatusCode {
+        let json = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+        st.recorded.lock().unwrap().push(Recorded {
+            path: uri.path().to_string(),
+            body: json,
+        });
+        st.status
+    }
+
+    /// Spawn a loopback server on an ephemeral port that records every request
+    /// and answers with `status`. Mirrors `crates/core/downloads`'s test idiom.
+    async fn spawn_server(status: StatusCode) -> (SocketAddr, Arc<Mutex<Vec<Recorded>>>) {
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let state = AppState {
+            recorded: recorded.clone(),
+            status,
+        };
+        let app = Router::new().fallback(record_handler).with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (addr, recorded)
+    }
+
+    /// A bound-then-freed local address: connecting to it yields an immediate
+    /// connection-refused (no network, no DNS), which drives the send-failure
+    /// error branches deterministically.
+    fn dead_addr() -> SocketAddr {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let a = l.local_addr().unwrap();
+        drop(l);
+        a
+    }
+
+    // ---- send_webhook_text: full 2xx-gate coverage ------------------------
+
+    #[tokio::test]
+    async fn webhook_text_ok_on_2xx_and_sends_text_and_content() {
+        let (addr, recorded) = spawn_server(StatusCode::OK).await;
+        let http = reqwest::Client::new();
+        let url = format!("http://{addr}/hook");
+        let out = send_webhook_text(&http, &url, "hello world").await;
+        assert!(out.is_ok(), "2xx must map to Ok: {out:?}");
+
+        let rec = recorded.lock().unwrap();
+        assert_eq!(rec.len(), 1);
+        assert_eq!(rec[0].path, "/hook");
+        // Both a Slack `text` and a Discord `content` field carry the message.
+        assert_eq!(rec[0].body["text"], "hello world");
+        assert_eq!(rec[0].body["content"], "hello world");
+    }
+
+    #[tokio::test]
+    async fn webhook_text_err_on_non_2xx() {
+        let (addr, _rec) = spawn_server(StatusCode::INTERNAL_SERVER_ERROR).await;
+        let http = reqwest::Client::new();
+        let url = format!("http://{addr}/hook");
+        let err = send_webhook_text(&http, &url, "x").await.unwrap_err();
+        assert!(err.contains("HTTP 500"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn webhook_text_err_on_connection_refused() {
+        let http = reqwest::Client::new();
+        let url = format!("http://{}/hook", dead_addr());
+        let err = send_webhook_text(&http, &url, "x").await.unwrap_err();
+        assert!(
+            err.contains("webhook send failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // ---- send_telegram_text: error branch (https URL is hardcoded) ---------
+
+    #[tokio::test]
+    async fn telegram_text_err_on_connection_refused() {
+        // `.resolve` pins api.telegram.org to a dead local port: no DNS, no
+        // network, connection-refused before TLS. (The 2xx/else status branch
+        // needs a real TLS response — see the crate-level test notes.)
+        let http = reqwest::Client::builder()
+            .resolve("api.telegram.org", dead_addr())
+            .build()
+            .unwrap();
+        let err = send_telegram_text(&http, "BOT", "CHAT", "hi")
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("telegram send failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // ---- best-effort alert sends: shape + non-panic on failure ------------
+
+    #[tokio::test]
+    async fn webhook_alert_posts_title_message_and_alert_payload() {
+        let (addr, recorded) = spawn_server(StatusCode::OK).await;
+        let http = reqwest::Client::new();
+        let url = format!("http://{addr}/hook");
+        let alert = json!({ "severity": "high", "id": 7 });
+        send_webhook_alert(&http, &url, "Down!", "site is 500ing", &alert).await;
+
+        let rec = recorded.lock().unwrap();
+        assert_eq!(rec.len(), 1);
+        assert_eq!(rec[0].body["text"], "Down!\nsite is 500ing");
+        assert_eq!(rec[0].body["content"], "Down!\nsite is 500ing");
+        assert_eq!(rec[0].body["alert"], alert);
+    }
+
+    #[tokio::test]
+    async fn webhook_alert_is_best_effort_on_failure() {
+        // Non-2xx and connection-refused must both be swallowed (no panic, no
+        // return value) — fan-out never fails a caller.
+        let (addr, _rec) = spawn_server(StatusCode::BAD_GATEWAY).await;
+        let http = reqwest::Client::new();
+        send_webhook_alert(
+            &http,
+            &format!("http://{addr}/hook"),
+            "t",
+            "m",
+            &json!({}),
+        )
+        .await;
+        send_webhook_alert(
+            &http,
+            &format!("http://{}/hook", dead_addr()),
+            "t",
+            "m",
+            &json!({}),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn telegram_alert_is_best_effort_on_failure() {
+        let http = reqwest::Client::builder()
+            .resolve("api.telegram.org", dead_addr())
+            .build()
+            .unwrap();
+        // Must not panic even though the send fails.
+        send_telegram_alert(&http, "BOT", "CHAT", "Title", "body").await;
+    }
+
+    // ---- push_expo_message: empty short-circuit + failure path -------------
+
+    #[tokio::test]
+    async fn expo_push_empty_tokens_makes_no_request() {
+        let (addr, recorded) = spawn_server(StatusCode::OK).await;
+        // Pin exp.host at the recording server so a stray request WOULD be
+        // recorded; the empty-token early return means it never is.
+        let http = reqwest::Client::builder()
+            .resolve("exp.host", addr)
+            .build()
+            .unwrap();
+        push_expo_message(&http, &[], "t", "b", json!({})).await;
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "empty token list must short-circuit before any request"
+        );
+    }
+
+    #[tokio::test]
+    async fn expo_push_non_empty_is_best_effort_on_failure() {
+        let http = reqwest::Client::builder()
+            .resolve("exp.host", dead_addr())
+            .build()
+            .unwrap();
+        // Non-empty tokens build the message batch and POST; a refused
+        // connection is swallowed (best-effort), no panic.
+        push_expo_message(
+            &http,
+            &["ExponentPushToken[abc]".to_string()],
+            "Title",
+            "Body",
+            json!({ "url": "/x" }),
+        )
+        .await;
+    }
+}

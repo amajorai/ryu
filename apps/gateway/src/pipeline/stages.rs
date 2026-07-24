@@ -292,7 +292,10 @@ impl StageOrder {
 mod tests {
     use super::*;
 
-    fn resolve(order: &[PipelineStage], disabled: &[PipelineStage]) -> Result<StageOrder, StageOrderError> {
+    fn resolve(
+        order: &[PipelineStage],
+        disabled: &[PipelineStage],
+    ) -> Result<StageOrder, StageOrderError> {
         StageOrder::resolve(&PipelineOrderConfig {
             order: order.to_vec(),
             disabled: disabled.to_vec(),

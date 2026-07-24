@@ -177,7 +177,7 @@ import {
 import { createScheduledAgentWorkflow } from "@/src/lib/automations.ts";
 import { PlanCapError } from "@/src/lib/gating/planCapBridge.ts";
 import { useEntityCap } from "@/src/lib/gating/useEntityCap.ts";
-import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
+import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
 /** Base64-encode a UTF-8 string (btoa is Latin-1 only). Used to inline the plugin
  *  bundle into the sandboxed `srcdoc` so a body containing `</script>` cannot
@@ -247,7 +247,9 @@ function pickAudioFile(): Promise<File | null> {
 /** Fetch the Shadow keyframe at `tsMicros` and return it as a `data:` URL (the
  *  timeline companion's frame, blocked from a direct `<img src>` by the frame CSP
  *  `img-src data: blob:`). The shell (unsandboxed) reaches device-local Shadow
- *  (:3030) directly; `frameUrl` needs no node token (the `shadow.ts` INVARIANT).
+ *  through the LOCAL Core's `/api/shadow` proxy (`frameUrl` — Shadow's own HTTP
+ *  surface is bearer-gated and 403s browser requests; the `shadow.ts` INVARIANT
+ *  still holds: never the per-tab node).
  *  Resolves to `null` when no keyframe exists near that moment (Shadow 404s), so the
  *  companion renders its "No frame recorded" placeholder — parity with the desktop
  *  page's `<img onError>` fallback. */
@@ -391,7 +393,9 @@ export function PluginHostPanel({
 	// settings gear opens Settings → Quests through the `questsOpenDetectionSettings`
 	// bridge verb (the QuestsSettings tab stays a shell surface; the extracted page's
 	// gear reaches it via this host-side navigation, preserving the old behavior).
-	const openSettings = useSettingsDialog((s) => s.openSettings);
+	// Quests is an app: its settings render under the Apps header in the node-scoped
+	// Gateway dialog, addressed by its `app:<id>` entity value.
+	const openGateway = useGatewayDialog((s) => s.openGateway);
 	// The shell tab opener — the `com.ryu.activity` companion's clickable rows open the
 	// chat tab for an item's session through the `activityOpenSession` bridge verb (the
 	// extracted page used `useTabsContext().openTab` directly; the sandboxed frame reaches
@@ -855,7 +859,7 @@ export function PluginHostPanel({
 				>,
 			// Shell navigation: open Settings at the Quests (detection) tab. Not a Core
 			// call — the companion's gear reaches the shell SettingsDialog through here.
-			questsOpenDetectionSettings: () => openSettings("quests"),
+			questsOpenDetectionSettings: () => openGateway("app:com.ryu.quests"),
 			// Activity feed — the com.ryu.activity companion renders Core's read-only
 			// unified feed. Host-direct (the monitors pattern): the host holds the node
 			// token and calls the existing `/api/activity` read, forwarding Core's
@@ -1232,7 +1236,7 @@ export function PluginHostPanel({
 			limitFor,
 			canUse,
 			requestUpgrade,
-			openSettings,
+			openGateway,
 			openTab,
 			updateTabTitle,
 			currentTabId,

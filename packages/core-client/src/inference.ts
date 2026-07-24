@@ -145,5 +145,6 @@ export function isLocalEngine(engine: string | null | undefined): boolean {
 	if (!engine) {
 		return false;
 	}
-	return LOCAL_ENGINES.has(engine.trim().replace(ACP_PREFIX, "").toLowerCase());
+	// Lowercase BEFORE stripping so `ACP:llamacpp` and `acp:llamacpp` agree.
+	return LOCAL_ENGINES.has(engine.trim().toLowerCase().replace(ACP_PREFIX, ""));
 }

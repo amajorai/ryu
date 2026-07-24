@@ -1,18 +1,19 @@
 // apps/desktop/src/components/panels/PinnedSummaryPanel.tsx
 //
-// The "Pinned summary" panel: a floating, chromeless accordion pinned to the
-// top-right of the chat area once a conversation has a thread. It has no card
-// background and no header — just the accordion whose rows each carry their own
-// card surface. The first row is "Environment" (project ▸ branch ▸ worktree +
-// live git +added/−removed line counts + a one-click "Commit & push"); the rest
-// (Progress / Artifacts / Changes / Sources / Side chats) come from the shared
-// CoworkContextPanel and only appear when they have something to show.
+// The "Pinned summary" panel: a chromeless accordion sidebar shown once a
+// conversation has a thread. It has no card background and no header — just the
+// accordion whose rows each carry their own card surface. The first row is
+// "Environment" (project ▸ branch ▸ worktree + live git +added/−removed line
+// counts + a one-click "Commit & push"); the rest (Progress / Artifacts /
+// Changes / Sources / Side chats) come from the shared CoworkContextPanel and
+// only appear when they have something to show.
 //
 // The Environment row is shown (and default-open) only while a project folder is
 // open; with no folder there is nothing to configure, so it is omitted too.
-// Visibility of the whole panel is owned by ChatPage: it auto-hides while the
-// right panel is open and reopens when the right panel closes, unless the user
-// hid it via the titlebar toggle.
+// Placement is owned by WorkspacePanels: normally a docked column stacked with
+// the right panel (both push the chat narrower, both can be open at once); when
+// the chat would get too narrow it auto-demotes to a floating overlay. Only the
+// floating overlay passes `onDismiss` — the docked column never self-dismisses.
 
 import {
 	ArrowUpRight01Icon,
@@ -49,8 +50,8 @@ interface PinnedSummaryPanelProps {
 	folder: string | null;
 	/**
 	 * Called when the panel should hide itself because the user pressed away
-	 * from it while it overlaps the message column (below the `md` breakpoint).
-	 * At `md` and up the panel is docked in the gutter and never self-dismisses.
+	 * from it. Only passed in floating-overlay mode (where the panel overlaps
+	 * the message column); the docked column never self-dismisses.
 	 */
 	onDismiss?: () => void;
 	target: ApiTarget;
@@ -195,10 +196,10 @@ export function PinnedSummaryPanel({
 	const [git, setGit] = useState<GitStatus | null>(null);
 	const [commit, setCommit] = useState<CommitState>({ status: "idle" });
 
-	// The panel floats over the top-right of the message column (which has no
-	// max-width, so right-aligned user bubbles run under it at any window size).
-	// So it behaves like a dismissible popover: a pointer press anywhere outside
-	// it hides it, and the titlebar toggle brings it back.
+	// In floating-overlay mode (onDismiss set) the panel overlaps the message
+	// column, so it behaves like a dismissible popover: a pointer press anywhere
+	// outside it hides it, and the titlebar toggle brings it back. In docked
+	// mode onDismiss is absent and no listener is bound.
 	const panelRef = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		if (!onDismiss) {
@@ -319,8 +320,13 @@ export function PinnedSummaryPanel({
 	};
 
 	return (
+		// Floating overlay caps its own height and scrolls; the docked column's
+		// wrapper is full-height and owns scrolling, so no cap there.
 		<div
-			className="pointer-events-auto max-h-[70vh] w-72 overflow-y-auto"
+			className={cn(
+				"pointer-events-auto w-72",
+				onDismiss && "max-h-[70vh] overflow-y-auto"
+			)}
 			ref={panelRef}
 		>
 			<CoworkContextPanel

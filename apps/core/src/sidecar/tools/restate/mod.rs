@@ -171,6 +171,15 @@ pub fn restate_admin_url() -> String {
 mod tests {
     use super::*;
 
+    /// Serializes the two tests that read/mutate the process-global
+    /// `RYU_RESTATE_ADMIN_URL`: without it, the env-override test's set/restore races
+    /// the default test's read under cargo's in-process parallel runner (the default
+    /// test then observed the override and failed). Poison-tolerant.
+    static ADMIN_URL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_admin_url_env() -> std::sync::MutexGuard<'static, ()> {
+        ADMIN_URL_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn restate_manager_name() {
         let mgr = RestateManager::new();
@@ -185,6 +194,7 @@ mod tests {
 
     #[test]
     fn restate_admin_url_default() {
+        let _lock = lock_admin_url_env();
         if std::env::var("RYU_RESTATE_ADMIN_URL").is_err() {
             let url = restate_admin_url();
             assert!(
@@ -196,6 +206,7 @@ mod tests {
 
     #[test]
     fn restate_admin_url_env_override() {
+        let _lock = lock_admin_url_env();
         let prev = std::env::var("RYU_RESTATE_ADMIN_URL").ok();
         std::env::set_var("RYU_RESTATE_ADMIN_URL", "http://example.test:9999/health");
         assert_eq!(restate_admin_url(), "http://example.test:9999/health");

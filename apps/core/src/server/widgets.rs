@@ -175,7 +175,11 @@ pub struct WidgetCallBody {
 
 /// Error reply codes (D6): `denied | not_found | over_budget | server_error |
 /// invalid_args`.
-fn err_reply(status: StatusCode, code: &str, message: impl Into<String>) -> axum::response::Response {
+fn err_reply(
+    status: StatusCode,
+    code: &str,
+    message: impl Into<String>,
+) -> axum::response::Response {
     (
         status,
         Json(json!({ "ok": false, "error": message.into(), "code": code })),
@@ -198,7 +202,11 @@ pub async fn widget_call_tool(
 ) -> axum::response::Response {
     // 1. instanceId → live record (fail-closed).
     let Some(record) = store().get(&body.instance_id) else {
-        return err_reply(StatusCode::NOT_FOUND, "not_found", "unknown or expired widget instance");
+        return err_reply(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown or expired widget instance",
+        );
     };
     // 2. same-server: the tool must belong to the instance's origin server.
     let tool_server = body.tool_id.split("__").next().unwrap_or_default();
@@ -437,10 +445,18 @@ pub async fn widget_follow_up(
     Json(body): Json<WidgetFollowUpBody>,
 ) -> axum::response::Response {
     let Some(record) = store().get(&body.instance_id) else {
-        return err_reply(StatusCode::NOT_FOUND, "not_found", "unknown or expired widget instance");
+        return err_reply(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown or expired widget instance",
+        );
     };
     if body.prompt.trim().is_empty() {
-        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "prompt is required");
+        return err_reply(
+            StatusCode::BAD_REQUEST,
+            "invalid_args",
+            "prompt is required",
+        );
     }
 
     // Firewall / PII-DLP on the prompt before it can enter model context.
@@ -515,7 +531,11 @@ pub async fn widget_state(
     Json(body): Json<WidgetStateBody>,
 ) -> axum::response::Response {
     if store().get(&body.instance_id).is_none() {
-        return err_reply(StatusCode::NOT_FOUND, "not_found", "unknown or expired widget instance");
+        return err_reply(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown or expired widget instance",
+        );
     }
     store().set_state(&body.instance_id, body.state);
     Json(json!({ "ok": true })).into_response()
@@ -590,13 +610,25 @@ pub async fn widget_asset(
 
     // 2. Parse the target; `https://` only.
     let Ok(target) = url::Url::parse(&q.url) else {
-        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "asset url is not a valid URL");
+        return err_reply(
+            StatusCode::BAD_REQUEST,
+            "invalid_args",
+            "asset url is not a valid URL",
+        );
     };
     if target.scheme() != "https" {
-        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "asset url must be https");
+        return err_reply(
+            StatusCode::BAD_REQUEST,
+            "invalid_args",
+            "asset url must be https",
+        );
     }
     let Some(host) = target.host_str().map(str::to_ascii_lowercase) else {
-        return err_reply(StatusCode::BAD_REQUEST, "invalid_args", "asset url has no host");
+        return err_reply(
+            StatusCode::BAD_REQUEST,
+            "invalid_args",
+            "asset url has no host",
+        );
     };
 
     // 3. Authoritative allowlist: the origin server's widget-resource
@@ -637,12 +669,30 @@ pub async fn widget_asset(
     {
         Ok(Ok(addrs)) => addrs,
         _ => {
-            audit_asset(&record, &host, 0, started, Some("dns resolution failed".to_owned())).await;
-            return err_reply(StatusCode::BAD_GATEWAY, "server_error", "asset host did not resolve");
+            audit_asset(
+                &record,
+                &host,
+                0,
+                started,
+                Some("dns resolution failed".to_owned()),
+            )
+            .await;
+            return err_reply(
+                StatusCode::BAD_GATEWAY,
+                "server_error",
+                "asset host did not resolve",
+            );
         }
     };
     if resolved.is_empty() || resolved.iter().any(|a| ip_is_blocked(&a.ip())) {
-        audit_asset(&record, &host, 0, started, Some("resolves to blocked range".to_owned())).await;
+        audit_asset(
+            &record,
+            &host,
+            0,
+            started,
+            Some("resolves to blocked range".to_owned()),
+        )
+        .await;
         return err_reply(
             StatusCode::FORBIDDEN,
             "denied",
@@ -664,7 +714,14 @@ pub async fn widget_asset(
     {
         Ok(c) => c,
         Err(e) => {
-            audit_asset(&record, &host, 0, started, Some(format!("client build failed: {e}"))).await;
+            audit_asset(
+                &record,
+                &host,
+                0,
+                started,
+                Some(format!("client build failed: {e}")),
+            )
+            .await;
             return err_reply(
                 StatusCode::BAD_GATEWAY,
                 "server_error",
@@ -680,7 +737,14 @@ pub async fn widget_asset(
     {
         Ok(r) => r,
         Err(e) => {
-            audit_asset(&record, &host, 0, started, Some(format!("fetch failed: {e}"))).await;
+            audit_asset(
+                &record,
+                &host,
+                0,
+                started,
+                Some(format!("fetch failed: {e}")),
+            )
+            .await;
             return err_reply(
                 StatusCode::BAD_GATEWAY,
                 "server_error",
@@ -690,7 +754,14 @@ pub async fn widget_asset(
     };
     if !resp.status().is_success() {
         let status = resp.status();
-        audit_asset(&record, &host, 0, started, Some(format!("upstream {status}"))).await;
+        audit_asset(
+            &record,
+            &host,
+            0,
+            started,
+            Some(format!("upstream {status}")),
+        )
+        .await;
         return err_reply(
             StatusCode::BAD_GATEWAY,
             "server_error",
@@ -764,10 +835,16 @@ async fn widget_asset_allowlist(
     template: Option<&str>,
 ) -> Vec<String> {
     let meta = match template {
-        Some(tpl) => state.mcp.widget_resource(server, tpl).await.and_then(|r| r.meta),
+        Some(tpl) => state
+            .mcp
+            .widget_resource(server, tpl)
+            .await
+            .and_then(|r| r.meta),
         None => None,
     };
-    meta.as_ref().map(parse_resource_domains).unwrap_or_default()
+    meta.as_ref()
+        .map(parse_resource_domains)
+        .unwrap_or_default()
 }
 
 /// Parse the `resource_domains` allowlist from a widget resource's `_meta`,
@@ -813,7 +890,12 @@ fn normalize_allow_host(entry: &str) -> Option<String> {
     let host = if e.contains("://") {
         url::Url::parse(e).ok()?.host_str()?.to_ascii_lowercase()
     } else {
-        e.split('/').next()?.split(':').next()?.trim().to_ascii_lowercase()
+        e.split('/')
+            .next()?
+            .split(':')
+            .next()?
+            .trim()
+            .to_ascii_lowercase()
     };
     if host.is_empty() || host.contains('*') || !host.contains('.') {
         return None;
@@ -863,7 +945,12 @@ fn ip_is_blocked(ip: &std::net::IpAddr) -> bool {
 /// serve fonts/images as it) — safe because the frame's `script-src` is nonce-only,
 /// so a mislabeled script can never execute regardless of what this returns.
 fn content_type_is_allowed(ct: &str) -> bool {
-    let m = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let m = ct
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     m.starts_with("image/")
         || m.starts_with("font/")
         || m.starts_with("audio/")
@@ -913,30 +1000,6 @@ async fn audit_asset(
 
 // ── Widget resource fetch (reload / third-party fallback) ────────────────────
 
-/// `GET /api/apps/ui/:slug` — serve a built-in app's self-contained widget HTML
-/// by slug (the reload / third-party fetch fallback; live widgets embed the HTML
-/// in the stream part).
-#[utoipa::path(
-    get,
-    path = "/api/apps/ui/{slug}",
-    tag = "Plugins",
-    summary = "serve a built-in app's self-contained widget HTML",
-    params(("slug" = String, Path)),
-    responses((status = 200, description = "OK", body = serde_json::Value))
-)]
-pub async fn apps_ui_bundle(Path(slug): Path<String>) -> axum::response::Response {
-    let uri = format!("ui://widget/{slug}.html");
-    match crate::sidecar::mcp::apps::read_resource(&uri) {
-        Some(res) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            res.html,
-        )
-            .into_response(),
-        None => err_reply(StatusCode::NOT_FOUND, "not_found", "unknown app widget"),
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ResourceReadBody {
     /// The MCP server that owns the resource (in-process app namespace or a
@@ -960,18 +1023,12 @@ pub async fn mcp_resources_read(
     State(state): State<ServerState>,
     Json(body): Json<ResourceReadBody>,
 ) -> axum::response::Response {
-    // In-process apps resolve directly from the uri.
-    if let Some(res) = crate::sidecar::mcp::apps::read_resource(&body.uri) {
-        return Json(json!({
-            "ok": true,
-            "uri": res.uri,
-            "mimeType": res.mime_type,
-            "text": res.html,
-        }))
-        .into_response();
-    }
     let Some(server) = body.server.as_deref().filter(|s| !s.is_empty()) else {
-        return err_reply(StatusCode::NOT_FOUND, "not_found", "unknown widget resource");
+        return err_reply(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown widget resource",
+        );
     };
     match state.mcp.widget_resource(server, &body.uri).await {
         Some(res) => Json(json!({
@@ -981,7 +1038,11 @@ pub async fn mcp_resources_read(
             "text": res.html,
         }))
         .into_response(),
-        None => err_reply(StatusCode::NOT_FOUND, "not_found", "unknown widget resource"),
+        None => err_reply(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "unknown widget resource",
+        ),
     }
 }
 
@@ -1072,5 +1133,151 @@ mod asset_proxy_tests {
         let m3 = json!({ "resource_domains": ["*.evil.com"] });
         assert!(parse_resource_domains(&m3).is_empty());
         assert!(parse_resource_domains(&json!({})).is_empty());
+    }
+
+    use super::{allow_gateway_fallback, err_reply, ip_is_blocked, WidgetInstanceStore};
+    use axum::http::StatusCode;
+    use std::net::IpAddr;
+
+    /// Serializes the `RYU_ALLOW_GATEWAY_FALLBACK` env mutation.
+    static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The per-session concurrency cap is enforced at mint: over cap → `None` (no
+    /// widget part emitted, D4). A different session is unaffected by another's cap.
+    #[test]
+    fn mint_enforces_per_session_cap() {
+        let store = WidgetInstanceStore::new(2);
+        let a1 = store.mint("sess-a".into(), "ag".into(), "srv".into(), vec![]);
+        let a2 = store.mint("sess-a".into(), "ag".into(), "srv".into(), vec![]);
+        assert!(a1.is_some() && a2.is_some(), "first two in a session mint");
+        // Third for the SAME session is over cap → None.
+        assert!(
+            store
+                .mint("sess-a".into(), "ag".into(), "srv".into(), vec![])
+                .is_none(),
+            "over-cap mint must return None"
+        );
+        // A different session has its own budget.
+        assert!(
+            store
+                .mint("sess-b".into(), "ag".into(), "srv".into(), vec![])
+                .is_some(),
+            "the cap is per-session, not global"
+        );
+    }
+
+    /// Minted instances get unguessable, unique ids and resolve by id; an unknown id
+    /// fails closed (the capability the public asset proxy authenticates against).
+    #[test]
+    fn mint_ids_are_unique_and_resolvable() {
+        let store = WidgetInstanceStore::new(8);
+        let i1 = store
+            .mint("s".into(), "ag".into(), "srv".into(), vec!["tool.x".into()])
+            .unwrap();
+        let i2 = store
+            .mint("s".into(), "ag".into(), "srv".into(), vec![])
+            .unwrap();
+        assert_ne!(i1.instance_id, i2.instance_id, "ids must be unique");
+        assert!(i1.instance_id.starts_with("wgt_"));
+        // Resolvable by id, carrying the server-resolved provenance.
+        let got = store.get(&i1.instance_id).expect("live instance resolves");
+        assert_eq!(got.origin_server, "srv");
+        assert_eq!(got.widget_accessible_tool_ids, vec!["tool.x".to_owned()]);
+        // Unknown id → None (fail-closed).
+        assert!(store.get("wgt_does_not_exist").is_none());
+    }
+
+    /// `set_state` persists a server-authoritative snapshot for a live instance and is
+    /// a silent no-op for an unknown id (never mints a phantom row).
+    #[test]
+    fn set_state_persists_for_live_and_noops_for_unknown() {
+        let store = WidgetInstanceStore::new(8);
+        let inst = store
+            .mint("s".into(), "ag".into(), "srv".into(), vec![])
+            .unwrap();
+        assert!(store.get(&inst.instance_id).unwrap().widget_state.is_none());
+        store.set_state(&inst.instance_id, json!({ "count": 5 }));
+        assert_eq!(
+            store.get(&inst.instance_id).unwrap().widget_state,
+            Some(json!({ "count": 5 }))
+        );
+        // No-op for an unknown id — must not create a resolvable instance.
+        store.set_state("wgt_ghost", json!({ "x": 1 }));
+        assert!(store.get("wgt_ghost").is_none());
+    }
+
+    /// The D6 error envelope is `{ ok:false, error, code }` at the given status — the
+    /// shape every widget route returns on a denial / bad-args.
+    #[test]
+    fn err_reply_shapes_the_d6_error_envelope() {
+        let resp = err_reply(StatusCode::FORBIDDEN, "denied", "nope");
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// The SSRF IP guard blocks IPv4-mapped IPv6 metadata + a few ranges the host
+    /// literal check delegates to, and passes a genuine public address.
+    #[test]
+    fn ip_guard_blocks_mapped_and_ula_passes_public() {
+        // IPv4-mapped cloud metadata address (the DNS-rebinding residual closer).
+        assert!(ip_is_blocked(&"::ffff:169.254.169.254".parse::<IpAddr>().unwrap()));
+        // CGNAT / carrier range is public-routable-but... 100.64/10 is NOT private per
+        // std, so it is NOT blocked — pin that we don't over-block.
+        assert!(!ip_is_blocked(&"100.64.0.1".parse::<IpAddr>().unwrap()));
+        // A real public v4 + v6 pass.
+        assert!(!ip_is_blocked(&"1.1.1.1".parse::<IpAddr>().unwrap()));
+        assert!(!ip_is_blocked(&"2606:4700:4700::1111".parse::<IpAddr>().unwrap()));
+    }
+
+    /// The gateway-fallback escape hatch is OFF unless explicitly opted in with a
+    /// documented truthy token — a stray value keeps the safe default.
+    #[test]
+    fn gateway_fallback_is_opt_in_only() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        let prior = std::env::var("RYU_ALLOW_GATEWAY_FALLBACK").ok();
+
+        std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK");
+        assert!(!allow_gateway_fallback(), "unset → off");
+        for on in ["1", "true", "yes"] {
+            std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", on);
+            assert!(allow_gateway_fallback(), "'{on}' enables fallback");
+        }
+        for off in ["0", "false", "", "on"] {
+            std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", off);
+            assert!(!allow_gateway_fallback(), "'{off}' keeps fallback off");
+        }
+
+        match prior {
+            Some(v) => std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", v),
+            None => std::env::remove_var("RYU_ALLOW_GATEWAY_FALLBACK"),
+        }
+    }
+
+    /// Extra `normalize_allow_host` edges: an entry with a path/port strips to the
+    /// bare host; a `://`-scheme entry parses its host; an IPv6-literal-ish or
+    /// dotless label is rejected.
+    #[test]
+    fn normalize_allow_host_strips_port_path_and_scheme() {
+        assert_eq!(
+            normalize_allow_host("https://cdn.example.com:8443/a/b?x=1"),
+            Some("cdn.example.com".to_owned())
+        );
+        assert_eq!(
+            normalize_allow_host("assets.example.co.uk/path"),
+            Some("assets.example.co.uk".to_owned())
+        );
+        // Dotless single label (even non-localhost) is rejected — exact public host only.
+        assert_eq!(normalize_allow_host("intranet"), None);
+    }
+
+    /// Content-type gate is case-insensitive and ignores parameters, and never
+    /// permits active types (html/js/json) that could turn the lane into a loader.
+    #[test]
+    fn content_type_gate_is_case_and_param_insensitive() {
+        assert!(content_type_is_allowed("IMAGE/PNG"));
+        assert!(content_type_is_allowed("Font/WOFF2 ; charset=binary"));
+        assert!(content_type_is_allowed("application/vnd.ms-fontobject"));
+        assert!(!content_type_is_allowed("application/json"));
+        assert!(!content_type_is_allowed(""));
+        assert!(!content_type_is_allowed("text/html; charset=utf-8"));
     }
 }

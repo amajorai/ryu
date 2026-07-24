@@ -164,7 +164,10 @@ export class CrashBoundary extends Component<
 			// rounded window surface here ourselves, otherwise the error screen
 			// shows through with no background and square corners.
 			return (
-				<div className="/50 flex h-screen w-full items-center justify-center overflow-hidden rounded-[var(--ryu-window-radius-base,2rem)] bg-background backdrop-blur-xl">
+				<div
+					className="/50 flex h-screen w-full items-center justify-center overflow-hidden rounded-[var(--ryu-window-radius-base,2rem)] bg-background backdrop-blur-xl"
+					data-tauri-drag-region
+				>
 					<Empty>
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
@@ -186,7 +189,7 @@ export class CrashBoundary extends Component<
 									<Button
 										onClick={this.handleCopyConsole}
 										size="sm"
-										variant="outline"
+										variant="ghost"
 									>
 										{this.state.copied ? "Copied" : "Copy console"}
 									</Button>

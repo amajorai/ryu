@@ -331,7 +331,11 @@ async fn fetch_and_extract_source(
         match fmt.as_str() {
             "tar.gz" => extract_tar_gz_to_dir(&data, &dest, None).map_err(|e| e.to_string())?,
             "zip" => extract_zip_to_dir(&data, &dest, None).map_err(|e| e.to_string())?,
-            other => return Err(format!("unsupported source format '{other}' (need tar.gz|zip)")),
+            other => {
+                return Err(format!(
+                    "unsupported source format '{other}' (need tar.gz|zip)"
+                ))
+            }
         };
         Ok(())
     })

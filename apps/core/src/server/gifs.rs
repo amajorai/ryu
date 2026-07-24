@@ -118,11 +118,17 @@ async fn search_klipy(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
     if !q.is_empty() {
         req = req.query(&[("q", q)]);
     }
-    let resp = req.send().await.map_err(|e| format!("klipy request failed: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("klipy request failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("klipy returned {}", resp.status()));
     }
-    let body: Value = resp.json().await.map_err(|e| format!("klipy decode failed: {e}"))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("klipy decode failed: {e}"))?;
     // Klipy wraps the list as `{ result, data: { data: [...] } }`.
     let items = body
         .get("data")
@@ -148,15 +154,29 @@ async fn search_klipy(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
         };
         let id = it
             .get("id")
-            .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| v.to_string())
+            })
             .unwrap_or_default();
         out.push(GifResult {
             id,
-            title: it.get("title").and_then(Value::as_str).unwrap_or("GIF").to_string(),
+            title: it
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("GIF")
+                .to_string(),
             preview_url: preview.to_string(),
             url: full.to_string(),
-            width: full_fmt.and_then(|g| g.get("width")).and_then(str_num).unwrap_or(0),
-            height: full_fmt.and_then(|g| g.get("height")).and_then(str_num).unwrap_or(0),
+            width: full_fmt
+                .and_then(|g| g.get("width"))
+                .and_then(str_num)
+                .unwrap_or(0),
+            height: full_fmt
+                .and_then(|g| g.get("height"))
+                .and_then(str_num)
+                .unwrap_or(0),
         });
     }
     Ok(out)
@@ -169,18 +189,30 @@ async fn search_giphy(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
     } else {
         "https://api.giphy.com/v1/gifs/search".to_string()
     };
-    let mut req = gif_client()
-        .get(&base)
-        .query(&[("api_key", key), ("limit", &limit.to_string()), ("rating", "pg-13")]);
+    let mut req = gif_client().get(&base).query(&[
+        ("api_key", key),
+        ("limit", &limit.to_string()),
+        ("rating", "pg-13"),
+    ]);
     if !q.is_empty() {
         req = req.query(&[("q", q)]);
     }
-    let resp = req.send().await.map_err(|e| format!("giphy request failed: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("giphy request failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("giphy returned {}", resp.status()));
     }
-    let body: Value = resp.json().await.map_err(|e| format!("giphy decode failed: {e}"))?;
-    let items = body.get("data").and_then(Value::as_array).cloned().unwrap_or_default();
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("giphy decode failed: {e}"))?;
+    let items = body
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::with_capacity(items.len());
     for it in &items {
         let images = it.get("images");
@@ -197,12 +229,26 @@ async fn search_giphy(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
         };
         let dims = images.and_then(|i| i.get("original"));
         out.push(GifResult {
-            id: it.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
-            title: it.get("title").and_then(Value::as_str).unwrap_or("GIF").to_string(),
+            id: it
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            title: it
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("GIF")
+                .to_string(),
             preview_url: preview.to_string(),
             url: full.to_string(),
-            width: dims.and_then(|d| d.get("width")).and_then(str_num).unwrap_or(0),
-            height: dims.and_then(|d| d.get("height")).and_then(str_num).unwrap_or(0),
+            width: dims
+                .and_then(|d| d.get("width"))
+                .and_then(str_num)
+                .unwrap_or(0),
+            height: dims
+                .and_then(|d| d.get("height"))
+                .and_then(str_num)
+                .unwrap_or(0),
         });
     }
     Ok(out)
@@ -224,12 +270,22 @@ async fn search_tenor(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
     if !q.is_empty() {
         req = req.query(&[("q", q)]);
     }
-    let resp = req.send().await.map_err(|e| format!("tenor request failed: {e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("tenor request failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("tenor returned {}", resp.status()));
     }
-    let body: Value = resp.json().await.map_err(|e| format!("tenor decode failed: {e}"))?;
-    let items = body.get("results").and_then(Value::as_array).cloned().unwrap_or_default();
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("tenor decode failed: {e}"))?;
+    let items = body
+        .get("results")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::with_capacity(items.len());
     for it in &items {
         let formats = it.get("media_formats");
@@ -249,10 +305,20 @@ async fn search_tenor(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
             .and_then(|f| f.get("gif"))
             .and_then(|g| g.get("dims"))
             .and_then(Value::as_array);
-        let width = dims.and_then(|d| d.first()).and_then(Value::as_u64).unwrap_or(0) as u32;
-        let height = dims.and_then(|d| d.get(1)).and_then(Value::as_u64).unwrap_or(0) as u32;
+        let width = dims
+            .and_then(|d| d.first())
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let height = dims
+            .and_then(|d| d.get(1))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
         out.push(GifResult {
-            id: it.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+            id: it
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
             title: it
                 .get("content_description")
                 .and_then(Value::as_str)
@@ -269,7 +335,63 @@ async fn search_tenor(key: &str, q: &str, limit: u32) -> Result<Vec<GifResult>, 
 
 /// Giphy reports dimensions as numeric strings; parse leniently.
 fn str_num(v: &Value) -> Option<u32> {
-    v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_u64().map(|n| n as u32))
+    v.as_str()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| v.as_u64().map(|n| n as u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `str_num` tolerates every dimension spelling providers use: Giphy's numeric
+    /// strings, Tenor's raw integers, and rejects anything non-numeric.
+    #[test]
+    fn str_num_parses_string_and_integer_dimensions() {
+        // Giphy sends dimensions as JSON strings.
+        assert_eq!(str_num(&json!("480")), Some(480));
+        // Tenor sends them as raw numbers.
+        assert_eq!(str_num(&json!(270)), Some(270));
+        // Zero is a valid dimension (not a parse failure).
+        assert_eq!(str_num(&json!("0")), Some(0));
+        assert_eq!(str_num(&json!(0)), Some(0));
+    }
+
+    #[test]
+    fn str_num_rejects_non_numeric_and_wrong_types() {
+        assert_eq!(str_num(&json!("not-a-number")), None);
+        assert_eq!(str_num(&json!("")), None);
+        // A float, bool, null, array, or object has no lenient integer reading.
+        assert_eq!(str_num(&json!(1.5)), None);
+        assert_eq!(str_num(&json!(true)), None);
+        assert_eq!(str_num(&json!(null)), None);
+        assert_eq!(str_num(&json!([1, 2])), None);
+        // A negative numeric string does not parse as u32 (fail-closed to None).
+        assert_eq!(str_num(&json!("-5")), None);
+    }
+
+    /// The empty/absent `q` path defaults to 24 and clamps limit into [1, 50] —
+    /// the same clamp the `search` handler applies before hitting a provider.
+    #[test]
+    fn limit_clamps_into_provider_bounds() {
+        // The handler does `params.limit.unwrap_or(24).clamp(1, 50)`.
+        assert_eq!(0u32.clamp(1, 50), 1);
+        assert_eq!(999u32.clamp(1, 50), 50);
+        assert_eq!(24u32.clamp(1, 50), 24);
+    }
+
+    /// The search query deserializes with a defaulted `q` and optional `limit`, so a
+    /// bare `?q=` (or no params) is a valid trending request, not a 422.
+    #[test]
+    fn search_query_defaults_empty_q() {
+        let q: GifSearchQuery = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(q.q, "");
+        assert_eq!(q.limit, None);
+
+        let q2: GifSearchQuery = serde_json::from_value(json!({ "q": "cat", "limit": 5 })).unwrap();
+        assert_eq!(q2.q, "cat");
+        assert_eq!(q2.limit, Some(5));
+    }
 }
 
 /// `GET /api/gifs/search?q=&limit=` — search (or, with empty `q`, trending) GIFs

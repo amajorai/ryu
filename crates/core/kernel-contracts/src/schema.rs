@@ -68,6 +68,10 @@ pub struct WorkflowConfig {
 ///     (`host.*` gated by the plugin's grants). Requires the `tool:execute` grant.
 ///   - `http`: Core proxies the call to `url` with Gateway egress governance,
 ///     gated by a `tool:http-egress:<domain>` grant.
+///   - `command`: Core execs an allowlisted local CLI named by `bin` (a logical
+///     allowlist KEY, never a path) with an argv array built from `command_args`
+///     templates. Gated by a `tool:command:<bin>` grant and routed through the
+///     same budget + exec-approval scan + audit bracket as `http`.
 ///
 /// Extra fields the SDK emits for Ryu-App widgets (`widget`, `input_schema`, …)
 /// are tolerated (serde ignores unknown keys) so a `defineApp` config still
@@ -78,7 +82,8 @@ pub struct ToolConfig {
     /// wraps (e.g. `"web_search"`); for `inline_deno`/`http` it is the tool's own
     /// name. The registered, callable id is always `app__<slug>`.
     pub slug: String,
-    /// Backend kind: `"alias"` (default when absent) | `"inline_deno"` | `"http"`.
+    /// Backend kind: `"alias"` (default when absent) | `"inline_deno"` | `"http"`
+    /// | `"command"`.
     #[serde(default)]
     pub backend: Option<String>,
     /// `inline_deno`: the self-contained JS body run in the sandbox. Invoked with
@@ -104,6 +109,175 @@ pub struct ToolConfig {
     /// injected by the identity vault) reaches the request. Empty/absent = none.
     #[serde(default)]
     pub header_params: Option<Vec<String>>,
+    /// `http`: request headers whose VALUES are injected server-side from a secret
+    /// source and are NEVER part of the model-visible input schema (closes the
+    /// model-sees-the-token gap). Maps the wire header name to a value TEMPLATE:
+    /// each whitespace-delimited `env:VARNAME` / `vault:<domain>` TOKEN is
+    /// substituted with its resolved secret while literal text is preserved, so
+    /// `"Bearer env:RYU_EXA_API_KEY"` sends `Bearer <resolved>` and the degenerate
+    /// whole-value `"env:RYU_EXA_API_KEY"` still yields the bare secret. Sources:
+    ///   - `env:VARNAME`    read Core's process env (the exa BYOK seam).
+    ///   - `vault:<domain>` read the identity-vault credential bound for <domain>
+    ///     via the gateway-governed `identity.read` gate.
+    /// Keys MUST be disjoint from `header_params` (resolve_backend errors otherwise).
+    #[serde(default)]
+    pub secret_headers: Option<std::collections::BTreeMap<String, String>>,
+    /// `http`: when true, a transport failure or a 401/403 becomes a soft
+    /// `Ok({available:false, reason, hint})` result so the agent's turn continues
+    /// (mirrors the exa provider); other statuses still return `{status, body}`.
+    /// Absent/false = today's behavior (transport->Err, any response->{status,body}).
+    #[serde(default)]
+    pub fail_open: Option<bool>,
+    /// `http`: when true, a 2xx response returns the parsed upstream body VERBATIM
+    /// (no `{status, body}` envelope) — for a tool that wants the raw provider JSON
+    /// (e.g. exa's search response). A non-2xx response, and a `fail_open` 401/403,
+    /// still yield their envelopes (`{status, body}` / `{available:false, …}`).
+    /// Absent/false = today's behavior (every response wraps as `{status, body}`).
+    #[serde(default)]
+    pub unwrap_body: Option<bool>,
+    /// `http`: a static JSON object DEEP-MERGED UNDER the model-provided request
+    /// body (model args win on any key collision; nested objects merge key-by-key).
+    /// Lets a manifest supply defaulted + nested body fields declaratively — e.g.
+    /// exa's `{num_results:10, use_autoprompt:true, contents:{text:true}}` — that the
+    /// model can still override. Lives in the tool CONFIG, never in `input_schema`,
+    /// so these defaults are not model-visible args. Absent = no defaulting (today's
+    /// verbatim forwarding). Must be a JSON object when present.
+    #[serde(default)]
+    pub body_defaults: Option<serde_json::Value>,
+    /// `command`: the LOGICAL allowlist key of the local binary to exec (e.g.
+    /// `"exa"`). Resolved to an absolute path against Core's command allowlist at
+    /// dispatch — NEVER a filesystem path from the manifest. Required for the
+    /// `command` backend; `resolve_backend` rejects a value containing a path
+    /// separator, `..`, or an absolute form.
+    #[serde(default)]
+    pub bin: Option<String>,
+    /// `command`: argv templates. Each element is ONE argv slot (no shell) and may
+    /// contain `{name}` placeholders substituted from the tool-call args by name
+    /// (e.g. `"--query={query}"`). Absent = no arguments.
+    #[serde(default)]
+    pub command_args: Option<Vec<String>>,
+    /// `command`: child-environment overlay — child var name → source spec. v1
+    /// supports only `"env:VARNAME"` (read Core's process env). Declared VALUES are
+    /// deliberately excluded from the firewall/DLP scan and the audit trail.
+    #[serde(default)]
+    pub command_env: Option<std::collections::BTreeMap<String, String>>,
+    /// `command`: absolute working directory for the child. `None` = inherit Core's.
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// `command`: hard wall-clock timeout in seconds (default
+    /// [`DEFAULT_COMMAND_TIMEOUT_SECS`]). The child is killed on elapse.
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    /// `command`: how stdout is shaped into the tool result — `"stdout"` (default,
+    /// raw capped string) or `"json"` (parse stdout as JSON, error if unparseable).
+    #[serde(default)]
+    pub output: Option<String>,
+    /// `command`: name of the tool-call arg whose value is an OUTBOUND URL the
+    /// child will fetch (e.g. a crawler's target `"url"`). When set, the
+    /// dispatcher SSRF-screens that arg's value BEFORE spawn — scheme allowlist +
+    /// internal-address rejection (loopback / RFC1918 / link-local /
+    /// 169.254.169.254 metadata / ULA / CGNAT), the same guard the `http` backend
+    /// applies — so a network CLI cannot be turned into an SSRF probe. Absent = no
+    /// egress screen (a purely-local CLI). Because the child re-resolves DNS
+    /// itself, this is a pre-spawn screen (no IP-pinning), matching the inherent
+    /// residual for any shell-out fetcher.
+    #[serde(default)]
+    pub egress_url_arg: Option<String>,
+    /// `command`: structured argv builder that SUPERSEDES `command_args` when
+    /// present. Each [`ArgSpec`] reads one tool-call arg and expands to 0..N argv
+    /// tokens, which `command_args`' one-slot-per-template model cannot do. Two
+    /// expansions the template grammar structurally cannot express:
+    ///   - `map` — an enum value selects a token list, and a value mapping to `[]`
+    ///     contributes ZERO tokens (how `rtk`'s `mode:"wrap"` becomes no
+    ///     subcommand at all);
+    ///   - `split:"shell"` — one string arg is `shell_words`-split into VARIADIC
+    ///     argv (how `rtk`'s `command:"git status"` becomes `git` + `status`),
+    ///     WITHOUT ever reaching a shell.
+    /// Absent = use `command_args` (the default template path; spider/exa).
+    #[serde(default)]
+    pub args: Option<Vec<ArgSpec>>,
+}
+
+/// One entry in a [`ToolConfig::args`] structured argv builder. Exactly one
+/// tool-call arg (`from`) is read and expanded to 0..N argv tokens. Unlike a
+/// `command_args` template (always one argv slot), an `ArgSpec` can drop a token
+/// or fan one arg out into many — the two things `rtk` needs.
+///
+/// Modes (v1 — `rtk` uses only `map` and `split`):
+///   - `map` + optional `default`: the arg's string value is a KEY into `map`,
+///     selecting the token list to emit. A key mapping to `[]` emits nothing.
+///     `default` supplies the key when the arg is absent. An unknown value (no
+///     matching key, no usable default) is a dispatch error.
+///   - `split: "shell"`: the arg's string value is `shell_words`-split into
+///     variadic argv tokens (quotes honored, escapes collapsed; never a shell).
+///     The split tokens are NOT subject to the leading-`-` option-injection guard
+///     that `command_args` applies to interpolated values — a wrapped command
+///     legitimately carries flags (`-la`, `--all`); the exec-scan + bin grant are
+///     the controls here, exactly as they were for the deleted native provider.
+///   - neither `map` nor `split`: the arg's scalar value is emitted as ONE token.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ArgSpec {
+    /// Name of the tool-call arg this spec reads. Required (v1 has no literal).
+    pub from: String,
+    /// Enum-map expansion: the arg's string value is a key selecting the token
+    /// list to emit (a key mapping to `[]` emits ZERO tokens).
+    #[serde(default)]
+    pub map: Option<std::collections::BTreeMap<String, Vec<String>>>,
+    /// Fallback map key used when the arg is absent (only meaningful with `map`).
+    #[serde(default)]
+    pub default: Option<String>,
+    /// Splitting mode: `"shell"` shell-splits the arg's string value into variadic
+    /// argv. The only supported value.
+    #[serde(default)]
+    pub split: Option<String>,
+    /// When true, a missing/blank arg is a dispatch error rather than skipped.
+    #[serde(default)]
+    pub required: Option<bool>,
+}
+
+impl ArgSpec {
+    /// Structural validation independent of any tool-call args (checked at
+    /// `resolve_backend` time). Runtime concerns (unknown map value, unbalanced
+    /// quotes, blank required arg) surface later, at dispatch.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.from.trim().is_empty() {
+            return Err("tool backend 'command': an 'args' entry needs a non-empty 'from'".to_owned());
+        }
+        if self.map.is_some() && self.split.is_some() {
+            return Err(format!(
+                "tool backend 'command': 'args' entry for '{}' cannot set both 'map' and 'split'",
+                self.from
+            ));
+        }
+        if let Some(split) = self.split.as_deref() {
+            if split != "shell" {
+                return Err(format!(
+                    "tool backend 'command': 'args' entry for '{}' has unknown split '{split}' (only 'shell')",
+                    self.from
+                ));
+            }
+        }
+        if self.default.is_some() && self.map.is_none() {
+            return Err(format!(
+                "tool backend 'command': 'args' entry for '{}' sets 'default' without 'map'",
+                self.from
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Default wall-clock timeout for a [`ToolBackend::Command`] child, in seconds.
+pub const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 30;
+
+/// How a [`ToolBackend::Command`] shapes its child's stdout into the tool result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommandOutput {
+    /// Return the raw stdout as a (bounded) string. The default.
+    #[default]
+    Stdout,
+    /// Parse stdout as JSON; a non-JSON stdout is an error.
+    Json,
 }
 
 /// The resolved, dispatch-ready backend of a [`ToolConfig`]. Produced by
@@ -121,7 +295,163 @@ pub enum ToolBackend {
         url: String,
         method: String,
         header_params: Vec<String>,
+        /// Wire header name → secret value TEMPLATE (`env:VARNAME` / `vault:<domain>`
+        /// tokens substituted in place, e.g. `"Bearer env:RYU_EXA_API_KEY"`).
+        /// Resolved server-side in `run_http_tool` and NEVER present in the
+        /// model-visible input schema or `header_params` (disjointness enforced at
+        /// `resolve_backend`). Empty = no secret headers.
+        secret_headers: std::collections::BTreeMap<String, String>,
+        /// Soft-unavailable posture: on `true`, a transport failure or a 401/403
+        /// becomes `Ok({available:false,…})` so the agent's turn continues.
+        fail_open: bool,
+        /// On `true`, a 2xx response returns the parsed upstream body VERBATIM
+        /// (no `{status, body}` envelope). Non-2xx (and a fail_open 401/403) still
+        /// return their envelope. `false` = every response wraps as `{status, body}`.
+        unwrap_body: bool,
+        /// Static JSON object deep-merged UNDER the model-provided body (model args
+        /// win). `Value::Null` = no defaulting. Resolved to a body-shaping default in
+        /// `run_http_tool`; never model-visible.
+        body_defaults: serde_json::Value,
     },
+    /// Exec an allowlisted local CLI. `bin` is an allowlist KEY (never a path —
+    /// `resolve_backend` structurally rejects path-shaped values); the KEY→abs-path
+    /// resolution is Core-controlled at dispatch. `args` are argv templates
+    /// (`{name}` placeholders, one slot each, no shell); `env` is the declared
+    /// child-env overlay; the child runs under a hard `timeout_secs` with a bounded
+    /// stdout read. Grant: `tool:command:<bin>` (or the `*` wildcard).
+    Command {
+        bin: String,
+        args: Vec<String>,
+        env: std::collections::BTreeMap<String, String>,
+        cwd: Option<String>,
+        timeout_secs: u64,
+        output: CommandOutput,
+        /// Name of the arg to SSRF-screen as an outbound URL before spawn (see
+        /// [`ToolConfig::egress_url_arg`]). `None` = no egress screen.
+        egress_url_arg: Option<String>,
+        /// Structured argv builder (see [`ToolConfig::args`]). When `Some`, the
+        /// dispatcher expands these against the call args instead of templating
+        /// `args` — the map/split expansions the template grammar cannot do. `None`
+        /// = use the `args` templates (spider/exa).
+        arg_specs: Option<Vec<ArgSpec>>,
+        /// Per-arg numeric default + min/max clamp, pre-extracted from the tool's
+        /// own `input_schema.properties` at `resolve_backend` time. Applied to the
+        /// call args at render time (BOTH the `command_args` and `arg_specs`
+        /// paths) so a raw-JSON caller that bypasses the advertised schema still
+        /// gets the schema's `default`/`minimum`/`maximum`. Empty = no bounds.
+        arg_bounds: std::collections::BTreeMap<String, ArgBounds>,
+    },
+}
+
+/// Numeric default + clamp bounds for one command-tool arg, sourced from the
+/// tool's `input_schema` (`default`/`minimum`/`maximum`). Applied at render time by
+/// [`clamp_and_default_args`] so the argv a command sees is always within the
+/// bounds the schema advertises — even for a caller that hand-rolls raw JSON and
+/// skips the MCP schema's own `minimum`/`maximum` validation.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ArgBounds {
+    /// Value substituted when the arg is absent/null (the JSON-schema `default`).
+    pub default: Option<serde_json::Value>,
+    /// Inclusive lower clamp (JSON-schema `minimum`).
+    pub minimum: Option<f64>,
+    /// Inclusive upper clamp (JSON-schema `maximum`).
+    pub maximum: Option<f64>,
+    /// True when the arg is integral (`type: "integer"`, or every bound is a whole
+    /// number): a clamped value is then emitted as an integer so it renders as
+    /// `"10"`, not `"10.0"`.
+    pub integer: bool,
+}
+
+/// Extract per-arg [`ArgBounds`] from a tool `input_schema`'s numeric properties.
+/// Pure — only reads `default`/`minimum`/`maximum`/`type` under `properties`. A
+/// property with none of those contributes no entry.
+pub fn extract_arg_bounds(
+    input_schema: Option<&serde_json::Value>,
+) -> std::collections::BTreeMap<String, ArgBounds> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(props) = input_schema
+        .and_then(|s| s.get("properties"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return out;
+    };
+    for (name, spec) in props {
+        let default = spec.get("default").cloned();
+        let minimum = spec.get("minimum").and_then(serde_json::Value::as_f64);
+        let maximum = spec.get("maximum").and_then(serde_json::Value::as_f64);
+        if default.is_none() && minimum.is_none() && maximum.is_none() {
+            continue;
+        }
+        let ty = spec.get("type").and_then(serde_json::Value::as_str);
+        let is_int_type = ty == Some("integer");
+        let bounds_are_whole = minimum.is_none_or(|m| m.fract() == 0.0)
+            && maximum.is_none_or(|m| m.fract() == 0.0)
+            && default
+                .as_ref()
+                .and_then(serde_json::Value::as_f64)
+                .is_none_or(|d| d.fract() == 0.0);
+        out.insert(
+            name.clone(),
+            ArgBounds {
+                default,
+                minimum,
+                maximum,
+                integer: is_int_type || bounds_are_whole,
+            },
+        );
+    }
+    out
+}
+
+/// Apply [`ArgBounds`] to a mutable tool-call args object: inject the `default` for
+/// an absent/null arg, and clamp a present numeric arg into `[minimum, maximum]`.
+/// A clamped integral arg stays an integer so it renders without a `.0`. Pure and
+/// network-free (unit-testable). Non-object args are left unchanged.
+pub fn clamp_and_default_args(
+    args: &mut serde_json::Value,
+    bounds: &std::collections::BTreeMap<String, ArgBounds>,
+) {
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
+    for (name, b) in bounds {
+        match obj.get(name) {
+            None | Some(serde_json::Value::Null) => {
+                if let Some(def) = &b.default {
+                    obj.insert(name.clone(), def.clone());
+                }
+            }
+            Some(v) => {
+                let Some(n) = v.as_f64() else { continue };
+                let mut c = n;
+                if let Some(min) = b.minimum {
+                    if c < min {
+                        c = min;
+                    }
+                }
+                if let Some(max) = b.maximum {
+                    if c > max {
+                        c = max;
+                    }
+                }
+                if c != n {
+                    obj.insert(name.clone(), number_from(c, b.integer));
+                }
+            }
+        }
+    }
+}
+
+/// Build a JSON number from a clamped f64, preserving integrality so an integral
+/// bound renders as `10` rather than `10.0`.
+fn number_from(v: f64, integer: bool) -> serde_json::Value {
+    if integer {
+        serde_json::Value::Number(serde_json::Number::from(v as i64))
+    } else {
+        serde_json::Number::from_f64(v)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null)
+    }
 }
 
 impl ToolConfig {
@@ -158,14 +488,106 @@ impl ToolConfig {
                     .filter(|m| !m.is_empty())
                     .unwrap_or("POST")
                     .to_ascii_uppercase();
+                let header_params = self.header_params.clone().unwrap_or_default();
+                let secret_headers = self.secret_headers.clone().unwrap_or_default();
+                // Model-invisibility is ENFORCED: a header may not be BOTH a model
+                // arg (header_params) and a server-side secret. Otherwise reqwest
+                // would emit it twice AND a manifest could re-surface the secret
+                // name as a model-produced argument, defeating gap #1.
+                for secret_name in secret_headers.keys() {
+                    if header_params
+                        .iter()
+                        .any(|h| h.eq_ignore_ascii_case(secret_name))
+                    {
+                        return Err(format!(
+                            "tool backend 'http': header '{secret_name}' cannot be both a model arg (header_params) and a secret_header"
+                        ));
+                    }
+                }
+                // `body_defaults`, when present, MUST be a JSON object — it is
+                // deep-merged into the request body object, so a scalar/array has no
+                // meaningful merge and is a manifest authoring error.
+                let body_defaults = match self.body_defaults.clone() {
+                    None => serde_json::Value::Null,
+                    Some(v) if v.is_object() => v,
+                    Some(_) => {
+                        return Err(
+                            "tool backend 'http': 'body_defaults' must be a JSON object".to_owned()
+                        )
+                    }
+                };
                 Ok(ToolBackend::Http {
                     url: url.to_owned(),
                     method,
-                    header_params: self.header_params.clone().unwrap_or_default(),
+                    header_params,
+                    secret_headers,
+                    fail_open: self.fail_open.unwrap_or(false),
+                    unwrap_body: self.unwrap_body.unwrap_or(false),
+                    body_defaults,
+                })
+            }
+            "command" => {
+                let bin = self
+                    .bin
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|b| !b.is_empty())
+                    .ok_or_else(|| {
+                        "tool backend 'command' requires a non-empty 'bin'".to_owned()
+                    })?;
+                // `bin` is an allowlist KEY, never a path: reject any separator, a
+                // parent-dir ref, or an absolute form so a manifest can never name a
+                // filesystem path. The KEY→absolute-path resolution is
+                // Core-controlled at dispatch (mirrors how `http`'s egress-grant
+                // check lives at dispatch, not here).
+                if bin.contains('/')
+                    || bin.contains('\\')
+                    || bin.contains("..")
+                    || std::path::Path::new(bin).is_absolute()
+                {
+                    return Err(format!(
+                        "tool backend 'command': 'bin' must be an allowlist key, not a path (got '{bin}')"
+                    ));
+                }
+                let output = match self.output.as_deref().map(str::trim) {
+                    None | Some("") | Some("stdout") => CommandOutput::Stdout,
+                    Some("json") => CommandOutput::Json,
+                    Some(other) => {
+                        return Err(format!(
+                            "tool backend 'command': unknown output '{other}' (expected stdout | json)"
+                        ))
+                    }
+                };
+                // Structured `args` (map/split), when present, supersedes the
+                // `command_args` template path. Validate each entry structurally
+                // here; runtime concerns (unknown map value, blank required arg)
+                // surface at dispatch.
+                let arg_specs = match &self.args {
+                    Some(specs) if !specs.is_empty() => {
+                        for spec in specs {
+                            spec.validate()?;
+                        }
+                        Some(specs.clone())
+                    }
+                    _ => None,
+                };
+                Ok(ToolBackend::Command {
+                    bin: bin.to_owned(),
+                    args: self.command_args.clone().unwrap_or_default(),
+                    env: self.command_env.clone().unwrap_or_default(),
+                    cwd: self.cwd.clone().filter(|c| !c.trim().is_empty()),
+                    timeout_secs: self.timeout_secs.unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECS),
+                    output,
+                    egress_url_arg: self
+                        .egress_url_arg
+                        .clone()
+                        .filter(|s| !s.trim().is_empty()),
+                    arg_specs,
+                    arg_bounds: extract_arg_bounds(self.input_schema.as_ref()),
                 })
             }
             other => Err(format!(
-                "unknown tool backend '{other}' (expected alias | inline_deno | http)"
+                "unknown tool backend '{other}' (expected alias | inline_deno | http | command)"
             )),
         }
     }
@@ -942,7 +1364,12 @@ pub fn validate_sidecar_spec(spec: &SidecarSpec) -> Result<(), String> {
                     spec.name
                 ));
             }
-            if let Some(rt) = node.runtime.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(rt) = node
+                .runtime
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 if !SUPPORTED_NODE_RUNTIMES.contains(&rt) {
                     return Err(format!(
                         "sidecar '{}': unsupported node runtime '{rt}' (expected one of {SUPPORTED_NODE_RUNTIMES:?})",
@@ -1041,6 +1468,15 @@ impl RunnableEntry {
 /// This is a pure lookup + fallback so it is unit-testable in isolation and can
 /// be shared by every detail builder (built-in manifest and git marketplace).
 pub fn capability_label(grant: &str) -> String {
+    // Declarative `command` tool exec grant (`tool:command:<bin>`). Prefix-matched
+    // because the bin key is open-ended, unlike the curated exact arms below.
+    if let Some(bin) = grant.strip_prefix("tool:command:") {
+        return if bin == "*" {
+            "Runs local commands".to_string()
+        } else {
+            format!("Runs the '{bin}' command")
+        };
+    }
     match grant {
         // Chat / turn-hook capabilities.
         "chat.sendFollowUp" => "Interactive".to_string(),
@@ -1342,6 +1778,164 @@ mod tests {
     }
 
     #[test]
+    fn capability_label_labels_command_grant() {
+        assert_eq!(capability_label("tool:command:exa"), "Runs the 'exa' command");
+        assert_eq!(capability_label("tool:command:*"), "Runs local commands");
+    }
+
+    #[test]
+    fn command_backend_resolves_with_defaults() {
+        let cfg: ToolConfig = serde_json::from_value(json!({
+            "slug": "exa_search",
+            "backend": "command",
+            "bin": "exa",
+            "command_args": ["search", "--query={query}"],
+            "command_env": { "RYU_EXA_API_KEY": "env:RYU_EXA_API_KEY" },
+        }))
+        .unwrap();
+        match cfg.resolve_backend().unwrap() {
+            ToolBackend::Command {
+                bin,
+                args,
+                env,
+                cwd,
+                timeout_secs,
+                output,
+                egress_url_arg,
+                arg_specs,
+                arg_bounds,
+            } => {
+                assert_eq!(bin, "exa");
+                // No numeric bounds without an input_schema.
+                assert!(arg_bounds.is_empty());
+                assert_eq!(args, vec!["search", "--query={query}"]);
+                assert_eq!(env.get("RYU_EXA_API_KEY").map(String::as_str), Some("env:RYU_EXA_API_KEY"));
+                assert_eq!(cwd, None);
+                // Default timeout applied when absent.
+                assert_eq!(timeout_secs, DEFAULT_COMMAND_TIMEOUT_SECS);
+                // Default output is Stdout.
+                assert_eq!(output, CommandOutput::Stdout);
+                // No egress screen unless declared.
+                assert_eq!(egress_url_arg, None);
+                // No structured args unless declared (template path).
+                assert_eq!(arg_specs, None);
+            }
+            other => panic!("expected Command backend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_backend_rejects_missing_or_empty_bin() {
+        let missing: ToolConfig =
+            serde_json::from_value(json!({ "slug": "x", "backend": "command" })).unwrap();
+        assert!(missing.resolve_backend().is_err());
+        let empty: ToolConfig =
+            serde_json::from_value(json!({ "slug": "x", "backend": "command", "bin": "  " }))
+                .unwrap();
+        assert!(empty.resolve_backend().is_err());
+    }
+
+    #[test]
+    fn command_backend_rejects_path_shaped_bin() {
+        for bad in ["/usr/bin/exa", "../exa", "sub/exa", "a\\b"] {
+            let cfg: ToolConfig =
+                serde_json::from_value(json!({ "slug": "x", "backend": "command", "bin": bad }))
+                    .unwrap();
+            assert!(
+                cfg.resolve_backend().is_err(),
+                "path-shaped bin '{bad}' must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn command_backend_output_parsing() {
+        let json_out: ToolConfig = serde_json::from_value(
+            json!({ "slug": "x", "backend": "command", "bin": "exa", "output": "json" }),
+        )
+        .unwrap();
+        assert!(matches!(
+            json_out.resolve_backend().unwrap(),
+            ToolBackend::Command { output: CommandOutput::Json, .. }
+        ));
+        let unknown: ToolConfig = serde_json::from_value(
+            json!({ "slug": "x", "backend": "command", "bin": "exa", "output": "yaml" }),
+        )
+        .unwrap();
+        assert!(unknown.resolve_backend().is_err());
+    }
+
+    #[test]
+    fn command_backend_carries_structured_args_for_rtk() {
+        // The exact `rtk` shape: a mode-map (wrap → zero tokens) + a shell-split
+        // command. It must resolve to a Command backend carrying `arg_specs`.
+        let cfg: ToolConfig = serde_json::from_value(json!({
+            "slug": "rtk__run",
+            "backend": "command",
+            "bin": "rtk",
+            "timeout_secs": 120,
+            "args": [
+                { "from": "mode", "map": { "wrap": [], "proxy": ["proxy"], "test": ["test"], "err": ["err"] }, "default": "wrap" },
+                { "from": "command", "split": "shell", "required": true }
+            ]
+        }))
+        .unwrap();
+        match cfg.resolve_backend().unwrap() {
+            ToolBackend::Command { bin, arg_specs, timeout_secs, .. } => {
+                assert_eq!(bin, "rtk");
+                assert_eq!(timeout_secs, 120);
+                let specs = arg_specs.expect("structured args present");
+                assert_eq!(specs.len(), 2);
+                assert_eq!(specs[0].from, "mode");
+                assert_eq!(specs[0].default.as_deref(), Some("wrap"));
+                assert_eq!(
+                    specs[0].map.as_ref().and_then(|m| m.get("wrap")).map(Vec::as_slice),
+                    Some(&[][..])
+                );
+                assert_eq!(specs[1].from, "command");
+                assert_eq!(specs[1].split.as_deref(), Some("shell"));
+                assert_eq!(specs[1].required, Some(true));
+            }
+            other => panic!("expected Command backend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_backend_rejects_bad_arg_specs() {
+        // Empty `from`.
+        let no_from: ToolConfig = serde_json::from_value(json!({
+            "slug": "x", "backend": "command", "bin": "rtk", "args": [{ "from": " " }]
+        }))
+        .unwrap();
+        assert!(no_from.resolve_backend().is_err());
+        // Both map and split.
+        let both: ToolConfig = serde_json::from_value(json!({
+            "slug": "x", "backend": "command", "bin": "rtk",
+            "args": [{ "from": "m", "map": { "a": [] }, "split": "shell" }]
+        }))
+        .unwrap();
+        assert!(both.resolve_backend().is_err());
+        // Unknown split mode.
+        let bad_split: ToolConfig = serde_json::from_value(json!({
+            "slug": "x", "backend": "command", "bin": "rtk",
+            "args": [{ "from": "c", "split": "regex" }]
+        }))
+        .unwrap();
+        assert!(bad_split.resolve_backend().is_err());
+    }
+
+    #[test]
+    fn validate_runnable_rejects_command_tool_missing_bin() {
+        let err = validate_runnable(&entry(
+            "t",
+            RunnableKind::Tool,
+            Some(json!({ "slug": "x", "backend": "command" })),
+        ))
+        .unwrap_err();
+        assert!(err.contains("bin"), "{err}");
+    }
+
+    #[test]
     fn validate_runnable_enforces_per_kind_required_fields() {
         assert!(validate_runnable(&entry("a", RunnableKind::Agent, None)).is_ok());
         assert!(validate_runnable(&entry("w", RunnableKind::Workflow, None)).is_err());
@@ -1351,9 +1945,12 @@ mod tests {
             Some(json!({ "slug": "web_search" }))
         ))
         .is_ok());
-        let err =
-            validate_runnable(&entry("c", RunnableKind::Companion, Some(json!({ "label": "Ryu" }))))
-                .unwrap_err();
+        let err = validate_runnable(&entry(
+            "c",
+            RunnableKind::Companion,
+            Some(json!({ "label": "Ryu" })),
+        ))
+        .unwrap_err();
         assert!(err.contains("impersonate system chrome"), "{err}");
     }
 
@@ -1376,8 +1973,123 @@ mod tests {
                 url: "https://api.example.com/quote".to_owned(),
                 method: "POST".to_owned(),
                 header_params: vec![],
+                secret_headers: Default::default(),
+                fail_open: false,
+                unwrap_body: false,
+                body_defaults: serde_json::Value::Null,
             }
         );
+    }
+
+    #[test]
+    fn resolve_backend_http_carries_secret_headers_and_fail_open() {
+        // Present secret_headers + fail_open:true resolve onto the backend.
+        let cfg: ToolConfig = serde_json::from_value(json!({
+            "slug": "exa__search",
+            "backend": "http",
+            "url": "https://api.exa.ai/search",
+            "secret_headers": { "Authorization": "env:RYU_EXA_API_KEY" },
+            "fail_open": true,
+        }))
+        .unwrap();
+        match cfg.resolve_backend().unwrap() {
+            ToolBackend::Http {
+                secret_headers,
+                fail_open,
+                header_params,
+                ..
+            } => {
+                assert_eq!(
+                    secret_headers.get("Authorization").map(String::as_str),
+                    Some("env:RYU_EXA_API_KEY")
+                );
+                assert!(fail_open);
+                assert!(header_params.is_empty());
+            }
+            other => panic!("expected Http backend, got {other:?}"),
+        }
+
+        // Absent → empty map + fail_open:false (back-compat).
+        let bare: ToolConfig = serde_json::from_value(json!({
+            "slug": "q", "backend": "http", "url": "https://api.example.com/q",
+        }))
+        .unwrap();
+        match bare.resolve_backend().unwrap() {
+            ToolBackend::Http {
+                secret_headers,
+                fail_open,
+                ..
+            } => {
+                assert!(secret_headers.is_empty());
+                assert!(!fail_open);
+            }
+            other => panic!("expected Http backend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_backend_http_rejects_secret_header_colliding_with_header_params() {
+        // A header listed as BOTH a model arg and a secret is rejected (gap #1 crux),
+        // case-insensitively.
+        let cfg: ToolConfig = serde_json::from_value(json!({
+            "slug": "x",
+            "backend": "http",
+            "url": "https://api.example.com/x",
+            "header_params": ["Authorization"],
+            "secret_headers": { "authorization": "env:X" },
+        }))
+        .unwrap();
+        let err = cfg.resolve_backend().unwrap_err();
+        assert!(
+            err.contains("secret_header") && err.contains("cannot be both"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn extract_arg_bounds_reads_default_min_max_and_integrality() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "depth": { "type": "integer", "default": 1, "maximum": 10 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+                "ratio": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
+                "name":  { "type": "string" }
+            }
+        });
+        let bounds = extract_arg_bounds(Some(&schema));
+        // A property with no numeric keywords contributes nothing.
+        assert!(!bounds.contains_key("name"));
+        let depth = &bounds["depth"];
+        assert_eq!(depth.maximum, Some(10.0));
+        assert_eq!(depth.default, Some(json!(1)));
+        assert!(depth.integer);
+        let limit = &bounds["limit"];
+        assert_eq!(limit.minimum, Some(1.0));
+        assert_eq!(limit.maximum, Some(500.0));
+        // A number with a fractional bound is not integral.
+        assert!(!bounds["ratio"].integer);
+    }
+
+    #[test]
+    fn clamp_and_default_args_injects_default_and_clamps_integrally() {
+        let bounds = extract_arg_bounds(Some(&json!({
+            "properties": {
+                "depth": { "type": "integer", "default": 1, "maximum": 10 },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+            }
+        })));
+        // Over-max clamps; renders as an integer (no ".0").
+        let mut a = json!({ "depth": 9999, "limit": 0 });
+        clamp_and_default_args(&mut a, &bounds);
+        assert_eq!(a["depth"], json!(10));
+        assert_eq!(a["limit"], json!(1));
+        assert_eq!(a["depth"].to_string(), "10");
+        // Absent arg gets the default.
+        let mut b = json!({ "limit": 5 });
+        clamp_and_default_args(&mut b, &bounds);
+        assert_eq!(b["depth"], json!(1));
+        assert_eq!(b["limit"], json!(5)); // in-range unchanged
     }
 
     #[test]
@@ -1414,7 +2126,10 @@ mod tests {
         let http = spec2.http.as_ref().unwrap();
         assert_eq!(http.routes[0].auth, RouteAuth::Protected); // secure default
         assert_eq!(http.routes[1].auth, RouteAuth::Public);
-        assert_eq!(spec2.host_api.as_ref().unwrap().grants, vec!["hook:side-model"]);
+        assert_eq!(
+            spec2.host_api.as_ref().unwrap().grants,
+            vec!["hook:side-model"]
+        );
         assert!(validate_sidecar_spec(&spec2).is_ok());
         let back: SidecarSpec =
             serde_json::from_str(&serde_json::to_string(&spec2).unwrap()).unwrap();
@@ -1457,7 +2172,10 @@ mod tests {
         // so an existing manifest round-trips byte-identically.
         let out = serde_json::to_string(&spec).unwrap();
         assert!(!out.contains("lazy"), "default lazy omitted: {out}");
-        assert!(!out.contains("idle_stop_secs"), "default idle omitted: {out}");
+        assert!(
+            !out.contains("idle_stop_secs"),
+            "default idle omitted: {out}"
+        );
 
         // A lazy sidecar with a sane idle window round-trips and validates.
         let raw2 = r#"{
@@ -1535,6 +2253,7 @@ mod tests {
             host_api: None,
             lazy: false,
             idle_stop_secs: None,
+            provides_provider: None,
         };
         // Empty entry.
         assert!(validate_sidecar_spec(&mk("", None)).is_err());
@@ -1560,8 +2279,14 @@ mod tests {
             ..Default::default()
         };
         let out = serde_json::to_string(&m).unwrap();
-        assert!(!out.contains("backend_code"), "absent backend_code omitted: {out}");
-        assert!(!out.contains("backend_sha256"), "absent backend_sha256 omitted: {out}");
+        assert!(
+            !out.contains("backend_code"),
+            "absent backend_code omitted: {out}"
+        );
+        assert!(
+            !out.contains("backend_sha256"),
+            "absent backend_sha256 omitted: {out}"
+        );
 
         // Present fields round-trip.
         let raw = r#"{
@@ -1573,7 +2298,10 @@ mod tests {
             "backend_sha256": "abc123"
         }"#;
         let parsed: PluginManifest = serde_json::from_str(raw).unwrap();
-        assert_eq!(parsed.backend_code.as_deref(), Some("export function activate(){}"));
+        assert_eq!(
+            parsed.backend_code.as_deref(),
+            Some("export function activate(){}")
+        );
         assert_eq!(parsed.backend_sha256.as_deref(), Some("abc123"));
     }
 }

@@ -186,11 +186,14 @@ export function useStoreHome(): UseStoreHomeResult {
 			result.push({ realm: "agents", label: "Agents", items: agents });
 		}
 
-		// One catalog fetch, split by kind: companion-UI plugins are the "Apps"
-		// row, the rest the "Plugins" row — mirroring the Store's two sections.
+		// One catalog fetch, split into the "Apps" vs "Plugins" rows the same way
+		// the Store's two sections do: prefer the explicit `type` discriminator,
+		// fall back to the legacy "ships a Companion" derivation for older wires.
 		const catalog = appsQuery.data ?? [];
+		const isApp = (e: (typeof catalog)[number]) =>
+			e.type ? e.type === "app" : e.kinds.includes("companion");
 		const apps = catalog
-			.filter((e) => e.kinds.includes("companion"))
+			.filter((e) => isApp(e))
 			.slice(0, PER_ROW_LIMIT)
 			.map<HomeCard>((e) => ({
 				id: e.id,
@@ -204,7 +207,7 @@ export function useStoreHome(): UseStoreHomeResult {
 		}
 
 		const plugins = catalog
-			.filter((e) => !e.kinds.includes("companion"))
+			.filter((e) => !isApp(e))
 			.slice(0, PER_ROW_LIMIT)
 			.map<HomeCard>((e) => ({
 				id: e.id,

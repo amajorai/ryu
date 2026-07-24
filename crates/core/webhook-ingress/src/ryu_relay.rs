@@ -262,7 +262,9 @@ pub fn relay_inbound_url(path: &str) -> Option<String> {
     let token = persisted_relay_token()?;
     let base = relay_base();
     let trimmed = path.trim_start_matches('/');
-    Some(format!("{base}/api/composio-relay/inbound/{token}/{trimmed}"))
+    Some(format!(
+        "{base}/api/composio-relay/inbound/{token}/{trimmed}"
+    ))
 }
 
 /// Register this node with the relay server, returning `(relay_token, public_url)`.
@@ -503,6 +505,9 @@ async fn dispatch_frame(data: &str, seen: &mut SeenDeliveries) {
                 tracing::debug!("ryu-relay: skipping duplicate delivery {delivery_id}");
                 return;
             }
+            // "" for `deliver_inbound`'s inner workflow-webhook dedup: this frame
+            // was already deduped by `delivery_id` above (the `seen.insert` a few
+            // lines up), so a second dedup here would be redundant.
             let outcome =
                 super::deliver_inbound(&path, body.as_bytes(), signature.as_deref()).await;
             match outcome {

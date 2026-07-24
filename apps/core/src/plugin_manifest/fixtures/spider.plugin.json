@@ -2,6 +2,62 @@
   "id": "spider",
   "name": "Spider",
   "version": "1.0.0",
-  "runnables": [],
-  "permission_grants": ["mcp:spider"]
+  "description": "High-performance web crawling and content extraction via the Spider CLI (https://spider.cloud), exposed as a declarative `command` tool that shells out to the locally-installed `spider` binary. No API key.",
+  "tagline": "Crawl and extract web pages for agents",
+  "category": "Search",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "tool-spider-crawl",
+      "name": "Spider Crawl",
+      "kind": "tool",
+      "config": {
+        "slug": "spider__crawl",
+        "backend": "command",
+        "bin": "spider",
+        "command_args": [
+          "crawl",
+          "--depth",
+          "{depth}",
+          "--limit",
+          "{limit}",
+          "--output",
+          "json",
+          "--",
+          "{url}"
+        ],
+        "output": "json",
+        "timeout_secs": 120,
+        "egress_url_arg": "url",
+        "description": "Crawl a URL with the Spider web crawler and return the extracted page content. Use depth=0 for a single page; depth>0 follows links up to that many hops.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The URL to crawl and extract content from."
+            },
+            "depth": {
+              "type": "integer",
+              "description": "How many link hops to follow from the start URL (default 1 — single page only).",
+              "default": 1,
+              "minimum": 0,
+              "maximum": 10
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of pages to crawl (default 10).",
+              "default": 10,
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          "required": ["url"]
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:command:spider"]
 }

@@ -4,6 +4,7 @@ mod nodes;
 mod permissions;
 mod profile;
 mod secrets;
+mod shadow_auth;
 mod tray;
 mod win_process;
 // M7 companion spike — compiled only when companion-spike feature is active.
@@ -99,11 +100,10 @@ fn resolve_core_binary() -> Option<std::path::PathBuf> {
 		.ok()
 		.map(std::path::PathBuf::from)
 		.filter(|p| p.exists())
-		// 2. ~/.ryu/bin (production install)
+		// 2. ~/.ryu{profile}/bin (installed) — profile-aware so a dev app resolves its
+		//    OWN binary under ~/.ryu-dev/bin, never the release app's ~/.ryu/bin exe.
 		.or_else(|| {
-			dirs::home_dir()
-				.map(|h| h.join(".ryu").join("bin").join(bin_name))
-				.filter(|p| p.exists())
+			Some(profile::ryu_home_dir().join("bin").join(bin_name)).filter(|p| p.exists())
 		})
 		// 3. PATH
 		.or_else(|| which::which(bin_name.strip_suffix(".exe").unwrap_or(bin_name)).ok())
@@ -196,6 +196,27 @@ async fn ensure_core_installed(app: tauri::AppHandle) -> Result<String, String> 
 		}
 		let p = crate::core::install::download_core_binary(&app).await?;
 		Ok(p.to_string_lossy().to_string())
+	}
+}
+
+/// Ensure the Island Electron companion is installed under `~/.ryu/island/`, then
+/// launch it, returning the launched bundle path. Dev is a no-op (`"dev"`): turbo
+/// owns Island in development (`bun run dev` starts electron-vite), so downloading a
+/// release build would fight it — same `debug_assertions` gate as
+/// [`ensure_core_installed`]. Invoked from the node selector's Island row ("Install /
+/// Launch" when the local island isn't reachable) and from onboarding.
+#[tauri::command]
+async fn install_and_launch_island(app: tauri::AppHandle) -> Result<String, String> {
+	#[cfg(debug_assertions)]
+	{
+		let _ = app;
+		return Ok("dev".to_string());
+	}
+	#[cfg(not(debug_assertions))]
+	{
+		let path = crate::core::install::ensure_island_installed(&app).await?;
+		crate::core::install::launch_island()?;
+		Ok(path.to_string_lossy().to_string())
 	}
 }
 
@@ -434,9 +455,20 @@ async fn import_data_folder(
 	app.restart();
 }
 
+/// Open a URL with the OS default handler. Only web/mail schemes are allowed:
+/// callers pass backend-supplied URLs, and a hand-rolled command bypasses the
+/// shell plugin's scope validation, so a `file://`/`smb://` URL from a spoofed
+/// backend must never reach the opener.
 #[tauri::command]
 async fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
 	use tauri_plugin_shell::ShellExt;
+	let parsed = tauri::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+	if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
+		return Err(format!(
+			"Refusing to open URL with disallowed scheme '{}'.",
+			parsed.scheme()
+		));
+	}
 	app.shell().open(&url, None).map_err(|e| e.to_string())
 }
 
@@ -1129,15 +1161,21 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 #[allow(unused_mut)]
                 let mut binary = resolve_core_binary();
-                // Production only: if no binary is present, fetch it from the public
-                // release hub into ~/.ryu/bin/ so a fresh install just works. In dev
-                // the binary is owned by turbo (`bun run dev:core`), so we never
-                // download — resolve_core_binary's dev fallback finds the debug build.
+                // Production only: fetch the core binary from the public release hub
+                // into ~/.ryu/bin/ when it is missing OR when a stale copy from an
+                // older app version is sitting there. The app self-updates via the
+                // Tauri updater, but the out-of-process ryu-core sidecar is separate:
+                // without this staleness check a 0.0.3 core lingered forever after the
+                // app moved to 0.0.8. In dev the binary is owned by turbo
+                // (`bun run dev:core`), so we never download — resolve_core_binary's
+                // dev fallback finds the debug build.
                 #[cfg(not(debug_assertions))]
-                if binary.is_none() {
+                if binary.is_none() || crate::core::install::is_managed_core_stale(&handle) {
                     match crate::core::install::download_core_binary(&handle).await {
                         Ok(p) => binary = Some(p),
-                        Err(e) => tracing::error!("Failed to auto-install Ryu Core: {}", e),
+                        // Keep whatever resolve_core_binary found on failure: a download
+                        // error should degrade to the old-but-working core, not strand it.
+                        Err(e) => tracing::error!("Failed to auto-install/upgrade Ryu Core: {}", e),
                     }
                 }
                 // Ensure the ryu-gateway sidecar is on disk BEFORE Core starts: Core
@@ -1167,17 +1205,50 @@ pub fn run() {
                     tracing::warn!("Ryu Core binary not found — install to ~/.ryu/bin/ or set RYU_CORE_BIN");
                 }
 
-                // Optional opt-in app sidecars — the wave-1 mail/browser pair plus the
-                // wave-2..4 out-of-process app bins (teams/research/clips/finetune/
-                // quests/healing/meetings/recipes/dashboards/monitors). Fetched
-                // up-front and detached (one task each) so they never delay the UI or
-                // Core start; a failure is silent (these are opt-in and their release
-                // assets may not exist yet). v1 fetches them up-front rather than
-                // on-demand because the "is this app enabled" signal lives behind
-                // Core's HTTP API, which isn't queried from this layer — see
-                // core::install for the rationale and the on-demand follow-up.
+                // NOTE: the desktop no longer prefetches the opt-in app sidecar bins
+                // (mail/teams/research/…) at boot. Those binaries are now downloaded
+                // by Core on-demand the first time their app is *enabled* (and removed
+                // on uninstall) — see `apps/core/src/sidecar/manifest_sidecar.rs`
+                // (`ensure_local_sidecar_present`) and `plans/019-sidecar-binary-lifecycle.md`.
+                // A fresh install therefore ships only core + gateway; an app's binary
+                // arrives when the user turns the app on, not before.
+
+                // Island (the Electron companion overlay, loopback :7989) — install
+                // it and launch it, best-effort, in its own detached task so it never
+                // delays app open. Island is a companion, not required for the app to
+                // function, so a failure (unsupported platform, asset not published
+                // yet, launch error) is silent like the optional sidecars. Island
+                // self-guards with an Electron single-instance lock, so re-launching on
+                // a restart where it is already running self-exits. Dev is owned by
+                // turbo, same gate as the sidecars.
+                //
+                // v1: island autostart is DISABLED to shrink the shippable
+                // surface (the Electron island is deferred out of the first
+                // release). The install+launch code below is left intact and
+                // still referenced, so nothing here goes stale. The tray toggle
+                // and the `install_and_launch_island` command still work if a
+                // user opts in manually — this only removes the boot autostart.
+                // TO RE-ENABLE: flip ISLAND_AUTOSTART to `true`.
                 #[cfg(not(debug_assertions))]
-                crate::core::install::spawn_optional_sidecar_installs(&handle);
+                {
+                    const ISLAND_AUTOSTART: bool = false;
+                    if ISLAND_AUTOSTART {
+                        let island_handle = handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            match crate::core::install::ensure_island_installed(&island_handle).await
+                            {
+                                Ok(_) => {
+                                    if let Err(e) = crate::core::install::launch_island() {
+                                        tracing::debug!("Ryu Island not launched: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!("Ryu Island not installed (companion): {}", e)
+                                }
+                            }
+                        });
+                    }
+                }
             });
 
             Ok(())
@@ -1186,6 +1257,7 @@ pub fn run() {
             start_ryu_core,
             stop_ryu_core,
             ensure_core_installed,
+            install_and_launch_island,
             get_ryu_status,
             get_ryu_core_url,
             get_build_profile,

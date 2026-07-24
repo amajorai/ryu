@@ -29,3 +29,26 @@ pub async fn get_evaluators(State(state): State<SharedState>) -> Json<Value> {
     let registry = EvaluatorRegistry::from_config(&state.config);
     Json(json!({ "evaluators": registry.all() }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn get_evaluators_returns_the_seed_catalog() {
+        let state = Arc::new(AppState::new_for_test_default());
+        let Json(body) = get_evaluators(State(state)).await;
+        let list = body["evaluators"].as_array().expect("evaluators array");
+        assert!(!list.is_empty(), "the built-in seed catalog is non-empty");
+        // The five wired text detectors must be catalogued and flagged enforced.
+        let enforced_ids: Vec<&str> = list
+            .iter()
+            .filter(|e| e["enforced"] == serde_json::json!(true))
+            .filter_map(|e| e["id"].as_str())
+            .collect();
+        assert!(enforced_ids.contains(&"prompt_injection"));
+        assert!(enforced_ids.contains(&"pii_leakage"));
+    }
+}

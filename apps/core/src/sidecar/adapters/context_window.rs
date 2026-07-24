@@ -452,4 +452,111 @@ mod tests {
         // (flat per-image cost), never ~57k tokens from the base64 length.
         assert!(estimate_ui_message_tokens(&msg) <= IMAGE_TOKEN_COST + PER_MESSAGE_OVERHEAD + 8);
     }
+
+    #[test]
+    fn input_budget_saturates_when_reserves_exceed_max() {
+        // reserve_output + system + SKILLS_RESERVE all subtract from max_tokens;
+        // when they exceed it the budget floors at 0 (never underflows/panics).
+        let c = cfg(100, 1000); // reserve_output alone dwarfs max_tokens
+        assert_eq!(c.input_budget(0), 0);
+        // Even a modest max is fully consumed by system_tokens + SKILLS_RESERVE.
+        let c2 = cfg(1000, 0);
+        assert_eq!(c2.input_budget(10_000), 0);
+    }
+
+    #[test]
+    fn ui_message_text_joins_text_parts_when_content_empty() {
+        // With empty content, the text is reconstructed from the `text` parts.
+        let msg = UiMessage {
+            role: "user".to_owned(),
+            content: UiContent::Empty,
+            parts: vec![
+                json!({ "type": "text", "text": "foo" }),
+                json!({ "type": "image", "url": "x" }), // no `text` key → skipped
+                json!({ "type": "text", "text": "bar" }),
+            ],
+        };
+        assert_eq!(ui_message_text(&msg), "foobar");
+    }
+
+    #[test]
+    fn ui_message_text_prefers_content_over_parts() {
+        let msg = UiMessage {
+            role: "user".to_owned(),
+            content: UiContent::Text("primary".to_owned()),
+            parts: vec![json!({ "type": "text", "text": "ignored" })],
+        };
+        assert_eq!(ui_message_text(&msg), "primary");
+    }
+
+    // ── budgeted_short_term (ACP short-term window) ─────────────────────────
+
+    use crate::server::conversations::ConversationStore;
+
+    #[tokio::test]
+    async fn budgeted_short_term_none_without_prior_turns() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        // No messages at all → None.
+        assert!(budgeted_short_term(&store, "empty-conv", 0, &cfg(1000, 0))
+            .await
+            .is_none());
+        // A single message is JUST the current turn — no prior context to replay.
+        store
+            .append_message("one-conv", "user", "only turn", None, None, None)
+            .await
+            .unwrap();
+        assert!(budgeted_short_term(&store, "one-conv", 0, &cfg(1000, 0))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn budgeted_short_term_replays_prefix_excluding_current_turn() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        for (role, text) in [
+            ("user", "remember 42"),
+            ("assistant", "noted"),
+            ("user", "what number?"), // current turn — must be excluded
+        ] {
+            store
+                .append_message("c", role, text, None, None, None)
+                .await
+                .unwrap();
+        }
+        let block = budgeted_short_term(&store, "c", 0, &cfg(100_000, 0))
+            .await
+            .expect("prior turns replayed");
+        assert!(block.starts_with("Conversation so far:\n"));
+        assert!(block.contains("user: remember 42"));
+        assert!(block.contains("assistant: noted"));
+        // The just-persisted current turn is never echoed back into context.
+        assert!(!block.contains("what number?"));
+    }
+
+    #[tokio::test]
+    async fn budgeted_short_term_drops_oldest_when_over_budget() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let big = "x".repeat(400); // ~114 tokens each
+        for _ in 0..4 {
+            store
+                .append_message("cb", "user", &big, None, None, None)
+                .await
+                .unwrap();
+        }
+        store
+            .append_message("cb", "user", "current", None, None, None)
+            .await
+            .unwrap();
+        // Tiny budget (auto_compact off) → only the newest prefix turn survives,
+        // older ones are silently dropped rather than summarized.
+        let block = budgeted_short_term(&store, "cb", 0, &cfg(200, 0))
+            .await
+            .expect("some prior context");
+        let big_occurrences = block.matches(&big).count();
+        assert_eq!(
+            big_occurrences, 1,
+            "over-budget prefix keeps only the newest turn"
+        );
+        assert!(!block.contains("current"), "current turn excluded");
+    }
 }

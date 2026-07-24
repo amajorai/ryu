@@ -77,3 +77,50 @@ pub fn default_bind() -> String {
 pub fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join(format!("ryu{}", suffix())).join("gateway.toml"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These assert relationships that hold regardless of which profile the test
+    // process resolved to (RYU_PROFILE is process-global + cached in a OnceLock, so
+    // we never set it here — we pin the offset invariants instead).
+
+    #[test]
+    fn dev_offset_is_a_thousand() {
+        assert_eq!(DEV_PORT_OFFSET, 1000);
+    }
+
+    #[test]
+    fn offset_is_zero_or_dev_offset() {
+        let off = port_offset();
+        assert!(off == 0 || off == DEV_PORT_OFFSET);
+    }
+
+    #[test]
+    fn port_adds_the_active_offset_and_saturates() {
+        assert_eq!(port(0), port_offset());
+        assert_eq!(port(7981), 7981u16.saturating_add(port_offset()));
+        // Never wraps past the u16 ceiling.
+        assert_eq!(port(u16::MAX), u16::MAX);
+    }
+
+    #[test]
+    fn suffix_is_empty_iff_offset_is_zero() {
+        assert_eq!(suffix().is_empty(), port_offset() == 0);
+    }
+
+    #[test]
+    fn default_bind_targets_the_offset_gateway_port() {
+        assert_eq!(default_bind(), format!("0.0.0.0:{}", port(7981)));
+    }
+
+    #[test]
+    fn default_config_path_ends_at_the_gateway_toml() {
+        if let Some(path) = default_config_path() {
+            assert!(path.ends_with("gateway.toml"));
+            let parent = path.parent().unwrap().file_name().unwrap().to_string_lossy();
+            assert_eq!(parent, format!("ryu{}", suffix()));
+        }
+    }
+}

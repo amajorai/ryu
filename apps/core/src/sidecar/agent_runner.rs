@@ -21,12 +21,12 @@ use std::sync::OnceLock;
 use crate::agents::AgentStore;
 use crate::server::conversations::ConversationStore;
 use crate::server::memory::MemoryStore;
-use ryu_tracing::TraceStore;
 use crate::sidecar::adapters::run_text_turn;
 use crate::sidecar::adapters::AcpAgentRegistry;
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::SidecarManager;
 use ryu_skills::SkillRegistry;
+use ryu_tracing::TraceStore;
 
 /// Bundle of the chat stores needed to invoke an agent off the chat path.
 ///

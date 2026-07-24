@@ -24,6 +24,7 @@ use serde::Serialize;
 const GITHUB_CACHE_TTL_SECONDS: u64 = 60 * 60 * 24;
 
 pub mod from_source;
+pub mod plugin_skills;
 
 pub(crate) const USER_AGENT: &str = "ryu-core/0.1 (+https://ryu.app)";
 
@@ -1193,5 +1194,156 @@ mod tests {
         assert_eq!(safe_join(base, "C:/evil.md"), None);
         // A UNC/share path must not escape either.
         assert_eq!(safe_join(base, "\\\\server\\share\\x.md"), None);
+    }
+
+    // ── HTML-scrape + formatting helper coverage ─────────────────────────────
+
+    #[test]
+    fn safe_cache_segment_sanitizes_to_filename_safe() {
+        assert_eq!(safe_cache_segment("owner/repo:skill"), "owner_repo_skill");
+        // Alphanumerics and -_. are preserved; everything else becomes '_'.
+        assert_eq!(safe_cache_segment("a-b_c.d"), "a-b_c.d");
+        assert_eq!(safe_cache_segment("weird name!"), "weird_name_");
+    }
+
+    #[test]
+    fn format_compact_count_thresholds() {
+        assert_eq!(format_compact_count(999), "999");
+        assert_eq!(format_compact_count(1_500), "1.5K");
+        assert_eq!(format_compact_count(2_000_000), "2.0M");
+        assert_eq!(format_compact_count(0), "0");
+    }
+
+    #[test]
+    fn parse_compact_count_round_trips_suffixes_and_junk() {
+        assert_eq!(parse_compact_count(Some("1.5K")), 1_500);
+        assert_eq!(parse_compact_count(Some("2m")), 2_000_000);
+        assert_eq!(parse_compact_count(Some("1,234")), 1_234);
+        assert_eq!(parse_compact_count(Some("42")), 42);
+        // Empty / None / non-numeric degrade to 0, never panic.
+        assert_eq!(parse_compact_count(Some("   ")), 0);
+        assert_eq!(parse_compact_count(None), 0);
+        assert_eq!(parse_compact_count(Some("garbage")), 0);
+    }
+
+    #[test]
+    fn html_escape_decodes_entities() {
+        assert_eq!(
+            html_escape("a &amp; b &lt;c&gt; &quot;d&quot; &#x27;e&#x27;"),
+            "a & b <c> \"d\" 'e'"
+        );
+    }
+
+    #[test]
+    fn strip_tags_removes_markup_and_decodes_entities() {
+        let out = strip_tags("<p>Hello &amp; <b>world</b></p>");
+        // Tags become newlines; entities are decoded. Collapse for a stable assert.
+        let joined: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(joined, "Hello & world");
+    }
+
+    #[test]
+    fn href_from_anchor_absolute_and_relative() {
+        // An absolute href is returned as-is (with &amp; decoded).
+        assert_eq!(
+            href_from_anchor(r#"<a href="https://x.io/a?b=1&amp;c=2">x</a>"#),
+            Some("https://x.io/a?b=1&c=2".to_string())
+        );
+        // A relative href is prefixed with the API base.
+        let rel = href_from_anchor(r#"<a href="/audit/42">x</a>"#).unwrap();
+        assert!(rel.ends_with("/audit/42"));
+        assert!(rel.starts_with(&api_base()));
+        // No href at all → None.
+        assert_eq!(href_from_anchor("<a>no href</a>"), None);
+    }
+
+    #[test]
+    fn repository_url_enforces_https_github_host() {
+        // A legitimate github repo link is accepted.
+        let html = r#"<div>Repository <a href="https://github.com/o/r">link</a></div>"#;
+        assert_eq!(
+            repository_url(html).as_deref(),
+            Some("https://github.com/o/r")
+        );
+        // A look-alike host is rejected (no substring bypass).
+        let evil = r#"Repository <a href="https://github.com.evil.com/o/r">x</a>"#;
+        assert_eq!(repository_url(evil), None);
+        // A javascript: URL that merely contains the literal is rejected.
+        let js = r#"Repository <a href="javascript:alert('github.com')">x</a>"#;
+        assert_eq!(repository_url(js), None);
+        // No "Repository" label → None.
+        assert_eq!(repository_url("<a href=\"https://github.com/o/r\">x</a>"), None);
+    }
+
+    #[test]
+    fn text_after_label_reads_first_nonempty_line() {
+        let html = "<span>Author</span><div>  </div><div>Ada Lovelace</div>";
+        assert_eq!(
+            text_after_label(html, "Author").as_deref(),
+            Some("Ada Lovelace")
+        );
+        // A label that isn't present → None.
+        assert_eq!(text_after_label(html, "Missing"), None);
+    }
+
+    #[test]
+    fn security_audits_extracts_known_providers_only() {
+        let html = r#"
+            Security Audits
+            <a href="/audits/socket"><span>Socket</span><span>Passed</span></a>
+            <a href="https://snyk.io/x"><span>Snyk</span><span>Clean</span></a>
+            <a href="/x"><span>Unknown Provider</span><span>Nope</span></a>
+            Browse more
+            <a href="/audits/socket"><span>Socket</span></a>
+        "#;
+        let audits = security_audits(html);
+        // Only the two recognized providers before "Browse" are surfaced.
+        assert_eq!(audits.len(), 2);
+        assert_eq!(audits[0].name, "Socket");
+        assert_eq!(audits[0].status, "Passed");
+        assert!(audits[0].url.as_deref().unwrap().ends_with("/audits/socket"));
+        assert_eq!(audits[1].name, "Snyk");
+        assert_eq!(audits[1].url.as_deref(), Some("https://snyk.io/x"));
+
+        // No section at all → empty, never panics.
+        assert!(security_audits("<div>nothing</div>").is_empty());
+    }
+
+    #[test]
+    fn normalise_skill_md_strips_crlf_and_trailing_space() {
+        assert_eq!(
+            normalise_skill_md("line1\r\nline2\r\n\n  \n"),
+            "line1\nline2"
+        );
+    }
+
+    #[test]
+    fn find_repo_file_path_prefers_exact_then_suffix_match() {
+        let tree = vec![
+            GithubTreeItem {
+                path: "other/SKILL.md".into(),
+                kind: "blob".into(),
+            },
+            GithubTreeItem {
+                path: "my-skill/SKILL.md".into(),
+                kind: "blob".into(),
+            },
+        ];
+        // Exact package-path match wins.
+        assert_eq!(
+            find_repo_file_path(&tree, "my-skill", "my-skill/SKILL.md").as_deref(),
+            Some("my-skill/SKILL.md")
+        );
+        // A nested layout is found via the `/slug/<pkg>` suffix rule.
+        let nested = vec![GithubTreeItem {
+            path: "packages/my-skill/SKILL.md".into(),
+            kind: "blob".into(),
+        }];
+        assert_eq!(
+            find_repo_file_path(&nested, "my-skill", "SKILL.md").as_deref(),
+            Some("packages/my-skill/SKILL.md")
+        );
+        // Nothing matches → None.
+        assert_eq!(find_repo_file_path(&[], "x", "SKILL.md"), None);
     }
 }

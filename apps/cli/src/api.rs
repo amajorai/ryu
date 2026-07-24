@@ -643,11 +643,7 @@ pub async fn uninstall_plugin(
 /// POST `/api/plugins/:id/install` — record an available plugin as installed
 /// (disabled). The plugin must already be discoverable in `GET /api/plugins`
 /// (an `installed:false` row).
-pub async fn install_plugin(
-    api_url: &str,
-    token: Option<&str>,
-    id: &str,
-) -> anyhow::Result<()> {
+pub async fn install_plugin(api_url: &str, token: Option<&str>, id: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()

@@ -16,6 +16,7 @@ import {
 	installAgent,
 } from "@/src/lib/api/agents.ts";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
+import { installAndLaunchIsland } from "@/src/lib/api/island.ts";
 import { setFeatureEnabled, TOGGLEABLE_FEATURES } from "@/src/lib/features.ts";
 import { fetchCatalog, installSidecar } from "@/src/lib/services-api.ts";
 import { useAppStore } from "@/src/store/useAppStore.ts";
@@ -64,13 +65,13 @@ type Phase =
 	| "done";
 
 const STATUS_MESSAGES: Record<Phase, string> = {
-	starting: "Setting things up…",
+	starting: "Setting things up",
 	choose: "How do you want to run Ryu?",
-	installing: "Getting your local AI ready…",
+	installing: "Getting your local AI ready",
 	agents: "Add your agents",
 	features: "Choose your features",
 	mic: "Enable voice input",
-	finishing: "Almost there…",
+	finishing: "Almost there",
 	done: "Ready!",
 };
 
@@ -81,34 +82,34 @@ const STATUS_MESSAGES: Record<Phase, string> = {
 // phases keep their single static heading from STATUS_MESSAGES.
 const ROTATING_MESSAGES: Partial<Record<Phase, string[]>> = {
 	starting: [
-		"Setting things up…",
-		"Warming up the engine…",
-		"Preparing your workspace…",
-		"Tidying up the place…",
-		"Unpacking your assistant…",
-		"Getting comfortable…",
+		"Setting things up",
+		"Warming up the engine",
+		"Preparing your workspace",
+		"Tidying up the place",
+		"Unpacking your assistant",
+		"Getting comfortable",
 	],
 	installing: [
-		"Installing the AI engine…",
-		"Downloading your local model…",
-		"Optimizing for your device…",
-		"Getting your local AI ready…",
-		"Teaching Ryu to think…",
-		"Wiring up the neurons…",
-		"Loading the brain cells…",
-		"Tuning the model weights…",
-		"Almost ready to chat…",
-		"This part can take a few minutes…",
-		"Hang tight, nearly there…",
-		"Putting the finishing touches…",
+		"Installing the AI engine",
+		"Downloading your local model",
+		"Optimizing for your device",
+		"Getting your local AI ready",
+		"Teaching Ryu to think",
+		"Wiring up the neurons",
+		"Loading the brain cells",
+		"Tuning the model weights",
+		"Almost ready to chat",
+		"This part can take a few minutes",
+		"Hang tight, nearly there",
+		"Putting the finishing touches",
 	],
 	finishing: [
-		"Adding your agents…",
-		"Applying your preferences…",
-		"Finishing up…",
-		"Rolling out the welcome mat…",
-		"Polishing things off…",
-		"Just a sec…",
+		"Adding your agents",
+		"Applying your preferences",
+		"Finishing up",
+		"Rolling out the welcome mat",
+		"Polishing things off",
+		"Just a sec",
 	],
 };
 
@@ -357,6 +358,10 @@ export default function OnboardingPage() {
 			const target = toTarget(node);
 
 			setPhase("installing");
+			// Best-effort: get the Island companion installed + launched during
+			// onboarding so it's ready by first chat. Fire-and-forget (no `await`) and
+			// non-fatal — it must never block or fail onboarding, and dev is a no-op.
+			installAndLaunchIsland().catch(() => undefined);
 			await waitForLocalStack(node, () => cancelledRef.current);
 			if (cancelledRef.current) {
 				return;

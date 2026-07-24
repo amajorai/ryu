@@ -215,7 +215,7 @@ mod tests {
         };
         // Firewall enabled (default) + WarnAndContinue set explicitly — the R3
         // rule fires only for the advisory-only warn policy, which is no longer the
-        // firewall default (that is now Sanitize), so it must be opted into here.
+        // firewall default (that is now Block), so it must be opted into here.
         let firewall = FirewallConfig {
             policy: FirewallPolicy::WarnAndContinue,
             ..Default::default()

@@ -211,7 +211,11 @@ impl WasmPolicyHost {
     pub async fn evaluate(&self, module_bytes: &[u8], input: &str) -> WasmVerdict {
         let module = match self.load_module(module_bytes) {
             Ok(m) => m,
-            Err(e) => return WasmVerdict::Fail { reason: format!("module load: {e}") },
+            Err(e) => {
+                return WasmVerdict::Fail {
+                    reason: format!("module load: {e}"),
+                }
+            }
         };
 
         // Cap the excerpt on a char boundary so the guest gets valid-ish UTF-8.
@@ -227,7 +231,11 @@ impl WasmPolicyHost {
 
         let permit = match self.sem.clone().acquire_owned().await {
             Ok(p) => p,
-            Err(_) => return WasmVerdict::Fail { reason: "semaphore closed".into() },
+            Err(_) => {
+                return WasmVerdict::Fail {
+                    reason: "semaphore closed".into(),
+                }
+            }
         };
         let engine = self.engine.clone();
         let result = tokio::task::spawn_blocking(move || {
@@ -238,8 +246,12 @@ impl WasmPolicyHost {
 
         match result {
             Ok(Ok(v)) => v,
-            Ok(Err(e)) => WasmVerdict::Fail { reason: sanitize_reason(&e.to_string()) },
-            Err(join) => WasmVerdict::Fail { reason: format!("guest task panicked: {join}") },
+            Ok(Err(e)) => WasmVerdict::Fail {
+                reason: sanitize_reason(&e.to_string()),
+            },
+            Err(join) => WasmVerdict::Fail {
+                reason: format!("guest task panicked: {join}"),
+            },
         }
     }
 }
@@ -267,7 +279,10 @@ pub fn validate_wasm_evaluators(
             continue;
         };
         if module_base64.len() > MAX_MODULE_B64_LEN {
-            return Err(format!("evaluator '{}': wasm module payload too large", ev.id));
+            return Err(format!(
+                "evaluator '{}': wasm module payload too large",
+                ev.id
+            ));
         }
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(module_base64.as_bytes())
@@ -338,7 +353,9 @@ fn run_guest(engine: &Engine, module: &Module, input: &[u8]) -> anyhow::Result<W
     memory.read(&store, out_ptr, &mut buf)?; // checked read — OOB → Err → fail-closed
     match buf[0] {
         0 => Ok(WasmVerdict::Allow),
-        1 => Ok(WasmVerdict::Deny { reason: sanitize_reason(&String::from_utf8_lossy(&buf[1..])) }),
+        1 => Ok(WasmVerdict::Deny {
+            reason: sanitize_reason(&String::from_utf8_lossy(&buf[1..])),
+        }),
         other => anyhow::bail!("guest returned invalid decision byte {other}"),
     }
 }
@@ -481,10 +498,15 @@ mod tests {
     #[tokio::test]
     async fn allow_and_deny_verdicts_enforced() {
         let host = WasmPolicyHost::new().unwrap();
-        assert_eq!(host.evaluate(&wasm(ALLOW_WAT), "anything").await, WasmVerdict::Allow);
+        assert_eq!(
+            host.evaluate(&wasm(ALLOW_WAT), "anything").await,
+            WasmVerdict::Allow
+        );
         assert_eq!(
             host.evaluate(&wasm(DENY_WAT), "anything").await,
-            WasmVerdict::Deny { reason: "denied".into() }
+            WasmVerdict::Deny {
+                reason: "denied".into()
+            }
         );
     }
 
@@ -492,8 +514,16 @@ mod tests {
     async fn verdict_depends_on_host_supplied_input() {
         let host = WasmPolicyHost::new().unwrap();
         let m = wasm(FIRST_BYTE_B_WAT);
-        assert_eq!(host.evaluate(&m, "Blocked prompt").await, WasmVerdict::Deny { reason: "denied".into() });
-        assert_eq!(host.evaluate(&m, "allowed prompt").await, WasmVerdict::Allow);
+        assert_eq!(
+            host.evaluate(&m, "Blocked prompt").await,
+            WasmVerdict::Deny {
+                reason: "denied".into()
+            }
+        );
+        assert_eq!(
+            host.evaluate(&m, "allowed prompt").await,
+            WasmVerdict::Allow
+        );
         assert_eq!(host.evaluate(&m, "").await, WasmVerdict::Allow);
     }
 
@@ -512,7 +542,10 @@ mod tests {
         let host = WasmPolicyHost::new().unwrap();
         let t0 = std::time::Instant::now();
         let v = host.evaluate(&wasm(INFINITE_LOOP_WAT), "x").await;
-        assert!(matches!(v, WasmVerdict::Fail { .. }), "infinite loop must Fail, got {v:?}");
+        assert!(
+            matches!(v, WasmVerdict::Fail { .. }),
+            "infinite loop must Fail, got {v:?}"
+        );
         assert!(
             t0.elapsed() < std::time::Duration::from_secs(5),
             "must be bounded by fuel/epoch, took {:?}",
@@ -524,7 +557,10 @@ mod tests {
     async fn memory_bomb_is_capped_and_fails_closed() {
         let host = WasmPolicyHost::new().unwrap();
         let v = host.evaluate(&wasm(MEM_BOMB_WAT), "x").await;
-        assert!(matches!(v, WasmVerdict::Fail { .. }), "over-cap memory must Fail, got {v:?}");
+        assert!(
+            matches!(v, WasmVerdict::Fail { .. }),
+            "over-cap memory must Fail, got {v:?}"
+        );
     }
 
     #[tokio::test]
@@ -563,8 +599,14 @@ mod tests {
             description: String::new(),
             category: crate::evaluators::EvaluatorCategory::Security,
             target: crate::evaluators::EvaluatorTarget::Input,
-            capabilities: crate::evaluators::Capabilities { inline: true, offline: false },
-            impl_: crate::evaluators::EvaluatorImpl::Wasm { module_base64: b64, fail_open: false },
+            capabilities: crate::evaluators::Capabilities {
+                inline: true,
+                offline: false,
+            },
+            impl_: crate::evaluators::EvaluatorImpl::Wasm {
+                module_base64: b64,
+                fail_open: false,
+            },
             inline: None,
             offline: None,
             builtin: false,
@@ -580,7 +622,9 @@ mod tests {
     fn validate_wasm_evaluators_rejects_at_declaration() {
         let host = WasmPolicyHost::new().unwrap();
         assert!(validate_wasm_evaluators(&host, &[wasm_eval("ok", ALLOW_WAT)]).is_ok());
-        assert!(validate_wasm_evaluators(&host, &[wasm_eval("bad", FORBIDDEN_IMPORT_WAT)]).is_err());
+        assert!(
+            validate_wasm_evaluators(&host, &[wasm_eval("bad", FORBIDDEN_IMPORT_WAT)]).is_err()
+        );
         // A non-wasm evaluator is ignored (no wasm to validate).
         let non_wasm = crate::evaluators::Evaluator {
             impl_: crate::evaluators::EvaluatorImpl::Heuristic,

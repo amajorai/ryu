@@ -22,3 +22,8 @@ hex = "0.4"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# Hermetic temp dirs for the SQLite trigger-store tests (matches the
+# workspace-wide `tempfile = "3"` used by sibling core crates, e.g. core/usage).
+tempfile = "3"

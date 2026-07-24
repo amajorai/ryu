@@ -76,12 +76,24 @@ pub async fn notify_all(
     for target in targets {
         match target {
             NotifyTarget::Webhook { url } => {
-                ryu_notify::send_webhook_alert(http, url, &alert.title, &alert.message, &alert.hook_event)
-                    .await;
+                ryu_notify::send_webhook_alert(
+                    http,
+                    url,
+                    &alert.title,
+                    &alert.message,
+                    &alert.hook_event,
+                )
+                .await;
             }
             NotifyTarget::Telegram { bot_token, chat_id } => {
-                ryu_notify::send_telegram_alert(http, bot_token, chat_id, &alert.title, &alert.message)
-                    .await;
+                ryu_notify::send_telegram_alert(
+                    http,
+                    bot_token,
+                    chat_id,
+                    &alert.title,
+                    &alert.message,
+                )
+                .await;
             }
             NotifyTarget::ExpoPush { token } => {
                 ryu_notify::push_expo_message(

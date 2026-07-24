@@ -3,5 +3,12 @@
   "name": "Agent Browser",
   "version": "1.0.0",
   "runnables": [],
-  "permission_grants": ["mcp:agentbrowser"]
+  "permission_grants": ["mcp:agentbrowser"],
+  "mcp_servers": {
+    "agentbrowser": {
+      "command": "npx",
+      "args": ["-y", "agentbrowser"],
+      "description": "Agent Browser — AI-powered web browsing (navigate, extract, interact). Launched via `npx agentbrowser`; unavailable until the package (and Node) are installed."
+    }
+  }
 }

@@ -964,11 +964,7 @@ mod tests {
             None
         }
         fn record_version(&self, _store_key: &str, _version: &str, _checksum: &str) {}
-        fn authorize(
-            &self,
-            _url: &str,
-            req: reqwest::RequestBuilder,
-        ) -> reqwest::RequestBuilder {
+        fn authorize(&self, _url: &str, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
             req
         }
     }

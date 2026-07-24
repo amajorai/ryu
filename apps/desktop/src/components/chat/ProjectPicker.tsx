@@ -45,7 +45,7 @@ import { NodeFolderBrowser } from "./NodeFolderBrowser.tsx";
 const PATH_SEP = /[\\/]/;
 
 export function ProjectPicker() {
-	const { folder, setFolder, clearFolder } = useWorkspaceStore();
+	const { folder, setFolder } = useWorkspaceStore();
 	const [menuOpen, setMenuOpen] = useState(false);
 	// The create-folder and browse dialogs live OUTSIDE the menu so they survive
 	// the menu closing on select (a dialog nested in the menu would unmount with it).
@@ -54,11 +54,14 @@ export function ProjectPicker() {
 
 	const handleSelectBrowsed = useCallback(
 		(selected: string) => {
+			// Browsed paths come from Core's own listing, so activation should
+			// succeed; on a transient failure keep the current folder rather than
+			// clearing it out from under the user.
 			setFolder(selected).catch(() => {
-				clearFolder();
+				// no-op
 			});
 		},
-		[setFolder, clearFolder]
+		[setFolder]
 	);
 
 	const folderName = folder ? folder.split(PATH_SEP).at(-1) : null;
@@ -121,19 +124,20 @@ export function ProjectPickerContent({
 }: {
 	onClose: () => void;
 	/** Opens the create-folder dialog (owned by the persistent parent, so it
-	 *  survives this menu closing). */
-	onStartFromScratch: () => void;
+	 *  survives this menu closing). Omit to hide the "New project" submenu (e.g.
+	 *  the empty-state popover offers recents only). */
+	onStartFromScratch?: () => void;
 	/** Opens the node-aware folder browser (owned by the persistent parent, so it
 	 *  survives this menu closing). Replaces the native OS picker, which only sees
-	 *  the desktop host and not a remote node. */
-	onBrowse: () => void;
+	 *  the desktop host and not a remote node. Omit to hide the "New project"
+	 *  submenu. */
+	onBrowse?: () => void;
 }) {
 	const {
 		folder,
 		recentFolders,
 		projectIcons,
 		setFolder,
-		removeRecentFolder,
 		removeProject,
 		clearFolder,
 	} = useWorkspaceStore();
@@ -142,17 +146,19 @@ export function ProjectPickerContent({
 
 	const handleBrowse = useCallback(() => {
 		onClose();
-		onBrowse();
+		onBrowse?.();
 	}, [onBrowse, onClose]);
 
 	const handleSelectRecent = useCallback(
 		async (path: string) => {
 			onClose();
+			// Selecting must never REMOVE the folder: removal is the X button's job
+			// only. If activation fails (e.g. the folder is gone), leave the row be.
 			await setFolder(path).catch(() => {
-				removeRecentFolder(path);
+				// no-op: keep the recent; the user removes it explicitly via the X.
 			});
 		},
-		[setFolder, removeRecentFolder, onClose]
+		[setFolder, onClose]
 	);
 
 	// Removing here uses removeProject (not just removeRecentFolder) so the folder
@@ -256,7 +262,9 @@ export function ProjectPickerContent({
 				</>
 			)}
 
-			{/* Browse ▸ { Open existing folder · Start from scratch } */}
+			{/* Browse ▸ { Open existing folder · Start from scratch }. Hidden when the
+			    host offers neither action (e.g. the empty-state popover). */}
+			{(onBrowse || onStartFromScratch) && (
 			<DropdownMenuSub>
 				<DropdownMenuSubTrigger>
 					<HugeiconsIcon
@@ -266,17 +274,20 @@ export function ProjectPickerContent({
 					<span className="text-foreground/70">New project</span>
 				</DropdownMenuSubTrigger>
 				<DropdownMenuSubContent className="w-64">
-					<DropdownMenuItem onClick={handleBrowse}>
-						<HugeiconsIcon
-							className="size-4 shrink-0 text-foreground/40"
-							icon={FolderOpenIcon}
-						/>
-						Open existing folder
-					</DropdownMenuItem>
+					{onBrowse && (
+						<DropdownMenuItem onClick={handleBrowse}>
+							<HugeiconsIcon
+								className="size-4 shrink-0 text-foreground/40"
+								icon={FolderOpenIcon}
+							/>
+							Open existing folder
+						</DropdownMenuItem>
+					)}
 
 					{/* Start from scratch: opens a dialog to name a new folder created
 					    under Documents/Ryu (the dialog is owned by the parent so it
 					    survives this menu closing). */}
+					{onStartFromScratch && (
 					<DropdownMenuItem onClick={onStartFromScratch}>
 						<HugeiconsIcon
 							className="size-4 shrink-0 text-foreground/40"
@@ -284,8 +295,10 @@ export function ProjectPickerContent({
 						/>
 						Start from scratch
 					</DropdownMenuItem>
+					)}
 				</DropdownMenuSubContent>
 			</DropdownMenuSub>
+			)}
 
 			{folder && (
 				<button
@@ -386,7 +399,7 @@ export function CreateFolderDialog({
 				/>
 				{error && <p className="text-[12px] text-destructive">{error}</p>}
 				<DialogFooter>
-					<DialogClose render={<Button variant="outline" />}>
+					<DialogClose render={<Button variant="ghost" />}>
 						Cancel
 					</DialogClose>
 					<Button

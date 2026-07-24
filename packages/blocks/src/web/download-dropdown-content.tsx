@@ -244,7 +244,7 @@ export function DownloadDropdownContent({
 				</DropdownMenuItem>
 			</DropdownMenuGroup>
 
-			<DropdownMenuSeparator />
+			{/* <DropdownMenuSeparator />
 
 			<DropdownMenuGroup>
 				<SectionLabel>Extensions</SectionLabel>
@@ -279,7 +279,7 @@ export function DownloadDropdownContent({
 				))}
 			</DropdownMenuGroup>
 
-			<DropdownMenuSeparator />
+			<DropdownMenuSeparator /> */}
 
 			<DropdownMenuGroup>
 				<SectionLabel>Others</SectionLabel>
@@ -334,7 +334,7 @@ export function DownloadDropdownContent({
 				</DropdownMenuItem>
 			</DropdownMenuGroup>
 
-			<DropdownMenuSeparator />
+			{/* <DropdownMenuSeparator />
 
 			<DropdownMenuGroup>
 				<SectionLabel>Mobile</SectionLabel>
@@ -354,7 +354,7 @@ export function DownloadDropdownContent({
 				</DropdownMenuItem>
 			</DropdownMenuGroup>
 
-			<DropdownMenuSeparator />
+			<DropdownMenuSeparator /> */}
 
 			<DropdownMenuGroup>
 				<SectionLabel>Cloud</SectionLabel>

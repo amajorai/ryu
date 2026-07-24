@@ -68,6 +68,30 @@ impl ShadowProcess {
             .kill_on_drop(false)
             .no_window();
         Self::apply_llm_env(&mut command);
+        // Isolate Shadow's on-disk state per profile: `~/.ryu{profile}/shadow` (via the
+        // profile-aware `ryu_dir()`) instead of the hardcoded `~/.shadow`, so a dev and
+        // a release Shadow never share — and thus never corrupt — each other's memory /
+        // timeline / search-index DBs. Shadow reads `SHADOW_DATA_DIR`
+        // (apps/shadow/src/config.rs); anything an operator already exported wins.
+        if std::env::var_os("SHADOW_DATA_DIR").is_none() {
+            command.env("SHADOW_DATA_DIR", crate::paths::ryu_dir().join("shadow"));
+        }
+        // Shared-secret bearer for Shadow's HTTP surface (apps/shadow/src/server.rs
+        // gates everything except /health): read-or-create the persisted token and
+        // inject it so the spawned Shadow and Core's clients (`sidecar/mcp/shadow`,
+        // `ShadowManager::stop`) always agree — even when an operator overrode
+        // `SHADOW_DATA_DIR`. An operator-exported `SHADOW_API_TOKEN` wins (Shadow
+        // prefers the env var too).
+        if std::env::var_os("SHADOW_API_TOKEN").is_none() {
+            match super::ensure_api_token() {
+                Ok(token) => {
+                    command.env("SHADOW_API_TOKEN", token);
+                }
+                Err(e) => tracing::warn!(
+                    "shadow: could not prepare the API token (Shadow's gated routes will fail closed): {e}"
+                ),
+            }
+        }
 
         let mut child = command.spawn()?;
 
@@ -216,5 +240,46 @@ impl ShadowProcess {
                 .no_window()
                 .output();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Only pure state-machine defaults and path helpers are covered here.
+    // `start`/`stop`/`cleanup_orphan` spawn or signal real processes and are not
+    // exercised in a unit test.
+
+    #[test]
+    fn new_starts_in_stopped_state_and_keeps_port() {
+        let mut proc = ShadowProcess::new(PathBuf::from("/bin/shadow"), 7994);
+        assert_eq!(proc.state, ProcessState::Stopped);
+        assert_eq!(proc.port, 7994);
+        // No child spawned: not running, state untouched.
+        assert!(!proc.is_running());
+        assert_eq!(proc.state, ProcessState::Stopped);
+    }
+
+    #[test]
+    fn pid_path_lives_under_the_shadow_dir() {
+        let path = pid_path();
+        assert!(path.ends_with("shadow.pid"));
+        assert_eq!(path.parent().unwrap(), shadow_dir());
+        assert!(shadow_dir().ends_with("shadow"));
+    }
+
+    #[test]
+    fn process_state_equality_and_failed_payload() {
+        assert_eq!(ProcessState::Starting, ProcessState::Starting);
+        assert_ne!(ProcessState::Running, ProcessState::Stopping);
+        assert_eq!(
+            ProcessState::Failed("x".to_string()),
+            ProcessState::Failed("x".to_string())
+        );
+        assert_ne!(
+            ProcessState::Failed("x".to_string()),
+            ProcessState::Failed("y".to_string())
+        );
     }
 }

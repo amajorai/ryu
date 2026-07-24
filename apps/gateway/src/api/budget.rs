@@ -49,10 +49,7 @@ fn filter_scope(
     key: &Option<String>,
 ) -> std::collections::HashMap<String, u64> {
     match key {
-        Some(id) => map
-            .into_iter()
-            .filter(|(k, _)| k == id)
-            .collect(),
+        Some(id) => map.into_iter().filter(|(k, _)| k == id).collect(),
         None => map,
     }
 }
@@ -71,7 +68,13 @@ pub async fn get_spend(
 ) -> Result<Json<Value>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
     let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
-    crate::api::config::require_local_admin(&state, &peer, ctx.is_master_key, "Budget spend access")?;
+    crate::api::config::require_local_admin(
+        &state,
+        &peer,
+        ctx.is_master_key,
+        &headers,
+        "Budget spend access",
+    )?;
 
     let snapshot = state.with_budget(|b| b.spend_snapshot());
     let config = state.with_budget(|b| b.config().clone());

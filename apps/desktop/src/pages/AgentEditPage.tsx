@@ -10,6 +10,8 @@ import {
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Checkbox } from "@ryu/ui/components/checkbox";
+import type { GradientDirection } from "@ryu/ui/components/dither-kit/gradient";
+import { isDitherColor } from "@ryu/ui/components/dither-kit/palette";
 import { Label } from "@ryu/ui/components/label";
 import { Spinner } from "@ryu/ui/components/spinner";
 import { Textarea } from "@ryu/ui/components/textarea";
@@ -22,7 +24,11 @@ import { AgentCalendarView } from "@/src/components/agents/AgentCalendarView.tsx
 import { AgentCapabilitiesPanel } from "@/src/components/agents/AgentCapabilitiesPanel.tsx";
 import { AgentChannelsSection } from "@/src/components/agents/AgentChannelsSection.tsx";
 import { AgentEvalsView } from "@/src/components/agents/AgentEvalsView.tsx";
-import { AgentImageField } from "@/src/components/agents/AgentImageField.tsx";
+import {
+	type AgentAvatarValue,
+	type AgentDitherValue,
+	AgentImageField,
+} from "@/src/components/agents/AgentImageField.tsx";
 import { AgentLanyardCard } from "@/src/components/agents/AgentLanyardCard.tsx";
 import { AgentRunHistoryView } from "@/src/components/agents/AgentRunHistoryView.tsx";
 import { AgentSmartRouteOverride } from "@/src/components/agents/AgentSmartRouteOverride.tsx";
@@ -56,6 +62,7 @@ import { useIdentities } from "@/src/hooks/useIdentities.ts";
 import { AgentLogo } from "@/src/lib/agent-logos.tsx";
 import {
 	type Agent,
+	type AgentPersona,
 	type AgentSummary,
 	type AgentTools,
 	bumpPatchVersion,
@@ -382,6 +389,48 @@ const ACP_CUSTOM_ENGINE = "__acp_exec_custom__";
 /** Engine prefix Core treats as a literal ACP spawn command (`agent_route`). */
 const ACP_EXEC_PREFIX = "acp-exec:";
 
+const DITHER_DIRECTIONS: GradientDirection[] = ["up", "down", "left", "right"];
+
+/** Coerce a persisted direction string to a valid {@link GradientDirection}. */
+function coerceDirection(value: string | null | undefined): GradientDirection {
+	return DITHER_DIRECTIONS.find((d) => d === value) ?? "up";
+}
+
+/**
+ * Reconstruct a typed dither avatar from a persisted persona spec, or null when
+ * absent / invalid (`from` must be a known palette colour).
+ */
+function personaToDither(
+	dither: AgentPersona["dither"]
+): AgentDitherValue | null {
+	if (!(dither && isDitherColor(dither.from))) {
+		return null;
+	}
+	return {
+		from: dither.from,
+		to: isDitherColor(dither.to) ? dither.to : null,
+		direction: coerceDirection(dither.direction),
+	};
+}
+
+/** Fold the three avatar-source states into the field's discriminated value. */
+function toAvatarValue(
+	image: string | null,
+	icon: string | null,
+	dither: AgentDitherValue | null
+): AgentAvatarValue {
+	if (image) {
+		return { kind: "image", dataUrl: image };
+	}
+	if (icon) {
+		return { kind: "icon", id: icon };
+	}
+	if (dither) {
+		return { kind: "dither", dither };
+	}
+	return null;
+}
+
 function agentEngineOptionId(agent: AgentSummary): string | null {
 	if (!agent.builtIn) {
 		return null;
@@ -510,9 +559,14 @@ export default function AgentEditPage({
 	const [personaDisplayName, setPersonaDisplayName] = useState("");
 	const [tone, setTone] = useState<ToneOption>("neutral");
 	const [customTone, setCustomTone] = useState("");
-	// Custom agent avatar (a cropped image stored inline as a data URL). Null =
-	// use the engine logo.
+	// Custom agent avatar. Three mutually-exclusive sources — a cropped image
+	// stored inline as a data URL, a custom icon id, or a dither gradient. All
+	// null = use the engine logo. Setting one clears the others on save.
 	const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+	const [avatarIcon, setAvatarIcon] = useState<string | null>(null);
+	const [avatarDither, setAvatarDither] = useState<AgentDitherValue | null>(
+		null
+	);
 
 	// ── Advanced inference (per-agent sampling defaults) ─────────────────────────
 	const [sampling, setSampling] = useState<SamplingConfig>({});
@@ -827,6 +881,8 @@ export default function AgentEditPage({
 			const persona = existing.persona;
 			setPersonaDisplayName(persona?.display_name ?? "");
 			setAvatarUrl(persona?.avatar_url ?? null);
+			setAvatarIcon(persona?.icon ?? null);
+			setAvatarDither(personaToDither(persona?.dither));
 			const savedTone = persona?.tone ?? null;
 			const presetTone = savedTone
 				? TONE_OPTIONS.find(
@@ -978,10 +1034,14 @@ export default function AgentEditPage({
 			identityProfileIds: Array.from(selectedIdentities),
 			version: nextVersion,
 			// Persona fields — passed through; Core stores them when the field exists.
+			// The three avatar sources are mutually exclusive: only the active one
+			// is non-null (the field clears the others when a new source is picked).
 			persona: {
 				display_name: personaDisplayName.trim() || null,
 				tone: toneValue === "neutral" ? null : toneValue,
 				avatar_url: avatarUrl,
+				icon: avatarIcon,
+				dither: avatarDither,
 			},
 			// Advanced sampling defaults — passed through to Core's agent record.
 			inference: sampling,
@@ -1340,8 +1400,13 @@ export default function AgentEditPage({
 						<AgentImageField
 							disabled={isLocked}
 							fallback={<AgentLogo engine={chatModel} size="24px" />}
-							onChange={setAvatarUrl}
-							value={avatarUrl}
+							onChange={(next) => {
+								// A single active source: setting one clears the others.
+								setAvatarUrl(next?.kind === "image" ? next.dataUrl : null);
+								setAvatarIcon(next?.kind === "icon" ? next.id : null);
+								setAvatarDither(next?.kind === "dither" ? next.dither : null);
+							}}
+							value={toAvatarValue(avatarUrl, avatarIcon, avatarDither)}
 						/>
 					}
 					byoaPanel={

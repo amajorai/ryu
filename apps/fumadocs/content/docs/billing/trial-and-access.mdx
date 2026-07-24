@@ -1,0 +1,69 @@
+---
+title: "Trial & Access Model"
+description: "How the 7-day trial works, the soft paywall, offline grace, and the access decision logic."
+---
+
+Every fresh install gets a **7-day free trial** of full Pro access. After the trial, without an active subscription or license key, Pro features are locked behind a **soft, dismissible paywall** — closing it drops you into free local chat.
+
+<Callout type="info">
+  Source of truth: `DESKTOP_GATE` and `decideDesktopAccess()` in `packages/auth/src/lib/plans.ts`.
+</Callout>
+
+## The trial
+
+- **Length**: 7 days from first launch
+- **What you get**: Everything Pro unlocks — managed inference, all Band 2 features, unlimited caps
+- **No card needed**: the trial starts automatically on first launch
+- **After expiry**: the paywall appears. You can dismiss it to continue with free local chat.
+
+## Access decision logic
+
+The desktop app resolves access in this order:
+
+1. **Active subscription** → Pro unlocked, managed inference enabled
+2. **Valid desktop license key** → Pro unlocked, no managed inference
+3. **Beta free flag** → Pro unlocked (beta), no managed pool — break-glass only, off by default
+4. **Inside 7-day trial** → Pro unlocked (trial), no managed pool
+5. **Offline + fresh cache** → Ride the cached entitlement (offline grace window)
+6. **Otherwise** → Paywalled (free local chat stays usable)
+
+## The paywall
+
+The paywall is **soft** — it's a dismissible modal, not a hard block. Dismissing it drops you into free local chat with Band 1 features (local/BYOK chat, single agent, tool calling, MCP, skills).
+
+The paywall shows:
+
+- Trial countdown (if still in trial)
+- Current access state (subscription, license, trial, locked)
+- Upgrade / manage actions
+
+## Offline grace
+
+When the control plane is unreachable (network down, server error), the app uses a **cached last-good entitlement** for up to **7 days**. This prevents a paying user from being falsely locked out by a flaky network.
+
+The cache stores:
+
+- `proUnlocked` — the resolved Pro state at cache time
+- `managedInference` — whether managed inference was enabled
+- `plan` — the plan id (if any)
+- `cachedAtMs` — when the cache was written
+
+After 7 days offline, the cache expires and the app falls back to free local chat.
+
+## Self-hosters
+
+If you never sign into the control plane (`hasBillingAuth()` is false):
+
+- **All limits are Infinity** — no caps enforced
+- **No paywall** — the app works fully locally
+- **BYOK** — bring your own API keys for cloud models
+- **No managed inference** — you're using your own keys, not Ryu's
+
+## License key validation
+
+Lifetime license keys are validated via `POST /api/billing/license/validate`. The key is stored locally and checked on app launch. A valid license:
+
+- Unlocks all Band 2 features (Pro feature set)
+- Does **not** enable managed inference (Band 3)
+- Does **not** provide Agent Inboxes (Band 3)
+- Includes one year of app updates

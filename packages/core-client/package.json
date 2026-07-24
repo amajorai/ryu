@@ -7,6 +7,9 @@
     "./client": "./src/client.ts",
     "./*": "./src/*.ts"
   },
+  "scripts": {
+    "test": "bun test"
+  },
   "dependencies": {
     "@ryuhq/protocol": "workspace:*"
   },

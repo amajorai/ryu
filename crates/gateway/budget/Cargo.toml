@@ -10,3 +10,6 @@ description = "Ryu Gateway token-budget stage: per-user / per-agent / per-sessio
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
 ryu-gw-contracts = { path = "../contracts", version = "0.0.8" }
+
+[dev-dependencies]
+serde_json = "1"

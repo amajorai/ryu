@@ -64,21 +64,38 @@ const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
 ///
 /// (`sample.plugin.json` — the Research Assistant demo — is kept as a test-only
 /// fixture and is deliberately NOT shipped as a built-in.)
-/// - `spider.plugin.json` — Spider web crawler tool (system plugin, sidecar-backed).
+/// - `spider.plugin.json` — Spider web crawler tool. A fully declarative
+///   `command` plugin (Core-tier, default-on): its single runnable IS the crawl
+///   tool, backed by a BYO `spider` CLI reached through the command-tool
+///   allowlist. The native `sidecar/mcp/spider.rs` provider was deleted, so the
+///   fixture is the SOLE owner of the tool (see the exception note below).
 /// - `agentbrowser.plugin.json` — Agent Browser web-browsing tool (system plugin, npx MCP-backed).
 /// - `exa.plugin.json` — Exa neural search tool plugin (U040, BYOK).
 /// - `ghost.plugin.json` — Ghost desktop-automation MCP tool (system plugin, Windows-first).
 /// - `shadow.plugin.json` — Shadow screen/audio capture + semantic memory (system plugin, Windows-first).
 ///
-/// The four sidecar-backed system tools (`spider`, `agentbrowser`, `ghost`,
-/// `shadow`) declare an **empty** `runnables` list on purpose: their tools are
-/// owned by their dedicated MCP provider (the `ghost`/`shadow`/`spider` modules
-/// in `sidecar/mcp/`, and the `agentbrowser` npx MCP server registered in
-/// `sidecar/mcp/mod.rs::builtin_servers`). The plugin record is the
+/// The two sidecar-backed system tools (`agentbrowser`, `ghost`) declare an
+/// **empty** `runnables` list on purpose: their tools are owned by the stdio MCP
+/// server each declares under `mcp_servers` in its own fixture (`ghost` → the
+/// `~/.ryu/bin/ghost mcp` binary; `agentbrowser` → `npx -y agentbrowser`),
+/// registered into the MCP registry on activation by
+/// `sidecar/mcp/register_manifest_mcp_servers` (they moved off the former
+/// hardcoded `sidecar/mcp/mod.rs::builtin_servers`). The plugin record is the
 /// install/enable/tier **governance shell** around that provider; declaring the
 /// tools again here would double-list every one as an `app__<slug>` alias
 /// (`fire_activation_event` → the Tool handler in `server/mod.rs`). Do not
 /// re-add tool runnables to these fixtures.
+///
+/// EXCEPTION: `spider`, `rtk`, `advisor` and `shadow` CARRY their tool runnables,
+/// because their Rust providers were deleted — the fixture is the only owner, so
+/// there is nothing to double-list. The "no runnables" rule above exists solely to
+/// avoid double-listing a provider-owned tool; it does not apply once the provider
+/// is gone. `spider`/`rtk` are declarative `command`-backend tools; `advisor`
+/// (`advisor__consult`) and `shadow` (`shadow__search`/`semantic_search`/`timeline`/
+/// `recent_context`) are declarative `http`-backend tools reaching Core loopback
+/// bridges (`/api/advisor/consult` and the `/api/shadow/*` proxy). `spider`/`rtk`
+/// are reached through the
+/// command-tool allowlist.
 /// - `headroom.plugin.json` — Headroom gateway egress compression (a `compression` Policy runnable, #425).
 /// - `firewall.plugin.json` — Gateway firewall on/off Policy plugin (#447, Core-tier, opt-in).
 /// - `routing.plugin.json` — Smart (classifier) routing on/off Policy plugin (#447, Core-tier, opt-in).
@@ -117,9 +134,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // `hook:run-agent`) that gathers real evidence with tools before deciding.
     include_str!("fixtures/proof.plugin.json"),
     // `rtk` surfaces the built-in RTK (Rust Token Killer) command-wrapping tool
-    // (`rtk__run`, a native provider in `sidecar/mcp/rtk.rs`) as an installable
-    // plugin: store presence + availability (detect-on-PATH) + the Phase-2
-    // auto-wrap settings. Community-tier, opt-in; the `rtk` binary is BYO.
+    // (`rtk__run`) as an installable plugin. Like `spider`, it is a fully
+    // declarative `command`-backend tool: the fixture CARRIES its runnable (the
+    // native `sidecar/mcp/rtk.rs` provider was deleted, so there is nothing to
+    // double-list — same EXCEPTION as spider). The `rtk` binary is BYO, reached
+    // through the command-tool allowlist. The fixture also contributes the Phase-2
+    // auto-wrap settings that drive `crate::rtk_config` (NOT a tool). Community-tier,
+    // opt-in.
     include_str!("fixtures/rtk.plugin.json"),
     // `security-guidance` ports Anthropic's security-guidance Claude Code plugin
     // onto Ryu's turn-hook substrate: a flag-gated `post_assistant_turn` hook that
@@ -158,22 +179,21 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("fixtures/mail.plugin.json"),
     // Browser (W9): a real-Chromium Electron browser Core runs as a `local` sidecar
     // and exposes as the grant-gated `browser.control` capability (list/open/navigate
-    // tabs, screenshot, read titles, privileged JS eval). OPT-IN — deliberately NOT in
-    // `CORE_DEFAULT_ON`, so it stays a catalog install and the sidecar (an Electron
-    // GUI app) never spawns unless a user enables it. `lazy` + idle-stop keep it cold
-    // until the desktop Browser panel first calls it through the ext-proxy.
+    // tabs, screenshot, read titles, privileged JS eval). CORE built-in — listed in
+    // `SYSTEM_PLUGINS` + `CORE_DEFAULT_ON`, so it is seeded enabled on a fresh install
+    // and uninstall-protected (the workspace "Browser" tab uses this sidecar instead of
+    // the fallback iframe). `lazy` + idle-stop keep the Electron GUI cold until the
+    // desktop Browser panel first calls it through the ext-proxy — it does not spawn on
+    // boot, only on first use.
     include_str!("fixtures/browser.plugin.json"),
-    // Ryu Apps (widget-rendering in-process apps). Each declares its tool
-    // runnables + `contributes.widgets[]`; apps that push a follow-up turn also
-    // declare the `chat.sendFollowUp` grant (governance §4.2). Default-on Core.
-    include_str!("fixtures/checklist.plugin.json"),
-    include_str!("fixtures/smart-intake-form.plugin.json"),
-    include_str!("fixtures/data-grid-explorer.plugin.json"),
-    include_str!("fixtures/chart-studio.plugin.json"),
-    include_str!("fixtures/decision-wizard.plugin.json"),
-    include_str!("fixtures/quest-board.plugin.json"),
-    include_str!("fixtures/worktree-diff-review.plugin.json"),
-    include_str!("fixtures/gateway-budget-dial.plugin.json"),
+    // Simulators: iOS Simulator (`simctl`, macOS + Xcode) + Android Emulator (`adb`)
+    // control Core runs as a dependency-free `local` sidecar, exposing the grant-gated
+    // `simulator.control` capability. OPT-IN like the browser — NOT in `CORE_DEFAULT_ON`,
+    // so the toolchain-wrapping sidecar never spawns unless a user enables it. `lazy` +
+    // idle-stop keep it cold until the desktop Simulator panel calls it through the
+    // ext-proxy. Availability is a RUNTIME probe (`/capabilities`): iOS shows only on a
+    // Mac with Xcode; Android wherever the SDK is present.
+    include_str!("fixtures/simulator.plugin.json"),
     // The Whiteboard app — a full-page Companion (`ui_format:"html"`, Path B) that
     // OWNS its Space documents via `spaces:docs`. Ships default-on with a UI bundle
     // + host-bridge grants seeded in `main.rs` (the generic CORE_DEFAULT_ON loop
@@ -334,6 +354,17 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // calls them directly, monitors pattern), so this manifest exists only to seed the
     // companion's UI bundle + `skills:crud` grant, not to gate a route surface.
     include_str!("fixtures/skill-editor.plugin.json"),
+    // `sample-widget` — the REFERENCE third-party MCP widget plugin (a dev
+    // template; source lives at `plugins-store/sample-widget/`). It declares a
+    // local Node MCP server (`node server.mjs`) whose `render` tool advertises
+    // `_meta.openai/outputTemplate = ui://widget/sample.html` and serves that
+    // resource, plus a `contributes.widgets` entry binding `sample_widget__render`
+    // to it and the `widget:render` grant. Registered so it parses/loads like every
+    // built-in and shows up as an installable example, but deliberately OPT-IN — it
+    // is NOT in `plugins::builtins::CORE_DEFAULT_ON`, so it never seeds enabled and
+    // its `node` server is never spawned unless a developer installs it. The
+    // canonical copy under `plugins-store/` and this fixture are byte-identical.
+    include_str!("fixtures/sample-widget.plugin.json"),
 ];
 
 /// The Canvas app's plugin id (its Space documents are `kind = app:<this>`). Shared
@@ -433,8 +464,7 @@ pub const TIMELINE_UI_HTML: &str = include_str!("fixtures/timeline.ui.html");
 /// `bun run --cwd apps-store/skill-editor/ui build` (or `scripts/sync-app-fixtures.sh
 /// skill-editor`) and copy `dist/index.html` to `fixtures/skill-editor.ui.html` to
 /// refresh it.
-pub const SKILL_EDITOR_UI_HTML: &str =
-    include_str!("fixtures/skill-editor.ui.html");
+pub const SKILL_EDITOR_UI_HTML: &str = include_str!("fixtures/skill-editor.ui.html");
 
 /// The Mail (Agent Inboxes) app's prebuilt, self-contained UI bundle (a
 /// `vite-plugin-singlefile` build of `apps-store/mail/ui`, all JS/CSS — incl. the
@@ -761,8 +791,8 @@ mod tests {
     /// doubles as the integration-test input and the in-module round-trip fixture.
     const MULTI_KIND_JSON: &str = include_str!("../../tests/manifest_fixtures/multi_kind.ryu.json");
 
-    /// The three companion apps exist as TWO copies of one manifest: the package
-    /// source (`apps-store/<x>/ui/plugin.json`, what the app team edits) and the
+    /// Each apps-store app exists as TWO copies of one manifest: the package
+    /// source (`apps-store/<x>/plugin.json`, what the app team edits) and the
     /// fixture Core actually compiles in via `include_str!`
     /// (`src/plugin_manifest/fixtures/<x>.plugin.json`). Editing only the package
     /// copy is a **dead edit** — Core never reads it — and silently diverges the
@@ -794,11 +824,19 @@ mod tests {
             ("timeline", "timeline.plugin.json"),
             ("meetings", "meetings.plugin.json"),
             ("skill-editor", "skill-editor.plugin.json"),
+            ("simulator", "simulator.plugin.json"),
+            ("clips", "clips.plugin.json"),
+            ("dashboards", "dashboards.plugin.json"),
+            ("healing", "healing.plugin.json"),
+            ("predict", "predict.plugin.json"),
+            ("recipes", "recipes.plugin.json"),
+            ("research", "research.plugin.json"),
+            ("teams", "teams.plugin.json"),
+            ("voice", "voice.plugin.json"),
         ] {
             let pkg_path = repo_root
                 .join("apps-store")
                 .join(app)
-                .join("ui")
                 .join("plugin.json");
             let Ok(pkg_json) = std::fs::read_to_string(&pkg_path) else {
                 // OSS mirror (no `packages/`) — nothing to compare against.
@@ -824,8 +862,8 @@ mod tests {
         }
 
         assert!(
-            checked == 0 || checked == 16,
-            "expected all sixteen companion manifests (or none, on the OSS mirror), found {checked}"
+            checked == 0 || checked == 25,
+            "expected all twenty-five apps-store manifests (or none, on the OSS mirror), found {checked}"
         );
     }
 
@@ -867,10 +905,7 @@ mod tests {
                  rebuild with scripts/sync-app-fixtures.sh",
                 html.len()
             );
-            assert!(
-                html.contains('<'),
-                "{name}.ui.html does not look like HTML"
-            );
+            assert!(html.contains('<'), "{name}.ui.html does not look like HTML");
         }
     }
 
@@ -1147,6 +1182,41 @@ mod tests {
             Some("html"),
             "whiteboard companion must declare ui_format:\"html\" (Path B)"
         );
+    }
+
+    #[test]
+    fn sample_widget_fixture_loads_and_binds_its_widget() {
+        // The reference third-party widget plugin must parse+register (a malformed
+        // fixture is silently WARN-skipped by `load()`, staying green under
+        // `cargo check`, so assert the loaded shape here). It carries no runnables:
+        // its tool is owned by the declared MCP server, and the widget is wired by
+        // `contributes.widgets` joined to the `widget:render` grant.
+        let manifests = PluginManifestLoader::load();
+        let m = manifests
+            .iter()
+            .find(|m| m.id == "sample-widget")
+            .expect("sample-widget fixture must load and validate");
+        assert!(
+            m.permission_grants.iter().any(|g| g == "widget:render"),
+            "sample-widget must declare the widget:render grant"
+        );
+        assert!(
+            m.mcp_servers.contains_key("sample_widget"),
+            "sample-widget must declare the sample_widget MCP server"
+        );
+        let widgets = m
+            .contributes
+            .as_ref()
+            .map(|c| c.widgets.as_slice())
+            .unwrap_or_default();
+        let widget = widgets
+            .iter()
+            .find(|w| w.tool_id == "sample_widget__render")
+            .expect("sample-widget must contribute the sample_widget__render widget");
+        // tool_id MUST be `<mcp_servers-key>__<toolName>` and the uri must match the
+        // resource the server serves (and the tool _meta.outputTemplate).
+        assert_eq!(widget.uri, "ui://widget/sample.html");
+        assert_eq!(widget.mime, "text/html+skybridge");
     }
 
     #[test]
@@ -1596,8 +1666,14 @@ mod tests {
     fn absent_requires_and_targets_are_not_serialised() {
         let m = parse(NO_DEPS).unwrap();
         let json = serde_json::to_value(&m).unwrap();
-        assert!(json.get("requires").is_none(), "absent requires must be omitted");
-        assert!(json.get("targets").is_none(), "empty targets must be omitted");
+        assert!(
+            json.get("requires").is_none(),
+            "absent requires must be omitted"
+        );
+        assert!(
+            json.get("targets").is_none(),
+            "empty targets must be omitted"
+        );
     }
 
     // ── explicit targets: filtering ───────────────────────────────────────────
@@ -1700,8 +1776,14 @@ mod tests {
     #[test]
     fn bare_min_version_is_a_minimum_not_a_caret() {
         let req = parse_min_version("1.2.0").unwrap();
-        assert!(req.matches(&semver::Version::parse("1.2.0").unwrap()), "exact");
-        assert!(req.matches(&semver::Version::parse("1.9.9").unwrap()), "minor");
+        assert!(
+            req.matches(&semver::Version::parse("1.2.0").unwrap()),
+            "exact"
+        );
+        assert!(
+            req.matches(&semver::Version::parse("1.9.9").unwrap()),
+            "minor"
+        );
         assert!(
             req.matches(&semver::Version::parse("2.0.0").unwrap()),
             "a bare min_version must accept a NEWER MAJOR — this is the whole point"
@@ -1728,5 +1810,111 @@ mod tests {
     fn invalid_min_version_strings_are_errors() {
         assert!(parse_min_version("not-a-version").is_err());
         assert!(parse_min_version("").is_err());
+    }
+
+    // ── Every fixture in `fixtures/*.plugin.json` must be well-formed ──────────
+    //
+    // `BUILTIN_MANIFESTS` only `include_str!`s the SHIPPED subset, so `load()` never
+    // touches the reference/sample fixtures (`sample`, `tool-firewall`,
+    // `hook-observers`, `agents`, …). A truncated or malformed one of those would
+    // compile fine and slip past every existing test. This reads the directory at
+    // runtime (like `companion_fixtures_match_their_package_manifests`) so ALL of
+    // them are exercised, and is skipped on any tree that ships without the folder.
+
+    fn fixture_plugin_json_paths() -> Vec<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("plugin_manifest")
+            .join("fixtures");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut paths: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with(".plugin.json"))
+            })
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    #[test]
+    fn every_fixture_deserializes_into_a_plugin_manifest() {
+        let paths = fixture_plugin_json_paths();
+        assert!(
+            !paths.is_empty(),
+            "fixtures/*.plugin.json must be present in this tree"
+        );
+        for path in &paths {
+            let raw = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("{} unreadable: {e}", path.display()));
+            let manifest: PluginManifest = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("{} failed to deserialise: {e}", path.display()));
+            assert!(
+                !manifest.id.trim().is_empty(),
+                "{} has an empty id",
+                path.display()
+            );
+            assert!(
+                !manifest.name.trim().is_empty(),
+                "{} has an empty name",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn every_fixture_has_a_valid_id_and_semver_version() {
+        for path in &fixture_plugin_json_paths() {
+            let raw = std::fs::read_to_string(path).expect("read fixture");
+            let manifest: PluginManifest = serde_json::from_str(&raw).expect("deserialise fixture");
+            validate_plugin_id(&manifest.id)
+                .unwrap_or_else(|e| panic!("{} has an invalid plugin id: {e}", path.display()));
+            semver::Version::parse(&manifest.version).unwrap_or_else(|e| {
+                panic!(
+                    "{} version '{}' is not semver: {e}",
+                    path.display(),
+                    manifest.version
+                )
+            });
+        }
+    }
+
+    #[test]
+    fn every_fixture_passes_parse_and_validate_independently() {
+        // Each fixture, validated in isolation (a fresh `seen_ids`), must clear the
+        // full loader contract — per-kind config, sidecar/companion/contributes
+        // cross-checks — even the ones `load()` never reaches. `engines`-gated
+        // fixtures are exempt: their `engines.ryu` is version-pinned and is a
+        // deliberate load-time rejection, not a malformed manifest.
+        for path in &fixture_plugin_json_paths() {
+            let raw = std::fs::read_to_string(path).expect("read fixture");
+            let manifest: PluginManifest = serde_json::from_str(&raw).expect("deserialise fixture");
+            if manifest.engines.is_some() {
+                continue;
+            }
+            let mut seen = HashSet::new();
+            PluginManifestLoader::parse_and_validate(&raw, "<fixture>", &mut seen)
+                .unwrap_or_else(|e| panic!("{} failed parse_and_validate: {e}", path.display()));
+        }
+    }
+
+    #[test]
+    fn fixture_ids_are_unique_across_the_directory() {
+        let mut seen: HashSet<String> = HashSet::new();
+        for path in &fixture_plugin_json_paths() {
+            let raw = std::fs::read_to_string(path).expect("read fixture");
+            let manifest: PluginManifest = serde_json::from_str(&raw).expect("deserialise fixture");
+            assert!(
+                seen.insert(manifest.id.clone()),
+                "duplicate fixture id '{}' at {}",
+                manifest.id,
+                path.display()
+            );
+        }
     }
 }

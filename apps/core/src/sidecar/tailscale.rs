@@ -530,4 +530,95 @@ mod tests {
     fn not_required() {
         assert!(!TailscaleManager::new().is_required());
     }
+
+    // Env vars here are tailscale-specific and disjoint from every other module's, so
+    // a module-local lock is enough to serialize the get/restore against parallel runs.
+    static MESH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        MESH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        fn set(key: &'static str, val: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, val);
+            Self { key, prev }
+        }
+        fn clear(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn socks5_addr_env_overrides_default() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set(ENV_SOCKS5_ADDR, "127.0.0.1:2000");
+        assert_eq!(socks5_addr(), "127.0.0.1:2000");
+    }
+
+    #[test]
+    fn socks5_addr_blank_env_falls_back_to_default() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set(ENV_SOCKS5_ADDR, "");
+        assert_eq!(socks5_addr(), DEFAULT_SOCKS5_ADDR);
+    }
+
+    #[test]
+    fn http_proxy_addr_env_overrides_default() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set(ENV_HTTP_PROXY_ADDR, "127.0.0.1:2001");
+        assert_eq!(http_proxy_addr(), "127.0.0.1:2001");
+    }
+
+    #[test]
+    fn tailscale_bins_default_to_bare_names() {
+        let _lock = lock_env();
+        let _a = EnvGuard::clear(ENV_TAILSCALED_BIN);
+        let _b = EnvGuard::clear(ENV_TAILSCALE_BIN);
+        assert_eq!(tailscaled_bin(), "tailscaled");
+        assert_eq!(tailscale_bin(), "tailscale");
+    }
+
+    #[test]
+    fn tailscale_bins_honour_env_override() {
+        let _lock = lock_env();
+        let _a = EnvGuard::set(ENV_TAILSCALED_BIN, "/opt/ts/tailscaled");
+        let _b = EnvGuard::set(ENV_TAILSCALE_BIN, "/opt/ts/tailscale");
+        assert_eq!(tailscaled_bin(), "/opt/ts/tailscaled");
+        assert_eq!(tailscale_bin(), "/opt/ts/tailscale");
+    }
+
+    #[test]
+    fn tailscale_bin_empty_env_falls_back() {
+        // An empty (unset-equivalent) value is filtered out → the bare default.
+        let _lock = lock_env();
+        let _a = EnvGuard::set(ENV_TAILSCALED_BIN, "");
+        assert_eq!(tailscaled_bin(), "tailscaled");
+    }
+
+    #[test]
+    fn mesh_state_files_share_the_mesh_dir() {
+        // The socket, state, and authkey files all live under the same per-node
+        // `~/.ryu/mesh` dir so Ryu's daemon never collides with a system tailscaled.
+        let dir = mesh_dir();
+        assert!(dir.ends_with("mesh"));
+        assert_eq!(socket_path().parent().unwrap(), dir);
+        assert_eq!(state_path().parent().unwrap(), dir);
+        assert_eq!(authkey_path().parent().unwrap(), dir);
+        assert!(authkey_path().ends_with("authkey"));
+    }
 }

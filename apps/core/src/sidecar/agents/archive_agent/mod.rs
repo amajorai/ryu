@@ -336,6 +336,26 @@ mod tests {
     }
 
     #[test]
+    fn spec_binary_path_is_os_correct_under_ryu_bin() {
+        let spec = ArchiveAgentSpec {
+            id: "goose",
+            repo: "block/goose",
+            asset_template: "goose-{platform}.{ext}",
+            binary_name: "goose",
+            pinned_tag: None,
+            label: "goose",
+        };
+        let p = spec.binary_path();
+        // Windows appends `.exe`; every other OS uses the bare binary name.
+        assert!(p.ends_with(if cfg!(target_os = "windows") {
+            "goose.exe"
+        } else {
+            "goose"
+        }));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
+    }
+
+    #[test]
     fn platform_tag_is_a_known_target_triple() {
         // The host tag must be one of the asset triples we template against.
         let tag = archive_platform_tag();

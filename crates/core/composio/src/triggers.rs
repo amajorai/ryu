@@ -653,13 +653,426 @@ mod tests {
         ));
         // A different secret, a wrong signature, an absent header, and a mutated
         // body all reject (fail-closed, independent of the global Composio secret).
-        assert!(!verify_workflow_webhook_signature("other", body, Some(&sig)));
-        assert!(!verify_workflow_webhook_signature("per-wf-secret", body, Some("00")));
-        assert!(!verify_workflow_webhook_signature("per-wf-secret", body, None));
+        assert!(!verify_workflow_webhook_signature(
+            "other",
+            body,
+            Some(&sig)
+        ));
+        assert!(!verify_workflow_webhook_signature(
+            "per-wf-secret",
+            body,
+            Some("00")
+        ));
+        assert!(!verify_workflow_webhook_signature(
+            "per-wf-secret",
+            body,
+            None
+        ));
         assert!(!verify_workflow_webhook_signature(
             "per-wf-secret",
             br#"{"event":"other"}"#,
             Some(&sig)
         ));
+    }
+
+    // --- Store + webhook-dispatch tests ---------------------------------------
+    //
+    // The trigger store's `subscribe*` path is the ONE composio HTTP leg reachable
+    // from a hermetic loopback: it builds its URL from the *unvalidated*
+    // `catalog::base_url()` (unlike catalog/connect/execute, which pin https + an
+    // allowlisted host and so cannot be pointed at a plaintext mock). We drive it
+    // end-to-end against a raw `std::net::TcpListener` (the sibling `core/usage`
+    // idiom), a temp SQLite DB, and a set-once mock `ComposioHost`.
+
+    use std::io::{Read, Write};
+
+    /// Records every host fan-out. The `ComposioHost` slot is a set-once
+    /// `OnceLock`, so a single process-global mock + call log serves the whole
+    /// binary; the webhook test that uses it holds `test_env_lock` for its whole
+    /// body, so there is no cross-test race on this log.
+    static HOST_CALLS: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+    struct RecordingHost;
+
+    #[async_trait::async_trait]
+    impl crate::host::ComposioHost for RecordingHost {
+        async fn run_workflow_for_trigger(
+            &self,
+            workflow_id: &str,
+            payload_json: &str,
+        ) -> Result<String> {
+            HOST_CALLS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((format!("workflow:{workflow_id}"), payload_json.to_string()));
+            if workflow_id == "FAIL-WF" {
+                return Err(anyhow!("simulated workflow failure"));
+            }
+            Ok(format!("run_wf_{workflow_id}"))
+        }
+
+        async fn run_agent(&self, agent_id: &str, prompt: &str) -> Result<String> {
+            HOST_CALLS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((format!("agent:{agent_id}"), prompt.to_string()));
+            if agent_id == "FAIL-AGENT" {
+                return Err(anyhow!("simulated agent failure"));
+            }
+            Ok(format!("run_ag_{agent_id}"))
+        }
+    }
+
+    fn host_calls() -> Vec<(String, String)> {
+        HOST_CALLS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+    fn clear_host_calls() {
+        HOST_CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    /// True once the buffer holds a full HTTP request (headers + declared body).
+    fn request_complete(buf: &[u8]) -> bool {
+        let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return false;
+        };
+        let head = String::from_utf8_lossy(&buf[..pos]).to_ascii_lowercase();
+        let content_length = head
+            .lines()
+            .find_map(|l| l.strip_prefix("content-length:"))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        buf.len() - (pos + 4) >= content_length
+    }
+
+    /// A hermetic loopback HTTP/1.1 server that serves `status_line` + `body` to
+    /// every request on a detached thread. Returns its `http://127.0.0.1:port`
+    /// base (no trailing slash) to point `COMPOSIO_BASE_URL` at.
+    fn spawn_mock(status_line: &'static str, body: String) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(300)));
+                // Drain the request (headers + body) so the client's write side
+                // completes before we reply and close (avoids a RST).
+                let mut req: Vec<u8> = Vec::new();
+                let mut tmp = [0u8; 2048];
+                loop {
+                    match stream.read(&mut tmp) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            req.extend_from_slice(&tmp[..n]);
+                            if request_complete(&req) {
+                                break;
+                            }
+                        }
+                        Err(_) => break, // read timeout / would-block
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// Snapshot of the shared env this suite mutates, restored on drop-in.
+    fn base_url_snapshot() -> Option<String> {
+        std::env::var("COMPOSIO_BASE_URL").ok()
+    }
+    fn restore_env(prev_base: Option<String>) {
+        // Clear the key cache we set and put COMPOSIO_BASE_URL back.
+        crate::auth::set_key("");
+        match prev_base {
+            Some(v) => std::env::set_var("COMPOSIO_BASE_URL", v),
+            None => std::env::remove_var("COMPOSIO_BASE_URL"),
+        }
+    }
+
+    async fn temp_store() -> (ComposioTriggerStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("composio-triggers.db");
+        let store = ComposioTriggerStore::open(Client::new(), db).expect("open store");
+        (store, dir)
+    }
+
+    #[tokio::test]
+    async fn subscribe_persists_agent_target_and_lists_newest_first() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        let base = spawn_mock("200 OK", r#"{"trigger_id":"trig_abc"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+
+        let (store, _dir) = temp_store().await;
+        assert!(store.list().await.unwrap().is_empty());
+
+        let sub = store
+            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({ "channel": "C1" }))
+            .await
+            .expect("subscribe");
+        assert_eq!(sub.agent_id, "agent-1");
+        assert_eq!(sub.toolkit, "slack");
+        assert_eq!(sub.trigger_slug, "SLACK_MSG");
+        assert_eq!(sub.target_kind, "agent");
+        assert!(sub.workflow_id.is_none());
+        // The instance id is parsed defensively from the upsert response.
+        assert_eq!(sub.composio_trigger_id.as_deref(), Some("trig_abc"));
+        assert!(sub.id.starts_with("ctrig_"));
+
+        let all = store.list().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, sub.id);
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn subscribe_errors_on_upstream_failure_and_persists_nothing() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        let base = spawn_mock("400 Bad Request", r#"{"error":"bad config"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+
+        let (store, _dir) = temp_store().await;
+        let err = store
+            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .await
+            .expect_err("upstream 400 must surface");
+        assert!(err.to_string().contains("trigger upsert"));
+        // A failed upsert never writes a row.
+        assert!(store.list().await.unwrap().is_empty());
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn subscribe_requires_a_key() {
+        let _lock = crate::auth::test_env_lock();
+        let prev_r = std::env::var("RYU_COMPOSIO_API_KEY").ok();
+        let prev_c = std::env::var("COMPOSIO_API_KEY").ok();
+        crate::auth::set_key("");
+        std::env::remove_var("RYU_COMPOSIO_API_KEY");
+        std::env::remove_var("COMPOSIO_API_KEY");
+
+        let (store, _dir) = temp_store().await;
+        let err = store
+            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .await
+            .expect_err("no key must error before HTTP");
+        assert!(err.to_string().contains("API key not set"));
+
+        match prev_r {
+            Some(v) => std::env::set_var("RYU_COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("RYU_COMPOSIO_API_KEY"),
+        }
+        match prev_c {
+            Some(v) => std::env::set_var("COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("COMPOSIO_API_KEY"),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_reports_match_and_removes_row() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        // 200 for the upsert AND the best-effort remote-disable DELETE.
+        let base = spawn_mock("200 OK", r#"{"trigger_id":"trig_del"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+
+        let (store, _dir) = temp_store().await;
+        let sub = store
+            .subscribe("agent-x", "github", "GH_PUSH", "ca_9", json!({}))
+            .await
+            .unwrap();
+
+        // Deleting a non-existent id reports false and removes nothing.
+        assert!(!store.delete("ctrig_missing").await.unwrap());
+        assert_eq!(store.list().await.unwrap().len(), 1);
+
+        // Deleting the real row reports true (and best-effort-disables remotely).
+        assert!(store.delete(&sub.id).await.unwrap());
+        assert!(store.list().await.unwrap().is_empty());
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn workflow_subscriptions_filter_and_bulk_delete() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        let base = spawn_mock("200 OK", r#"{"id":"trig_wf"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+
+        let (store, _dir) = temp_store().await;
+        // Two workflow subs on wf-1, one agent sub, one workflow sub on wf-2.
+        store
+            .subscribe_workflow("wf-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .await
+            .unwrap();
+        store
+            .subscribe_workflow("wf-1", "github", "GH_PUSH", "ca_2", json!({}))
+            .await
+            .unwrap();
+        store
+            .subscribe("agent-a", "gmail", "MAIL_IN", "ca_3", json!({}))
+            .await
+            .unwrap();
+        store
+            .subscribe_workflow("wf-2", "linear", "ISSUE_NEW", "ca_4", json!({}))
+            .await
+            .unwrap();
+
+        let for_wf1 = store.list_for_workflow("wf-1").await;
+        assert_eq!(for_wf1.len(), 2);
+        assert!(for_wf1.iter().all(|s| s.target_kind == "workflow"));
+        assert!(for_wf1
+            .iter()
+            .all(|s| s.workflow_id.as_deref() == Some("wf-1")));
+        assert!(store.list_for_workflow("does-not-exist").await.is_empty());
+
+        // Bulk delete only wf-1's two rows.
+        let removed = store.delete_for_workflow("wf-1").await.unwrap();
+        assert_eq!(removed, 2);
+        assert!(store.list_for_workflow("wf-1").await.is_empty());
+        // The agent sub and wf-2 sub survive.
+        assert_eq!(store.list().await.unwrap().len(), 2);
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn open_migrates_legacy_table_missing_columns() {
+        // A DB created before target_kind/workflow_id existed must be ALTERed in
+        // place (the guarded migration), not rejected, and its rows default to the
+        // agent target.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("legacy.db");
+        {
+            let conn = rusqlite::Connection::open(&db).expect("open legacy");
+            conn.execute_batch(
+                "CREATE TABLE subscriptions (
+                     id                   TEXT PRIMARY KEY,
+                     agent_id             TEXT NOT NULL,
+                     toolkit              TEXT NOT NULL,
+                     trigger_slug         TEXT NOT NULL,
+                     connected_account_id TEXT NOT NULL,
+                     composio_trigger_id  TEXT,
+                     created_at           TEXT NOT NULL
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO subscriptions
+                    (id, agent_id, toolkit, trigger_slug, connected_account_id, created_at)
+                 VALUES ('old1','ag','slack','SLACK_MSG','ca','2020-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let store = ComposioTriggerStore::open(Client::new(), db.clone()).expect("open migrates");
+        let rows = store.list().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "old1");
+        assert_eq!(rows[0].target_kind, "agent");
+        assert!(rows[0].workflow_id.is_none());
+
+        // Re-opening is idempotent (columns already present → no ALTER, no error).
+        let store2 = ComposioTriggerStore::open(Client::new(), db).expect("reopen idempotent");
+        assert_eq!(store2.list().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn handle_webhook_dispatches_agent_and_workflow_and_reports_failures() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        let base = spawn_mock("200 OK", r#"{"trigger_id":"trig_hook"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+        crate::host::set_global_host(std::sync::Arc::new(RecordingHost));
+
+        let (store, _dir) = temp_store().await;
+        store
+            .subscribe("agent-1", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .await
+            .unwrap();
+        store
+            .subscribe_workflow("wf-1", "github", "GH_PUSH", "ca_2", json!({}))
+            .await
+            .unwrap();
+        store
+            .subscribe("FAIL-AGENT", "gmail", "MAIL_IN", "ca_3", json!({}))
+            .await
+            .unwrap();
+
+        // Agent fire, matched by slug (case-insensitive).
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({ "trigger_slug": "slack_msg", "payload": { "text": "hi" } }))
+            .await;
+        assert_eq!(fired, 1);
+        let calls = host_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "agent:agent-1");
+        assert!(calls[0].1.contains("SLACK_MSG"));
+        assert!(calls[0].1.contains("slack"));
+
+        // Workflow fire, matched by an alternate slug key; payload injected raw.
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({ "triggerName": "GH_PUSH", "ref": "main" }))
+            .await;
+        assert_eq!(fired, 1);
+        let calls = host_calls();
+        assert_eq!(calls[0].0, "workflow:wf-1");
+        assert!(calls[0].1.contains("\"ref\":\"main\""));
+
+        // A host failure is swallowed and not counted as fired.
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({ "trigger_slug": "MAIL_IN" }))
+            .await;
+        assert_eq!(fired, 0);
+        assert_eq!(host_calls()[0].0, "agent:FAIL-AGENT");
+
+        // No matching subscription → nothing fires (no trigger_id, unknown slug).
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({ "trigger_slug": "UNKNOWN_EVENT" }))
+            .await;
+        assert_eq!(fired, 0);
+        assert!(host_calls().is_empty());
+
+        restore_env(prev);
+    }
+
+    #[tokio::test]
+    async fn handle_webhook_matches_by_composio_trigger_id() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = base_url_snapshot();
+        let base = spawn_mock("200 OK", r#"{"trigger_id":"trig_unique"}"#.to_string());
+        crate::auth::set_key("comp_key");
+        std::env::set_var("COMPOSIO_BASE_URL", &base);
+        crate::host::set_global_host(std::sync::Arc::new(RecordingHost));
+
+        let (store, _dir) = temp_store().await;
+        store
+            .subscribe("agent-id-match", "slack", "SLACK_MSG", "ca_1", json!({}))
+            .await
+            .unwrap();
+
+        // A payload carrying only the Composio trigger id (no slug) still matches.
+        clear_host_calls();
+        let fired = store
+            .handle_webhook(&json!({ "trigger_id": "trig_unique" }))
+            .await;
+        assert_eq!(fired, 1);
+        assert_eq!(host_calls()[0].0, "agent:agent-id-match");
+        restore_env(prev);
     }
 }

@@ -126,6 +126,54 @@ test("parseArgs: --node=<url> inline form", () => {
 	expect(parsed.flags.node).toBe("http://y:7980");
 });
 
+test("parseArgs: --force and --cascade set their flags", () => {
+	const parsed = parseArgs(["disable", "whiteboard", "--force", "--cascade"]);
+	expect(parsed.command).toBe("disable");
+	expect(parsed.args).toEqual(["whiteboard"]);
+	expect(parsed.flags.force).toBe(true);
+	expect(parsed.flags.cascade).toBe(true);
+	// Defaults for the flags not passed.
+	expect(parsed.flags.json).toBe(false);
+	expect(parsed.flags.help).toBe(false);
+});
+
+test("parseArgs: an unknown --flag is ignored (never a positional/command)", () => {
+	const parsed = parseArgs(["--nope", "list", "--also-unknown", "arg"]);
+	expect(parsed.command).toBe("list");
+	expect(parsed.args).toEqual(["arg"]);
+});
+
+test("parseArgs: a trailing --node with no value yields null (not the next flag)", () => {
+	const parsed = parseArgs(["list", "--node"]);
+	// argv[i+1] is undefined → null, and the loop's i++ skips past the end.
+	expect(parsed.flags.node).toBeNull();
+	expect(parsed.command).toBe("list");
+});
+
+test("parseArgs: -h sets help; flags may precede the command", () => {
+	const parsed = parseArgs(["-h"]);
+	expect(parsed.flags.help).toBe(true);
+	expect(parsed.command).toBeNull();
+});
+
+test("parseArgs: the first non-flag is the command, the rest are positional args", () => {
+	const parsed = parseArgs(["mail", "send", "a@b.com", "hi"]);
+	expect(parsed.command).toBe("mail");
+	expect(parsed.args).toEqual(["send", "a@b.com", "hi"]);
+});
+
+test("parseArgs: empty argv → null command and empty args", () => {
+	const parsed = parseArgs([]);
+	expect(parsed.command).toBeNull();
+	expect(parsed.args).toEqual([]);
+});
+
+test("isInteractive: --node value is not mistaken for a subcommand", () => {
+	// `--node <url>` with no subcommand stays interactive (the url is consumed as
+	// the flag value, not treated as the command).
+	expect(isInteractive(["--node", "http://x:7980"])).toBe(true);
+});
+
 // ── isInteractive ─────────────────────────────────────────────────────────────
 
 test("isInteractive: bare and 'tui' are interactive; a subcommand is not", () => {

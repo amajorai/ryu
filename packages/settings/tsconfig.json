@@ -5,7 +5,8 @@
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "paths": {
-      "@ryu/settings/*": ["./src/*"]
+      "@ryu/settings/*": ["./src/*"],
+      "@ryu/ui/*": ["../ui/src/*"]
     },
     "strictNullChecks": true
   },

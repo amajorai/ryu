@@ -59,6 +59,17 @@
 	}
 }
 
+/* Store featured carousel — the active dot's fill sweeps left→right over the slide
+   duration, so it doubles as a "time left until the next slide" indicator. */
+@keyframes ryu-carousel-progress {
+	from {
+		transform: scaleX(0);
+	}
+	to {
+		transform: scaleX(1);
+	}
+}
+
 @utility scroll-fade-effect-y {
 	--mask-height: 48px;
 	--scroll-buffer: 2rem;

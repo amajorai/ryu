@@ -99,7 +99,8 @@ impl SmartRouter {
         let chosen = match self.config.strategy {
             RouteStrategy::Llm => self.classify_llm(messages, providers, router).await,
             RouteStrategy::Embedding => {
-                self.classify_embedding(messages, http, embed_provider).await
+                self.classify_embedding(messages, http, embed_provider)
+                    .await
             }
             RouteStrategy::Keyword => self.classify_keyword(messages),
         }?;
@@ -201,7 +202,10 @@ impl SmartRouter {
                 best_idx = Some(idx);
             }
         }
-        debug!(?best_idx, best_score, "smart routing: embedding nearest match");
+        debug!(
+            ?best_idx,
+            best_score, "smart routing: embedding nearest match"
+        );
         self.model_for_match(best_idx)
     }
 
@@ -467,11 +471,7 @@ impl SmartRouterRegistry {
     /// Register a backend under a stable id (open extension point). Re-registering
     /// replaces in place; refreshes the live handle if it is the active id.
     #[allow(dead_code)]
-    pub fn register(
-        &self,
-        id: impl Into<String>,
-        backend: std::sync::Arc<dyn SmartRouterBackend>,
-    ) {
+    pub fn register(&self, id: impl Into<String>, backend: std::sync::Arc<dyn SmartRouterBackend>) {
         let id = id.into();
         let mut guard = match self.inner.write() {
             Ok(g) => g,

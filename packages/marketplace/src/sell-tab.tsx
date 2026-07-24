@@ -30,7 +30,7 @@ const SELLER_STATUS_LABEL: Record<SellerOnboardingStatus, string> = {
 };
 
 /** CTA label for the seller payout button based on onboarding state. */
-function payoutButtonLabel(
+export function payoutButtonLabel(
 	payoutsEnabled: boolean,
 	onboardingStatus: SellerOnboardingStatus
 ): string {

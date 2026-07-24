@@ -20,7 +20,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { LibraryToolbar } from "@ryu/blocks/desktop/library";
+import { LibraryToolbar } from "@ryu/blocks/desktop/library.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -32,7 +32,14 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+	createContext,
+	type ReactNode,
+	useContext,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 
 /** Below this content width the preview opens as a dialog, not a side pane. */
 const NARROW_PX = 880;
@@ -58,6 +65,25 @@ function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
 	return [ref, width];
 }
 
+/** Section header (title/subtitle) rendered inside the catalog's centered left
+ *  column so it tracks the card grid — including when the preview aside opens and
+ *  the grid recenters. The Store shell supplies it per section. */
+const StoreCatalogHeaderContext = createContext<ReactNode>(null);
+
+export function StoreCatalogHeaderProvider({
+	header,
+	children,
+}: {
+	header: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<StoreCatalogHeaderContext.Provider value={header}>
+			{children}
+		</StoreCatalogHeaderContext.Provider>
+	);
+}
+
 export default function StoreCatalogLayout({
 	search,
 	filter,
@@ -66,6 +92,7 @@ export default function StoreCatalogLayout({
 	hasSelection,
 	onCloseDetail,
 	detailTitle = "Details",
+	previewMode = "dialog",
 }: {
 	/** The giant search field pinned to the top. Omit for sections without search. */
 	search?: {
@@ -91,58 +118,83 @@ export default function StoreCatalogLayout({
 	onCloseDetail: () => void;
 	/** Accessible dialog title used in the narrow-window fallback. */
 	detailTitle?: string;
+	/** How the preview is presented. "dialog" (default) always opens the preview
+	 *  as a centered modal, so every tab reads the same. "auto" keeps the wide
+	 *  side-pane / narrow-dialog split — used only where a persistent side pane
+	 *  earns its space (Models, whose preview is a long per-file list). */
+	previewMode?: "auto" | "dialog";
 }) {
+	const header = useContext(StoreCatalogHeaderContext);
 	const [ref, width] = useContainerWidth();
 	// Before the first measure width is 0 — treat that as wide so the side pane is
 	// the default and we never flash a dialog on mount.
 	const narrow = width > 0 && width < NARROW_PX;
-	const showSidePane = hasSelection && !narrow;
-	const showDialog = hasSelection && narrow;
+	// "dialog" mode forces the modal at every width; "auto" shows the side pane
+	// when there is room and collapses to the dialog when narrow.
+	const showSidePane = hasSelection && !narrow && previewMode === "auto";
+	const showDialog = hasSelection && (narrow || previewMode === "dialog");
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden" ref={ref}>
-			{search ? (
-				<LibraryToolbar
-					filterSlot={
-						filter ? (
-							<Popover>
-								<PopoverTrigger
-									render={
-										<Button
-											className="gap-1.5"
-											size="sm"
-											variant={filter.activeCount ? "secondary" : "outline"}
-										>
-											<HugeiconsIcon
-												className="size-3.5"
-												icon={filter.icon ?? SlidersHorizontalIcon}
-											/>
-											{filter.label ?? "Filters"}
-											{filter.activeCount ? (
-												<span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] text-background">
-													{filter.activeCount}
-												</span>
-											) : null}
-										</Button>
-									}
-								/>
-								<PopoverContent align="end" className="w-[min(30rem,90vw)] p-0">
-									{filter.panel}
-								</PopoverContent>
-							</Popover>
-						) : null
-					}
-					onQueryChange={search.onChange}
-					query={search.value}
-					searchPlaceholder={search.placeholder ?? "Search…"}
-				/>
-			) : null}
-
 			<div className="flex min-h-0 flex-1 overflow-hidden">
-				{/* List column — a constant centered max-width so selecting an item
-				    never reflows the grid; the preview is a FIXED-width pane beside it. */}
-				<div className="scroll-fade-effect-y min-w-0 flex-1 overflow-auto px-4 pb-24">
-					<div className="mx-auto w-full max-w-4xl">{list}</div>
+				{/* Left region — header, toolbar and the centered card grid share one
+				    column at the same max-width, so they stay aligned in both states;
+				    when the preview aside opens, the whole column narrows and every
+				    row recenters together. */}
+				<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+					{header ? (
+						<div className="mx-auto w-full max-w-4xl shrink-0">{header}</div>
+					) : null}
+
+					{search ? (
+						<div className="mx-auto w-full max-w-4xl shrink-0">
+							<LibraryToolbar
+								filterSlot={
+									filter ? (
+										<Popover>
+											<PopoverTrigger
+												render={
+													<Button
+														className="gap-1.5"
+														size="sm"
+														variant={
+															filter.activeCount ? "secondary" : "outline"
+														}
+													>
+														<HugeiconsIcon
+															className="size-3.5"
+															icon={filter.icon ?? SlidersHorizontalIcon}
+														/>
+														{filter.label ?? "Filters"}
+														{filter.activeCount ? (
+															<span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] text-background">
+																{filter.activeCount}
+															</span>
+														) : null}
+													</Button>
+												}
+											/>
+											<PopoverContent
+												align="end"
+												className="w-[min(30rem,90vw)] p-0"
+											>
+												{filter.panel}
+											</PopoverContent>
+										</Popover>
+									) : null
+								}
+								onQueryChange={search.onChange}
+								query={search.value}
+								searchPlaceholder={search.placeholder ?? "Search…"}
+							/>
+						</div>
+					) : null}
+
+					{/* Card grid — the same centered max-width so selecting an item
+					    never reflows it; the preview is a FIXED-width pane beside. */}
+					<div className="scroll-fade-effect-y min-h-0 flex-1 overflow-auto px-4 pb-24">
+						<div className="mx-auto w-full max-w-4xl px-4">{list}</div>
+					</div>
 				</div>
 
 				{showSidePane ? (

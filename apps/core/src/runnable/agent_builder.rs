@@ -319,6 +319,8 @@ async fn configure_agent(args: Value, store: AgentStore) -> Result<Value> {
         patch.persona = Some(PersonaSlot {
             display_name: persona["display_name"].as_str().map(str::to_owned),
             avatar_url: None,
+            icon: None,
+            dither: None,
             tone: persona["tone"].as_str().map(str::to_owned),
         });
     }
@@ -485,6 +487,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolve_list_set_wins_over_add_and_remove() {
+        // When `_set` is present it is authoritative: `_add`/`_remove` are ignored,
+        // and the result is the deduped set alone, not `current` mutated.
+        let current = vec!["a".to_owned(), "b".to_owned()];
+        assert_eq!(
+            resolve_list(
+                &current,
+                &json!({ "tools_set": ["x", "y"], "tools_add": ["z"], "tools_remove": ["x"] }),
+                "tools"
+            ),
+            Some(vec!["x".to_owned(), "y".to_owned()])
+        );
+    }
+
+    #[test]
+    fn resolve_list_add_then_remove_applied_in_order() {
+        // `_add` and `_remove` combine: add appends (deduped), then remove filters —
+        // including an item that was just added in the same call.
+        let current = vec!["a".to_owned()];
+        assert_eq!(
+            resolve_list(
+                &current,
+                &json!({ "tools_add": ["b", "c"], "tools_remove": ["a", "c"] }),
+                "tools"
+            ),
+            Some(vec!["b".to_owned()])
+        );
+    }
+
+    #[test]
+    fn resolve_list_empty_add_returns_unchanged_clone_not_none() {
+        // An empty `_add` array is still a present key, so the base is "touched":
+        // the caller gets Some(current-unchanged), not None.
+        let current = vec!["a".to_owned(), "b".to_owned()];
+        assert_eq!(
+            resolve_list(&current, &json!({ "tools_add": [] }), "tools"),
+            Some(current.clone())
+        );
+    }
+
+    #[test]
+    fn resolve_list_non_array_set_is_not_a_set_op() {
+        // `has_set` requires an ARRAY. A scalar `_set` is not a set op; with no
+        // `_add`/`_remove` the whole call is a no-op (None).
+        let current = vec!["a".to_owned()];
+        assert_eq!(
+            resolve_list(&current, &json!({ "tools_set": "notanarray" }), "tools"),
+            None
+        );
+        // ...and a scalar `_set` alongside a real `_add` falls through to the
+        // add/remove path (the malformed set is ignored, current is the base).
+        assert_eq!(
+            resolve_list(
+                &current,
+                &json!({ "tools_set": "notanarray", "tools_add": ["z"] }),
+                "tools"
+            ),
+            Some(vec!["a".to_owned(), "z".to_owned()])
+        );
+    }
+
+    #[test]
+    fn resolve_list_ignores_keys_for_other_bases() {
+        // Only the `<base>_*` keys are consulted; a sibling base's keys are inert.
+        let current = vec!["a".to_owned()];
+        assert_eq!(
+            resolve_list(&current, &json!({ "skills_add": ["x"] }), "tools"),
+            None
+        );
+    }
+
     #[tokio::test]
     async fn configure_agent_refuses_built_in() {
         let store = store();
@@ -591,7 +665,10 @@ mod tests {
         assert_eq!(team.members.len(), 3);
         assert_eq!(team.coordination, Coordination::DebateSynthesis);
         // The lead is the first member flagged `lead`.
-        assert_eq!(team.lead_agent_id.as_deref(), Some(team.members[0].as_str()));
+        assert_eq!(
+            team.lead_agent_id.as_deref(),
+            Some(team.members[0].as_str())
+        );
 
         for member_id in &team.members {
             assert!(store.get(member_id).await.unwrap().is_some());

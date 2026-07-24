@@ -19,7 +19,7 @@
 //! change — the same pattern the sibling per-agent gateway-routing map uses,
 //! because the (async) chat path has no preferences-store handle.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
@@ -159,11 +159,56 @@ fn config_cell() -> &'static RwLock<Option<AgentAutoConfig>> {
     CELL.get_or_init(|| RwLock::new(None))
 }
 
+/// Cap on the number of sticky per-session decisions kept in-process. One entry
+/// per live-ish conversation; a long-running node otherwise leaks one entry per
+/// conversation forever. Eviction only re-triggers a routing decision for the
+/// evicted session's next turn, which is cheap and still correct — just not
+/// sticky past the cap.
+const DECISION_CACHE_CAPACITY: usize = 1024;
+
+/// A bounded, insertion-order FIFO map: on inserting a NEW key past capacity,
+/// evicts the oldest key. Re-inserting an existing key updates its value in
+/// place without moving it in eviction order. Mirrors `SeenDeliveries`
+/// (`crates/core/webhook-ingress/src/ryu_relay.rs`) but keeps a value per key.
+#[derive(Debug, Default)]
+struct BoundedDecisionCache {
+    order: VecDeque<String>,
+    map: HashMap<String, String>,
+}
+
+impl BoundedDecisionCache {
+    fn get(&self, key: &str) -> Option<String> {
+        self.map.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: String, value: String) {
+        if self.map.insert(key.clone(), value).is_none() {
+            // Newly-inserted key: track it for eviction order.
+            self.order.push_back(key);
+            while self.order.len() > DECISION_CACHE_CAPACITY {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.map.remove(&oldest);
+                }
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.order.clear();
+        self.map.clear();
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
 /// Per-session decision cache: conversation/session id → resolved agent id. Only
 /// consulted/written when `cache_by_session` is set.
-fn decisions() -> &'static RwLock<HashMap<String, String>> {
-    static MAP: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();
-    MAP.get_or_init(|| RwLock::new(HashMap::new()))
+fn decisions() -> &'static RwLock<BoundedDecisionCache> {
+    static MAP: OnceLock<RwLock<BoundedDecisionCache>> = OnceLock::new();
+    MAP.get_or_init(|| RwLock::new(BoundedDecisionCache::default()))
 }
 
 /// Replace the in-process config snapshot from the persisted preference value. A
@@ -185,6 +230,11 @@ pub fn set_auto_config_from_json(value: &str) {
     if let Ok(mut guard) = config_cell().write() {
         *guard = parsed;
     }
+    // New rules ⇒ old sticky decisions are stale. Clear so live conversations
+    // re-resolve under the new config instead of keeping the old agent forever.
+    if let Ok(mut m) = decisions().write() {
+        m.clear();
+    }
 }
 
 /// Clone the current config snapshot (if any).
@@ -193,7 +243,7 @@ fn auto_config() -> Option<AgentAutoConfig> {
 }
 
 fn cached_decision(session_id: &str) -> Option<String> {
-    decisions().read().ok().and_then(|m| m.get(session_id).cloned())
+    decisions().read().ok().and_then(|m| m.get(session_id))
 }
 
 fn cache_decision(session_id: &str, agent_id: &str) {
@@ -603,5 +653,77 @@ mod tests {
             "claude-code"
         );
         set_auto_config_from_json("");
+    }
+
+    #[tokio::test]
+    async fn config_change_clears_cached_decisions() {
+        let _guard = crate::agent_routing::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_auto_config_from_json(
+            r#"{"enabled":true,"strategy":"keyword","cache_by_session":true,
+                "rules":[
+                  {"description":"writing refactoring or debugging code","agent_id":"claude-code"}
+                ],
+                "default_agent_id":"ryu"}"#,
+        );
+        let sid = "config-change-test-session";
+        assert_eq!(
+            resolve_auto_agent("please help debugging this", Some(sid)).await,
+            "claude-code"
+        );
+
+        // New rules route the SAME text to a different agent.
+        set_auto_config_from_json(
+            r#"{"enabled":true,"strategy":"keyword","cache_by_session":true,
+                "rules":[
+                  {"description":"writing refactoring or debugging code","agent_id":"gemini"}
+                ],
+                "default_agent_id":"ryu"}"#,
+        );
+        // Without invalidation this would still return the stale "claude-code"
+        // decision cached under the old config.
+        assert_eq!(
+            resolve_auto_agent("please help debugging this", Some(sid)).await,
+            "gemini"
+        );
+        set_auto_config_from_json("");
+    }
+
+    #[test]
+    fn decision_cache_is_bounded() {
+        let _guard = crate::agent_routing::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Ok(mut m) = decisions().write() {
+            m.clear();
+        }
+        for i in 0..(DECISION_CACHE_CAPACITY + 10) {
+            cache_decision(&format!("bounded-test-session-{i}"), "agent-x");
+        }
+        let guard = decisions().read().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(guard.len(), DECISION_CACHE_CAPACITY);
+        // Oldest entries evicted, newest retained.
+        assert!(guard.get("bounded-test-session-0").is_none());
+        let newest = DECISION_CACHE_CAPACITY + 9;
+        assert!(guard
+            .get(&format!("bounded-test-session-{newest}"))
+            .is_some());
+    }
+
+    #[test]
+    fn reinsert_updates_in_place() {
+        let _guard = crate::agent_routing::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Ok(mut m) = decisions().write() {
+            m.clear();
+        }
+        let sid = "reinsert-test-session";
+        cache_decision(sid, "agent-a");
+        cache_decision(sid, "agent-b");
+        let guard = decisions().read().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(guard.get(sid), Some("agent-b".to_owned()));
+        assert_eq!(guard.len(), 1);
     }
 }

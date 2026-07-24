@@ -22,6 +22,10 @@ import {
 	EnginesErrorState,
 	installStateBadge,
 } from "@ryu/blocks/desktop/store-engines";
+import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
+import StoreCatalogLayout, {
+	StoreCardGrid,
+} from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { Badge } from "@ryu/ui/components/badge";
 import {
 	Empty,
@@ -33,8 +37,6 @@ import {
 import { Spinner } from "@ryu/ui/components/spinner";
 import { Switch } from "@ryu/ui/components/switch";
 import { type ComponentProps, useMemo, useState } from "react";
-import ResizableMasterDetail from "@/src/components/store/ResizableMasterDetail.tsx";
-import StoreListHeader from "@/src/components/store/StoreListHeader.tsx";
 import { useDebouncedValue } from "@/src/hooks/use-debounced-value.ts";
 import { useEngines } from "@/src/hooks/useEngines.ts";
 import {
@@ -218,49 +220,33 @@ function EngineList({
 	}
 
 	return (
-		<nav className="scroll-fade-effect-y h-full overflow-auto p-2">
+		<div className="flex flex-col gap-6 pt-2">
 			{groups.map((group) => (
-				<section className="mb-4 last:mb-0" key={group.kind}>
-					<h3 className="mb-1 px-3 font-medium text-muted-foreground text-xs uppercase tracking-widest">
+				<section key={group.kind}>
+					<h3 className="mb-2 px-1 font-medium text-muted-foreground text-xs uppercase tracking-widest">
 						{GROUP_LABELS[group.kind]}
 					</h3>
-					<ul className="flex flex-col gap-1">
-						{group.items.map((item) => {
-							const isSelected = item.id === selectedId;
-							return (
-								<li key={item.id}>
-									<button
-										className={`w-full rounded-md px-3 py-2 text-left transition-colors ${
-											isSelected ? "bg-accent" : "hover:bg-accent/50"
-										}`}
-										onClick={() => onSelect(item.id)}
-										type="button"
-									>
-										<div className="flex items-center gap-2">
-											<HugeiconsIcon
-												className="size-4 shrink-0 opacity-70"
-												icon={CpuIcon}
-											/>
-											<span className="flex-1 truncate font-medium text-sm">
-												{item.displayName}
-											</span>
-											{item.statusLabel && (
-												<Badge className="text-[10px]" variant="secondary">
-													{item.statusLabel}
-												</Badge>
-											)}
-										</div>
-										<div className="truncate pl-6 text-muted-foreground text-xs">
-											{item.description}
-										</div>
-									</button>
-								</li>
-							);
-						})}
-					</ul>
+					<StoreCardGrid>
+						{group.items.map((item) => (
+							<StoreCatalogCard
+								action={
+									item.statusLabel ? (
+										<Badge variant="secondary">{item.statusLabel}</Badge>
+									) : undefined
+								}
+								description={item.description}
+								icon={<HugeiconsIcon className="size-5" icon={CpuIcon} />}
+								key={item.id}
+								name={item.displayName}
+								onClick={() => onSelect(item.id)}
+								seedId={item.id}
+								selected={item.id === selectedId}
+							/>
+						))}
+					</StoreCardGrid>
 				</section>
 			))}
-		</nav>
+		</div>
 	);
 }
 
@@ -349,7 +335,7 @@ function EngineDetailPanel({
 		return (
 			<div className="scroll-fade-effect-y flex h-full flex-col gap-6 overflow-auto p-4">
 				<header className="flex flex-col gap-3">
-					<div className="flex items-start justify-between gap-3">
+					<div className="flex items-start justify-between gap-3 pr-8">
 						<div className="min-w-0">
 							<h2 className="truncate font-semibold text-xl">
 								{engine.displayName}
@@ -447,7 +433,7 @@ function EngineDetailPanel({
 		return (
 			<div className="scroll-fade-effect-y flex h-full flex-col gap-6 overflow-auto p-4">
 				<header className="flex flex-col gap-3">
-					<div className="flex items-start justify-between gap-3">
+					<div className="flex items-start justify-between gap-3 pr-8">
 						<div className="min-w-0">
 							<h2 className="truncate font-semibold text-xl">
 								{engine.displayName}
@@ -528,7 +514,7 @@ function EngineDetailPanel({
 		return (
 			<div className="scroll-fade-effect-y flex h-full flex-col gap-6 overflow-auto p-4">
 				<header className="flex flex-col gap-3">
-					<div className="flex items-start justify-between gap-3">
+					<div className="flex items-start justify-between gap-3 pr-8">
 						<div className="min-w-0">
 							<h2 className="truncate font-semibold text-xl">
 								{backend.displayName}
@@ -696,55 +682,51 @@ export default function EnginesCatalogSection() {
 		return <EnginesErrorState message={error} />;
 	}
 
+	const selectedName = selectedId?.split(":")[1] ?? null;
+
 	return (
-		<div className="flex h-full flex-col overflow-hidden">
-			<div className="min-h-0 flex-1 overflow-hidden">
-				<ResizableMasterDetail
-					detail={
-						<EngineDetailPanel
-							activateText={activateText}
-							installText={installText}
-							installVoice={installVoice}
-							patchRow={patchRow}
-							rowState={rowState}
-							runAction={runAction}
-							sandboxBackends={sandboxBackends}
-							sandboxError={sandboxError}
-							sandboxLoading={sandboxLoading}
-							selectedId={selectedId}
-							selectSandbox={selectSandbox}
-							setVoiceRunning={setVoiceRunning}
-							textEngines={textEngines}
-							textError={textError}
-							textLoading={textLoading}
-							uninstallText={uninstallText}
-							uninstallVoice={uninstallVoice}
-							voiceEngines={voiceEngines}
-							voiceError={voiceError}
-							voiceLoading={voiceLoading}
-						/>
-					}
-					list={
-						<EngineList
-							error={error}
-							groups={groups}
-							loading={loading}
-							onSelect={setSelectedId}
-							selectedId={selectedId}
-						/>
-					}
-					listHeader={
-						<StoreListHeader
-							search={{
-								value: query,
-								onChange: setQuery,
-								placeholder: "Search engines…",
-							}}
-						/>
-					}
-					storageKey="ryu.store.engines.split"
+		<StoreCatalogLayout
+			detail={
+				<EngineDetailPanel
+					activateText={activateText}
+					installText={installText}
+					installVoice={installVoice}
+					patchRow={patchRow}
+					rowState={rowState}
+					runAction={runAction}
+					sandboxBackends={sandboxBackends}
+					sandboxError={sandboxError}
+					sandboxLoading={sandboxLoading}
+					selectedId={selectedId}
+					selectSandbox={selectSandbox}
+					setVoiceRunning={setVoiceRunning}
+					textEngines={textEngines}
+					textError={textError}
+					textLoading={textLoading}
+					uninstallText={uninstallText}
+					uninstallVoice={uninstallVoice}
+					voiceEngines={voiceEngines}
+					voiceError={voiceError}
+					voiceLoading={voiceLoading}
 				/>
-			</div>
-		</div>
+			}
+			detailTitle={selectedName ?? "Engine"}
+			hasSelection={selectedId != null}
+			list={
+				<EngineList
+					error={error}
+					groups={groups}
+					loading={loading}
+					onSelect={setSelectedId}
+					selectedId={selectedId}
+				/>
+			}
+			onCloseDetail={() => setSelectedId(null)}
+			search={{
+				value: query,
+				onChange: setQuery,
+				placeholder: "Search engines…",
+			}}
+		/>
 	);
 }

@@ -325,4 +325,76 @@ mod tests {
             assert_eq!(c.version, info.ryu_version);
         }
     }
+
+    // ── extra coverage ───────────────────────────────────────────────────────
+
+    /// Serialize the RYU_UPDATE_FAKE_LATEST env mutation across tests here.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn asset_kind_covers_deb_zip_and_unknown() {
+        assert_eq!(asset_kind("ryu_0.2.0_amd64.deb"), "deb");
+        assert_eq!(asset_kind("ryu-core-windows-x86_64.zip"), "archive");
+        assert_eq!(asset_kind("checksums.txt"), "unknown");
+        // Case-insensitive extension match.
+        assert_eq!(asset_kind("Ryu.DMG"), "dmg");
+    }
+
+    #[test]
+    fn platform_match_score_prefers_this_os_and_arch() {
+        let os = std::env::consts::OS;
+        let arch = std::env::consts::ARCH;
+
+        // An asset built for a definitely-different OS is rejected (None).
+        let foreign = match os {
+            "windows" => "ryu-core-linux-x86_64.tar.gz",
+            _ => "ryu-core-windows-x86_64.zip",
+        };
+        assert!(platform_match_score(foreign).is_none());
+
+        // An asset naming THIS os + THIS arch scores above one naming only the OS.
+        let arch_token = match arch {
+            "x86_64" => "x86_64",
+            "aarch64" => "aarch64",
+            _ => return, // unusual arch: skip the arch-bonus assertion
+        };
+        let os_token = match os {
+            "windows" => "windows",
+            "macos" => "macos",
+            "linux" => "linux",
+            _ => return,
+        };
+        let with_arch = format!("ryu-core-{os_token}-{arch_token}.tar.gz");
+        let os_only = format!("ryu-core-{os_token}.tar.gz");
+        let s_arch = platform_match_score(&with_arch).expect("this-os asset matches");
+        let s_os = platform_match_score(&os_only).expect("this-os asset matches");
+        assert!(
+            s_arch > s_os,
+            "arch match ({s_arch}) should outrank os-only ({s_os})"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_for_update_honours_fake_latest_env() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // A far-future fake version is reported as an available update, no network.
+        std::env::set_var("RYU_UPDATE_FAKE_LATEST", "v999.0.0");
+        let client = reqwest::Client::new();
+        let check = check_for_update(&client).await.unwrap();
+        assert_eq!(check.latest, "999.0.0");
+        assert!(check.update_available);
+        assert!(check.notes.unwrap().contains("999.0.0"));
+        std::env::remove_var("RYU_UPDATE_FAKE_LATEST");
+    }
+
+    #[tokio::test]
+    async fn check_for_update_fake_latest_not_newer_when_equal() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Faking the CURRENT version must not claim an update is available.
+        std::env::set_var("RYU_UPDATE_FAKE_LATEST", current_version());
+        let client = reqwest::Client::new();
+        let check = check_for_update(&client).await.unwrap();
+        assert!(!check.update_available);
+        std::env::remove_var("RYU_UPDATE_FAKE_LATEST");
+    }
 }

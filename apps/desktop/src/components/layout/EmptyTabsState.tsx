@@ -8,6 +8,7 @@
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
+import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	ArrowRight,
@@ -798,31 +799,42 @@ export function EmptyTabsState() {
 
 	return (
 		<div className="h-full w-full overflow-y-auto">
-			{/* The no-tabs launchpad sits deliberately low, while still scrolling from
+			{/* The no-tabs launchpad is vertically centered while still scrolling from
 			    the top when the content is taller than the viewport. */}
-			<div className="flex min-h-full flex-col">
-				<div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 pt-40 pb-12 md:pt-52">
+			<div className="flex min-h-full flex-col justify-center">
+				<div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-12">
 					<header className="flex flex-col items-center gap-4 text-center">
-						<RyuLogo size="56px" variant="outline" />
-						<div className="space-y-1">
-							<h1 className="font-heading text-[26px] text-foreground tracking-tight">
-								{greeting()}
-								{name ? `, ${name}` : ""}
-							</h1>
-						</div>
+						{/* Same staggered blur-rise entrance the onboarding + login headers
+						    use (shared StaggerReveal), so the launchpad greeting settles in
+						    on mount rather than hard-appearing. */}
+						<StaggerReveal>
+							<div className="shrink-0">
+								<RyuLogo size="56px" variant="outline" />
+							</div>
+							<div className="space-y-1">
+								<h1 className="font-heading text-[26px] text-foreground tracking-tight">
+									{greeting()}
+									{name ? `, ${name}` : ""}
+								</h1>
+							</div>
+						</StaggerReveal>
 					</header>
 
 					<LaunchpadComposer />
 
 					{/* Every launchpad section — including the onboarding checklist — is
 					    reorderable and collapsible; the render order is persisted. */}
-					{/* TEMP: get-started, agents and spaces sections hidden on the no-tabs
-					    page per request — filtered out of the render (code kept intact). */}
+					{/* TEMP: get-started, agents, spaces AND quick-actions sections hidden
+					    on the no-tabs page per request — filtered out of the render (case
+					    code kept intact so they can be restored by dropping the filter). */}
 					<div className="flex flex-col gap-10">
 						{order
 							.filter(
 								(key) =>
-									key !== "get-started" && key !== "agents" && key !== "spaces"
+									key !== "get-started" &&
+									key !== "agents" &&
+									key !== "spaces" &&
+									key !== "quick-actions"
 							)
 							.map((key) => renderHomeSection(key))}
 					</div>

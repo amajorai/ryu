@@ -25,7 +25,6 @@ import { DeepLinkController } from "@/src/components/deeplink/DeepLinkController
 import { EmptyTabsState } from "@/src/components/layout/EmptyTabsState.tsx";
 import { PrivacyDisclosure } from "@/src/components/settings/privacy-disclosure.tsx";
 import { SupportAccessBanner } from "@/src/components/settings/support-access-banner.tsx";
-import { NodeUnreachableBanner } from "@/src/components/shell/NodeUnreachableBanner.tsx";
 import { AutoUpdater } from "@/src/components/updater/AutoUpdater.tsx";
 import {
 	ChatHistoryProvider,
@@ -38,7 +37,7 @@ import {
 	CurrentTabIdProvider,
 	findSplit,
 	IsActiveTabProvider,
-	splitMembers,
+	splitPaneTabs,
 	TabsProvider,
 	useTabsContext,
 } from "@/src/contexts/TabsContext.tsx";
@@ -78,12 +77,15 @@ import {
 } from "../icons/SidebarToggleIcon.tsx";
 import { AppSidebar, SidebarPanelContent } from "./AppSidebar.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
+import { SplitDropZones } from "./SplitDropZones.tsx";
 import {
+	computeSplitLayout,
 	paneNeedsTopClearance,
-	paneStyle,
+	paneRectStyle,
 	SplitGutters,
 } from "./SplitView.tsx";
 import { TitleBar } from "./TitleBar.tsx";
+import { TabDndProvider } from "./tabDnd.tsx";
 import { pathScrollsUnderTitlebar } from "./titlebarScroll.ts";
 
 // Populate the contribution registry with every built-in route BEFORE first
@@ -193,14 +195,15 @@ function LayoutContent({
 		prevLayoutRef.current = tabLayout;
 	}, [tabLayout, setOpen]);
 
-	// The split (if any) the focused tab belongs to, and the ordered ids of the
-	// panes to show (split members in tab order). With no split, only the focused
-	// tab is shown — exactly as before. Every other tab stays mounted but hidden
-	// so its state survives.
+	// The split (if any) the focused tab belongs to, its computed pane/gutter
+	// geometry, and the ids of the panes to show (in the tree's pane order).
+	// With no split, only the focused tab is shown — exactly as before. Every
+	// other tab stays mounted but hidden so its state survives.
 	const activeSplit = findSplit(tabs, splits, activeTabId);
+	const splitLayout = activeSplit ? computeSplitLayout(activeSplit.root) : null;
 	let paneIds: string[] = [];
 	if (activeSplit) {
-		paneIds = splitMembers(tabs, activeSplit.id).map((t) => t.id);
+		paneIds = splitPaneTabs(tabs, activeSplit).map((t) => t.id);
 	} else if (activeTabId) {
 		paneIds = [activeTabId];
 	}
@@ -223,9 +226,10 @@ function LayoutContent({
 		(id) => tabs.find((t) => t.id === id)?.path.startsWith("/chat") ?? false
 	);
 
-	// TEMP: floating Ryu (Ask Ryu dock) disabled per request. Flip to `true` to
-	// restore the launcher.
-	const showAssistantDock = false;
+	// Floating Ryu (Ask Ryu dock) launcher, restored. Hidden only when a chat pane
+	// is already visible (that pane IS the assistant, so the dock is redundant
+	// there — see `chatPaneVisible` above).
+	const showAssistantDock = true;
 
 	const resizingRef = useRef(false);
 	const startXRef = useRef(0);
@@ -330,7 +334,7 @@ function LayoutContent({
 	useHotkey("nav.library", () => openTab("/library"));
 
 	return (
-		<>
+		<TabDndProvider>
 			<CommandPalette />
 			<DeepLinkController />
 			<PrivacyDisclosure />
@@ -510,20 +514,18 @@ function LayoutContent({
 							// `focused` drives the titlebar and the active-pane highlight; a
 							// split also shows non-focused panes, which stay fully live.
 							const focused = tab.id === activeTabId;
-							const paneIndex = paneIds.indexOf(tab.id);
-							const visible = paneIndex !== -1;
+							const paneRect = splitLayout?.panes.get(tab.id);
+							const visible = paneRect
+								? true
+								: !activeSplit && tab.id === activeTabId;
 							// Panes are absolutely positioned so the tree is never reparented
 							// (reparenting would unmount it and lose state). Hidden-but-mounted
 							// tabs keep their timers/subscriptions; unloaded tabs are dropped
 							// entirely. Active split members are exempt from unloading, so a
 							// visible pane is never null.
 							let style: CSSProperties;
-							if (visible && activeSplit) {
-								style = paneStyle(
-									activeSplit.orientation,
-									activeSplit.sizes,
-									paneIndex
-								);
+							if (paneRect) {
+								style = paneRectStyle(paneRect);
 							} else if (visible) {
 								style = { position: "absolute", inset: 0 };
 							} else {
@@ -536,8 +538,7 @@ function LayoutContent({
 							const scrollsUnderTitlebar = pathScrollsUnderTitlebar(tab.path);
 							const needsClearance =
 								!scrollsUnderTitlebar &&
-								(!activeSplit ||
-									paneNeedsTopClearance(activeSplit.orientation, paneIndex));
+								(paneRect ? paneNeedsTopClearance(paneRect) : true);
 							return (
 								<IsActiveTabProvider
 									isActive={focused}
@@ -579,6 +580,10 @@ function LayoutContent({
 					{activeSplit && (
 						<SplitGutters containerRef={contentRef} split={activeSplit} />
 					)}
+					{/* Warp-style drop zones: while a tab chip/row is dragged, hovering
+					    a pane edge previews + creates a split there; the center swaps
+					    panes. Renders nothing outside a drag. */}
+					<SplitDropZones containerRef={contentRef} />
 				</div>
 				{/* Frosted titlebar overlays the content (absolute, z-10). */}
 				<TitleBar />
@@ -587,7 +592,6 @@ function LayoutContent({
 				    content down or break the under-the-bar scroll. */}
 				<div className="pointer-events-none absolute top-12 right-0 left-0 z-20 [&>*]:pointer-events-auto">
 					<AutoUpdater />
-					<NodeUnreachableBanner />
 				</div>
 			</SidebarInset>
 
@@ -600,7 +604,7 @@ function LayoutContent({
 			    survives close/reopen because its id lives in the assistant store. */}
 			{assistantMode === "sidebar" && <AssistantPanel />}
 			{showAssistantDock && !chatPaneVisible && <AssistantDock />}
-		</>
+		</TabDndProvider>
 	);
 }
 

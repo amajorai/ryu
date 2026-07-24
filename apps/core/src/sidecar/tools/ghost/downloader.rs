@@ -210,3 +210,74 @@ impl Default for GhostDownloader {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static GHOST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        GHOST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    struct EnvGuard {
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        fn set(val: &str) -> Self {
+            let prev = std::env::var(GHOST_RELEASE_URL_ENV).ok();
+            std::env::set_var(GHOST_RELEASE_URL_ENV, val);
+            Self { prev }
+        }
+        fn clear() -> Self {
+            let prev = std::env::var(GHOST_RELEASE_URL_ENV).ok();
+            std::env::remove_var(GHOST_RELEASE_URL_ENV);
+            Self { prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(GHOST_RELEASE_URL_ENV, v),
+                None => std::env::remove_var(GHOST_RELEASE_URL_ENV),
+            }
+        }
+    }
+
+    #[test]
+    fn bin_path_is_the_shared_ghost_bin() {
+        assert_eq!(bin_path(), super::super::ghost_bin_path());
+    }
+
+    #[test]
+    fn artifact_name_names_a_release_archive() {
+        // Each supported target names a platform archive (zip on Windows, tar.gz else),
+        // used only in the actionable "set RYU_GHOST_RELEASE_URL" error.
+        let name = artifact_name();
+        assert!(name.starts_with("ghost-") || name.contains("unsupported"));
+    }
+
+    #[test]
+    fn archive_url_errors_without_env_source() {
+        // No public Ghost release repo exists, so the unset case must be an actionable
+        // error, never a bogus URL.
+        let _lock = lock_env();
+        let _g = EnvGuard::clear();
+        let err = archive_url().unwrap_err().to_string();
+        assert!(err.contains(GHOST_RELEASE_URL_ENV), "got: {err}");
+    }
+
+    #[test]
+    fn archive_url_uses_env_override_trimmed() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set("  https://mirror.test/ghost.tar.gz  ");
+        assert_eq!(archive_url().unwrap(), "https://mirror.test/ghost.tar.gz");
+    }
+
+    #[test]
+    fn archive_url_blank_env_still_errors() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set("   ");
+        assert!(archive_url().is_err());
+    }
+}

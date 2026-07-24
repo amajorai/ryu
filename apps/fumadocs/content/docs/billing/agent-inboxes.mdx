@@ -1,0 +1,53 @@
+---
+title: "Agent Inboxes"
+description: "Real email inboxes your agents can send from and receive into. Limits, storage, and plan requirements."
+---
+
+Agent Inboxes are **real, hosted email inboxes** your agents can send from and receive into — no SMTP setup, no external service. Each inbox gets its own address, stores every message it receives, and exposes send + read over an API so your agents can run email workflows end to end.
+
+<Callout type="info">
+  Source of truth: `emailQuotaForPlan()` in `packages/auth/src/lib/plans.ts`. Enforcement: `packages/api/src/routers/mail.ts`.
+</Callout>
+
+## Availability
+
+Agent Inboxes require **Pro, Max, or Teams**. The Lifetime plan and Free tier do not include Agent Inboxes (Band 3 — subscription only).
+
+## Limits by plan
+
+| Plan | Inboxes | Sends / month | Storage | Branding removable |
+|---|---|---|---|---|
+| Free | 0 | 0 | 0 | No |
+| Lifetime | 0 | 0 | 0 | No |
+| Pro | **Unlimited** | **1,000** | **5 GB** | Yes |
+| Max | **Unlimited** | **25,000** | **10 GB** | Yes |
+| Teams | **Unlimited** | **100,000** | **20 GB** | Yes |
+
+### What the limits mean
+
+- **Inboxes** — the count of email addresses. All paid plans are **unlimited**; enforcement caps storage, not count.
+- **Sends / month** — outbound emails per calendar month. Resets on the 1st.
+- **Storage** — total stored mail bytes across all inboxes. This is the real cap, not inbox count.
+- **Branding removable** — paid plans can drop the "Sent from Ryu" footer (per-inbox toggle, off by default).
+
+## Teams storage
+
+Teams storage is a **flat org-wide cap** (20 GB), not per-seat. Every inbox in the organization draws from the same pool.
+
+## Enforcement
+
+Quotas are enforced server-side in the mail router (`packages/api/src/routers/mail.ts`):
+
+- **Inbox creation**: "Agent Inboxes require a Pro, Max, or Teams plan" (line 385)
+- **Inbox limit**: "Inbox limit reached... Upgrade your plan to add more" (line 396)
+- **Send limit**: "Monthly send limit reached... Upgrade your plan to send more" (line 595)
+
+## API
+
+Each inbox exposes:
+
+- **Send** — `POST /api/mail/:inboxId/send`
+- **Read** — `GET /api/mail/:inboxId/messages`
+- **Webhook** — incoming mail triggers a webhook to your agent
+
+See the Agent Inboxes API reference for full details.

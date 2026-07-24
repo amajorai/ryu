@@ -43,8 +43,8 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
 
-pub use ryu_gw_governance::{GrantDecision, SIGNING_ALGORITHM};
 use ryu_gw_governance::{signing_key_from_seed, verifying_key_from_b64};
+pub use ryu_gw_governance::{GrantDecision, SIGNING_ALGORITHM};
 
 /// Env var holding the ed25519 signing seed (32-byte secret), base64-encoded.
 /// The production source of truth: set it and every gateway replica signs with
@@ -76,7 +76,7 @@ fn default_grant_allowlist() -> Vec<String> {
         "tools.read",
         "tools.invoke",
         // Per-server MCP tool grants that the seeded system MCP-tool plugins
-        // declare in their `permission_grants` (`spider`, `agentbrowser`, `exa`,
+        // declare in their `permission_grants` (`spider`, `agentbrowser`,
         // `ghost`, `shadow`). `validate_grants` matches exact scope strings, so
         // each built-in MCP tool needs its own `mcp:<name>` on the allowlist:
         // without them a runtime disable→re-enable (which re-runs
@@ -86,7 +86,10 @@ fn default_grant_allowlist() -> Vec<String> {
         // `mcp:web_search`/`mcp:file_read` are intentionally NOT here.)
         "mcp:spider",
         "mcp:agentbrowser",
-        "mcp:exa",
+        // `exa` is a declarative `http` plugin (fixtures/exa.plugin.json), so it
+        // declares an egress grant, not an `mcp:<name>` server grant — its enable
+        // path validates this exact scope instead.
+        "tool:http-egress:api.exa.ai",
         "mcp:ghost",
         "mcp:shadow",
         // data scopes
@@ -152,6 +155,13 @@ fn default_grant_allowlist() -> Vec<String> {
         "workflows:runstate",
         "workflows:catalogs",
         "ghost:record",
+        // The Simulator app (`com.ryu.simulator`) drives the local `simctl`/`adb`
+        // device-control sidecar via one grant-gated capability. Same rationale as
+        // `monitors:crud` above: a fresh install seeds the grant directly, but a
+        // runtime disable→re-enable re-runs `/v1/grants/validate`; without it the
+        // re-enable would be denied with GrantsDenied. Swappable via the
+        // `RYU_MARKETPLACE_GRANT_ALLOWLIST` env override.
+        "simulator:control",
         // The Webhooks app (`com.ryu.webhooks`) renders Core's read-only webhook
         // endpoint registry from its sandboxed companion frame via one bridge
         // capability. Same rationale as `monitors:crud` above: a fresh install seeds the

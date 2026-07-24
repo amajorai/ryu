@@ -254,7 +254,6 @@ rebrand. See [`TRADEMARK.md`](./TRADEMARK.md). Build instructions:
 | [`packages/client`](./packages/client) | `@ryuhq/client` — typed client for embedding a Core agent in any app |
 | [`packages/core-client`](./packages/core-client) | `@ryuhq/core-client` — platform-agnostic Core node client (tui/native) |
 | [`packages/protocol`](./packages/protocol) | `@ryuhq/protocol` — surface-agnostic wire-format contracts |
-| [`packages/ryu-apps`](./packages/ryu-apps) | `@ryu/apps` — built-in widget-app workspace, embedded into Core |
 | [`packages/config`](./packages/config) · [`env`](./packages/env) | Shared TypeScript config + env schemas |
 
 ## Footprint
@@ -384,7 +383,6 @@ Shared TS surface: SDK, clients, design system, protocol.
 | [`@ryu/ui`](./packages/ui) | TypeScript | 53,385 | 1406 KB | — |
 | [`@ryu/blocks`](./packages/blocks) | TypeScript | 52,445 | 1459 KB | — |
 | [`@ryu/api`](./packages/api) | TypeScript | 30,168 | 985 KB | — |
-| [`@ryu/apps`](./packages/ryu-apps) | TypeScript | 10,276 | 261 KB | Ryu Apps widget workspace: the shared frame-side bridge plus the built-in widget bundles (one self-contained HTML p… |
 | [`@ryuhq/sdk`](./packages/sdk) | TypeScript | 9,665 | 326 KB | Ryu developer SDK: typed builders and CLI for authoring plugin.json Plugin bundles |
 | [`@ryuhq/core-client`](./packages/core-client) | TypeScript | 9,428 | 278 KB | — |
 | [`@ryu/app-host`](./packages/app-host) | TypeScript | 8,961 | 331 KB | — |

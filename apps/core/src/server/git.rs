@@ -377,6 +377,45 @@ pub struct ListDirQuery {
     path: Option<String>,
 }
 
+/// Sentinel path for the virtual "This PC" root on Windows: a level above every
+/// drive root whose entries are the available drives. A drive root's `parent`
+/// points here so "go up" can cross to another drive (`C:\` -> `D:\`), which the
+/// real filesystem gives no path for.
+#[cfg(windows)]
+const THIS_PC: &str = "::this-pc";
+
+/// Render a path for the client, stripping Windows verbatim (`\\?\`) and UNC
+/// (`\\?\UNC\`) prefixes that `canonicalize` adds. Those prefixes are valid but
+/// display as noise (`\\?\C:\...`) and are not what a user expects to see or a
+/// caller expects to store. No-op on non-Windows and on already-clean paths.
+fn display_path(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    s.into_owned()
+}
+
+/// The drives present on this Windows host, as folder entries for the virtual
+/// "This PC" root (`{ name: "C:\\", path: "C:\\" }`).
+#[cfg(windows)]
+fn windows_drives() -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    for letter in b'A'..=b'Z' {
+        let root = format!("{}:\\", letter as char);
+        if std::path::Path::new(&root).is_dir() {
+            out.push(json!({ "name": root, "path": root }));
+        }
+    }
+    out
+}
+
 /// `GET /api/workspace/list?path=<abs>` — list the sub-directories of a folder ON
 /// THE NODE, so the desktop can present a node-aware folder picker (the native OS
 /// dialog only sees the desktop host, which is wrong when the node is remote).
@@ -397,6 +436,21 @@ pub async fn list_directory(Query(q): Query<ListDirQuery>) -> axum::response::Re
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
     let raw = q.path.unwrap_or_default();
     let trimmed = raw.trim();
+
+    // The "This PC" sentinel is not a real path — resolve it before any
+    // canonicalize/is_dir check (which would 404 it) into a drive listing.
+    #[cfg(windows)]
+    if trimmed.eq_ignore_ascii_case(THIS_PC) {
+        return Json(json!({
+            "path": THIS_PC,
+            "label": "This PC",
+            "parent": null,
+            "home": display_path(&home),
+            "entries": windows_drives(),
+        }))
+        .into_response();
+    }
+
     let target = if trimmed.is_empty() {
         home.clone()
     } else if let Some(rest) = trimmed.strip_prefix("~") {
@@ -434,7 +488,7 @@ pub async fn list_directory(Query(q): Query<ListDirQuery>) -> axum::response::Re
             continue;
         }
         if item.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            entries.push(json!({ "name": name, "path": item.path().to_string_lossy() }));
+            entries.push(json!({ "name": name, "path": display_path(&item.path()) }));
         }
     }
     entries.sort_by(|a, b| {
@@ -445,10 +499,16 @@ pub async fn list_directory(Query(q): Query<ListDirQuery>) -> axum::response::Re
             .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
     });
 
+    // At a drive root (`C:\`) the real parent is None; on Windows point it at the
+    // virtual "This PC" root so "go up" can cross to another drive.
+    let parent = target.parent().map(display_path);
+    #[cfg(windows)]
+    let parent = parent.or_else(|| Some(THIS_PC.to_string()));
+
     Json(json!({
-        "path": target.to_string_lossy(),
-        "parent": target.parent().map(|p| p.to_string_lossy().into_owned()),
-        "home": home.to_string_lossy(),
+        "path": display_path(&target),
+        "parent": parent,
+        "home": display_path(&home),
         "entries": entries,
     }))
     .into_response()
@@ -547,14 +607,197 @@ mod tests {
         let resp = list_directory(Query(ListDirQuery { path: None })).await;
         let (status, json) = body_json(resp).await;
         assert_eq!(status, StatusCode::OK);
+        // The emitted path must never carry the Windows verbatim (`\\?\`) prefix
+        // that `canonicalize` adds — `display_path` strips it. (Trivially true off
+        // Windows, where no path starts with that.) This locks the display fix.
+        let path = json["path"].as_str().unwrap();
+        assert!(!path.starts_with(r"\\?\"), "verbatim prefix leaked: {path}");
         // Home is a real directory, so listing it succeeds and echoes the home path.
-        // On Windows, `canonicalize` yields a verbatim (`\\?\`) prefix that the raw
-        // home path lacks, so strip it before comparing.
-        let strip_verbatim = |p: &str| p.trim_start_matches(r"\\?\").to_string();
-        let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
-        assert_eq!(
-            strip_verbatim(json["path"].as_str().unwrap()),
-            strip_verbatim(&home)
-        );
+        let home = display_path(&dirs::home_dir().unwrap());
+        assert_eq!(path, home);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn list_directory_this_pc_lists_drives() {
+        let resp = list_directory(Query(ListDirQuery {
+            path: Some(THIS_PC.to_string()),
+        }))
+        .await;
+        let (status, json) = body_json(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json["parent"].is_null());
+        assert_eq!(json["label"].as_str().unwrap(), "This PC");
+        // The system drive is always present, so at least one entry comes back.
+        assert!(!json["entries"].as_array().unwrap().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn list_directory_drive_root_parents_to_this_pc() {
+        // Listing a drive root must point "up" at the virtual This PC root so the
+        // picker can cross to another drive; the real filesystem parent is None.
+        let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+        let root = format!("{system_drive}\\");
+        let resp = list_directory(Query(ListDirQuery { path: Some(root) })).await;
+        let (status, json) = body_json(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["parent"].as_str().unwrap(), THIS_PC);
+    }
+
+    // ── Handler validation paths ──────────────────────────────────────────────
+    //
+    // These exercise ONLY the pre-git validation guards (missing/empty params,
+    // non-directory cwd, bad action). None of them reach `spawn_blocking`, so no
+    // real `git` process is shelled and no repository is required.
+
+    fn query(pairs: &[(&str, &str)]) -> Query<HashMap<String, String>> {
+        let map = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        Query(map)
+    }
+
+    /// A path guaranteed not to be a directory on any platform.
+    const NON_DIR: &str = "/no/such/ryu/dir/xyz-does-not-exist";
+
+    #[tokio::test]
+    async fn git_status_missing_cwd_is_bad_request() {
+        let (status, json) = body_json(git_status(query(&[])).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn git_status_empty_cwd_is_bad_request() {
+        // An empty cwd is filtered out and treated as absent.
+        let (status, _) = body_json(git_status(query(&[("cwd", "")])).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn git_status_non_dir_returns_not_repo() {
+        let (status, json) = body_json(git_status(query(&[("cwd", NON_DIR)])).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["is_repo"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn git_branches_missing_cwd_is_bad_request() {
+        let (status, _) = body_json(git_branches(query(&[])).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn git_branches_non_dir_returns_empty_repo_shape() {
+        let (status, json) = body_json(git_branches(query(&[("cwd", NON_DIR)])).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["is_repo"], serde_json::json!(false));
+        assert!(json["current"].is_null());
+        assert_eq!(json["branches"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn git_checkout_rejects_empty_fields() {
+        for (cwd, branch) in [("", "main"), ("/some/path", ""), ("", "")] {
+            let body = GitCheckoutBody {
+                cwd: cwd.to_string(),
+                branch: branch.to_string(),
+            };
+            let (status, json) = body_json(git_checkout(Json(body)).await).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(json["success"], serde_json::json!(false));
+        }
+    }
+
+    #[tokio::test]
+    async fn git_checkout_rejects_non_dir_cwd() {
+        let body = GitCheckoutBody {
+            cwd: NON_DIR.to_string(),
+            branch: "main".to_string(),
+        };
+        let (status, json) = body_json(git_checkout(Json(body)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].as_str().unwrap().contains("not a directory"));
+    }
+
+    #[tokio::test]
+    async fn git_create_branch_rejects_empty_and_non_dir() {
+        let empty = GitCheckoutBody {
+            cwd: String::new(),
+            branch: "feature".to_string(),
+        };
+        let (status, _) = body_json(git_create_branch(Json(empty)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let non_dir = GitCheckoutBody {
+            cwd: NON_DIR.to_string(),
+            branch: "feature".to_string(),
+        };
+        let (status, json) = body_json(git_create_branch(Json(non_dir)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].as_str().unwrap().contains("not a directory"));
+    }
+
+    #[tokio::test]
+    async fn git_commit_push_rejects_empty_cwd() {
+        let body = GitCommitPushBody {
+            cwd: String::new(),
+            message: None,
+            action: None,
+            include_unstaged: true,
+        };
+        let (status, _) = body_json(git_commit_push(Json(body)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn git_commit_push_rejects_non_dir_cwd() {
+        let body = GitCommitPushBody {
+            cwd: NON_DIR.to_string(),
+            message: None,
+            action: None,
+            include_unstaged: true,
+        };
+        let (status, json) = body_json(git_commit_push(Json(body)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(json["error"].as_str().unwrap().contains("not a directory"));
+    }
+
+    #[tokio::test]
+    async fn git_commit_push_rejects_invalid_action() {
+        // A real, existing directory (not a git repo) so the is_dir guard passes
+        // and the action-allowlist check is what rejects. `git` is never shelled
+        // because the action is validated before `spawn_blocking`.
+        let base = std::env::temp_dir().join(format!("ryu_gitaction_{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let body = GitCommitPushBody {
+            cwd: base.to_string_lossy().into_owned(),
+            message: Some("hi".to_string()),
+            action: Some("rm-rf".to_string()),
+            include_unstaged: false,
+        };
+        let (status, json) = body_json(git_commit_push(Json(body)).await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json["error"].as_str().unwrap(), "invalid git action");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn create_project_folder_rejects_unsafe_names() {
+        // Validation fails before any filesystem write, so nothing is created.
+        for bad in ["", "..", "a/b", "a\\b", "foo..bar"] {
+            let body = NewFolderBody {
+                name: bad.to_string(),
+            };
+            let (status, json) = body_json(create_project_folder(Json(body)).await).await;
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "name {bad:?} should be rejected"
+            );
+            assert!(json["error"].is_string());
+        }
     }
 }

@@ -109,13 +109,11 @@ impl Provider for OpenAiProvider {
                     other => return other,
                 }
             }
-            Err(
-                last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                    provider: "openai".to_string(),
-                    retry_after: None,
-                    reset_at: None,
-                }),
-            )
+            Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
+                provider: "openai".to_string(),
+                retry_after: None,
+                reset_at: None,
+            }))
         })
     }
 
@@ -154,13 +152,11 @@ impl Provider for OpenAiProvider {
                     Ok(resp) => return Ok(Body::from_stream(resp.bytes_stream())),
                 }
             }
-            Err(
-                last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                    provider: "openai".to_string(),
-                    retry_after: None,
-                    reset_at: None,
-                }),
-            )
+            Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
+                provider: "openai".to_string(),
+                retry_after: None,
+                reset_at: None,
+            }))
         })
     }
 
@@ -236,14 +232,9 @@ impl Provider for OpenAiProvider {
             // Core carries the audio to the Gateway as base64 inside a JSON body
             // (it holds no multipart), but real Groq/OpenAI `/audio/transcriptions`
             // (Whisper STT) require `multipart/form-data`. Re-multipart here.
-            let audio_b64 = body
-                .get("file")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    ProviderError::Provider(
-                        "STT request missing base64 `file` field".to_string(),
-                    )
-                })?;
+            let audio_b64 = body.get("file").and_then(Value::as_str).ok_or_else(|| {
+                ProviderError::Provider("STT request missing base64 `file` field".to_string())
+            })?;
             let audio_bytes = base64::engine::general_purpose::STANDARD
                 .decode(audio_b64.trim())
                 .map_err(|e| {
@@ -309,7 +300,12 @@ impl Provider for OpenAiProvider {
 /// Guess an audio MIME type from a filename extension so the STT provider parses
 /// the uploaded `file` part correctly. Defaults to `application/octet-stream`.
 fn audio_content_type(filename: &str) -> &'static str {
-    match filename.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
+    match filename
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("wav") => "audio/wav",
         Some("mp3") => "audio/mpeg",
         Some("m4a" | "mp4") => "audio/mp4",
@@ -330,5 +326,210 @@ fn value_to_form_string(val: &Value) -> Option<String> {
         Value::Number(n) => Some(n.to_string()),
         Value::Bool(b) => Some(b.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{MockResponse, MockServer};
+    use base64::Engine as _;
+    use serde_json::json;
+
+    fn provider_with(base_url: String, keys: Vec<&str>) -> OpenAiProvider {
+        OpenAiProvider::new(
+            reqwest::Client::new(),
+            keys.into_iter().map(String::from).collect(),
+            base_url,
+            Arc::new(ProviderQuotas::new()),
+        )
+    }
+
+    #[test]
+    fn audio_content_type_maps_known_extensions() {
+        assert_eq!(audio_content_type("a.wav"), "audio/wav");
+        assert_eq!(audio_content_type("a.mp3"), "audio/mpeg");
+        assert_eq!(audio_content_type("a.MPGA"), "audio/mpeg");
+        assert_eq!(audio_content_type("clip.m4a"), "audio/mp4");
+        assert_eq!(audio_content_type("clip.MP4"), "audio/mp4");
+        assert_eq!(audio_content_type("v.ogg"), "audio/ogg");
+        assert_eq!(audio_content_type("v.webm"), "audio/webm");
+        assert_eq!(audio_content_type("v.flac"), "audio/flac");
+        assert_eq!(audio_content_type("v.aac"), "audio/aac");
+        // Unknown / no extension → octet-stream.
+        assert_eq!(audio_content_type("noext"), "application/octet-stream");
+        assert_eq!(audio_content_type("a.xyz"), "application/octet-stream");
+    }
+
+    #[test]
+    fn value_to_form_string_stringifies_scalars_only() {
+        assert_eq!(value_to_form_string(&json!("hi")), Some("hi".to_string()));
+        assert_eq!(value_to_form_string(&json!(3)), Some("3".to_string()));
+        assert_eq!(value_to_form_string(&json!(0.5)), Some("0.5".to_string()));
+        assert_eq!(value_to_form_string(&json!(true)), Some("true".to_string()));
+        assert_eq!(value_to_form_string(&json!(["a"])), None);
+        assert_eq!(value_to_form_string(&json!({ "k": 1 })), None);
+        assert_eq!(value_to_form_string(&json!(null)), None);
+    }
+
+    #[test]
+    fn next_key_rotates_and_primary_is_first() {
+        let p = provider_with("http://x".into(), vec!["a", "b"]);
+        assert_eq!(p.primary_key(), "a");
+        assert_eq!(p.next_key(), "a");
+        assert_eq!(p.next_key(), "b");
+        assert_eq!(p.next_key(), "a");
+    }
+
+    #[test]
+    fn primary_key_empty_when_no_keys() {
+        let p = provider_with("http://x".into(), vec![]);
+        assert_eq!(p.primary_key(), "");
+        // next_key falls back to empty string rather than panicking on an empty set.
+        assert_eq!(p.next_key(), "");
+    }
+
+    #[tokio::test]
+    async fn complete_sends_bearer_and_injects_model() {
+        let server =
+            MockServer::always(MockResponse::ok_json(r#"{"id":"cmpl","choices":[]}"#)).await;
+        let p = provider_with(server.base_url().to_string(), vec!["sk-abc"]);
+        let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        let out = p.complete("gpt-4o", &body).await.unwrap();
+        assert_eq!(out["id"], json!("cmpl"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/chat/completions");
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Bearer sk-abc")
+        );
+        // The routed model overrides whatever the caller sent.
+        assert_eq!(reqs[0].json()["model"], json!("gpt-4o"));
+    }
+
+    #[tokio::test]
+    async fn complete_error_does_not_leak_key() {
+        const SECRET: &str = "sk-openai-LEAKME-999";
+        let server = MockServer::always(MockResponse::json(
+            401,
+            r#"{"error":{"message":"bad key"}}"#,
+        ))
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec![SECRET]);
+        let err = p
+            .complete("m", &json!({ "messages": [] }))
+            .await
+            .unwrap_err();
+        let rendered = format!("{err}{err:?}");
+        assert!(!rendered.contains(SECRET), "leaked: {rendered}");
+        assert!(rendered.contains("bad key"));
+    }
+
+    #[tokio::test]
+    async fn complete_rotates_on_429_then_succeeds() {
+        let server = MockServer::start(vec![
+            MockResponse::json(429, "slow"),
+            MockResponse::ok_json(r#"{"id":"ok"}"#),
+        ])
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec!["k1", "k2"]);
+        let out = p
+            .complete("m", &json!({ "messages": [] }))
+            .await
+            .unwrap();
+        assert_eq!(out["id"], json!("ok"));
+        let reqs = server.requests();
+        assert_eq!(reqs.len(), 2);
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Bearer k1")
+        );
+        assert_eq!(
+            reqs[1].header("authorization").as_deref(),
+            Some("Bearer k2")
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_image_posts_to_images_endpoint_with_primary_key() {
+        let server = MockServer::always(MockResponse::ok_json(
+            r#"{"data":[{"url":"https://x/i.png"}]}"#,
+        ))
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec!["primary", "secondary"]);
+        let out = p
+            .generate_image("dall-e-3", &json!({ "prompt": "a cat" }))
+            .await
+            .unwrap();
+        assert_eq!(out["data"][0]["url"], json!("https://x/i.png"));
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/images/generations");
+        // Media uses the primary key, never the rotating cursor.
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Bearer primary")
+        );
+        assert_eq!(reqs[0].json()["model"], json!("dall-e-3"));
+    }
+
+    #[tokio::test]
+    async fn synthesize_speech_posts_to_audio_speech_endpoint() {
+        let server = MockServer::always(MockResponse::ok_json(r#"{"ok":true}"#)).await;
+        let p = provider_with(server.base_url().to_string(), vec!["k"]);
+        let _ = p
+            .synthesize_speech("tts-1", &json!({ "input": "hi", "voice": "alloy" }))
+            .await
+            .unwrap();
+        assert_eq!(server.requests()[0].path, "/audio/speech");
+    }
+
+    #[tokio::test]
+    async fn transcribe_audio_rejects_missing_file() {
+        let p = provider_with("http://127.0.0.1:1".to_string(), vec!["k"]);
+        let err = p
+            .transcribe_audio("whisper-1", &json!({ "model": "whisper-1" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("missing base64 `file`"));
+    }
+
+    #[tokio::test]
+    async fn transcribe_audio_rejects_invalid_base64() {
+        let p = provider_with("http://127.0.0.1:1".to_string(), vec!["k"]);
+        let err = p
+            .transcribe_audio("whisper-1", &json!({ "file": "!!!not base64!!!" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not valid base64"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn transcribe_audio_sends_multipart_with_decoded_file() {
+        let server = MockServer::always(MockResponse::ok_json(r#"{"text":"hello"}"#)).await;
+        let p = provider_with(server.base_url().to_string(), vec!["sk-stt"]);
+        let audio = base64::engine::general_purpose::STANDARD.encode(b"RIFFfake-wav-bytes");
+        let out = p
+            .transcribe_audio(
+                "whisper-1",
+                &json!({ "file": audio, "filename": "clip.wav", "language": "en" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out["text"], json!("hello"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/audio/transcriptions");
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Bearer sk-stt")
+        );
+        let ct = reqs[0].header("content-type").unwrap_or_default();
+        assert!(ct.starts_with("multipart/form-data"), "content-type={ct}");
+        // The decoded audio + the routed model + forwarded language ride in the body.
+        let raw = String::from_utf8_lossy(&reqs[0].body);
+        assert!(raw.contains("RIFFfake-wav-bytes"), "decoded audio missing");
+        assert!(raw.contains("whisper-1"));
+        assert!(raw.contains("clip.wav"));
     }
 }

@@ -232,6 +232,14 @@ export const env = createEnv({
 		// live CREATE path. Destroy stays gated even when this is on (see
 		// RYU_HETZNER_DESTROY_CONFIRM).
 		RYU_HETZNER_LIVE: z.string().optional(),
+		// Explicit opt-in to the SIMULATED (fake-active) provisioning path. Unset ⇒
+		// simulate is allowed ONLY in non-production (NODE_ENV !== "production");
+		// "true"/"1" force-enables it (e.g. a prod-like staging that must never touch
+		// Hetzner); "false"/"0" force-disables it (fail closed even in dev). It never
+		// enables LIVE infra — that is RYU_HETZNER_LIVE + HCLOUD_TOKEN. In real
+		// production leave this unset so an unarmed deploy fails closed instead of
+		// fabricating a node that does not exist.
+		RYU_CLOUD_SIMULATE: z.string().optional(),
 		// ADDITIONAL destroy gate. Live server DESTROY is the scariest automated
 		// action (a webhook replay could delete a node with user data), so it is
 		// NEVER wired to fire on its own — the live-delete seam is hardcoded off in

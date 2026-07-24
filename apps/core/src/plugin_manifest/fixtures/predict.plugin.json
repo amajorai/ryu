@@ -20,6 +20,14 @@
     }
   ],
   "contributes": {
+    "settings_tabs": [
+      {
+        "id": "predict.settings",
+        "title": "Predictive Typing",
+        "scope": "node",
+        "view": "predict"
+      }
+    ],
     "policies": [{ "id": "policy-predict", "title": "Predictive Typing" }]
   },
   "permission_grants": []

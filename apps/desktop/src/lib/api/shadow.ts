@@ -1,12 +1,18 @@
 // apps/desktop/src/lib/api/shadow.ts
 //
-// Typed client for Shadow's context endpoints at 127.0.0.1:3030. Shadow is a
-// standalone Rust sidecar that captures the active window, selection, and
-// on-screen text via OCR. This module exposes typed `getCurrentContext()`,
-// `getProactive()`, `getCaptureControl()`, and `setCaptureControl()` that the
-// companion overlay and consent settings use. If Shadow is not running
-// (:3030 unreachable) calls resolve to `null` so callers can degrade
-// gracefully rather than crash.
+// Typed client for Shadow's context endpoints, reached through the LOCAL
+// Core's authenticated `/api/shadow/*` proxy (`apps/core/src/server/
+// shadow_proxy.rs`). Shadow is a standalone Rust sidecar that captures the
+// active window, selection, and on-screen text via OCR; its own HTTP surface
+// (:3030) is bearer-gated and rejects every browser (Origin-bearing) request
+// outright, so the webview can no longer fetch it directly — Core holds the
+// shared-secret bearer and stamps it on the proxied hop. This module exposes
+// typed `getCurrentContext()`, `getProactive()`, `getCaptureControl()`, and
+// `setCaptureControl()` that the companion overlay and consent settings use.
+// If Shadow (or the local Core) is not running, calls resolve to `null` so
+// callers can degrade gracefully rather than crash.
+
+import { DEFAULT_CORE_URL } from "@/lib/core-url.ts";
 
 /** The context snapshot Shadow exposes at GET /context/current. */
 export interface ShadowContext {
@@ -113,8 +119,15 @@ export interface FeedbackRequest {
  *
  * Do not parameterize this with a node URL. If you need Shadow on a different box,
  * run the desktop on that box.
+ *
+ * The base is the LOCAL Core's `/api/shadow` proxy (never the per-tab node):
+ * `DEFAULT_CORE_URL` is the profile-aware local sidecar URL (the PreflightPage
+ * precedent for pinned-local Core calls). No bearer is attached here — the
+ * local loopback Core runs without a node token (`require_auth` allows when
+ * none is configured), and Core stamps Shadow's own shared-secret bearer on
+ * the upstream hop.
  */
-const SHADOW_BASE = "http://127.0.0.1:3030";
+const SHADOW_BASE = `${DEFAULT_CORE_URL}/api/shadow`;
 
 /** A single timeline event from GET /timeline. */
 export interface TimelineEvent {

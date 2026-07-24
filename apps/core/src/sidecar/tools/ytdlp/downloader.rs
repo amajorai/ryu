@@ -81,7 +81,10 @@ impl YtDlpDownloader {
     }
 
     /// Ensure the yt-dlp binary is installed at `~/.ryu/bin/yt-dlp[.exe]`.
-    pub async fn ensure_installed(&self, downloads: &crate::downloads::DownloadCenter) -> Result<()> {
+    pub async fn ensure_installed(
+        &self,
+        downloads: &crate::downloads::DownloadCenter,
+    ) -> Result<()> {
         let dest = bin_path();
 
         // Fast path: present with a matching recorded checksum.
@@ -156,5 +159,94 @@ impl YtDlpDownloader {
 impl Default for YtDlpDownloader {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Serializes the tests that mutate this downloader's process-global env vars so
+    /// they never race each other under cargo's in-process parallel runner.
+    static YTDLP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        YTDLP_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Snapshot + restore a var so a test that mutates process env never leaks.
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        fn set(key: &'static str, val: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::set_var(key, val);
+            Self { key, prev }
+        }
+        fn clear(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn artifact_name_is_a_single_file_binary() {
+        // Whatever the target, the asset is a single executable, never an archive.
+        let name = artifact_name();
+        assert!(!name.is_empty());
+        assert!(!name.ends_with(".zip") && !name.ends_with(".tar.gz"));
+    }
+
+    #[test]
+    fn target_version_defaults_and_env_override() {
+        let _lock = lock_env();
+        let _g = EnvGuard::clear(YTDLP_VERSION_ENV);
+        assert_eq!(target_version(), TARGET_VERSION);
+        let _o = EnvGuard::set(YTDLP_VERSION_ENV, "  2025.01.01  ");
+        // Trimmed.
+        assert_eq!(target_version(), "2025.01.01");
+    }
+
+    #[test]
+    fn target_version_ignores_blank_env() {
+        let _lock = lock_env();
+        let _g = EnvGuard::set(YTDLP_VERSION_ENV, "   ");
+        // A whitespace-only override is treated as unset → the pinned default.
+        assert_eq!(target_version(), TARGET_VERSION);
+    }
+
+    #[test]
+    fn archive_url_builds_github_release_path() {
+        let _lock = lock_env();
+        let _u = EnvGuard::clear(YTDLP_URL_ENV);
+        let _v = EnvGuard::set(YTDLP_VERSION_ENV, "2024.12.13");
+        let url = archive_url();
+        assert!(url.starts_with("https://github.com/yt-dlp/yt-dlp/releases/download/2024.12.13/"));
+        assert!(url.ends_with(artifact_name()));
+    }
+
+    #[test]
+    fn archive_url_env_fully_overrides() {
+        let _lock = lock_env();
+        let _u = EnvGuard::set(YTDLP_URL_ENV, "https://mirror.test/yt-dlp");
+        assert_eq!(archive_url(), "https://mirror.test/yt-dlp");
+    }
+
+    #[test]
+    fn archive_url_blank_env_falls_back_to_github() {
+        let _lock = lock_env();
+        let _u = EnvGuard::set(YTDLP_URL_ENV, "  ");
+        let url = archive_url();
+        assert!(url.contains("github.com/yt-dlp/yt-dlp/releases"));
     }
 }

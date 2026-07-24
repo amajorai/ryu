@@ -75,6 +75,22 @@ pub async fn dispatch(http: &Client, tool: &str, arguments: Value) -> Result<Val
                 ));
             }
 
+            // SSRF egress screen: the webhook URL is MODEL-authored, so an
+            // https-only check still let an agent POST an arbitrary body at
+            // loopback / RFC1918 / cloud-metadata targets. Route it through the
+            // same guard web_fetch/spider use (`screen_agent_egress_url`) before
+            // any request; the https requirement above stays (the shared screen
+            // also accepts http). A screened-out URL returns a structured
+            // refusal so the agent's turn continues — `Err` stays reserved for
+            // malformed calls.
+            if let Err(reason) = crate::server::screen_agent_egress_url(url).await {
+                return Ok(json!({
+                    "ok": false,
+                    "blocked": true,
+                    "reason": reason.to_string()
+                }));
+            }
+
             // Gateway egress DLP gate (webhook-unify #4): route the text through
             // the same firewall the workflow `ChannelSend` node uses so this
             // agent-callable path can't be an ungoverned egress bypass. A tripped
@@ -141,5 +157,23 @@ mod tests {
         )
         .await;
         assert!(err.is_err(), "non-https webhook must be rejected");
+    }
+
+    #[tokio::test]
+    async fn private_ip_webhook_is_screened_out() {
+        // Default-on egress screen, IP-literal hosts (no DNS needed). Blocked
+        // targets come back as a structured refusal, not `Err`.
+        let http = Client::new();
+        for url in [
+            "https://169.254.169.254/hook",
+            "https://127.0.0.1/hook",
+            "https://10.0.0.1/hook",
+        ] {
+            let res = dispatch(&http, "send", json!({ "webhook_url": url, "text": "hi" }))
+                .await
+                .expect("screened-out URL must be a structured refusal, not Err");
+            assert_eq!(res["ok"], false, "{url} must not be ok");
+            assert_eq!(res["blocked"], true, "{url} must be blocked");
+        }
     }
 }

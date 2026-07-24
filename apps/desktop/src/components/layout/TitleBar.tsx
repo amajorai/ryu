@@ -67,9 +67,7 @@ import {
 } from "@ryu/ui/components/tooltip";
 import { cn } from "@ryu/ui/lib/utils";
 import {
-	createContext,
 	type DragEvent,
-	useContext,
 	useEffect,
 	useRef,
 	useState,
@@ -95,6 +93,7 @@ import { setTabLayout, useTabLayout } from "@/src/hooks/useTabLayout.ts";
 import { setTabSizing, useTabSizing } from "@/src/hooks/useTabSizing.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
+import { useTabDnd, useTabDragProps } from "./tabDnd.tsx";
 import { pathScrollsUnderTitlebar } from "./titlebarScroll.ts";
 
 // Sidebar toggle moved to the window's fixed top-left (see Layout), so its
@@ -106,82 +105,6 @@ const isMac = navigator.userAgent.includes("Mac");
 const DEFAULT_NODE_VALUE = "__default__";
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// Drag-to-reorder state, shared by every tab chip in the strip. `draggingId` is
-// the tab being dragged; `overId`/`dropBefore` mark which tab is hovered and on
-// which side the drop indicator should draw. `canDrop` gates drops to tabs of
-// the same pinned-state (pinned tabs reorder within their block, unpinned within
-// theirs) since `normalize` would otherwise snap a cross-block drop back anyway.
-interface TabDnd {
-	canDrop: (targetId: string) => boolean;
-	draggingId: string | null;
-	dropBefore: boolean;
-	onDrop: (id: string) => void;
-	onEnd: () => void;
-	onOver: (id: string, before: boolean) => void;
-	onStart: (id: string) => void;
-	overId: string | null;
-}
-
-const TabDndContext = createContext<TabDnd | null>(null);
-
-function useTabDnd(): TabDnd {
-	const ctx = useContext(TabDndContext);
-	if (!ctx) {
-		throw new Error("useTabDnd must be used inside the TitleBar tab strip");
-	}
-	return ctx;
-}
-
-// Owns the drag-to-reorder state for the whole strip and returns the value put
-// on TabDndContext. Kept out of the TitleBar body so that component stays simple.
-function useTabReorder(
-	tabs: Tab[],
-	moveTab: (draggedId: string, targetId: string, before: boolean) => void
-): TabDnd {
-	const [draggingId, setDraggingId] = useState<string | null>(null);
-	const [overId, setOverId] = useState<string | null>(null);
-	const [dropBefore, setDropBefore] = useState(true);
-
-	const canDrop = (targetId: string): boolean => {
-		if (!draggingId || draggingId === targetId) {
-			return false;
-		}
-		const dragged = tabs.find((t) => t.id === draggingId);
-		const target = tabs.find((t) => t.id === targetId);
-		// Keep pinned tabs reordering within the pinned block and unpinned within
-		// theirs — a cross-block drop would just be snapped back by normalize.
-		return (
-			!!dragged &&
-			!!target &&
-			Boolean(dragged.pinned) === Boolean(target.pinned)
-		);
-	};
-
-	const reset = () => {
-		setDraggingId(null);
-		setOverId(null);
-	};
-
-	return {
-		draggingId,
-		overId,
-		dropBefore,
-		onStart: setDraggingId,
-		onEnd: reset,
-		onOver: (id, before) => {
-			setOverId((prev) => (prev === id ? prev : id));
-			setDropBefore((prev) => (prev === before ? prev : before));
-		},
-		onDrop: (id) => {
-			if (draggingId && canDrop(id)) {
-				moveTab(draggingId, id, dropBefore);
-			}
-			reset();
-		},
-		canDrop,
-	};
-}
 
 // The vertical bar drawn in the gap beside the hovered tab to preview where the
 // dragged tab will land. The host element must be `relative`.
@@ -195,49 +118,6 @@ function DropIndicator({ side }: { side: "left" | "right" }) {
 			)}
 		/>
 	);
-}
-
-// Shared drag handlers + indicator flags for a single draggable tab chip. Keeps
-// the dragstart/dragover/drop wiring in one place so PinnedTab and RegularTab
-// stay in sync.
-function useTabDragProps(tabId: string) {
-	const dnd = useTabDnd();
-	const isDragging = dnd.draggingId === tabId;
-	const isOver = dnd.overId === tabId && dnd.draggingId !== tabId;
-	return {
-		isDragging,
-		showBefore: isOver && dnd.dropBefore,
-		showAfter: isOver && !dnd.dropBefore,
-		dragHandlers: {
-			draggable: true,
-			onDragStart: (e: DragEvent) => {
-				e.dataTransfer.effectAllowed = "move";
-				e.dataTransfer.setData("text/plain", tabId);
-				dnd.onStart(tabId);
-			},
-			onDragEnd: () => dnd.onEnd(),
-			onDragOver: (e: DragEvent) => {
-				if (
-					!dnd.draggingId ||
-					dnd.draggingId === tabId ||
-					!dnd.canDrop(tabId)
-				) {
-					return;
-				}
-				e.preventDefault();
-				e.dataTransfer.dropEffect = "move";
-				const rect = e.currentTarget.getBoundingClientRect();
-				dnd.onOver(tabId, e.clientX < rect.left + rect.width / 2);
-			},
-			onDrop: (e: DragEvent) => {
-				if (!dnd.draggingId) {
-					return;
-				}
-				e.preventDefault();
-				dnd.onDrop(tabId);
-			},
-		},
-	};
 }
 
 // Static Tailwind classes per group color. Kept literal (not interpolated) so
@@ -486,6 +366,7 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 		splits,
 		openTab,
 		splitTabs,
+		addTabToSplit,
 		removeFromSplit,
 		unsplit,
 		setSplitOrientation,
@@ -495,10 +376,6 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 	const candidates = tabs.filter(
 		(t) => t.id !== tab.id && !t.pinned && !t.splitId
 	);
-	// Current members of this tab's split, used to grow it to 3+ panes.
-	const members = split
-		? tabs.filter((t) => t.splitId === split.id).map((t) => t.id)
-		: [];
 
 	return (
 		<ContextMenuSub>
@@ -513,7 +390,7 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 							onValueChange={(value) =>
 								setSplitOrientation(split.id, value as SplitOrientation)
 							}
-							value={split.orientation}
+							value={split.root.orientation}
 						>
 							<ContextMenuRadioItem value="columns">
 								Side by side
@@ -521,12 +398,12 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 							<ContextMenuRadioItem value="rows">Stacked</ContextMenuRadioItem>
 						</ContextMenuRadioGroup>
 						<ContextMenuSeparator />
-						{/* Grow the split to 3+ panes: re-split with the existing members
-						    plus a new one (splitTabs rebuilds membership). */}
+						{/* Grow the split to 3+ panes: the new pane joins at the end of
+						    the root run, keeping any nested arrangement intact. */}
 						<ContextMenuItem
 							onClick={() => {
 								const id = openTab("/chat", { forceNew: true });
-								splitTabs([...members, id], split.orientation);
+								addTabToSplit(split.id, id);
 							}}
 						>
 							<HugeiconsIcon className="size-4" icon={Add01Icon} />
@@ -542,9 +419,7 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 									{candidates.map((c) => (
 										<ContextMenuItem
 											key={c.id}
-											onClick={() =>
-												splitTabs([...members, c.id], split.orientation)
-											}
+											onClick={() => addTabToSplit(split.id, c.id)}
 										>
 											<span className="max-w-[160px] truncate">{c.title}</span>
 										</ContextMenuItem>
@@ -1085,9 +960,10 @@ function GroupHeaderPill({ group }: { group: TabGroup }) {
 	);
 }
 
-// The leading chip of a split bracket: a split glyph that opens a context menu to
-// flip orientation or dissolve the split. `anyMemberId` is any tab in the split
-// (unsplit/orientation resolve the split from it).
+// The leading chip of a split bracket: a split glyph that opens a context menu
+// to flip orientation or dissolve the split, and a drop target — dragging any
+// other tab onto it joins that tab to the split as a new pane. `anyMemberId`
+// is any tab in the split (unsplit/orientation resolve the split from it).
 function SplitBracketHeader({
 	split,
 	anyMemberId,
@@ -1095,7 +971,14 @@ function SplitBracketHeader({
 	split: Split;
 	anyMemberId: string;
 }) {
-	const { setSplitOrientation, unsplit } = useTabsContext();
+	const { tabs, setSplitOrientation, unsplit, addTabToSplit } =
+		useTabsContext();
+	const dnd = useTabDnd();
+	const [joinHover, setJoinHover] = useState(false);
+	// Any dragged tab that isn't already a member can join by dropping here.
+	const canJoin =
+		!!dnd.draggingId &&
+		tabs.find((t) => t.id === dnd.draggingId)?.splitId !== split.id;
 	return (
 		<ContextMenu>
 			<Tooltip>
@@ -1104,7 +987,30 @@ function SplitBracketHeader({
 						<TooltipTrigger
 							render={
 								<button
-									className="flex h-6 shrink-0 items-center justify-center rounded-full px-1.5 text-primary/70 transition-colors hover:text-primary"
+									className={cn(
+										"flex h-6 shrink-0 items-center justify-center rounded-full px-1.5 text-primary/70 transition-colors hover:text-primary",
+										joinHover && "bg-primary/20 text-primary"
+									)}
+									onDragLeave={() => setJoinHover(false)}
+									onDragOver={(e: DragEvent) => {
+										if (!canJoin) {
+											return;
+										}
+										e.preventDefault();
+										e.stopPropagation();
+										e.dataTransfer.dropEffect = "move";
+										setJoinHover(true);
+									}}
+									onDrop={(e: DragEvent) => {
+										setJoinHover(false);
+										if (!(canJoin && dnd.draggingId)) {
+											return;
+										}
+										e.preventDefault();
+										e.stopPropagation();
+										addTabToSplit(split.id, dnd.draggingId);
+										dnd.onEnd();
+									}}
 									type="button"
 								>
 									<HugeiconsIcon className="size-3.5" icon={GridIcon} />
@@ -1113,14 +1019,16 @@ function SplitBracketHeader({
 						/>
 					}
 				/>
-				<TooltipContent>Split view</TooltipContent>
+				<TooltipContent>
+					{canJoin ? "Drop to add to split" : "Split view"}
+				</TooltipContent>
 			</Tooltip>
 			<ContextMenuContent>
 				<ContextMenuRadioGroup
 					onValueChange={(value) =>
 						setSplitOrientation(split.id, value as SplitOrientation)
 					}
-					value={split.orientation}
+					value={split.root.orientation}
 				>
 					<ContextMenuRadioItem value="columns">
 						Side by side
@@ -1204,7 +1112,6 @@ export function TitleBar() {
 		hasClosedTabs,
 		goBack,
 		goForward,
-		moveTab,
 		splits,
 		splitTabs,
 		unsplit,
@@ -1228,9 +1135,6 @@ export function TitleBar() {
 	const activePath = tabs.find((t) => t.id === activeTabId)?.path ?? "";
 	const isChatActive =
 		tabs.length === 0 || pathScrollsUnderTitlebar(activePath);
-
-	// Drag-to-reorder state for the strip (provided to every tab chip below).
-	const tabDnd = useTabReorder(tabs, moveTab);
 
 	// The Tauri decorum titlebar fix lives in App.tsx now — it runs permanently
 	// (a MutationObserver + window focus/resize) from the always-mounted root, so
@@ -1317,20 +1221,19 @@ export function TitleBar() {
 	}, [goBack, goForward]);
 
 	return (
-		<TabDndContext.Provider value={tabDnd}>
-			<div
-				// The bar lives inside the SidebarInset main area (m-2), so its
-				// items naturally center at mt-2 + h-12/2 ≈ 30.7px from the window
-				// top in inset mode. Floating mode has no SidebarInset margin, so add
-				// the same 8px top offset to keep the tab row aligned with the sidebar
-				// node selector and the fixed nav cluster (see Layout).
-				className={cn(
-					"absolute left-0 z-10 flex h-12 w-full items-center px-2",
-					floatingChromeOffset ? "top-2" : "top-0"
-				)}
-				data-tauri-drag-region
-			>
-				{/* On the chat page the content scrolls UNDER the titlebar, so it gets
+		<div
+			// The bar lives inside the SidebarInset main area (m-2), so its
+			// items naturally center at mt-2 + h-12/2 ≈ 30.7px from the window
+			// top in inset mode. Floating mode has no SidebarInset margin, so add
+			// the same 8px top offset to keep the tab row aligned with the sidebar
+			// node selector and the fixed nav cluster (see Layout).
+			className={cn(
+				"absolute left-0 z-10 flex h-12 w-full items-center px-2",
+				floatingChromeOffset ? "top-2" : "top-0"
+			)}
+			data-tauri-drag-region
+		>
+			{/* On the chat page the content scrolls UNDER the titlebar, so it gets
 				    the frosted "liquid glass" gradient that blurs + fades whatever
 				    scrolls beneath it. Every other page sits cleanly below the bar, so
 				    it gets a plain solid background instead (no pointless blur over the
@@ -1342,63 +1245,63 @@ export function TitleBar() {
 				    it. So in floating mode we cancel the wrapper's 8px offset (pull the
 				    layer back up by 8px) and grow its height by the same 8px, keeping the
 				    blur anchored at the window top with its fade ending where it did. */}
-				{isChatActive ? (
-					<ProgressiveBlur
-						backgroundColor="var(--background)"
-						blurAmount="12px"
-						className={floatingChromeOffset ? "-top-2!" : ""}
-						height={floatingChromeOffset ? "80px" : "72px"}
-						position="top"
-					/>
-				) : (
-					<div
-						aria-hidden
-						className={cn(
-							"pointer-events-none absolute left-0 w-full bg-background",
-							floatingChromeOffset ? "-top-2 h-14" : "top-0 h-12"
-						)}
-					/>
-				)}
+			{isChatActive ? (
+				<ProgressiveBlur
+					backgroundColor="var(--background)"
+					blurAmount="12px"
+					className={floatingChromeOffset ? "-top-2!" : ""}
+					height={floatingChromeOffset ? "80px" : "72px"}
+					position="top"
+				/>
+			) : (
 				<div
-					className="relative z-10 flex w-full flex-row items-center gap-2"
-					data-tauri-drag-region
-				>
-					{/* Back/forward + the sidebar toggle are pinned at the window's
+					aria-hidden
+					className={cn(
+						"pointer-events-none absolute left-0 w-full bg-background",
+						floatingChromeOffset ? "-top-2 h-14" : "top-0 h-12"
+					)}
+				/>
+			)}
+			<div
+				className="relative z-10 flex w-full flex-row items-center gap-2"
+				data-tauri-drag-region
+			>
+				{/* Back/forward + the sidebar toggle are pinned at the window's
 					    top-left (fixed, in Layout) so the whole nav cluster survives
 					    sidebar collapse and never eats tab-strip space. When the sidebar
 					    is docked the cluster floats over the sidebar and the strip needs
 					    no offset. When collapsed the titlebar spans the full window, so
 					    reserve room on the left for the cluster (and, on macOS, the
 					    traffic lights). */}
-					{!open && (
-						<div
-							aria-hidden
-							className={cn("shrink-0", isMac ? "w-48" : "w-40")}
-							data-tauri-drag-region
-						/>
-					)}
+				{!open && (
+					<div
+						aria-hidden
+						className={cn("shrink-0", isMac ? "w-48" : "w-40")}
+						data-tauri-drag-region
+					/>
+				)}
 
-					{/* Tab strip — scrollable, fills remaining space. Hidden in
+				{/* Tab strip — scrollable, fills remaining space. Hidden in
 					    vertical-tabs mode, where the sidebar's Tabs section owns it. */}
-					{tabLayout === "vertical" ? (
-						<div className="min-w-0 flex-1" data-tauri-drag-region />
-					) : (
-						<ContextMenu>
-							<ContextMenuTrigger
-								className="flex min-w-0 flex-1 items-center"
-								data-tauri-drag-region
-							>
-								{/* Wrapper sizes to content but is capped at the available width
+				{tabLayout === "vertical" ? (
+					<div className="min-w-0 flex-1" data-tauri-drag-region />
+				) : (
+					<ContextMenu>
+						<ContextMenuTrigger
+							className="flex min-w-0 flex-1 items-center"
+							data-tauri-drag-region
+						>
+							{/* Wrapper sizes to content but is capped at the available width
 								    (max-w 100%). So the + button follows the last tab while they
 								    fit, and once the tabs' total content would exceed the bar the
 								    wrapper caps at 100% — in "fit" mode the shrinkable tabs then
 								    trim to fit, in "fixed" mode they keep size and the strip
 								    scrolls. */}
-								<div
-									className="flex min-w-0 items-center"
-									style={{ flex: "0 1 max-content", maxWidth: "100%" }}
-								>
-									{/* Fixed h-8 clip wrapper: the inner strip is allowed to grow
+							<div
+								className="flex min-w-0 items-center"
+								style={{ flex: "0 1 max-content", maxWidth: "100%" }}
+							>
+								{/* Fixed h-8 clip wrapper: the inner strip is allowed to grow
 								    taller than h-8 (via pb-8) so the horizontal scrollbar renders
 								    in the bottom padding band, BELOW the 32px visible row, and is
 								    then clipped away by this overflow-hidden box. That keeps the
@@ -1408,207 +1311,204 @@ export function TitleBar() {
 								    align-items:center then centers the tabs in the unpadded 32px
 								    content box, leaving the padding band (and its scrollbar) below.
 								    Overflow is also reached via the wheel handler + scrollIntoView. */}
-									<div className="flex h-8 min-w-0 flex-1 items-start overflow-hidden">
-										<div
-											className="group/tabstrip flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-hidden pb-8 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-											data-tauri-drag-region={false}
-											onWheel={handleTabStripWheel}
-											ref={scrollRef}
-										>
-											{/* Pinned tabs lead, as compact icon-only chips */}
-											{pinnedTabs.map((tab) => (
-												<PinnedTab
-													isActive={tab.id === activeTabId}
-													key={tab.id}
-													tab={tab}
-												/>
-											))}
+								<div className="flex h-8 min-w-0 flex-1 items-start overflow-hidden">
+									<div
+										className="group/tabstrip flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-hidden pb-8 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+										data-tauri-drag-region={false}
+										onWheel={handleTabStripWheel}
+										ref={scrollRef}
+									>
+										{/* Pinned tabs lead, as compact icon-only chips */}
+										{pinnedTabs.map((tab) => (
+											<PinnedTab
+												isActive={tab.id === activeTabId}
+												key={tab.id}
+												tab={tab}
+											/>
+										))}
 
-											{/* Then ungrouped tabs, group brackets, and split brackets */}
-											{segments.map((seg) => {
-												if (seg.type === "tab") {
-													return (
-														<RegularTab
-															inGroup={false}
-															isActive={seg.tab.id === activeTabId}
-															key={seg.tab.id}
-															tab={seg.tab}
-														/>
-													);
-												}
-												if (seg.type === "split") {
-													return (
-														<div
-															className="flex shrink-0 items-center gap-1 rounded-2xl bg-primary/5 px-1 py-0.5 ring-1 ring-primary/30"
-															key={seg.split.id}
-														>
-															<SplitBracketHeader
-																anyMemberId={seg.members[0]?.id ?? ""}
-																split={seg.split}
-															/>
-															{seg.members.map((tab) => (
-																<RegularTab
-																	inGroup
-																	isActive={tab.id === activeTabId}
-																	key={tab.id}
-																	tab={tab}
-																/>
-															))}
-														</div>
-													);
-												}
-												const colors = GROUP_COLOR_CLASSES[seg.group.color];
+										{/* Then ungrouped tabs, group brackets, and split brackets */}
+										{segments.map((seg) => {
+											if (seg.type === "tab") {
+												return (
+													<RegularTab
+														inGroup={false}
+														isActive={seg.tab.id === activeTabId}
+														key={seg.tab.id}
+														tab={seg.tab}
+													/>
+												);
+											}
+											if (seg.type === "split") {
 												return (
 													<div
-														className={cn(
-															"flex shrink-0 items-center gap-1 rounded-2xl px-1 py-0.5 ring-1",
-															colors.container
-														)}
-														key={seg.group.id}
+														className="flex shrink-0 items-center gap-1 rounded-2xl bg-primary/5 px-1 py-0.5 ring-1 ring-primary/30"
+														key={seg.split.id}
 													>
-														<GroupHeaderPill group={seg.group} />
-														{!seg.group.collapsed &&
-															seg.members.map((tab) => (
-																<RegularTab
-																	inGroup
-																	isActive={tab.id === activeTabId}
-																	key={tab.id}
-																	tab={tab}
-																/>
-															))}
+														<SplitBracketHeader
+															anyMemberId={seg.members[0]?.id ?? ""}
+															split={seg.split}
+														/>
+														{seg.members.map((tab) => (
+															<RegularTab
+																inGroup
+																isActive={tab.id === activeTabId}
+																key={tab.id}
+																tab={tab}
+															/>
+														))}
 													</div>
 												);
-											})}
-										</div>
+											}
+											const colors = GROUP_COLOR_CLASSES[seg.group.color];
+											return (
+												<div
+													className={cn(
+														"flex shrink-0 items-center gap-1 rounded-2xl px-1 py-0.5 ring-1",
+														colors.container
+													)}
+													key={seg.group.id}
+												>
+													<GroupHeaderPill group={seg.group} />
+													{!seg.group.collapsed &&
+														seg.members.map((tab) => (
+															<RegularTab
+																inGroup
+																isActive={tab.id === activeTabId}
+																key={tab.id}
+																tab={tab}
+															/>
+														))}
+												</div>
+											);
+										})}
 									</div>
-
-									{/* New tab button — outside the scroll container, always visible */}
-									<button
-										aria-label="New chat tab"
-										className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground"
-										data-tauri-drag-region={false}
-										onClick={handleNewTab}
-										type="button"
-									>
-										<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
-									</button>
 								</div>
-							</ContextMenuTrigger>
-							<ContextMenuContent>
-								<ContextMenuItem onClick={handleNewTab}>
-									<HugeiconsIcon className="size-4" icon={Add01Icon} />
-									New tab
-								</ContextMenuItem>
-								<ContextMenuItem disabled={!hasClosedTabs} onClick={restoreTab}>
-									<HugeiconsIcon
-										className="size-4"
-										icon={ArrowTurnBackwardIcon}
-									/>
-									Restore closed tab
-								</ContextMenuItem>
-								<ContextMenuSeparator />
-								<ContextMenuItem
-									disabled={!activeTabId}
-									onClick={toggleSplitActive}
+
+								{/* New tab button — outside the scroll container, always visible */}
+								<button
+									aria-label="New chat tab"
+									className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground"
+									data-tauri-drag-region={false}
+									onClick={handleNewTab}
+									type="button"
 								>
-									<HugeiconsIcon className="size-4" icon={GridIcon} />
-									{activeTabId && findSplit(tabs, splits, activeTabId)
-										? "Unsplit active tab"
-										: "Split active tab"}
-								</ContextMenuItem>
-								<ContextMenuItem
-									onClick={() =>
-										setTabSizing(tabSizing === "fit" ? "fixed" : "fit")
-									}
-								>
-									<HugeiconsIcon
-										className="size-4"
-										icon={
-											tabSizing === "fit" ? UnfoldMoreIcon : ArrowShrinkIcon
-										}
-									/>
-									{tabSizing === "fit"
-										? "Use fixed-width tabs"
-										: "Fit tabs to width"}
-								</ContextMenuItem>
-								{/* The strip only renders in horizontal mode, so this always
+									<HugeiconsIcon className="size-3.5" icon={Add01Icon} />
+								</button>
+							</div>
+						</ContextMenuTrigger>
+						<ContextMenuContent>
+							<ContextMenuItem onClick={handleNewTab}>
+								<HugeiconsIcon className="size-4" icon={Add01Icon} />
+								New tab
+							</ContextMenuItem>
+							<ContextMenuItem disabled={!hasClosedTabs} onClick={restoreTab}>
+								<HugeiconsIcon
+									className="size-4"
+									icon={ArrowTurnBackwardIcon}
+								/>
+								Restore closed tab
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+							<ContextMenuItem
+								disabled={!activeTabId}
+								onClick={toggleSplitActive}
+							>
+								<HugeiconsIcon className="size-4" icon={GridIcon} />
+								{activeTabId && findSplit(tabs, splits, activeTabId)
+									? "Unsplit active tab"
+									: "Split active tab"}
+							</ContextMenuItem>
+							<ContextMenuItem
+								onClick={() =>
+									setTabSizing(tabSizing === "fit" ? "fixed" : "fit")
+								}
+							>
+								<HugeiconsIcon
+									className="size-4"
+									icon={tabSizing === "fit" ? UnfoldMoreIcon : ArrowShrinkIcon}
+								/>
+								{tabSizing === "fit"
+									? "Use fixed-width tabs"
+									: "Fit tabs to width"}
+							</ContextMenuItem>
+							{/* The strip only renders in horizontal mode, so this always
 							    switches to vertical. */}
-								<ContextMenuItem onClick={() => setTabLayout("vertical")}>
-									<HugeiconsIcon className="size-4" icon={SidebarLeftIcon} />
-									Use vertical tabs
-								</ContextMenuItem>
-								<ContextMenuSeparator />
-								<ContextMenuItem
-									disabled={tabs.findIndex((t) => t.id === activeTabId) === 0}
-									onClick={() => {
-										const idx = tabs.findIndex((t) => t.id === activeTabId);
-										for (const t of tabs.slice(0, idx)) {
-											if (!t.pinned) {
-												closeTab(t.id);
-											}
-										}
-									}}
-								>
-									<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
-									Close tabs to the left
-								</ContextMenuItem>
-								<ContextMenuItem
-									disabled={
-										tabs.findIndex((t) => t.id === activeTabId) ===
-										tabs.length - 1
-									}
-									onClick={() => {
-										const idx = tabs.findIndex((t) => t.id === activeTabId);
-										for (const t of tabs.slice(idx + 1)) {
-											if (!t.pinned) {
-												closeTab(t.id);
-											}
-										}
-									}}
-								>
-									<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
-									Close tabs to the right
-								</ContextMenuItem>
-								<ContextMenuSeparator />
-								<ContextMenuItem
-									disabled={tabs.length === 0}
-									onClick={() => {
-										for (const t of [...tabs]) {
+							<ContextMenuItem onClick={() => setTabLayout("vertical")}>
+								<HugeiconsIcon className="size-4" icon={SidebarLeftIcon} />
+								Use vertical tabs
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+							<ContextMenuItem
+								disabled={tabs.findIndex((t) => t.id === activeTabId) === 0}
+								onClick={() => {
+									const idx = tabs.findIndex((t) => t.id === activeTabId);
+									for (const t of tabs.slice(0, idx)) {
+										if (!t.pinned) {
 											closeTab(t.id);
 										}
-									}}
-								>
-									<HugeiconsIcon className="size-4" icon={Delete02Icon} />
-									Close all tabs
-								</ContextMenuItem>
-							</ContextMenuContent>
-						</ContextMenu>
-					)}
+									}
+								}}
+							>
+								<HugeiconsIcon className="size-4" icon={ArrowLeft01Icon} />
+								Close tabs to the left
+							</ContextMenuItem>
+							<ContextMenuItem
+								disabled={
+									tabs.findIndex((t) => t.id === activeTabId) ===
+									tabs.length - 1
+								}
+								onClick={() => {
+									const idx = tabs.findIndex((t) => t.id === activeTabId);
+									for (const t of tabs.slice(idx + 1)) {
+										if (!t.pinned) {
+											closeTab(t.id);
+										}
+									}
+								}}
+							>
+								<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
+								Close tabs to the right
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+							<ContextMenuItem
+								disabled={tabs.length === 0}
+								onClick={() => {
+									for (const t of [...tabs]) {
+										closeTab(t.id);
+									}
+								}}
+							>
+								<HugeiconsIcon className="size-4" icon={Delete02Icon} />
+								Close all tabs
+							</ContextMenuItem>
+						</ContextMenuContent>
+					</ContextMenu>
+				)}
 
-					{/* Spacer so actions hug the right edge */}
+				{/* Spacer so actions hug the right edge */}
+				<div
+					className="flex-shrink-0 flex-grow-0"
+					data-tauri-drag-region
+					style={{ minWidth: 0 }}
+				/>
+
+				{/* Right-side page actions — offset clears Windows titlebar buttons */}
+				{actions && (
 					<div
-						className="flex-shrink-0 flex-grow-0"
-						data-tauri-drag-region
-						style={{ minWidth: 0 }}
-					/>
-
-					{/* Right-side page actions — offset clears Windows titlebar buttons */}
-					{actions && (
-						<div
-							className={cn(
-								"ryu-chrome-shadow relative inset-shadow-sm z-50 flex shrink-0 flex-row items-center gap-1 rounded-2xl bg-background/50 px-1 shadow-lg ring-1 ring-black/5 dark:ring-white/10",
-								// Windows caption buttons (min/max/close) sit at the top-right;
-								// give the page actions wide clearance so they never crowd them.
-								// macOS keeps its controls on the left, so only a small inset.
-								isMac ? "mr-2" : "mr-48"
-							)}
-							data-tauri-drag-region={false}
-						>
-							{actions}
-						</div>
-					)}
-				</div>
+						className={cn(
+							"ryu-chrome-shadow relative inset-shadow-sm z-50 flex shrink-0 flex-row items-center gap-1 rounded-2xl bg-background/50 px-1 shadow-lg ring-1 ring-black/5 dark:ring-white/10",
+							// Windows caption buttons (min/max/close) sit at the top-right;
+							// give the page actions wide clearance so they never crowd them.
+							// macOS keeps its controls on the left, so only a small inset.
+							isMac ? "mr-2" : "mr-48"
+						)}
+						data-tauri-drag-region={false}
+					>
+						{actions}
+					</div>
+				)}
 			</div>
-		</TabDndContext.Provider>
+		</div>
 	);
 }

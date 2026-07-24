@@ -11,31 +11,39 @@ import {
 	defineRegistry,
 	useBoundProp,
 } from "@json-render/react";
-import { Alert, AlertDescription, AlertTitle } from "@ryu/ui/components/alert";
-import { Avatar, AvatarFallback, AvatarImage } from "@ryu/ui/components/avatar";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
+import {
+	Alert,
+	AlertDescription,
+	AlertTitle,
+} from "@ryu/ui/components/alert.tsx";
+import {
+	Avatar,
+	AvatarFallback,
+	AvatarImage,
+} from "@ryu/ui/components/avatar.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Card,
 	CardContent,
 	CardDescription,
 	CardHeader,
 	CardTitle,
-} from "@ryu/ui/components/card";
-import { Checkbox } from "@ryu/ui/components/checkbox";
-import { Input } from "@ryu/ui/components/input";
-import { Label } from "@ryu/ui/components/label";
-import { Progress } from "@ryu/ui/components/progress";
+} from "@ryu/ui/components/card.tsx";
+import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Label } from "@ryu/ui/components/label.tsx";
+import { Progress } from "@ryu/ui/components/progress.tsx";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@ryu/ui/components/select";
-import { Separator } from "@ryu/ui/components/separator";
-import { Skeleton } from "@ryu/ui/components/skeleton";
-import { Switch } from "@ryu/ui/components/switch";
+} from "@ryu/ui/components/select.tsx";
+import { Separator } from "@ryu/ui/components/separator.tsx";
+import { Skeleton } from "@ryu/ui/components/skeleton.tsx";
+import { Switch } from "@ryu/ui/components/switch.tsx";
 import {
 	Table,
 	TableBody,
@@ -43,9 +51,9 @@ import {
 	TableHead,
 	TableHeader,
 	TableRow,
-} from "@ryu/ui/components/table";
-import { Textarea } from "@ryu/ui/components/textarea";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/table.tsx";
+import { Textarea } from "@ryu/ui/components/textarea.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 import { agentUiCatalog } from "./catalog.ts";
 

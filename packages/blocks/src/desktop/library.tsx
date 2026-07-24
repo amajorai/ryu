@@ -19,27 +19,27 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
-import { ViewToggle } from "@ryu/blocks/desktop/view-toggle";
-import { Badge } from "@ryu/ui/components/badge";
-import { Button } from "@ryu/ui/components/button";
-import { Card, CardContent, CardHeader } from "@ryu/ui/components/card";
+import type { ViewMode } from "@ryu/blocks/desktop/view-toggle.tsx";
+import { ViewToggle } from "@ryu/blocks/desktop/view-toggle.tsx";
+import { Badge } from "@ryu/ui/components/badge.tsx";
+import { Button } from "@ryu/ui/components/button.tsx";
+import { Card, CardContent, CardHeader } from "@ryu/ui/components/card.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
-} from "@ryu/ui/components/dropdown-menu";
+} from "@ryu/ui/components/dropdown-menu.tsx";
 import {
 	Empty,
 	EmptyDescription,
 	EmptyHeader,
 	EmptyMedia,
 	EmptyTitle,
-} from "@ryu/ui/components/empty";
-import { Input } from "@ryu/ui/components/input";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { cn } from "@ryu/ui/lib/utils";
+} from "@ryu/ui/components/empty.tsx";
+import { Input } from "@ryu/ui/components/input.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 /** A sort option shown in the toolbar's sort dropdown. */
@@ -216,19 +216,29 @@ function FavoriteStar({
 	);
 }
 
-/** Container that lays its children out as a responsive grid or a flat list. */
+/** Container that lays its children out as a responsive grid or a flat list.
+ *  `columns` caps the grid width: 2 mirrors the Store's centered card grid
+ *  (`sm:grid-cols-2`), 3 (default) is the wider standalone layout. */
 export function LibraryGrid({
 	children,
 	view = "grid",
+	columns = 3,
 }: {
 	children: ReactNode;
 	view?: ViewMode;
+	columns?: 2 | 3;
 }) {
 	if (view === "list") {
 		return <div className="flex flex-col gap-1.5">{children}</div>;
 	}
 	return (
-		<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+		<div
+			className={
+				columns === 2
+					? "grid grid-cols-1 gap-3 sm:grid-cols-2"
+					: "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+			}
+		>
 			{children}
 		</div>
 	);

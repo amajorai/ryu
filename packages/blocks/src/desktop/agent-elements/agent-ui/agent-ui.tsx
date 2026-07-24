@@ -13,7 +13,7 @@ import {
 	Renderer,
 	type Spec,
 } from "@json-render/react";
-import { cn } from "@ryu/ui/lib/utils";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { Component, type ReactNode } from "react";
 import { registry } from "./registry.tsx";
 

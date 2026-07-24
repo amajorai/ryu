@@ -600,6 +600,9 @@ impl rmcp::ServerHandler for RyuMcpHandler {
             _ => self
                 .mcp
                 .call_tool_with_identity(
+                    // The calling agent, so its configured `approval_tools`
+                    // (policy Layer A) feed the approval gate.
+                    Some(&self.agent_id),
                     tool_id,
                     args,
                     self.allowlist.as_deref(),
@@ -725,8 +728,7 @@ pub(crate) async fn build_widget_event(
 
     // Real tool-call id when the caller has one (the chat loop); otherwise the
     // synthetic instance-derived id (the ACP bridge, which cannot see it).
-    let tool_call_id =
-        tool_call_id.unwrap_or_else(|| format!("wgtcall_{}", instance.instance_id));
+    let tool_call_id = tool_call_id.unwrap_or_else(|| format!("wgtcall_{}", instance.instance_id));
 
     Some(ToolWidgetEvent {
         tool_call_id,
@@ -804,15 +806,14 @@ pub(crate) async fn build_widget_event(
 ///    on reload. `widgetState` (`POST /api/widgets/state`) lives only in the
 ///    in-memory `WidgetInstanceStore` and is replayed to the *iframe*, not the model.
 ///
-/// KNOWN PRE-EXISTING GAP (not this function's, and not introduced here): the
-/// OpenAI-compat chat tool loop folds its raw tool result into a `role:"tool"`
-/// message with **no** [`neutralize_external_result`] equivalent
-/// (`adapters/mod.rs`, the `oai_messages.push({"role":"tool"…})` after
-/// `exec_chat_tool`). That model edge was already un-neutralized before the widget
-/// channel was split, so this change neither causes nor worsens it — but it should
-/// be closed at *that* model edge, not by re-neutralizing the widget channel.
+/// The OpenAI-compat chat tool loop (`adapters/mod.rs`, the
+/// `oai_messages.push({"role":"tool"…})` after `exec_chat_tool`) is the third
+/// model edge; it folds through [`neutralize_external_result`] too (gap closed
+/// 2026-07-23 — it used to re-enter raw).
 fn widget_payload(typed: McpToolResult) -> (Value, Value) {
-    let mut meta = typed.meta.unwrap_or_else(|| Value::Object(Default::default()));
+    let mut meta = typed
+        .meta
+        .unwrap_or_else(|| Value::Object(Default::default()));
     if let Some(obj) = meta.as_object_mut() {
         obj.remove("ryu/widget");
     }
@@ -831,8 +832,10 @@ fn widget_payload(typed: McpToolResult) -> (Value, Value) {
 /// **This is the ACP plane's model edge, and it is the only place the ACP tool
 /// result is neutralized.** The widget channel ([`widget_payload`]) deliberately
 /// does NOT neutralize — see that function's doc comment for the full trace. Keep
-/// the boundary here; do not push it back onto widget delivery.
-fn neutralize_external_result(tool_id: &str, text: String) -> String {
+/// the boundary here; do not push it back onto widget delivery. `pub(crate)` so
+/// the OpenAI-compat tool loop (`adapters/mod.rs`) folds through the SAME edge
+/// instead of growing a divergent copy.
+pub(crate) fn neutralize_external_result(tool_id: &str, text: String) -> String {
     let is_external = !matches!(tool_id, "tool_search" | "describe");
     if is_external && untrusted::is_enabled() {
         untrusted::neutralize(&text)
@@ -990,11 +993,17 @@ mod tests {
             "the widget renders text verbatim; the model never sees this value"
         );
         assert_eq!(tool_output["reviews"][1]["body"], Value::Null);
-        assert_eq!(tool_output["nested"]["deep"]["leaf"], json!("still a string"));
+        assert_eq!(
+            tool_output["nested"]["deep"]["leaf"],
+            json!("still a string")
+        );
         assert_eq!(meta["provider"], json!("acme-places"));
         assert_eq!(meta["counts"], json!([1, 2, 3]));
         // `ryu/widget` is Core-internal and is stripped from `toolResponseMetadata`.
-        assert!(meta.get("ryu/widget").is_none(), "ryu/widget must be stripped");
+        assert!(
+            meta.get("ryu/widget").is_none(),
+            "ryu/widget must be stripped"
+        );
 
         // 2. MODEL EDGE, same result: still wrapped AND template-token-stripped.
         // This is the value the ACP `call_tool` folds back into model context.
@@ -1005,7 +1014,10 @@ mod tests {
             !model_text.contains("<|im_start|>"),
             "the model-facing fold must still strip chat-template tokens"
         );
-        assert!(model_text.contains("Pizza Palace"), "benign content survives");
+        assert!(
+            model_text.contains("Pizza Palace"),
+            "benign content survives"
+        );
     }
 
     #[test]
@@ -1026,7 +1038,11 @@ mod tests {
             tool_output,
             json!({ "quests": [{ "title": "Ship the widget fix" }] })
         );
-        assert_eq!(meta, json!({}), "only ryu/widget was present, so meta empties");
+        assert_eq!(
+            meta,
+            json!({}),
+            "only ryu/widget was present, so meta empties"
+        );
     }
 
     #[test]
@@ -1154,5 +1170,79 @@ mod tests {
             out.get("results").and_then(Value::as_array).is_some(),
             "envelope must carry a `results` array: {out}"
         );
+    }
+
+    // ── Function-def shaping (meta-tools + composio) ─────────────────────────
+
+    #[test]
+    fn meta_tool_defs_declare_required_params() {
+        // tool_search REQUIRES `query`; describe REQUIRES `id`. The model relies on
+        // these `required` arrays to call the meta-tools correctly.
+        let search = tool_search_def();
+        assert_eq!(search["function"]["name"], json!("tool_search"));
+        assert_eq!(
+            search["function"]["parameters"]["required"],
+            json!(["query"])
+        );
+        let describe = describe_tool_def();
+        assert_eq!(describe["function"]["name"], json!("describe"));
+        assert_eq!(describe["function"]["parameters"]["required"], json!(["id"]));
+    }
+
+    #[test]
+    fn composio_def_namespaces_slug_and_takes_freeform_arguments() {
+        let def = composio_def("SLACK_SEND_MESSAGE");
+        assert_eq!(
+            def["function"]["name"],
+            json!("composio__SLACK_SEND_MESSAGE")
+        );
+        // The full action schema is NOT pre-listed — the model passes a freeform
+        // `arguments` object (mirrors catalog::describe's shallow Composio shape).
+        let props = &def["function"]["parameters"]["properties"];
+        assert_eq!(props["arguments"]["type"], json!("object"));
+        // Shallow: no `required` list is imposed on the freeform action.
+        assert!(def["function"]["parameters"].get("required").is_none());
+    }
+
+    #[test]
+    fn params_map_extracts_parameters_object_and_defaults_empty() {
+        // The full parameters object is pulled out verbatim for rmcp `Tool::new`.
+        let params = params_map(&tool_search_def());
+        assert_eq!(params.get("type"), Some(&json!("object")));
+        assert!(params.contains_key("properties"));
+        // A def with no `function.parameters` yields an empty map (never panics).
+        let bare = json!({ "function": { "name": "x" } });
+        assert!(params_map(&bare).is_empty());
+        // A wholly-unexpected shape also yields an empty map.
+        assert!(params_map(&json!("not a def")).is_empty());
+    }
+
+    #[test]
+    fn tool_from_def_carries_name_and_description() {
+        let tool = tool_from_def(&composio_def("GITHUB_CREATE_ISSUE"));
+        assert_eq!(tool.name.as_ref(), "composio__GITHUB_CREATE_ISSUE");
+        assert!(
+            tool.description
+                .as_ref()
+                .is_some_and(|d| d.contains("GITHUB_CREATE_ISSUE")),
+            "description carries the action slug"
+        );
+        // The parameters schema round-trips through params_map onto the Tool.
+        assert!(tool.input_schema.contains_key("properties"));
+    }
+
+    #[test]
+    fn neutralize_external_result_empty_string_still_wrapped_when_enabled() {
+        let _guard = untrusted::FLAG_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        untrusted::set_enabled("true");
+        // An empty external result is still enclosed in the untrusted boundary so
+        // the model can never confuse "no output" for trusted whitespace.
+        let out = neutralize_external_result("exa__search", String::new());
+        assert!(out.starts_with(untrusted::UNTRUSTED_OPEN));
+        assert!(out.ends_with(untrusted::UNTRUSTED_CLOSE));
+        // Restore default-ON for sibling tests.
+        untrusted::set_enabled("true");
     }
 }

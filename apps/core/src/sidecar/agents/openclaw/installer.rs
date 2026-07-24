@@ -70,3 +70,21 @@ pub async fn ensure_installed() -> Result<()> {
     tracing::info!("openclaw installed at {}", dest.display());
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_path_uses_npm_wrapper_under_ryu_bin() {
+        let p = binary_path();
+        assert_eq!(p, bin_path());
+        // npm drops a `.cmd` wrapper on Windows, a plain shim elsewhere — both in bin/.
+        assert!(p.ends_with(if cfg!(target_os = "windows") {
+            "openclaw.cmd"
+        } else {
+            "openclaw"
+        }));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
+    }
+}

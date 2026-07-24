@@ -9,7 +9,10 @@
 // the client-side view exposed to React components. The internal symbol names
 // (App*, fetchApps, etc.) are kept stable to limit churn across importers.
 
-import type { ViewContribution } from "@ryu/app-host/views";
+import type {
+	SidebarSectionSpec,
+	ViewContribution,
+} from "@ryu/app-host/views";
 import {
 	type ApiTarget,
 	apiUrl,
@@ -406,6 +409,35 @@ export interface PluginContributions {
 	 *  {@link ViewContribution} the desktop/island renderer maps to native components,
 	 *  tagged server-side with its owning `plugin` id. */
 	views: PluginView[];
+	/** App-registered sidebar sections (header + live list), tagged with `plugin`. */
+	sidebar_sections: PluginSidebarSection[];
+	/** App-registered sidebar buttons (single nav rows), tagged with `plugin`. */
+	sidebar_buttons: PluginSidebarButton[];
+}
+
+/** An app-registered sidebar SECTION as served by Core (`contributes.sidebar_sections[]`),
+ *  tagged with its owning `plugin`. The `spec` is the shared {@link SidebarSectionSpec}. */
+export interface PluginSidebarSection {
+	icon?: string;
+	id: string;
+	order?: number;
+	/** The owning plugin's manifest id (added by Core's contributions endpoint). */
+	plugin: string;
+	spec?: SidebarSectionSpec;
+	title: string;
+}
+
+/** An app-registered sidebar BUTTON as served by Core (`contributes.sidebar_buttons[]`),
+ *  tagged with its owning `plugin`. A single nav row that opens `target`. */
+export interface PluginSidebarButton {
+	icon?: string;
+	id: string;
+	order?: number;
+	/** The owning plugin's manifest id (added by Core's contributions endpoint). */
+	plugin: string;
+	/** Client route the button opens (e.g. "/library/memory"). */
+	target: string;
+	title: string;
 }
 
 /** A declarative-view contribution as served by Core (`contributes.views[]`), tagged
@@ -525,6 +557,8 @@ export async function getPluginContributions(
 		slash_commands: json.slash_commands ?? [],
 		turn_hooks: json.turn_hooks ?? [],
 		views: json.views ?? [],
+		sidebar_sections: json.sidebar_sections ?? [],
+		sidebar_buttons: json.sidebar_buttons ?? [],
 		channels: json.channels ?? [],
 		companions: (json.companions ?? []).map(toPluginCompanion),
 	};
@@ -1019,10 +1053,14 @@ export interface CatalogEntry {
 	kinds: string[];
 	name: string;
 	permission_grants: string[];
+	/** The bundled sub-items this item ships (the manifest runnables). */
+	runnables?: { id: string; kind: string; name?: string }[];
 	source: string;
 	/** Short one-line pitch shown under the name. */
 	tagline?: string | null;
 	tags: string[];
+	/** Explicit app-vs-plugin discriminator (preferred over the kinds derivation). */
+	type?: "app" | "plugin";
 	version: string;
 }
 

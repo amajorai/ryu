@@ -42,10 +42,7 @@ impl TeamsCtx {
 pub fn routes(ctx: TeamsCtx) -> Router<()> {
     Router::new()
         .route("/", get(list_teams).post(create_team))
-        .route(
-            "/:id",
-            get(get_team).patch(update_team).delete(delete_team),
-        )
+        .route("/:id", get(get_team).patch(update_team).delete(delete_team))
         .route("/:id/members", post(add_team_member))
         .route("/:id/members/:agent_id", delete(remove_team_member))
         .with_state(ctx)

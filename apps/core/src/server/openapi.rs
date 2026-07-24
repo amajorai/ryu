@@ -396,7 +396,6 @@ use utoipa::OpenApi;
         super::notifications_api::register_push_token,
         super::notifications_api::remove_push_token,
         // Plugins
-        super::widgets::apps_ui_bundle,
         super::fire_activation_event_handler,
         super::install_app_bundle,
         super::install_plugin_from_catalog,

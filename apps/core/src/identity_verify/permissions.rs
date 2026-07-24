@@ -148,10 +148,9 @@ mod tests {
     #[test]
     fn viewer_set_is_exactly_the_four_keys() {
         let viewer = permissions_for_role(OrgRole::Viewer);
-        let expected: HashSet<&str> =
-            ["gateway.view", "workflow.view", "space.read", "agent.view"]
-                .into_iter()
-                .collect();
+        let expected: HashSet<&str> = ["gateway.view", "workflow.view", "space.read", "agent.view"]
+            .into_iter()
+            .collect();
         assert_eq!(viewer, expected);
     }
 

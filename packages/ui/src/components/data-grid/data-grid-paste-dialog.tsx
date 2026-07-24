@@ -128,7 +128,7 @@ function PasteDialogImpl({
 					</label>
 				</div>
 				<DialogFooter>
-					<Button onClick={onCancel} variant="outline">
+					<Button onClick={onCancel} variant="ghost">
 						Cancel
 					</Button>
 					<Button onClick={onContinue}>Continue</Button>

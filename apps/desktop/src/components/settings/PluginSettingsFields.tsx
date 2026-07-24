@@ -14,7 +14,6 @@
 // Used by two surfaces: inline on the Store's installed plugin card (the
 // per-plugin "Settings" disclosure) and the App Settings "Plugins" section.
 
-import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import {
 	Select,
@@ -26,9 +25,9 @@ import {
 import { toast } from "@ryu/ui/components/sileo";
 import { Switch } from "@ryu/ui/components/switch";
 import { Textarea } from "@ryu/ui/components/textarea";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { AgentModelPickerField } from "@/components/agent-elements/input/agent-model-picker-field.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
-import { fetchPiCatalog } from "@/src/lib/api/pi-config.ts";
 import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
 import {
 	type PluginSettingsField,
@@ -40,8 +39,6 @@ import {
 	SettingsItem,
 	SettingsSection,
 } from "./shared/settings-items.tsx";
-
-const MAX_MODEL_SUGGESTIONS = 8;
 
 async function saveField(
 	target: ApiTarget,
@@ -67,7 +64,6 @@ interface FieldControlProps {
 	 */
 	description?: ReactNode;
 	field: PluginSettingsField;
-	modelSuggestions: string[];
 	target: ApiTarget;
 }
 
@@ -196,11 +192,7 @@ function TextField({ field, target }: FieldControlProps) {
 	);
 }
 
-function ModelPickerField({
-	field,
-	modelSuggestions,
-	target,
-}: FieldControlProps) {
+function ModelPickerField({ field, target }: FieldControlProps) {
 	const [value, setValue] = useState("");
 
 	useEffect(() => {
@@ -222,33 +214,20 @@ function ModelPickerField({
 		});
 	};
 
+	// The SAME provider/model picker the chat composer uses (brand logos +
+	// per-provider model lists), controlled — replaces the old free-text box so a
+	// plugin's "which model runs this" is a precise catalog pick, not a typo-prone
+	// string.
 	return (
 		<SettingsItem title={field.label}>
-			<div className="space-y-2">
-				<Input
-					className="h-8 text-sm"
-					onBlur={() => commit(value)}
-					onChange={(e) => setValue(e.target.value)}
-					placeholder={field.placeholder ?? "Use default model"}
-					value={value}
-				/>
-				{modelSuggestions.length > 0 ? (
-					<div className="flex flex-wrap gap-1">
-						{modelSuggestions.map((model) => (
-							<Button
-								className="h-6 rounded-full px-2 text-xs"
-								key={model}
-								onClick={() => commit(model)}
-								size="sm"
-								type="button"
-								variant={value === model ? "secondary" : "ghost"}
-							>
-								{model}
-							</Button>
-						))}
-					</div>
-				) : null}
-			</div>
+			<AgentModelPickerField
+				ariaLabel={field.label}
+				mode="model"
+				onChange={commit}
+				placeholder={field.placeholder ?? "Use default model"}
+				target={target}
+				value={value}
+			/>
 		</SettingsItem>
 	);
 }
@@ -273,41 +252,6 @@ function FieldControl(props: FieldControlProps) {
 
 // ── Tab + panel ─────────────────────────────────────────────────────────────
 
-/**
- * Load the model-id suggestions once (flattened from the Pi config catalog's
- * per-provider suggested models), so `model_picker` fields can offer quick
- * picks. Returns an empty list until the catalog resolves or if it fails — the
- * free-text input still works without it.
- */
-function useModelSuggestions(target: ApiTarget, enabled: boolean): string[] {
-	const [models, setModels] = useState<string[]>([]);
-
-	useEffect(() => {
-		if (!enabled) {
-			return;
-		}
-		let cancelled = false;
-		fetchPiCatalog(target)
-			.then((catalog) => {
-				if (cancelled) {
-					return;
-				}
-				const flat = (catalog.providers ?? []).flatMap(
-					(p) => p.suggestedModels ?? []
-				);
-				setModels([...new Set(flat)].slice(0, MAX_MODEL_SUGGESTIONS));
-			})
-			.catch(() => {
-				// Suggestions are optional; the input works without them.
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [target, enabled]);
-
-	return models;
-}
-
 interface PluginSettingsFieldsProps {
 	/** Hide each tab's title header (used inline where the plugin name is already shown). */
 	hideTabTitles?: boolean;
@@ -317,20 +261,13 @@ interface PluginSettingsFieldsProps {
 
 /**
  * Render one plugin's settings tabs. Each tab becomes a {@link SettingsSection}
- * with a grouped card of its fields. Model suggestions are fetched once for the
- * whole panel if any field is a `model_picker`.
+ * with a grouped card of its fields.
  */
 export function PluginSettingsFields({
 	hideTabTitles,
 	tabs,
 	target,
 }: PluginSettingsFieldsProps) {
-	const hasModelPicker = useMemo(
-		() => tabs.some((t) => t.fields.some((f) => f.type === "model_picker")),
-		[tabs]
-	);
-	const modelSuggestions = useModelSuggestions(target, hasModelPicker);
-
 	return (
 		<div className="space-y-4">
 			{tabs.map((tab) => (
@@ -349,7 +286,6 @@ export function PluginSettingsFields({
 								}
 								field={field}
 								key={field.prefKey}
-								modelSuggestions={modelSuggestions}
 								target={target}
 							/>
 						))}

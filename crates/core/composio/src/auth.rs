@@ -74,6 +74,25 @@ pub fn is_configured() -> bool {
 mod tests {
     use super::*;
 
+    /// Snapshot + restore the two key env vars so a test that mutates them does
+    /// not leak into another test in the same binary.
+    fn take_key_env() -> (Option<String>, Option<String>) {
+        (
+            std::env::var("RYU_COMPOSIO_API_KEY").ok(),
+            std::env::var("COMPOSIO_API_KEY").ok(),
+        )
+    }
+    fn restore_key_env(prev: (Option<String>, Option<String>)) {
+        match prev.0 {
+            Some(v) => std::env::set_var("RYU_COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("RYU_COMPOSIO_API_KEY"),
+        }
+        match prev.1 {
+            Some(v) => std::env::set_var("COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("COMPOSIO_API_KEY"),
+        }
+    }
+
     #[test]
     fn set_then_clear_key() {
         // The auth key cache + RYU_COMPOSIO_API_KEY/COMPOSIO_API_KEY env are
@@ -81,6 +100,7 @@ mod tests {
         // managed-node, mcp catalog/composio); serialize on the shared lock so
         // none reads another's transient value.
         let _lock = test_env_lock();
+        let prev = take_key_env();
         set_key("  comp_abc123  ");
         assert_eq!(key().as_deref(), Some("comp_abc123"));
         set_key("   ");
@@ -88,5 +108,45 @@ mod tests {
         std::env::remove_var("RYU_COMPOSIO_API_KEY");
         std::env::remove_var("COMPOSIO_API_KEY");
         assert_eq!(key(), None);
+        assert!(!is_configured());
+        restore_key_env(prev);
+    }
+
+    #[test]
+    fn env_fallback_prefers_ryu_prefixed_and_trims() {
+        let _lock = test_env_lock();
+        let prev = take_key_env();
+        // Clear the in-process cache so the env branch is what resolves.
+        set_key("");
+        std::env::set_var("RYU_COMPOSIO_API_KEY", "  ryu_key  ");
+        std::env::set_var("COMPOSIO_API_KEY", "plain_key");
+        // RYU_-prefixed wins over the plain env, and surrounding space is trimmed.
+        assert_eq!(key().as_deref(), Some("ryu_key"));
+        assert!(is_configured());
+
+        // With only the plain env set, it resolves.
+        std::env::remove_var("RYU_COMPOSIO_API_KEY");
+        assert_eq!(key().as_deref(), Some("plain_key"));
+
+        // An all-whitespace env value is filtered back to None (not configured).
+        std::env::set_var("COMPOSIO_API_KEY", "   ");
+        assert_eq!(key(), None);
+        assert!(!is_configured());
+        restore_key_env(prev);
+    }
+
+    #[test]
+    fn preferences_cache_beats_env() {
+        let _lock = test_env_lock();
+        let prev = take_key_env();
+        std::env::set_var("COMPOSIO_API_KEY", "env_key");
+        set_key("pref_key");
+        // The in-process (preferences) cache is consulted first.
+        assert_eq!(key().as_deref(), Some("pref_key"));
+        // Clearing it falls through to env.
+        set_key("");
+        assert_eq!(key().as_deref(), Some("env_key"));
+        set_key("");
+        restore_key_env(prev);
     }
 }

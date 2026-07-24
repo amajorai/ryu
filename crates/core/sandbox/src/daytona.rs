@@ -204,8 +204,9 @@ struct DaytonaClient {
 impl DaytonaClient {
     /// Build the client from env config, erroring when no token is configured.
     fn from_env() -> Result<Self> {
-        let token = daytona_token()
-            .ok_or_else(|| anyhow!("Daytona backend requires an API token ({ENV_DAYTONA_TOKEN})"))?;
+        let token = daytona_token().ok_or_else(|| {
+            anyhow!("Daytona backend requires an API token ({ENV_DAYTONA_TOKEN})")
+        })?;
         Ok(Self {
             base: daytona_base_url(),
             token,
@@ -289,7 +290,10 @@ impl DaytonaClient {
 
         let resp = self
             .http
-            .post(format!("{}/sandbox/{id}/toolbox/process/execute", self.base))
+            .post(format!(
+                "{}/sandbox/{id}/toolbox/process/execute",
+                self.base
+            ))
             .bearer_auth(&self.token)
             .timeout(timeout)
             .json(&body)

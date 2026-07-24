@@ -126,13 +126,32 @@ export interface MemorySlot {
 	write_enabled: boolean;
 }
 
-/** Persona fields that travel with an agent save. */
+/** A dither-gradient avatar spec, rendered client-side by the shared dither-kit.
+ * `from` is a palette colour name (or a hue as a string); `to` is an optional
+ * second palette colour (absent = fade to transparent); `direction` is one of
+ * `"up" | "down" | "left" | "right"`. Mirrors Core's `DitherSpec`. */
+export interface DitherSpec {
+	direction?: string | null;
+	from?: string | null;
+	to?: string | null;
+}
+
+/** Persona fields that travel with an agent save.
+ *
+ * The avatar has three mutually-exclusive sources, resolved in priority order by
+ * the client: an uploaded image ({@link avatar_url}), a custom {@link icon} id,
+ * or a {@link dither} gradient. Saving one clears the others. */
 export interface AgentPersona {
 	/** Custom avatar image for the agent, stored inline as a data URL (or a
 	 * remote URL). Null = no custom image; clients fall back to the engine logo. */
 	avatar_url?: string | null;
 	/** Display name the agent uses when introducing itself (optional). */
 	display_name: string | null;
+	/** Dither-gradient avatar spec (alternative avatar source). Null = none. */
+	dither?: DitherSpec | null;
+	/** Custom icon id (Iconify / icons0 / Hugeicons), an alternative avatar
+	 * source to an uploaded image or a dither gradient. Null = none. */
+	icon?: string | null;
 	/** Tone string: "neutral" | "professional" | "friendly" | "pirate" | any custom string. Null = default. */
 	tone: string | null;
 }

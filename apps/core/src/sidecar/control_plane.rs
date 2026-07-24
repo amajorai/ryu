@@ -21,6 +21,9 @@ use serde::Deserialize;
 const ENV_CONTROL_PLANE_URL: &str = "RYU_CONTROL_PLANE_URL";
 /// Env var with this gateway's API key (issued by the control plane, U27).
 const ENV_GATEWAY_KEY: &str = "RYU_GATEWAY_KEY";
+/// Env var with the bearer Core presents to the gateway data plane (F7: adopted
+/// in-process after a bootstrap→durable exchange). Mirrors `gateway::ENV_GATEWAY_TOKEN`.
+const ENV_GATEWAY_TOKEN: &str = "RYU_GATEWAY_TOKEN";
 /// Env var with this managed node's publicly-reachable base URL (A4 / #501).
 /// A managed node sets this (provisioning injects it) so the control plane can
 /// record where the node is reachable and the desktop NodeSelector can list it.
@@ -349,6 +352,19 @@ pub struct RegisteredOrg {
 #[derive(Debug, Deserialize)]
 struct ResolveOrgResponse {
     organization: ResolveOrg,
+    /// F7: present only when the control plane just exchanged a single-use
+    /// BOOTSTRAP gateway credential for a durable per-node one. When set, the node
+    /// must adopt this durable token for the gateway data plane; the bootstrap it
+    /// presented is now revoked. `#[serde(default)]` so every ordinary resolve
+    /// (the field absent) decodes unchanged.
+    #[serde(default, rename = "credentialRotation")]
+    credential_rotation: Option<CredentialRotation>,
+}
+
+/// F7: the durable gateway token minted in exchange for a bootstrap token.
+#[derive(Debug, Deserialize)]
+struct CredentialRotation {
+    token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -369,6 +385,91 @@ pub fn is_managed_node() -> bool {
 /// The org this managed node is bound to, if registration has succeeded.
 pub fn registered_org() -> Option<RegisteredOrg> {
     NODE_ORG.read().ok().and_then(|g| g.clone())
+}
+
+// ── F7: durable-token persistence (restart survival) ─────────────────────────
+//
+// A managed node boots with a single-use BOOTSTRAP key in `RYU_GATEWAY_KEY`
+// (from cloud-init `core.env`). `register_managed_node` exchanges it for a
+// DURABLE per-node token, which must outlive the process: the bootstrap is
+// revoked + expired the moment it is exchanged, so a restart that re-read the
+// bootstrap from `core.env` would 401. Core cannot rewrite `/etc/ryu/core.env`
+// (owned root:ryu, and `ProtectSystem=full` makes /etc read-only for the
+// service), but it CAN write its own data dir, so the durable is persisted
+// there at 0600 (same custody posture as `master.key`) and re-adopted at boot.
+
+/// Filename of the persisted durable gateway token inside the Core data dir.
+const DURABLE_TOKEN_FILE: &str = "gateway-durable.token";
+
+/// Absolute path of the persisted durable token in the active Core data dir.
+fn durable_token_path() -> std::path::PathBuf {
+    crate::paths::ryu_dir().join(DURABLE_TOKEN_FILE)
+}
+
+/// Pure: the durable token to adopt from a rotation's raw token string — trimmed,
+/// or `None` when empty (keep the presented key + warn). Unit-testable without I/O.
+fn durable_from_rotation_token(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+/// Adopt a durable token for BOTH gateway roles in THIS process. The durable
+/// serves as the control-plane key (resolve/notify/permissions) AND the
+/// data-plane bearer, so both env vars point at it; setting only one strands the
+/// other on the revoked bootstrap.
+fn apply_durable_token(token: &str) {
+    std::env::set_var(ENV_GATEWAY_KEY, token);
+    std::env::set_var(ENV_GATEWAY_TOKEN, token);
+}
+
+/// Persist `token` to [`durable_token_path`] atomically-ish at 0600. Delegates to
+/// [`persist_durable_token_at`] so tests can target a scratch path (the real
+/// [`durable_token_path`] is `OnceLock`-cached process-wide).
+fn persist_durable_token(token: &str) -> std::io::Result<()> {
+    persist_durable_token_at(&durable_token_path(), token)
+}
+
+fn persist_durable_token_at(path: &std::path::Path, token: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, token.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Read a persisted durable token from `path`, trimmed; `None` if absent/empty.
+fn load_durable_token_from(path: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+/// F7 boot loader: if a prior bootstrap exchange persisted a durable token, adopt
+/// it for BOTH gateway roles BEFORE any registration/resolution spawn runs, so a
+/// restarted node presents the durable — never the now expired+revoked bootstrap
+/// that `core.env` still carries. Best-effort and idempotent: absent file = no-op
+/// (a fresh node then exchanges its bootstrap normally). MUST be called from
+/// `main.rs` ahead of the `resolve_scope` and `register_managed_node` spawns.
+pub fn load_persisted_durable_token() {
+    if let Some(token) = load_durable_token_from(&durable_token_path()) {
+        apply_durable_token(&token);
+        tracing::info!(
+            "control-plane: loaded a persisted durable gateway token (restart survival); using it for the control + data plane"
+        );
+    }
 }
 
 /// Register this managed node with the control plane (A4 / #501).
@@ -421,6 +522,43 @@ pub async fn register_managed_node(client: &reqwest::Client) -> Result<Option<Re
         .json()
         .await
         .map_err(|e| anyhow!("managed-node register decode failed: {e}"))?;
+
+    // F7 (armed): if the control plane exchanged our single-use bootstrap KEY for a
+    // durable per-node token, adopt it for BOTH gateway roles and persist it so a
+    // restart survives.
+    //
+    //  - The durable serves BOTH roles: `ENV_GATEWAY_KEY` (control plane —
+    //    resolve_scope / notify / permissions) AND `ENV_GATEWAY_TOKEN` (the
+    //    data-plane bearer `gateway::gateway_bearer()` presents to the fleet).
+    //    Setting only the TOKEN would leave the next resolve presenting the now
+    //    REVOKED bootstrap KEY → 401, so both are set. Both are read lazily on
+    //    every call, so `set_var` takes effect for all subsequent traffic in THIS
+    //    process without a restart.
+    //  - Persist to a Core-WRITABLE 0600 file (the service user cannot rewrite
+    //    `root:ryu 0640 /etc/ryu/core.env`, and the bootstrap in core.env is
+    //    expired + revoked after this exchange). The boot loader
+    //    (`load_persisted_durable_token`, run from `main.rs` before the register /
+    //    resolve spawns) re-adopts it on the next start, so a restart never
+    //    re-presents the dead bootstrap.
+    if let Some(rotation) = body.credential_rotation {
+        match durable_from_rotation_token(&rotation.token) {
+            Some(token) => {
+                apply_durable_token(&token);
+                match persist_durable_token(&token) {
+                    Ok(()) => tracing::info!(
+                        "control-plane: adopted + persisted a rotated durable gateway token (bootstrap exchanged)"
+                    ),
+                    Err(e) => tracing::warn!(
+                        "control-plane: adopted a rotated durable gateway token in-process but failed to persist it ({e}); it survives this process but a restart will need re-provisioning"
+                    ),
+                }
+            }
+            None => tracing::warn!(
+                "control-plane: bootstrap exchange returned an empty durable token; keeping the presented token"
+            ),
+        }
+    }
+
     let org = RegisteredOrg {
         id: body.organization.id,
         name: body.organization.name,
@@ -546,5 +684,102 @@ mod tests {
 
         std::env::remove_var(ENV_NODE_PUBLIC_URL);
         assert_eq!(node_public_url(), None);
+    }
+
+    // ── F7: durable-token exchange + restart-survival persistence ────────────
+
+    /// Serialize env-mutating tests: `set_var`/`remove_var` are process-global.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static L: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        L.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn durable_from_rotation_token_trims_and_rejects_empty() {
+        // Empty / whitespace-only ⇒ None (keep the presented bootstrap + warn).
+        assert_eq!(durable_from_rotation_token(""), None);
+        assert_eq!(durable_from_rotation_token("   "), None);
+        // A real token is trimmed and adopted.
+        assert_eq!(
+            durable_from_rotation_token("  rgw_durable_abc  ").as_deref(),
+            Some("rgw_durable_abc")
+        );
+    }
+
+    #[test]
+    fn parses_gateway_resolve_credential_rotation() {
+        // A resolve that just exchanged a bootstrap carries `credentialRotation`;
+        // an ordinary resolve omits it (serde default ⇒ None).
+        let with = r#"{
+            "organization": { "id": "org_1", "name": "Acme" },
+            "credentialRotation": { "token": "rgw_durable_xyz" }
+        }"#;
+        let parsed: ResolveOrgResponse = serde_json::from_str(with).unwrap();
+        assert_eq!(
+            parsed
+                .credential_rotation
+                .as_ref()
+                .and_then(|r| durable_from_rotation_token(&r.token))
+                .as_deref(),
+            Some("rgw_durable_xyz")
+        );
+
+        let without = r#"{ "organization": { "id": "org_1", "name": "Acme" } }"#;
+        let plain: ResolveOrgResponse = serde_json::from_str(without).unwrap();
+        assert!(plain.credential_rotation.is_none());
+    }
+
+    #[test]
+    fn persist_and_load_durable_token_roundtrips_at_0600() {
+        let dir = std::env::temp_dir().join(format!(
+            "ryu-durable-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join(DURABLE_TOKEN_FILE);
+
+        // Absent ⇒ None (a fresh node has no persisted durable).
+        assert_eq!(load_durable_token_from(&path), None);
+
+        persist_durable_token_at(&path, "rgw_durable_persisted").unwrap();
+        assert_eq!(
+            load_durable_token_from(&path).as_deref(),
+            Some("rgw_durable_persisted")
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "durable token file must be 0600");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_durable_token_overrides_a_stale_bootstrap_in_env() {
+        let _lock = env_lock();
+        // Simulate a RESTARTED node: core.env still carries the (now revoked)
+        // bootstrap KEY, and no data-plane TOKEN yet.
+        std::env::set_var(ENV_GATEWAY_KEY, "rgw_stale_bootstrap");
+        std::env::remove_var(ENV_GATEWAY_TOKEN);
+
+        // The boot loader / exchange adopts the durable for BOTH roles.
+        apply_durable_token("rgw_durable_new");
+        assert_eq!(
+            std::env::var(ENV_GATEWAY_KEY).unwrap(),
+            "rgw_durable_new",
+            "control-plane KEY must be overridden to the durable"
+        );
+        assert_eq!(
+            std::env::var(ENV_GATEWAY_TOKEN).unwrap(),
+            "rgw_durable_new",
+            "data-plane TOKEN must also be set to the durable (both roles)"
+        );
+
+        std::env::remove_var(ENV_GATEWAY_KEY);
+        std::env::remove_var(ENV_GATEWAY_TOKEN);
     }
 }

@@ -308,7 +308,7 @@ export function PublishDialog({
 						) : null}
 
 						<DialogFooter>
-							<Button onClick={close} variant="outline">
+							<Button onClick={close} variant="ghost">
 								Cancel
 							</Button>
 							<Button

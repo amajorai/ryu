@@ -4,11 +4,12 @@
 //! command-approval scanner at the `request_permission` seam
 //! (`sidecar::adapters::acp::acp_exec_scan_verdict` → `check_exec_scan`) — this
 //! covers Claude Code's / Codex's own native `Bash`/`Write`/`Edit` tools, not
-//! just Ryu-injected tools. That scan is **opt-in**: it short-circuits to `Allow`
-//! with no network call unless `RYU_EXEC_APPROVAL_MODE` is set to something other
-//! than `off` (see `sidecar::gateway::exec_approval_enabled`).
+//! just Ryu-injected tools. That scan is **armed by default** (an unset
+//! `RYU_EXEC_APPROVAL_MODE` scans); only an explicit `off` disarms it (see
+//! `sidecar::gateway::exec_approval_enabled`) — the default-on posture is what
+//! keeps headless (non-interactive) runs from auto-approving unscanned commands.
 //!
-//! This module lets the desktop turn the gate on via a preference instead of
+//! This module lets the desktop set the gate's mode via a preference instead of
 //! requiring the env var to be exported by hand. The pref seeds the env var
 //! **once at startup** — before any request thread runs — so there is no
 //! concurrent `set_var`/`var` race. Changing the pref is therefore
@@ -26,8 +27,9 @@
 const ENV_EXEC_APPROVAL_MODE: &str = "RYU_EXEC_APPROVAL_MODE";
 
 /// Preferences key the desktop writes to enable/disable the command-approval
-/// gate. Value is the mode string forwarded to the gateway scan (`off` disables;
-/// any other value — e.g. `enforce` — enables the fail-closed scan).
+/// gate. Value is the mode string forwarded to the gateway scan (`off` disarms;
+/// any other value — e.g. `enforce` — keeps the fail-closed scan armed, which
+/// is also the unset default).
 pub const EXEC_APPROVAL_MODE_PREF_KEY: &str = "exec-approval-mode";
 
 /// Seed `RYU_EXEC_APPROVAL_MODE` from a persisted preference value. Call ONCE at
@@ -35,6 +37,10 @@ pub const EXEC_APPROVAL_MODE_PREF_KEY: &str = "exec-approval-mode";
 /// data race with the readers in `sidecar::gateway`. An explicit env var already
 /// present is respected — a hand-exported override wins over the pref, so ops can
 /// force the gate on regardless of the stored preference.
+///
+/// The gate is armed by default (unset env scans), so a pref of `off` must be
+/// seeded EXPLICITLY into the env — leaving it unset would silently re-arm a
+/// gate the user turned off. An empty pref leaves the env unset (default: armed).
 pub fn seed_from_pref(value: &str) {
     // A real env override takes precedence and is never clobbered.
     if std::env::var(ENV_EXEC_APPROVAL_MODE)
@@ -44,11 +50,12 @@ pub fn seed_from_pref(value: &str) {
         return;
     }
     let v = value.trim();
-    if v.is_empty() || v.eq_ignore_ascii_case("off") {
-        // Leave unset → the gate stays dormant (Allow, no network call).
+    if v.is_empty() {
+        // No stored preference → leave unset; the gate's default (armed) rules.
         return;
     }
     // SAFETY: called once at startup before any other thread reads the env.
+    // `off` is seeded verbatim so the user's opt-out survives the armed default.
     std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
 }
 
@@ -71,13 +78,17 @@ mod tests {
     }
 
     #[test]
-    fn seed_leaves_unset_for_off_or_empty() {
+    fn seed_writes_off_explicitly_and_leaves_empty_unset() {
         let _g = crate::sidecar::gateway::GATEWAY_ENV_TEST_LOCK.lock();
         std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
-        seed_from_pref("off");
-        assert!(std::env::var(ENV_EXEC_APPROVAL_MODE).is_err());
+        // An empty pref leaves the env unset — the armed default rules.
         seed_from_pref("   ");
         assert!(std::env::var(ENV_EXEC_APPROVAL_MODE).is_err());
+        // `off` must be seeded EXPLICITLY: the gate is armed by default, so an
+        // unset env would silently re-arm a gate the user turned off.
+        seed_from_pref("off");
+        assert_eq!(std::env::var(ENV_EXEC_APPROVAL_MODE).as_deref(), Ok("off"));
+        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
     }
 
     #[test]

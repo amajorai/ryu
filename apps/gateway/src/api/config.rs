@@ -229,15 +229,95 @@ pub(crate) fn admin_loopback_allowed(
 /// zero-config dev posture (no base auth, no mesh/fleet, and no master key
 /// provisioned) — see [`admin_loopback_allowed`]. Shared by the config, audit,
 /// and budget-spend handlers so the gate has one definition and cannot drift.
+/// CSRF defense (F3): reject state-changing requests that a browser stamped as a
+/// cross-origin (`cross-site`) or same-origin scripted (`same-site`) fetch.
+///
+/// Several privileged gateway routes authorize on loopback posture alone (no
+/// credential) while the gateway serves a permissive `allow_origin(Any)` CORS
+/// policy — so a malicious web page the user merely visits could `fetch()` them
+/// cross-origin (e.g. read the config, PUT a trusted_forwarder API key, or get a
+/// manifest signed under the trusted key). Browsers stamp `Sec-Fetch-Site` on
+/// such requests and page JS cannot forge or strip it; a cross-site (or
+/// same-site) browser origin is never a legitimate privileged caller. Non-browser
+/// callers — curl, SDKs, and the desktop's own admin path (webview → Core →
+/// gateway, whose gateway hop is a server-side Rust request) — omit the header
+/// entirely and are unaffected. Shared so every gate uses one definition.
+pub(crate) fn reject_cross_origin_browser(
+    headers: &HeaderMap,
+    action: &str,
+) -> Result<(), GatewayError> {
+    if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        if site.eq_ignore_ascii_case("cross-site")
+            || site.eq_ignore_ascii_case("same-site")
+            || site.eq_ignore_ascii_case("same-origin")
+        {
+            return Err(GatewayError::Unauthorized(format!(
+                "{action} is not permitted from a cross-origin browser request."
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Anti–DNS-rebinding defense (F3): reject a request whose `Host` header is not a
+/// loopback authority. `Host` is a Fetch-spec forbidden header — page JS cannot
+/// set or forge it — so a rebinding page pointing `evil.com` at `127.0.0.1` still
+/// sends `Host: evil.com:<port>`, which this rejects even though the post-rebind
+/// request is same-origin (so `Sec-Fetch-Site` reads `same-origin` and CORS is
+/// never consulted). Legitimate server-side callers (curl, SDKs, Core's own
+/// gateway hop) address the gateway at `127.0.0.1`/`localhost`, so their `Host` is
+/// loopback and passes. An ABSENT `Host` is allowed: browsers always send an
+/// authority, so a hostless request is a raw-socket local process outside the
+/// browser CSRF model.
+pub(crate) fn reject_non_loopback_host(
+    headers: &HeaderMap,
+    action: &str,
+) -> Result<(), GatewayError> {
+    let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) else {
+        return Ok(());
+    };
+    // Strip the optional port. Bracketed IPv6 (`[::1]` / `[::1]:port`) keeps the
+    // address inside the brackets; otherwise split off the rightmost colon.
+    let hostname = if let Some(rest) = host.strip_prefix('[') {
+        match rest.split_once(']') {
+            Some((addr, _)) => addr,
+            None => rest,
+        }
+    } else {
+        host.rsplit_once(':').map_or(host, |(name, _)| name)
+    };
+
+    let is_loopback = hostname.eq_ignore_ascii_case("localhost")
+        || hostname
+            .parse::<std::net::Ipv4Addr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
+        || hostname
+            .parse::<std::net::Ipv6Addr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
+
+    if is_loopback {
+        Ok(())
+    } else {
+        Err(GatewayError::Unauthorized(format!(
+            "{action} is not permitted from a non-loopback Host."
+        )))
+    }
+}
+
 pub(crate) fn require_local_admin(
     state: &SharedState,
     peer: &SocketAddr,
     is_master_key: bool,
+    headers: &HeaderMap,
     action: &str,
 ) -> Result<(), GatewayError> {
     if is_master_key {
         return Ok(());
     }
+    reject_cross_origin_browser(headers, action)?;
+    reject_non_loopback_host(headers, action)?;
     let (require_auth, master_key_present) =
         state.with_auth(|a| (a.require_auth, a.master_key.is_some()));
     if !admin_loopback_allowed(
@@ -263,7 +343,7 @@ pub async fn get_config(
 ) -> Result<Json<Value>, GatewayError> {
     let raw_key = headers.get("authorization").and_then(|v| v.to_str().ok());
     let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
-    require_local_admin(&state, &peer, ctx.is_master_key, "Config access")?;
+    require_local_admin(&state, &peer, ctx.is_master_key, &headers, "Config access")?;
 
     // Read live config from the RwLock fields so GET reflects any PUT changes
     // that have been applied since startup.
@@ -478,9 +558,7 @@ fn validate_stage_backends(
 /// node-only `wrap_untrusted_tool_results` value + lock stripped (see
 /// [`crate::firewall::resolve::normalize_overlay`]) before it is stored,
 /// persisted, or resolved — an org/agent scope may neither set nor lock it.
-fn normalize_overlay_map(
-    m: HashMap<String, FirewallOverlay>,
-) -> HashMap<String, FirewallOverlay> {
+fn normalize_overlay_map(m: HashMap<String, FirewallOverlay>) -> HashMap<String, FirewallOverlay> {
     m.into_iter()
         .map(|(k, v)| (k, crate::firewall::resolve::normalize_overlay(&v)))
         .collect()
@@ -525,7 +603,7 @@ pub async fn put_config(
     let ctx = authenticate(&state, AuthInputs::with_key(raw_key)).await?;
     // Same local-trust rule as GET: writable from loopback in no-auth mode,
     // master-key-gated otherwise (remote peers always need the master key).
-    require_local_admin(&state, &peer, ctx.is_master_key, "Config updates")?;
+    require_local_admin(&state, &peer, ctx.is_master_key, &headers, "Config updates")?;
 
     if patch_is_empty(
         patch.firewall.is_some(),
@@ -556,8 +634,7 @@ pub async fn put_config(
     // dupes). Category/target/impl are serde-closed enums, so an invalid one fails
     // deserialization before reaching here.
     if let Some(custom) = &patch.custom_evaluators {
-        crate::evaluators::validate_custom_evaluators(custom)
-            .map_err(GatewayError::BadRequest)?;
+        crate::evaluators::validate_custom_evaluators(custom).map_err(GatewayError::BadRequest)?;
 
         // Compile + import-validate any WASM policy modules OFF the request path so
         // a malformed / oversized / forbidden-import module is rejected HERE at
@@ -907,7 +984,10 @@ mod tests {
         bad.cache = "ghost".to_string();
         match validate_stage_backends(&state, &bad) {
             Err(GatewayError::BadRequest(msg)) => {
-                assert!(msg.contains("backends.cache") && msg.contains("ghost"), "{msg}");
+                assert!(
+                    msg.contains("backends.cache") && msg.contains("ghost"),
+                    "{msg}"
+                );
             }
             other => panic!("expected BadRequest, got {other:?}"),
         }
@@ -941,7 +1021,9 @@ mod tests {
         let org = patch.firewall_org_overlays.expect("org overlays present");
         assert_eq!(org["o1"].policy, Some(FirewallPolicy::Block));
         assert_eq!(org["o1"].redact_pii, Some(false));
-        let agent = patch.firewall_agent_overlays.expect("agent overlays present");
+        let agent = patch
+            .firewall_agent_overlays
+            .expect("agent overlays present");
         assert_eq!(agent["a1"].enabled, Some(false));
     }
 
@@ -1058,7 +1140,9 @@ mod tests {
         assert_eq!(resolved.policy, base.policy);
         assert_eq!(resolved.redact_pii, base.redact_pii);
         assert!(resolved.custom_patterns.is_empty());
-        assert!(resolved.locked_fields.is_empty());
+        // The default lock set is already sorted, so the resolver's sorted
+        // union reproduces the node base byte-for-byte.
+        assert_eq!(resolved.locked_fields, base.locked_fields);
     }
 
     #[test]
@@ -1178,5 +1262,316 @@ mod tests {
             state.resolved_scanner(&ctx).config().policy,
             FirewallPolicy::Block,
         );
+    }
+
+    #[test]
+    fn redact_providers_masks_keys_and_reports_counts() {
+        use super::redact_providers;
+        use crate::config::{
+            AnthropicProviderConfig, CoreProviderConfig, GenAiProviderConfig, OpenAiProviderConfig,
+            ProvidersConfig,
+        };
+
+        let cfg = ProvidersConfig {
+            openai: Some(OpenAiProviderConfig {
+                api_key: "sk-secret".to_string(),
+                api_keys: vec!["sk-a".to_string(), "sk-b".to_string()],
+                base_url: "https://api.openai.com/v1".to_string(),
+            }),
+            anthropic: Some(AnthropicProviderConfig {
+                api_key: "sk-anthropic".to_string(),
+                api_keys: vec![],
+                base_url: "https://api.anthropic.com".to_string(),
+            }),
+            core: Some(CoreProviderConfig {
+                base_url: "http://127.0.0.1:7979".to_string(),
+                token: Some("core-token".to_string()),
+            }),
+            genai: Some(GenAiProviderConfig {
+                keys: HashMap::from([("gemini".to_string(), "sk-gem".to_string())]),
+            }),
+            ..ProvidersConfig::default()
+        };
+
+        let view = redact_providers(&cfg);
+        let openai = view.openai.unwrap();
+        assert_eq!(openai.api_key, "***", "the raw key must never be returned");
+        assert_eq!(openai.base_url, "https://api.openai.com/v1");
+        // all_keys() = primary + 2 extras, none blank ⇒ 3 accounts.
+        assert_eq!(openai.api_key_count, 3);
+        assert_eq!(view.anthropic.unwrap().api_key_count, 1);
+        // Core exposes only whether a token is present, never the token itself.
+        assert!(view.core.unwrap().has_token);
+        // GenAi exposes only the key NAMES (providers), not the secret values.
+        let genai = view.genai.unwrap();
+        assert_eq!(genai.keys, vec!["gemini".to_string()]);
+    }
+
+    #[test]
+    fn redact_auth_masks_api_keys_but_keeps_metadata() {
+        use super::redact_auth;
+        use crate::config::{ApiKeyConfig, AuthConfig};
+
+        let auth = AuthConfig {
+            require_auth: true,
+            master_key: Some("sk-master".to_string()),
+            api_keys: vec![ApiKeyConfig {
+                key: "sk-client-secret".to_string(),
+                name: "client-1".to_string(),
+                org_id: Some("org-1".to_string()),
+                team_id: Some("team-1".to_string()),
+                project_id: None,
+                requests_per_minute: None,
+                tokens_per_minute: None,
+                token_budget_total: None,
+                downgrade_to: None,
+                trusted_forwarder: true,
+            }],
+        };
+        let view = redact_auth(&auth);
+        assert!(view.require_auth);
+        assert_eq!(view.api_keys.len(), 1);
+        let k = &view.api_keys[0];
+        assert_eq!(k.key, "***", "the client key must be masked");
+        assert_eq!(k.name, "client-1");
+        assert_eq!(k.org_id.as_deref(), Some("org-1"));
+        assert!(k.trusted_forwarder);
+    }
+
+    #[test]
+    fn admin_loopback_allowed_only_on_the_unlocked_local_case() {
+        use super::admin_loopback_allowed;
+        // The one green case: loopback peer, no auth required, no mesh/fleet, no
+        // master key ⇒ the local unauthenticated admin path is allowed.
+        assert!(admin_loopback_allowed(true, false, false, false, false));
+        // Any single lock closes it.
+        assert!(!admin_loopback_allowed(false, false, false, false, false)); // remote peer
+        assert!(!admin_loopback_allowed(true, true, false, false, false)); // auth required
+        assert!(!admin_loopback_allowed(true, false, true, false, false)); // mesh on
+        assert!(!admin_loopback_allowed(true, false, false, true, false)); // fleet on
+        assert!(!admin_loopback_allowed(true, false, false, false, true)); // master key set
+    }
+
+    #[tokio::test]
+    async fn require_local_admin_admits_master_key_and_rejects_remote_anon() {
+        use super::require_local_admin;
+        use crate::config::{AuthConfig, GatewayConfig};
+        use axum::http::HeaderMap;
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        // A gateway with a master key configured (auth required).
+        let config = GatewayConfig {
+            auth: AuthConfig {
+                require_auth: true,
+                master_key: Some("sk-master".to_string()),
+                api_keys: vec![],
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let state = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+
+        let loopback: SocketAddr = "127.0.0.1:5".parse().unwrap();
+        let remote: SocketAddr = "203.0.113.7:5".parse().unwrap();
+        let no_headers = HeaderMap::new();
+
+        // The master key admits from anywhere.
+        assert!(require_local_admin(&state, &remote, true, &no_headers, "Config").is_ok());
+        // A non-master, remote, auth-required caller is refused.
+        let err = require_local_admin(&state, &remote, false, &no_headers, "Config").unwrap_err();
+        assert!(matches!(err, crate::error::GatewayError::Unauthorized(_)));
+        // A non-master loopback caller is ALSO refused here, because a master key is
+        // configured (the unlocked-local exception requires no master key).
+        assert!(require_local_admin(&state, &loopback, false, &no_headers, "Config").is_err());
+    }
+
+    #[tokio::test]
+    async fn require_local_admin_rejects_cross_origin_browser_requests() {
+        use super::require_local_admin;
+        use crate::config::GatewayConfig;
+        use axum::http::HeaderMap;
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        // Zero-config desktop posture: no auth, no master key — the loopback
+        // exception would otherwise admit an anonymous local caller.
+        let config = GatewayConfig::default();
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let state = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+        let loopback: SocketAddr = "127.0.0.1:5".parse().unwrap();
+
+        // No Sec-Fetch-Site (curl, SDK, Core's server-side hop): admitted.
+        assert!(require_local_admin(&state, &loopback, false, &HeaderMap::new(), "Config").is_ok());
+
+        // A cross-site browser fetch (the CSRF attack) is refused even on loopback.
+        let mut cross = HeaderMap::new();
+        cross.insert("sec-fetch-site", "cross-site".parse().unwrap());
+        assert!(
+            require_local_admin(&state, &loopback, false, &cross, "Config").is_err(),
+            "cross-site browser origin must be rejected"
+        );
+
+        // same-site is likewise not a legitimate admin caller.
+        let mut same_site = HeaderMap::new();
+        same_site.insert("sec-fetch-site", "same-site".parse().unwrap());
+        assert!(require_local_admin(&state, &loopback, false, &same_site, "Config").is_err());
+
+        // A direct navigation (`none`) is not a scripted cross-origin request.
+        let mut none = HeaderMap::new();
+        none.insert("sec-fetch-site", "none".parse().unwrap());
+        assert!(require_local_admin(&state, &loopback, false, &none, "Config").is_ok());
+    }
+
+    #[tokio::test]
+    async fn require_local_admin_rejects_non_loopback_host_rebinding() {
+        use super::require_local_admin;
+        use crate::config::GatewayConfig;
+        use axum::http::HeaderMap;
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        // No-auth loopback posture (zero-config desktop): the peer is always
+        // 127.0.0.1 in a DNS-rebinding attack, so peer posture alone can't tell the
+        // browser from a legit server-side caller — the Host header does.
+        let state = Arc::new(AppState::new_for_test_default());
+        let loopback: SocketAddr = "127.0.0.1:9999".parse().unwrap();
+
+        // Rebinding shape: browser points evil.com at 127.0.0.1, so the request is
+        // same-origin post-rebind but its (unforgeable) Host is the attacker domain.
+        let mut rebinding = HeaderMap::new();
+        rebinding.insert("host", "evil.com:7981".parse().unwrap());
+        rebinding.insert("sec-fetch-site", "same-origin".parse().unwrap());
+        assert!(
+            matches!(
+                require_local_admin(&state, &loopback, false, &rebinding, "Config").unwrap_err(),
+                crate::error::GatewayError::Unauthorized(_)
+            ),
+            "a rebinding browser (non-loopback Host) must be rejected"
+        );
+
+        // Legitimate server-side caller (curl / SDK / Core's gateway hop): loopback
+        // Host, no Sec-Fetch-Site. This is the load-bearing non-regression.
+        let mut legit = HeaderMap::new();
+        legit.insert("host", "127.0.0.1:7981".parse().unwrap());
+        assert!(
+            require_local_admin(&state, &loopback, false, &legit, "Config").is_ok(),
+            "a server-side loopback caller must still pass"
+        );
+
+        // Even a loopback Host is refused if the browser stamped it same-origin: a
+        // Sec-Fetch-Site tell on a privileged mutation is never a legit admin caller.
+        let mut loopback_but_browser = HeaderMap::new();
+        loopback_but_browser.insert("host", "127.0.0.1:7981".parse().unwrap());
+        loopback_but_browser.insert("sec-fetch-site", "same-origin".parse().unwrap());
+        assert!(
+            require_local_admin(&state, &loopback, false, &loopback_but_browser, "Config").is_err(),
+            "a same-origin browser fetch is rejected even on a loopback Host"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_config_returns_a_redacted_view_for_the_master_key() {
+        use super::get_config;
+        use crate::config::{AuthConfig, GatewayConfig, OpenAiProviderConfig, ProvidersConfig};
+        use axum::extract::{ConnectInfo, State};
+        use axum::http::HeaderMap;
+        use axum::Json;
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        let config = GatewayConfig {
+            auth: AuthConfig {
+                require_auth: true,
+                master_key: Some("sk-master".to_string()),
+                api_keys: vec![],
+            },
+            providers: ProvidersConfig {
+                openai: Some(OpenAiProviderConfig {
+                    api_key: "sk-openai-secret".to_string(),
+                    api_keys: vec![],
+                    base_url: "https://api.openai.com/v1".to_string(),
+                }),
+                ..ProvidersConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let state = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer sk-master".parse().unwrap());
+        let peer = ConnectInfo("127.0.0.1:5".parse::<SocketAddr>().unwrap());
+
+        let Json(body) = get_config(State(state), peer, headers)
+            .await
+            .expect("master key may read config");
+
+        // The provider key is redacted, and no raw secret appears anywhere.
+        assert_eq!(body["providers"]["openai"]["api_key"], "***");
+        let serialized = serde_json::to_string(&body).unwrap();
+        assert!(
+            !serialized.contains("sk-openai-secret"),
+            "the raw provider key must never leave the gateway"
+        );
+        assert_eq!(body["auth"]["require_auth"], true);
+    }
+
+    #[tokio::test]
+    async fn get_config_rejects_a_missing_or_wrong_key() {
+        use super::get_config;
+        use crate::config::{AuthConfig, GatewayConfig};
+        use axum::extract::{ConnectInfo, State};
+        use axum::http::HeaderMap;
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        let config = GatewayConfig {
+            auth: AuthConfig {
+                require_auth: true,
+                master_key: Some("sk-master".to_string()),
+                api_keys: vec![],
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let state = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+
+        // A remote peer with no authorization header must not read config.
+        let peer = ConnectInfo("203.0.113.7:5".parse::<SocketAddr>().unwrap());
+        let res = get_config(State(state), peer, HeaderMap::new()).await;
+        assert!(res.is_err(), "unauthenticated remote read must be refused");
     }
 }

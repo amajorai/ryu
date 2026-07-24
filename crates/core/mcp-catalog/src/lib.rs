@@ -97,10 +97,9 @@ pub fn set_global_host(host: Arc<dyn McpCatalogHost>) {
 /// Fetch the installed host. Strict by design: panics if [`set_global_host`] was
 /// never called, rather than silently issuing an un-guarded fetch.
 fn host() -> Arc<dyn McpCatalogHost> {
-    host_slot()
-        .get()
-        .cloned()
-        .expect("ryu-mcp-catalog host not installed — call ryu_mcp_catalog::set_global_host at boot")
+    host_slot().get().cloned().expect(
+        "ryu-mcp-catalog host not installed — call ryu_mcp_catalog::set_global_host at boot",
+    )
 }
 
 /// Default official MCP registry base. Swappable via `RYU_MCP_REGISTRY_URL` so
@@ -528,9 +527,7 @@ pub struct InstallPlan {
 /// fetch. The update check compares this against installed servers' recorded
 /// versions. Best-effort: any fetch/parse error yields an empty map (no updates
 /// reported rather than an error).
-pub async fn latest_versions(
-    base_url: Option<&str>,
-) -> std::collections::HashMap<String, String> {
+pub async fn latest_versions(base_url: Option<&str>) -> std::collections::HashMap<String, String> {
     // Page through the whole registry (following `next_cursor`) so a server that
     // sits beyond the first page can still report an update. Bounded by a page
     // cap so a broken/looping cursor can never spin forever.

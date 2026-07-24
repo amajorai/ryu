@@ -9,6 +9,9 @@
     "./sse": "./src/sse-client.ts",
     "./voice": "./src/voice.ts"
   },
+  "scripts": {
+    "test": "bun test"
+  },
   "devDependencies": {
     "@ryu/config": "workspace:*",
     "@types/bun": "catalog:",

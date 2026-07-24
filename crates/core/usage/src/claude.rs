@@ -19,6 +19,19 @@ use super::{
 };
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+
+/// The usage endpoint to call. In production this is always [`USAGE_URL`]; the
+/// `#[cfg(test)]` variant lets a hermetic loopback server stand in via
+/// `RYU_USAGE_CLAUDE_URL`, so the end-to-end `fetch` path can be exercised
+/// without touching the real vendor. Compiled out of release builds entirely.
+#[cfg(not(test))]
+fn usage_url() -> String {
+    USAGE_URL.to_string()
+}
+#[cfg(test)]
+fn usage_url() -> String {
+    std::env::var("RYU_USAGE_CLAUDE_URL").unwrap_or_else(|_| USAGE_URL.to_string())
+}
 /// Header value the usage endpoint expects (mirrors the `claude` CLI).
 const ANTHROPIC_BETA: &str = "oauth-2025-04-20";
 /// The scope the usage endpoint requires; a token without it can do inference
@@ -162,7 +175,7 @@ pub(super) async fn fetch(agent_id: &str) -> UsageSnapshot {
     );
 
     let resp = http_client()
-        .get(USAGE_URL)
+        .get(usage_url())
         .header("Authorization", format!("Bearer {}", access_token.trim()))
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
@@ -270,4 +283,360 @@ fn title_case(s: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::spawn_loopback;
+
+    // CLAUDE_CONFIG_DIR + RYU_USAGE_CLAUDE_URL are process-global; serialize every
+    // env-touching test so parallel runs don't clobber each other's fixtures.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Point CLAUDE_CONFIG_DIR at `dir` and write a `.credentials.json` there.
+    fn write_creds(dir: &std::path::Path, body: &str) {
+        std::env::set_var("CLAUDE_CONFIG_DIR", dir);
+        std::fs::write(dir.join(".credentials.json"), body).unwrap();
+    }
+
+    fn clear_env() {
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        std::env::remove_var("RYU_USAGE_CLAUDE_URL");
+    }
+
+    // ── pure helpers ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn title_case_capitalizes_words() {
+        assert_eq!(title_case("max"), "Max");
+        assert_eq!(title_case("MAX PLAN"), "Max Plan");
+        assert_eq!(title_case("pro_max"), "Pro Max");
+        assert_eq!(title_case("   "), "");
+    }
+
+    #[test]
+    fn format_plan_appends_multiplier() {
+        assert_eq!(
+            format_plan(Some("max"), Some("default_max_20x")).as_deref(),
+            Some("Max 20x")
+        );
+        assert_eq!(
+            format_plan(Some("max"), Some("something-5x-tier")).as_deref(),
+            Some("Max 5x")
+        );
+    }
+
+    #[test]
+    fn format_plan_without_valid_multiplier() {
+        // No tier => base only.
+        assert_eq!(format_plan(Some("pro"), None).as_deref(), Some("Pro"));
+        // Tier present but no "<digits>x" segment => base only.
+        assert_eq!(
+            format_plan(Some("pro"), Some("standard")).as_deref(),
+            Some("Pro")
+        );
+        // A bare "x" segment (len == 1) is filtered out => base only.
+        assert_eq!(format_plan(Some("pro"), Some("x")).as_deref(), Some("Pro"));
+        // Non-numeric prefix before x is rejected => base only.
+        assert_eq!(
+            format_plan(Some("pro"), Some("ax")).as_deref(),
+            Some("Pro")
+        );
+    }
+
+    #[test]
+    fn format_plan_none_for_missing_or_empty_subscription() {
+        assert_eq!(format_plan(None, Some("default_max_20x")), None);
+        assert_eq!(format_plan(Some("   "), None), None);
+    }
+
+    #[test]
+    fn window_maps_utilization_and_resets_at() {
+        let body = serde_json::json!({
+            "five_hour": { "utilization": 42.5, "resets_at": "2026-07-23T05:00:00Z" }
+        });
+        let w = window(&body, "five_hour", "Session").unwrap();
+        assert_eq!(w.label, "Session");
+        assert_eq!(w.used_percent, 42.5);
+        assert_eq!(w.resets_at.as_deref(), Some("2026-07-23T05:00:00Z"));
+    }
+
+    #[test]
+    fn window_empty_resets_at_is_dropped() {
+        let body = serde_json::json!({ "k": { "utilization": 3.0, "resets_at": "" } });
+        let w = window(&body, "k", "L").unwrap();
+        assert!(w.resets_at.is_none());
+    }
+
+    #[test]
+    fn window_none_without_utilization() {
+        let body = serde_json::json!({ "k": { "resets_at": "x" } });
+        assert!(window(&body, "k", "L").is_none());
+        // Missing key entirely.
+        assert!(window(&body, "absent", "L").is_none());
+    }
+
+    #[test]
+    fn extra_usage_usd_converts_cents_when_enabled() {
+        let body = serde_json::json!({
+            "extra_usage": { "is_enabled": true, "used_credits": 250 }
+        });
+        assert_eq!(extra_usage_usd(&body), Some(2.5));
+    }
+
+    #[test]
+    fn extra_usage_usd_none_when_disabled_or_absent() {
+        let disabled = serde_json::json!({
+            "extra_usage": { "is_enabled": false, "used_credits": 250 }
+        });
+        assert_eq!(extra_usage_usd(&disabled), None);
+        let no_credits =
+            serde_json::json!({ "extra_usage": { "is_enabled": true } });
+        assert_eq!(extra_usage_usd(&no_credits), None);
+        assert_eq!(extra_usage_usd(&serde_json::json!({})), None);
+    }
+
+    // ── credential path resolution ───────────────────────────────────────────
+
+    #[test]
+    fn credentials_path_honours_override_and_default() {
+        let _g = lock();
+        std::env::set_var("CLAUDE_CONFIG_DIR", "/tmp/xyz-claude");
+        assert_eq!(
+            credentials_path(),
+            PathBuf::from("/tmp/xyz-claude").join(".credentials.json")
+        );
+        // Whitespace-only override falls back to the default ~/.claude home.
+        std::env::set_var("CLAUDE_CONFIG_DIR", "   ");
+        assert_eq!(credentials_path(), default_home().join(".credentials.json"));
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        assert_eq!(credentials_path(), default_home().join(".credentials.json"));
+    }
+
+    #[test]
+    fn read_credentials_prefers_nonempty_file() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), "{\"hello\":true}");
+        assert_eq!(read_credentials().as_deref(), Some("{\"hello\":true}"));
+        clear_env();
+    }
+
+    // ── fetch gates (no network) ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_not_logged_in_on_empty_oauth() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        // Valid JSON but no claudeAiOauth => NotLoggedIn (and non-empty file, so
+        // the macOS keychain fallback is never consulted).
+        write_creds(dir.path(), "{}");
+        let snap = fetch("acp:claude").await;
+        assert!(!snap.available);
+        assert_eq!(snap.engine, "claude");
+        assert!(matches!(snap.reason, Some(UsageUnavailable::NotLoggedIn)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_not_logged_in_on_invalid_json() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), "this is not json");
+        let snap = fetch("acp:claude").await;
+        assert!(matches!(snap.reason, Some(UsageUnavailable::NotLoggedIn)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_not_logged_in_on_empty_access_token() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), r#"{"claudeAiOauth":{"accessToken":""}}"#);
+        let snap = fetch("acp:claude").await;
+        assert!(matches!(snap.reason, Some(UsageUnavailable::NotLoggedIn)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_missing_scope_when_scopes_lack_user_profile() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(
+            dir.path(),
+            r#"{"claudeAiOauth":{"accessToken":"tok","scopes":["user:inference"]}}"#,
+        );
+        let snap = fetch("acp:claude").await;
+        assert!(matches!(snap.reason, Some(UsageUnavailable::MissingScope)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_token_expired_when_past_expiry() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        // expiresAt one hour in the past.
+        let past = chrono::Utc::now().timestamp_millis() - 3_600_000;
+        write_creds(
+            dir.path(),
+            &format!(r#"{{"claudeAiOauth":{{"accessToken":"tok","expiresAt":{past}}}}}"#),
+        );
+        let snap = fetch("acp:claude").await;
+        assert!(matches!(snap.reason, Some(UsageUnavailable::TokenExpired)));
+        clear_env();
+    }
+
+    // ── fetch end-to-end via loopback server ─────────────────────────────────
+
+    fn future_expiry_creds() -> String {
+        let future = chrono::Utc::now().timestamp_millis() + 3_600_000;
+        format!(
+            r#"{{"claudeAiOauth":{{"accessToken":"tok","expiresAt":{future},"subscriptionType":"max","rateLimitTier":"default_max_20x","scopes":["user:profile"]}}}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn fetch_happy_path_builds_windows_and_plan() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), &future_expiry_creds());
+        let url = spawn_loopback(
+            "200 OK",
+            r#"{"five_hour":{"utilization":42.5,"resets_at":"2026-07-23T05:00:00Z"},"seven_day":{"utilization":10.0,"resets_at":""},"seven_day_sonnet":{"utilization":5.0},"extra_usage":{"is_enabled":true,"used_credits":250}}"#,
+        );
+        std::env::set_var("RYU_USAGE_CLAUDE_URL", &url);
+
+        let snap = fetch("acp:claude").await;
+        assert!(snap.available, "reason={:?}", snap.reason);
+        assert_eq!(snap.engine, "claude");
+        assert_eq!(snap.plan.as_deref(), Some("Max 20x"));
+        assert_eq!(snap.extra_usage_usd, Some(2.5));
+        assert_eq!(snap.windows.len(), 3);
+        assert_eq!(snap.windows[0].label, "Session");
+        assert_eq!(snap.windows[0].used_percent, 42.5);
+        assert_eq!(
+            snap.windows[0].resets_at.as_deref(),
+            Some("2026-07-23T05:00:00Z")
+        );
+        assert_eq!(snap.windows[1].label, "Weekly");
+        assert!(snap.windows[1].resets_at.is_none());
+        assert_eq!(snap.windows[2].label, "Sonnet weekly");
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_maps_401_to_token_expired() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), &future_expiry_creds());
+        let url = spawn_loopback("401 Unauthorized", "{}");
+        std::env::set_var("RYU_USAGE_CLAUDE_URL", &url);
+        let snap = fetch("acp:claude").await;
+        assert!(!snap.available);
+        assert!(matches!(snap.reason, Some(UsageUnavailable::TokenExpired)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_maps_429_to_rate_limited() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), &future_expiry_creds());
+        let url = spawn_loopback("429 Too Many Requests", "{}");
+        std::env::set_var("RYU_USAGE_CLAUDE_URL", &url);
+        let snap = fetch("acp:claude").await;
+        assert!(matches!(snap.reason, Some(UsageUnavailable::RateLimited)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_maps_500_to_error() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), &future_expiry_creds());
+        let url = spawn_loopback("500 Internal Server Error", "{}");
+        std::env::set_var("RYU_USAGE_CLAUDE_URL", &url);
+        let snap = fetch("acp:claude").await;
+        assert!(matches!(snap.reason, Some(UsageUnavailable::Error)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_bad_json_body_is_error() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), &future_expiry_creds());
+        let url = spawn_loopback("200 OK", "not-json-at-all");
+        std::env::set_var("RYU_USAGE_CLAUDE_URL", &url);
+        let snap = fetch("acp:claude").await;
+        assert!(!snap.available);
+        assert!(matches!(snap.reason, Some(UsageUnavailable::Error)));
+        clear_env();
+    }
+
+    #[tokio::test]
+    async fn fetch_connection_refused_is_error() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), &future_expiry_creds());
+        // Port 1 on loopback refuses immediately — exercises the reqwest send-error
+        // arm without any external network.
+        std::env::set_var("RYU_USAGE_CLAUDE_URL", "http://127.0.0.1:1/usage");
+        let snap = fetch("acp:claude").await;
+        assert!(!snap.available);
+        assert!(matches!(snap.reason, Some(UsageUnavailable::Error)));
+        clear_env();
+    }
+
+    /// Route through the public entry point so the `fetch_usage` engine-dispatch
+    /// arm for Claude is exercised (the other tests call `fetch` directly).
+    #[tokio::test]
+    async fn fetch_usage_dispatches_to_claude() {
+        let _g = lock();
+        let dir = tempfile::tempdir().unwrap();
+        write_creds(dir.path(), "{}"); // valid JSON, no oauth => NotLoggedIn
+        let snap = crate::fetch_usage("acp:claude").await;
+        assert_eq!(snap.engine, "claude");
+        assert!(matches!(snap.reason, Some(UsageUnavailable::NotLoggedIn)));
+        clear_env();
+    }
+
+    #[test]
+    fn credentials_deserialize_tolerates_shapes() {
+        // Unknown fields are ignored; absent optionals default to None; explicit
+        // nulls parse to None; a wrong-typed field is a parse error. Exercises the
+        // derived Deserialize branches for each struct field.
+        let all = serde_json::from_str::<CredentialsFile>(
+            r#"{"unknown":1,"claudeAiOauth":{"accessToken":"t","expiresAt":null,"subscriptionType":null,"rateLimitTier":null,"scopes":null,"extra":true}}"#,
+        )
+        .unwrap();
+        let oauth = all.oauth.unwrap();
+        assert_eq!(oauth.access_token.as_deref(), Some("t"));
+        assert!(oauth.expires_at.is_none());
+        assert!(oauth.scopes.is_none());
+
+        let empty = serde_json::from_str::<CredentialsFile>("{}").unwrap();
+        assert!(empty.oauth.is_none());
+
+        // Wrong type for a numeric field => Err (deserialize error path).
+        assert!(serde_json::from_str::<CredentialsFile>(
+            r#"{"claudeAiOauth":{"expiresAt":"not-a-number"}}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn credential_structs_are_debug_printable() {
+        // Exercises the derived Debug impls on the credential structs.
+        let parsed: CredentialsFile = serde_json::from_str(
+            r#"{"claudeAiOauth":{"accessToken":"t","expiresAt":1.0,"subscriptionType":"max","rateLimitTier":"x","scopes":["user:profile"]}}"#,
+        )
+        .unwrap();
+        assert!(!format!("{parsed:?}").is_empty());
+    }
 }

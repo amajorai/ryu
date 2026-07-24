@@ -306,6 +306,27 @@ mod tests {
     }
 
     #[test]
+    fn resolve_response_ignores_unknown_credential_rotation_field() {
+        // F7 (load-bearing): the hosted FLEET gateway also calls `/gateway/resolve`
+        // (with the client bearer as x-gateway-key) on every chat. Its
+        // `ResolveResponse` has NO `credentialRotation` field and MUST silently
+        // drop it — if this struct ever gained `#[serde(deny_unknown_fields)]`, a
+        // bootstrap presented to the fleet would error here instead of being
+        // ignored, and the whole KEY-only injection contract (only the NODE's own
+        // `register_managed_node` triggers the single-use exchange) would break,
+        // bricking fresh nodes. This test fails loudly if that regression lands.
+        let body = serde_json::json!({
+            "organization": { "id": "o3", "name": "Acme" },
+            "policy": { "rules": {} },
+            "credentialRotation": { "token": "rgw_durable_should_be_ignored" }
+        });
+        let resolved = serde_json::from_value::<ResolveResponse>(body)
+            .expect("fleet ResolveResponse must tolerate an unknown credentialRotation field")
+            .into_resolved();
+        assert_eq!(resolved.org_id, "o3");
+    }
+
+    #[test]
     fn from_env_requires_both_url_and_key() {
         // With neither set in this test process, the source is None.
         if std::env::var(ENV_CONTROL_PLANE_URL).is_err() && std::env::var(ENV_GATEWAY_KEY).is_err()

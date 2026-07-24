@@ -229,16 +229,16 @@ impl<'a> BindingRegistry<'a> {
     pub fn resolve(&self, req: &CapabilityReq) -> Result<Binding, BindingError> {
         // 1. Collect providers of this capability (the provider's own ProvidesEntry
         //    carries the served capability version).
-        let providers: Vec<(&PluginManifest, &crate::plugin_manifest::ProvidesEntry)> =
-            self.candidates
-                .iter()
-                .filter_map(|m| {
-                    m.provided_capabilities()
-                        .iter()
-                        .find(|p| p.capability == req.capability)
-                        .map(|p| (m, p))
-                })
-                .collect();
+        let providers: Vec<(&PluginManifest, &crate::plugin_manifest::ProvidesEntry)> = self
+            .candidates
+            .iter()
+            .filter_map(|m| {
+                m.provided_capabilities()
+                    .iter()
+                    .find(|p| p.capability == req.capability)
+                    .map(|p| (m, p))
+            })
+            .collect();
 
         if providers.is_empty() {
             return Err(BindingError::Unprovided {
@@ -301,10 +301,7 @@ impl<'a> BindingRegistry<'a> {
     /// Resolve every required capability of one plugin. Returns the successful
     /// bindings and, separately, every capability that failed — so a caller can
     /// refuse enable with the full list rather than one error at a time.
-    pub fn resolve_all(
-        &self,
-        manifest: &PluginManifest,
-    ) -> (Vec<Binding>, Vec<BindingError>) {
+    pub fn resolve_all(&self, manifest: &PluginManifest) -> (Vec<Binding>, Vec<BindingError>) {
         let mut ok = Vec::new();
         let mut errs = Vec::new();
         for req in manifest.required_capabilities() {
@@ -347,7 +344,10 @@ pub fn first_binding_error(
 /// refuses enable before this lowering ever runs. Duplicate edges (a capability that
 /// resolves to a plugin already named in `requires.apps`) are de-duplicated so the
 /// graph's diamond handling isn't relied on for a self-inflicted double.
-pub fn lower_manifests(manifests: &[PluginManifest], config: &BindingConfig) -> Vec<PluginManifest> {
+pub fn lower_manifests(
+    manifests: &[PluginManifest],
+    config: &BindingConfig,
+) -> Vec<PluginManifest> {
     let registry = BindingRegistry::new(config, manifests);
     manifests
         .iter()
@@ -426,18 +426,25 @@ mod tests {
     #[test]
     fn overrides_json_round_trips_and_tolerates_garbage() {
         let mut cfg = BindingConfig::default();
-        cfg.overrides.insert("rag".to_owned(), "graphrag".to_owned());
+        cfg.overrides
+            .insert("rag".to_owned(), "graphrag".to_owned());
         cfg.overrides.insert("tts".to_owned(), "piper".to_owned());
         let json = overrides_to_json(&cfg);
         assert_eq!(config_from_overrides_json(&json), cfg);
         // Malformed / empty ⇒ default (never blocks startup).
-        assert_eq!(config_from_overrides_json("not json"), BindingConfig::default());
+        assert_eq!(
+            config_from_overrides_json("not json"),
+            BindingConfig::default()
+        );
         assert_eq!(config_from_overrides_json("{}"), BindingConfig::default());
     }
 
     #[test]
     fn single_provider_binds_zero_config() {
-        let set = vec![provider("rag-app", "rag", "1.5.0"), consumer("spaces", "rag", None)];
+        let set = vec![
+            provider("rag-app", "rag", "1.5.0"),
+            consumer("spaces", "rag", None),
+        ];
         let cfg = BindingConfig::default();
         let reg = BindingRegistry::new(&cfg, &set);
         let b = reg.resolve(&req("rag", None)).expect("binds");
@@ -483,7 +490,10 @@ mod tests {
         let mut cfg = BindingConfig::default();
         cfg.overrides.insert("rag".to_owned(), "vecrag".to_owned());
         let reg = BindingRegistry::new(&cfg, &set);
-        assert_eq!(reg.resolve(&req("rag", None)).unwrap().provider_id, "vecrag");
+        assert_eq!(
+            reg.resolve(&req("rag", None)).unwrap().provider_id,
+            "vecrag"
+        );
     }
 
     #[test]
@@ -595,10 +605,7 @@ mod tests {
         let order = graph::resolve_enable_order("com.ryu.rag", &lowered).expect("resolves");
         let ei = order.iter().position(|id| id == "engines");
         let ri = order.iter().position(|id| id == "com.ryu.rag");
-        assert!(
-            ei < ri,
-            "engines enabled before rag (order: {order:?})"
-        );
+        assert!(ei < ri, "engines enabled before rag (order: {order:?})");
         assert!(
             graph::dependents_of("engines", &lowered).contains(&"com.ryu.rag".to_owned()),
             "rag is a dependent of engines"

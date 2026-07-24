@@ -8,13 +8,16 @@
 //!     (same shape as the skills allowlist / identity binding).
 //!   - **Layer B — global mode + risk tags.** The `approval-mode` preference
 //!     (`off` / `smart` / `manual`), Hermes-style:
-//!       - `off`    → Layer B never gates (Layers A/C may still).
+//!       - `off`    → Layer B never gates (Layers A/B′ may still).
 //!       - `manual` → every tool call is gated.
-//!       - `smart`  → only tool calls classified *risky* are gated.
-//!   - **Layer C — Gateway consult.** The authoritative moat layer: the Gateway
-//!     may force approval (budget/org policy). Fail-**open** (an unreachable
-//!     gateway never blocks a call), mirroring how the `Guardrails` node defers
-//!     to the firewall. Lives in [`consult_gateway`]; the call site ORs it in.
+//!       - `smart`  → only tool calls classified *risky* are gated. This is the
+//!         DEFAULT: an unset/unrecognized pref resolves to `smart`, so risky
+//!         irreversible tools (send/delete/pay/deploy) get HITL on a default
+//!         install. `off` must be an explicit operator choice.
+//!
+//! A "Layer C — Gateway consult" (org-policy moat) has been designed but is NOT
+//! implemented; nothing in this module calls the Gateway. Do not describe it as
+//! an active control until it exists.
 //!
 //! ## Risk classification
 //!
@@ -33,21 +36,25 @@ pub const APPROVAL_MODE_PREF: &str = "approval-mode";
 /// The global approval mode (Layer B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalMode {
-    /// Layer B gates nothing (the default). Layers A and C may still gate.
+    /// Layer B gates nothing. Requires an EXPLICIT `off` pref; Layers A/B′ may
+    /// still gate.
     Off,
     /// Layer B gates only tool calls classified risky (see [`classify_risk`]).
+    /// The default for an unset/unrecognized pref.
     Smart,
     /// Layer B gates every tool call.
     Manual,
 }
 
 impl ApprovalMode {
-    /// Parse the pref string; anything unrecognized (incl. empty/absent) is `Off`.
+    /// Parse the pref string. Only an explicit `off` disables Layer B; anything
+    /// unrecognized (incl. empty/absent) resolves to the fail-safe `Smart`
+    /// default so risky tools are gated out of the box.
     pub fn from_pref(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "manual" => ApprovalMode::Manual,
-            "smart" => ApprovalMode::Smart,
-            _ => ApprovalMode::Off,
+            "off" => ApprovalMode::Off,
+            _ => ApprovalMode::Smart,
         }
     }
 
@@ -93,7 +100,33 @@ const RISKY_PATTERNS: &[&str] = &[
     "tweet",
     "merge",
     "force_push",
+    // Exec / mutating / transfer verb classes (security M11). Matching is
+    // substring-based, so "exec" also covers "execute" and "write" also covers
+    // "overwrite"/"rewrite". `read` stays deliberately absent (too noisy).
+    "run",
+    "exec",
+    "write",
+    "download",
+    "upload",
+    "fetch",
+    // Worktree verbs: `apply` merges an agent-authored worktree into the user's
+    // base branch, `open_pr` publishes it, `discard` irreversibly deletes work.
+    "apply",
+    "discard",
+    "open_pr",
+    // Workflow minting: workflows dispatch tools through the ungated engine
+    // plane, so an agent creating/reconfiguring one is a laundering path around
+    // HITL — gate the minting itself.
+    "create_workflow",
+    "configure_workflow",
 ];
+
+/// Governance-mutating actions (exact action-segment match): tools that let an
+/// agent alter its own damage-limiting controls (e.g. raise or remove the
+/// Gateway spend cap via `ryu.gateway__budget.set`). Like the CoreApi-mutation
+/// rule, these gate whenever the operator has not EXPLICITLY opted out with
+/// `approval-mode=off` — the verb heuristic alone would miss them.
+const GOVERNANCE_ACTIONS: &[&str] = &["budget.set"];
 
 /// The action segment of a tool id: the part after the last `__`
 /// (`<server>__<tool>` → `<tool>`), lowercased. Falls back to the whole id.
@@ -156,6 +189,14 @@ pub fn should_require_approval_local(
         tags.push("core-api-mutation".to_owned());
         return Some(tags);
     }
+    // Layer B′ (continued) — governance mutations. Same escape-hatch semantics
+    // as the CoreApi rule: an agent must never silently loosen its own
+    // damage-limiting controls unless the operator explicitly opted out.
+    if !core_api_opted_out && GOVERNANCE_ACTIONS.contains(&action_segment(tool_id).as_str()) {
+        let mut tags = classify_risk(tool_id);
+        tags.push("governance-mutation".to_owned());
+        return Some(tags);
+    }
     // Layer B: global mode.
     match mode {
         ApprovalMode::Off => None,
@@ -180,11 +221,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mode_parses_case_insensitively_and_defaults_off() {
+    fn mode_parses_case_insensitively_and_defaults_smart() {
         assert_eq!(ApprovalMode::from_pref("MANUAL"), ApprovalMode::Manual);
         assert_eq!(ApprovalMode::from_pref(" smart "), ApprovalMode::Smart);
-        assert_eq!(ApprovalMode::from_pref(""), ApprovalMode::Off);
-        assert_eq!(ApprovalMode::from_pref("bogus"), ApprovalMode::Off);
+        assert_eq!(ApprovalMode::from_pref(" OFF "), ApprovalMode::Off);
+        // Unset/empty/unrecognized resolve to the fail-safe Smart default —
+        // only an explicit `off` disables Layer B.
+        assert_eq!(ApprovalMode::from_pref(""), ApprovalMode::Smart);
+        assert_eq!(ApprovalMode::from_pref("bogus"), ApprovalMode::Smart);
+    }
+
+    #[test]
+    fn governance_mutation_gates_unless_explicit_off() {
+        // `budget.set` lets the agent raise/remove its own spend cap; the verb
+        // heuristic misses it, so the governance rule must gate it — including
+        // under the unset default — with only explicit `off` opting out.
+        let t = "ryu.gateway__budget.set";
+        let tags = should_require_approval_local(&[], t, ApprovalMode::Smart, None)
+            .expect("governance mutation must gate under the default");
+        assert!(tags.iter().any(|t| t == "governance-mutation"));
+        assert!(
+            should_require_approval_local(&[], t, ApprovalMode::Manual, Some("manual")).is_some()
+        );
+        assert!(should_require_approval_local(&[], t, ApprovalMode::Off, Some("off")).is_none());
+    }
+
+    #[test]
+    fn classify_flags_worktree_and_workflow_minting_verbs() {
+        assert!(!classify_risk("ryu.worktree__apply").is_empty());
+        assert!(!classify_risk("ryu.worktree__discard").is_empty());
+        assert!(!classify_risk("ryu.worktree__open_pr").is_empty());
+        assert!(!classify_risk("workflow_builder__create_workflow").is_empty());
+        assert!(!classify_risk("workflow_builder__configure_workflow").is_empty());
+        // Reads on the same servers stay free.
+        assert!(classify_risk("workflow_builder__get_workflow").is_empty());
     }
 
     #[test]
@@ -196,6 +266,43 @@ mod tests {
         assert!(classify_risk("shadow__semantic_search").is_empty());
         // The server prefix must not leak a match (only the action segment counts).
         assert!(classify_risk("sender__list_items").is_empty());
+    }
+
+    #[test]
+    fn classify_flags_exec_and_mutating_verbs() {
+        // `rtk` executes arbitrary dev commands — it must classify risky so Smart
+        // mode gates it (security M6/M11). As a declarative `command` plugin tool
+        // its callable id is now `app__rtk__run`, but `classify_risk` keys on the
+        // action segment after the last `__`, so the `run` verb still classifies.
+        assert!(classify_risk("app__rtk__run").iter().any(|t| t == "run"));
+        // Exec / write / transfer verb classes.
+        assert!(!classify_risk("shell__exec").is_empty());
+        assert!(!classify_risk("db__execute_query").is_empty());
+        assert!(!classify_risk("fs__write_file").is_empty());
+        assert!(!classify_risk("fs__overwrite").is_empty());
+        assert!(!classify_risk("s3__upload_object").is_empty());
+        assert!(!classify_risk("model__download").is_empty());
+        assert!(!classify_risk("web__fetch").is_empty());
+        // `read` is deliberately not risky.
+        assert!(classify_risk("fs__read_file").is_empty());
+    }
+
+    #[test]
+    fn smart_mode_gates_rtk_run_and_write_tools() {
+        assert!(should_require_approval_local(
+            &[],
+            "app__rtk__run",
+            ApprovalMode::Smart,
+            Some("smart")
+        )
+        .is_some());
+        assert!(should_require_approval_local(
+            &[],
+            "fs__write_file",
+            ApprovalMode::Smart,
+            Some("smart")
+        )
+        .is_some());
     }
 
     #[test]

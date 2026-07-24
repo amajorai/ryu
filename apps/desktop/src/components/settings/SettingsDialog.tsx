@@ -13,50 +13,48 @@ import { useTheme } from "next-themes";
 import { useEffect, useMemo, useState } from "react";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import ResizableSettingsLayout from "@/src/components/ResizableSettingsLayout.tsx";
-import { useApps } from "@/src/hooks/useApps.ts";
-import { PREDICT_PLUGIN_ID } from "@/src/lib/api/predict.ts";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import {
+	APP_SECTION_PREFIX,
+	buildEntityNavGroups,
+	isEntitySection,
+	PLUGIN_SECTION_PREFIX,
+	type ScopedNavEntity,
+	useScopedSettingsNav,
+} from "@/src/hooks/useScopedSettingsNav.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
 import { openFeedbackWidget } from "@/src/lib/userjot.ts";
 import CreditsTab from "@/src/pages/CreditsPage.tsx";
-import { PreflightPage } from "@/src/pages/PreflightPage.tsx";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 import type { SettingsSectionValue } from "@/src/store/useSettingsDialog.ts";
 import { AccountTab } from "./AccountTab.tsx";
 import { AppearanceTab } from "./AppearanceTab.tsx";
 import { AudioDevicesSettings } from "./AudioDevicesSettings.tsx";
 import { BillingTab } from "./BillingTab.tsx";
-import { ConnectionsTab } from "./ConnectionsTab.tsx";
-import { DangerZoneSettings } from "./DangerZoneSettings.tsx";
-import { EmailAlertsSettings } from "./EmailAlertsSettings.tsx";
+import { EntitySettings } from "./EntitySettings.tsx";
 import { ExperimentalSettings } from "./ExperimentalSettings.tsx";
 import { GeneralTab } from "./GeneralTab.tsx";
 import { IslandSettings } from "./IslandSettings.tsx";
 import { KeyboardShortcutsTab } from "./KeyboardShortcutsTab.tsx";
-import { MeetingsSettings } from "./MeetingsSettings.tsx";
-import { MemoryTab } from "./MemoryTab.tsx";
-import { PluginsSettings } from "./PluginsSettings.tsx";
-import { PredictSettings } from "./PredictSettings.tsx";
-import { PrivacySettings } from "./PrivacySettings.tsx";
-import { QuestsSettings } from "./QuestsSettings.tsx";
 import { SessionsTab } from "./SessionsTab.tsx";
 import { ShadowSettings } from "./ShadowSettings.tsx";
-import { StorageSettings } from "./StorageSettings.tsx";
 import { TeamsBillingTab } from "./TeamsBillingTab.tsx";
 import { TtsEngineSettings } from "./TtsEngineSettings.tsx";
-import { UpdatesSettings } from "./UpdatesSettings.tsx";
 import { VoiceInputSettings } from "./VoiceInputSettings.tsx";
 import { VoiceModeDisplaySettings } from "./VoiceModeDisplaySettings.tsx";
 import { VoiceReadbackSettings } from "./VoiceReadbackSettings.tsx";
 
 const queryClient = new QueryClient();
 
-// Section identifiers are defined in the store so external openers (the Gateway
-// dialog cross-link, the command palette) can request a section without
-// importing this component.
+// Static (built-in) sections defined in the store so external openers (the Gateway
+// dialog cross-link, the command palette) can request one without importing this
+// component. Per-app/plugin tabs are dynamic (`app:<id>` / `plugin:<id>`) and are
+// NOT part of this union — they are matched by prefix at render time.
 type SectionValue = SettingsSectionValue;
 
 interface NavItem {
 	label: string;
-	value: SectionValue;
+	value: string;
 }
 
 interface NavGroup {
@@ -64,6 +62,11 @@ interface NavGroup {
 	title?: string;
 }
 
+// Desktop-client + user-account sections only. Everything node/gateway-level
+// (meetings, memory, privacy, storage, updates, email/alerts, connections, health,
+// predictive typing, tasks, the Danger Zone, and node-scoped app/plugin settings)
+// now lives in the Gateway dialog — those affect the whole node, not this per-user
+// desktop client, and belong next to the other node settings.
 const NAV_GROUPS: NavGroup[] = [
 	{
 		items: [
@@ -73,11 +76,7 @@ const NAV_GROUPS: NavGroup[] = [
 			{ value: "island", label: "Island" },
 			{ value: "shadow", label: "Shadow" },
 			{ value: "voice", label: "Voice" },
-			{ value: "memory", label: "Memory" },
-			{ value: "meetings", label: "Meetings" },
-			{ value: "quests", label: "Tasks" },
-			{ value: "predict", label: "Predictive typing" },
-			{ value: "plugins", label: "Plugins" },
+			{ value: "experimental", label: "Experimental" },
 		],
 	},
 	{
@@ -91,23 +90,10 @@ const NAV_GROUPS: NavGroup[] = [
 	{
 		title: "Services",
 		items: [
-			{ value: "connections", label: "Connections" },
 			{ value: "billing", label: "Billing" },
 			{ value: "referrals", label: "Referrals" },
 			{ value: "teams", label: "Teams" },
 			{ value: "credits", label: "Credits" },
-		],
-	},
-	{
-		title: "System",
-		items: [
-			{ value: "email-alerts", label: "Email & Alerts" },
-			{ value: "privacy", label: "Privacy" },
-			{ value: "storage", label: "Storage" },
-			{ value: "updates", label: "Updates" },
-			{ value: "health", label: "Health" },
-			{ value: "experimental", label: "Experimental" },
-			{ value: "danger", label: "Danger Zone" },
 		],
 	},
 ];
@@ -118,8 +104,6 @@ function SectionContent({ value }: { value: SectionValue }) {
 			return <GeneralTab />;
 		case "account":
 			return <AccountTab />;
-		case "connections":
-			return <ConnectionsTab />;
 		case "sessions":
 			return <SessionsTab />;
 		case "authorized-apps":
@@ -140,16 +124,8 @@ function SectionContent({ value }: { value: SectionValue }) {
 			return <TeamsBillingTab />;
 		case "credits":
 			return <CreditsTab />;
-		case "updates":
-			return <UpdatesSettings />;
-		case "storage":
-			return <StorageSettings />;
-		case "health":
-			return <PreflightPage embedded />;
 		case "experimental":
 			return <ExperimentalSettings />;
-		case "danger":
-			return <DangerZoneSettings />;
 		case "voice":
 			return (
 				<div className="space-y-4">
@@ -160,20 +136,6 @@ function SectionContent({ value }: { value: SectionValue }) {
 					<TtsEngineSettings />
 				</div>
 			);
-		case "memory":
-			return <MemoryTab />;
-		case "predict":
-			return <PredictSettings />;
-		case "meetings":
-			return <MeetingsSettings />;
-		case "quests":
-			return <QuestsSettings />;
-		case "plugins":
-			return <PluginsSettings />;
-		case "email-alerts":
-			return <EmailAlertsSettings />;
-		case "privacy":
-			return <PrivacySettings />;
 		default:
 			return null;
 	}
@@ -190,28 +152,31 @@ export function SettingsDialog({
 	onOpenChange,
 	defaultSection,
 }: SettingsDialogProps) {
-	const [activeSection, setActiveSection] = useState<SectionValue>(
+	const [activeSection, setActiveSection] = useState<string>(
 		defaultSection ?? "general"
 	);
 	const openGateway = useGatewayDialog((s) => s.openGateway);
 	const { resolvedTheme } = useTheme();
+	const target = toTarget(useActiveNode());
 
-	// System-wide predictive typing is a built-in *plugin*; its settings tab only
-	// exists while that plugin is enabled (the plugin is the single on/off switch —
-	// there is no standalone feature to configure otherwise). Filter the nav from
-	// live plugin state rather than the static NAV_GROUPS.
-	const { apps } = useApps();
-	const predictEnabled = useMemo(
-		() => apps.some((a) => a.id === PREDICT_PLUGIN_ID && a.enabled),
-		[apps]
-	);
+	// User-scoped app/plugin settings tabs (node-scoped ones render in the Gateway
+	// dialog instead). Each becomes its own nav item under the Apps / Plugins header.
+	const { apps: appEntities, plugins: pluginEntities } =
+		useScopedSettingsNav("user");
+	const entityById = useMemo(() => {
+		const map = new Map<string, ScopedNavEntity>();
+		for (const e of appEntities) {
+			map.set(`${APP_SECTION_PREFIX}${e.id}`, e);
+		}
+		for (const e of pluginEntities) {
+			map.set(`${PLUGIN_SECTION_PREFIX}${e.id}`, e);
+		}
+		return map;
+	}, [appEntities, pluginEntities]);
+
 	const navGroups = useMemo(
-		() =>
-			NAV_GROUPS.map((g) => ({
-				...g,
-				items: g.items.filter((it) => it.value !== "predict" || predictEnabled),
-			})),
-		[predictEnabled]
+		() => [...NAV_GROUPS, ...buildEntityNavGroups(appEntities, pluginEntities)],
+		[appEntities, pluginEntities]
 	);
 	const allItems = useMemo(
 		() => navGroups.flatMap((g) => g.items),
@@ -244,16 +209,17 @@ export function SettingsDialog({
 		}
 	}, [open, defaultSection]);
 
-	// If the predict plugin is disabled while sitting on its (now-hidden) tab,
-	// fall back to General so the content pane never shows an orphaned section.
+	// If the selected app/plugin entity disappears (disabled/uninstalled) while its
+	// now-orphaned tab is open, fall back to General so the pane never shows nothing.
 	useEffect(() => {
-		if (!predictEnabled && activeSection === "predict") {
+		if (isEntitySection(activeSection) && !entityById.has(activeSection)) {
 			setActiveSection("general");
 		}
-	}, [predictEnabled, activeSection]);
+	}, [activeSection, entityById]);
 
 	const activeLabel =
 		allItems.find((i) => i.value === activeSection)?.label ?? "";
+	const activeEntity = entityById.get(activeSection);
 
 	return (
 		<QueryClientProvider client={queryClient}>
@@ -263,14 +229,18 @@ export function SettingsDialog({
 						content={
 							<div className="px-8 py-6">
 								<h2 className="mb-6 font-semibold text-base">{activeLabel}</h2>
-								<SectionContent value={activeSection} />
+								{activeEntity ? (
+									<EntitySettings entity={activeEntity} target={target} />
+								) : (
+									<SectionContent value={activeSection as SectionValue} />
+								)}
 							</div>
 						}
 						sidebar={
 							<>
 								{navGroups.map((group, gi) => (
 									// biome-ignore lint/suspicious/noArrayIndexKey: static nav groups with no stable key
-									<SidebarGroup className="py-1" key={gi}>
+									<SidebarGroup className="py-1" key={group.title ?? gi}>
 										{group.title && (
 											<SidebarGroupLabel>{group.title}</SidebarGroupLabel>
 										)}

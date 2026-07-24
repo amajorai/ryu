@@ -154,6 +154,10 @@ mod tests {
                 url: "https://api.example.com/quote".to_owned(),
                 method: "POST".to_owned(),
                 header_params: vec![],
+                secret_headers: Default::default(),
+                fail_open: false,
+                unwrap_body: false,
+                body_defaults: serde_json::Value::Null,
             }
         );
     }
@@ -355,7 +359,9 @@ mod tests {
             .unwrap_err()
             .contains("health_path"));
         spec = binary_sidecar("engine", "https://example.com/e", "  ");
-        assert!(validate_sidecar_spec(&spec).unwrap_err().contains("version"));
+        assert!(validate_sidecar_spec(&spec)
+            .unwrap_err()
+            .contains("version"));
     }
 
     #[test]

@@ -8,7 +8,7 @@
  * that the SDK's deliberately simpler zod authoring schema, the blessed JSON
  * Schema, and the generated types stay describing the same manifest:
  *
- * 1. a known-good repo manifest (apps-store/mail/ui/plugin.json — the first
+ * 1. a known-good repo manifest (apps-store/mail/plugin.json — the first
  *    fully manifest-driven app) parses with the zod `PluginManifestSchema`;
  * 2. every key the schema marks required exists in the schema, the generated
  *    TS, and the fixture;
@@ -24,7 +24,7 @@ import { PluginManifestSchema } from "./manifest";
 
 const FIXTURE_PATH = join(
 	import.meta.dir,
-	"../../../apps-store/mail/ui/plugin.json"
+	"../../../apps-store/mail/plugin.json"
 );
 const SCHEMA_PATH = join(
 	import.meta.dir,

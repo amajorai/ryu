@@ -252,3 +252,129 @@ impl ApprovalStore {
         self.tx.subscribe()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::approvals::{ApprovalKind, ApprovalStatus};
+
+    /// Build a bare pending request with an explicit id / source / expiry so the
+    /// store's filters and sweeps have deterministic inputs.
+    fn req(id: &str, source: Option<&str>, expires_at: Option<&str>) -> ApprovalRequest {
+        ApprovalRequest {
+            id: id.to_owned(),
+            kind: ApprovalKind::ScheduledRun,
+            title: "t".to_owned(),
+            summary: "s".to_owned(),
+            agent_id: None,
+            conversation_id: None,
+            source_ref: source.map(str::to_owned),
+            risk_tags: Vec::new(),
+            status: ApprovalStatus::Pending,
+            note: None,
+            error: None,
+            result: None,
+            action: None,
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            decided_at: None,
+            expires_at: expires_at.map(str::to_owned),
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_get_round_trips_the_full_request() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        store.insert(&req("a1", Some("job:1"), None)).await.unwrap();
+        let got = store.get("a1").await.unwrap().expect("row present");
+        assert_eq!(got.id, "a1");
+        assert_eq!(got.source_ref.as_deref(), Some("job:1"));
+        // A missing id resolves to None, not an error.
+        assert!(store.get("nope").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn list_filters_by_status_and_orders_newest_first() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        let mut older = req("old", None, None);
+        older.created_at = "2026-01-01T00:00:00Z".to_owned();
+        let mut newer = req("new", None, None);
+        newer.created_at = "2026-06-01T00:00:00Z".to_owned();
+        store.insert(&older).await.unwrap();
+        store.insert(&newer).await.unwrap();
+
+        // Unfiltered list: both, newest first.
+        let all = store.list(None).await.unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, "new");
+
+        // Approve one and confirm the status filter isolates it.
+        let mut approved = newer.clone();
+        approved.status = ApprovalStatus::Approved;
+        store.update(&approved).await.unwrap();
+        let pending = store.list(Some(ApprovalStatus::Pending)).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "old");
+        let done = store.list(Some(ApprovalStatus::Approved)).await.unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].id, "new");
+    }
+
+    #[tokio::test]
+    async fn has_pending_for_source_tracks_only_pending_rows() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        store.insert(&req("s1", Some("src:x"), None)).await.unwrap();
+        assert!(store.has_pending_for_source("src:x").await.unwrap());
+        assert!(!store.has_pending_for_source("src:other").await.unwrap());
+
+        // Decide it → no longer counts as pending for the source.
+        let mut decided = req("s1", Some("src:x"), None);
+        decided.status = ApprovalStatus::Rejected;
+        assert!(store.try_transition(&decided).await.unwrap());
+        assert!(!store.has_pending_for_source("src:x").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn try_transition_only_fires_from_pending() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        store.insert(&req("t1", None, None)).await.unwrap();
+        let mut approved = req("t1", None, None);
+        approved.status = ApprovalStatus::Approved;
+        // First transition wins.
+        assert!(store.try_transition(&approved).await.unwrap());
+        // Second (row already non-pending) is a no-op.
+        assert!(!store.try_transition(&approved).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn pending_expired_returns_only_stale_pending_rows() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        // Expired in the past.
+        store
+            .insert(&req("past", None, Some("2020-01-01T00:00:00Z")))
+            .await
+            .unwrap();
+        // Expires in the far future.
+        store
+            .insert(&req("future", None, Some("2999-01-01T00:00:00Z")))
+            .await
+            .unwrap();
+        // No expiry at all → never swept.
+        store.insert(&req("never", None, None)).await.unwrap();
+
+        let now = "2026-01-01T00:00:00Z";
+        let stale = store.pending_expired(now).await.unwrap();
+        let ids: Vec<&str> = stale.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["past"]);
+    }
+
+    #[tokio::test]
+    async fn insert_broadcasts_a_created_event_to_subscribers() {
+        let store = ApprovalStore::open_in_memory().unwrap();
+        let mut rx = store.subscribe();
+        store.insert(&req("b1", None, None)).await.unwrap();
+        match rx.try_recv() {
+            Ok(ApprovalEvent::Created { request }) => assert_eq!(request.id, "b1"),
+            other => panic!("expected a Created event, got {other:?}"),
+        }
+    }
+}

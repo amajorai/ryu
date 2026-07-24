@@ -730,8 +730,9 @@ Source: [`apps/gateway/.env.example`](https://github.com/amajorai/ryu/blob/main/
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `RYU_CHANNEL_ALLOWED_USERS` | Optional | - | Global allowlist of users allowed across all channels. |
+| `RYU_CHANNEL_ALLOWED_USERS` | Optional | - | Global allowlist of users allowed across all channels. With no allowlist configured, all inbound is refused unless `RYU_CHANNEL_ALLOW_ALL` is set. |
 | `RYU_CHANNEL_ALLOWED_USERS_TELEGRAM` | Optional | - | Per-platform allowlist for Telegram. |
+| `RYU_CHANNEL_ALLOW_ALL` | Optional | `0` | Set to `1` to accept inbound from ALL chats when no allowlist is configured (channels are closed by default without an allowlist). |
 | `TELEGRAM_BOT_TOKEN` | Optional | - | Telegram bot token. Setting a token enables the channel. |
 | `TELEGRAM_MODEL` | Optional | - | Telegram per-channel model override. |
 | `TELEGRAM_SYSTEM_PROMPT` | Optional | - | Telegram per-channel system prompt. |

@@ -7,5 +7,23 @@
 		"ryu": ">=0.0.1"
 	},
 	"runnables": [],
-	"permission_grants": []
+	"permission_grants": [],
+	"contributes": {
+		"settings_tabs": [
+			{
+				"id": "memory.settings",
+				"title": "Memory",
+				"scope": "node",
+				"view": "memory"
+			}
+		],
+		"sidebar_buttons": [
+			{
+				"id": "memory",
+				"title": "Memory",
+				"icon": "lucide:brain",
+				"target": "/library/memory"
+			}
+		]
+	}
 }

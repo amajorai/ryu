@@ -45,3 +45,48 @@ impl fmt::Display for ProviderError {
 }
 
 impl std::error::Error for ProviderError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_provider_error() {
+        let e = ProviderError::Provider("boom".to_string());
+        assert_eq!(e.to_string(), "Provider error: boom");
+    }
+
+    #[test]
+    fn display_rate_limited_names_provider_but_not_backoff() {
+        let e = ProviderError::RateLimited {
+            provider: "openai".to_string(),
+            retry_after: Some(30),
+            reset_at: Some(12345),
+        };
+        let s = e.to_string();
+        assert_eq!(s, "Provider rate limited: openai");
+        // The Display form is a summary — it does not leak the numeric back-off.
+        assert!(!s.contains("30"));
+        assert!(!s.contains("12345"));
+    }
+
+    #[test]
+    fn clone_and_debug_are_available() {
+        let e = ProviderError::RateLimited {
+            provider: "anthropic".to_string(),
+            retry_after: None,
+            reset_at: None,
+        };
+        let cloned = e.clone();
+        assert_eq!(cloned.to_string(), e.to_string());
+        // Debug is derived; exercise it so the impl is covered.
+        assert!(format!("{e:?}").contains("RateLimited"));
+    }
+
+    #[test]
+    fn is_usable_as_std_error() {
+        // Ensure the std::error::Error impl compiles/behaves (source() defaults None).
+        let e: Box<dyn std::error::Error> = Box::new(ProviderError::Provider("x".into()));
+        assert!(e.source().is_none());
+    }
+}

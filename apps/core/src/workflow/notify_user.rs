@@ -93,8 +93,8 @@ pub async fn run(
     }
     let ack_required = !matches!(ack_mode, AckMode::None);
 
-    let store = crate::notify::global_store()
-        .ok_or("NotifyUser: notification store unavailable")?;
+    let store =
+        crate::notify::global_store().ok_or("NotifyUser: notification store unavailable")?;
 
     // Deliver to every recipient across all three surfaces. Collect each inbox id
     // so an ack gate can map an acking user back to their row.
@@ -181,7 +181,9 @@ pub async fn record_ack(run: &mut WorkflowRun, user_id: &str) -> Result<AckAckRe
 
     // Only members that were pinged may ack.
     if !state.required.iter().any(|u| u == user_id) {
-        return Err(format!("user {user_id} was not a target of this notification"));
+        return Err(format!(
+            "user {user_id} was not a target of this notification"
+        ));
     }
     let notif_id = state.notifications.get(user_id).cloned();
     if !state.acked.iter().any(|u| u == user_id) {
@@ -203,9 +205,9 @@ pub async fn record_ack(run: &mut WorkflowRun, user_id: &str) -> Result<AckAckRe
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::store::{RunStatus, WorkflowRun};
     use super::super::AckMode;
+    use super::*;
     use std::collections::HashMap;
 
     fn gate_run(node_id: &str, required: &[&str], mode: &AckMode) -> WorkflowRun {
@@ -224,8 +226,10 @@ mod tests {
             acked: Vec::new(),
             notifications,
         };
-        run.state
-            .insert(ack_state_key(node_id), serde_json::to_string(&state).unwrap());
+        run.state.insert(
+            ack_state_key(node_id),
+            serde_json::to_string(&state).unwrap(),
+        );
         run
     }
 

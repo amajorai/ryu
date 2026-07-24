@@ -60,13 +60,20 @@ impl GhostProcess {
         self.cleanup_orphan().await;
         self.state = ProcessState::Starting;
 
-        let mut child = Command::new(&self.binary_path)
+        let mut command = Command::new(&self.binary_path);
+        command
             .args(["mcp"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false)
-            .no_window()
-            .spawn()?;
+            .no_window();
+        // Isolate Ghost's recipe/model state per profile (`~/.ryu{profile}/ghost`
+        // instead of the shared `~/.ghost`), so a dev and a release Ghost keep their
+        // own recipes. Ghost reads `GHOST_DATA_DIR` (crates/ghost recipe store); BYO wins.
+        if std::env::var_os("GHOST_DATA_DIR").is_none() {
+            command.env("GHOST_DATA_DIR", crate::paths::ryu_dir().join("ghost"));
+        }
+        let mut child = command.spawn()?;
 
         // Write PID file so we can recover from a crash on next start.
         if let Some(pid) = child.id() {
@@ -185,5 +192,46 @@ impl GhostProcess {
                 .no_window()
                 .output();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NOTE: these cover only the pure state-machine defaults and path helpers.
+    // `start`/`stop`/`cleanup_orphan` are deliberately NOT exercised — they spawn
+    // or signal real processes (cleanup_orphan would `taskkill`/SIGKILL a PID read
+    // from disk), which a unit test must never do.
+
+    #[test]
+    fn new_starts_in_stopped_state_with_no_child() {
+        let mut proc = GhostProcess::new(PathBuf::from("/bin/ghost"));
+        assert_eq!(proc.state, ProcessState::Stopped);
+        // No child was spawned, so it is not running and the state is unchanged.
+        assert!(!proc.is_running());
+        assert_eq!(proc.state, ProcessState::Stopped);
+    }
+
+    #[test]
+    fn pid_path_lives_under_the_ghost_dir() {
+        let path = pid_path();
+        assert!(path.ends_with("ghost.pid"));
+        assert_eq!(path.parent().unwrap(), ghost_dir());
+        assert!(ghost_dir().ends_with(".ghost"));
+    }
+
+    #[test]
+    fn process_state_equality_and_failed_payload() {
+        assert_eq!(ProcessState::Running, ProcessState::Running);
+        assert_ne!(ProcessState::Running, ProcessState::Stopped);
+        assert_eq!(
+            ProcessState::Failed("boom".to_string()),
+            ProcessState::Failed("boom".to_string())
+        );
+        assert_ne!(
+            ProcessState::Failed("a".to_string()),
+            ProcessState::Failed("b".to_string())
+        );
     }
 }

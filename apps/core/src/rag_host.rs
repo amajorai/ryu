@@ -98,7 +98,11 @@ pub fn reranker_local_server(registry: &ModelRegistry) -> Reranker {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| registry.reranker_base_url.clone());
-    Reranker::remote(&base_url, &registry.local_reranker_model.id, reranker_api_key())
+    Reranker::remote(
+        &base_url,
+        &registry.local_reranker_model.id,
+        reranker_api_key(),
+    )
 }
 
 /// Bearer key for the reranker endpoint (`RYU_RERANKER_API_KEY`).

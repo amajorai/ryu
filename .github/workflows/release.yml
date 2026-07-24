@@ -37,7 +37,7 @@ jobs:
     name: Release notes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The changelog diffs against the previous tag — needs full history.
           fetch-depth: 0
@@ -81,8 +81,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.5
       - run: bun install --frozen-lockfile
@@ -148,11 +148,11 @@ jobs:
           - platform: windows-latest
             args: ""
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - name: Install Linux build deps
@@ -160,8 +160,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      # SECURITY (updater signing key scope): `bun install` is deliberately a
+      # separate step with NO signing key in env, so a malicious dependency
+      # postinstall script cannot read TAURI_SIGNING_PRIVATE_KEY. The key is
+      # introduced only on the tauri-action step below. RESIDUAL RISK: tauri-action
+      # runs the app's `beforeBuildCommand` (vite build), so build-time deps still
+      # execute with the key in env; the action offers no hook to pre-run that in a
+      # key-free step, so this residual cannot be closed at the workflow layer.
       - run: bun install
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -225,8 +232,8 @@ jobs:
         # Desktop stays on windows-latest — it builds Rust, not node-gyp natives.
         os: [ubuntu-latest, macos-latest, windows-2022]
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.5
       # uiohook-napi compiles libuiohook from source on Linux and needs the X11
@@ -298,7 +305,7 @@ jobs:
           - { asset: ryu-core,       bin: ryu-core,       dir: apps/core }
           - { asset: ryu-gateway,    bin: ryu-gateway,    dir: apps/gateway }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -313,12 +320,12 @@ jobs:
         run: brew install dbus pkg-config opus
 
       - name: Install protoc (prost-build)
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: ${{ matrix.target.dir }}
 

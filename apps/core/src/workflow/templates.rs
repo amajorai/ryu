@@ -83,11 +83,21 @@ fn branch_edge(from: &str, to: &str, branch: &str) -> WorkflowEdge {
 }
 
 fn input(id: &str, key: &str) -> WorkflowNode {
-    node(id, NodeKind::Input { key: Some(key.to_owned()) })
+    node(
+        id,
+        NodeKind::Input {
+            key: Some(key.to_owned()),
+        },
+    )
 }
 
 fn output(id: &str, key: &str) -> WorkflowNode {
-    node(id, NodeKind::Output { key: Some(key.to_owned()) })
+    node(
+        id,
+        NodeKind::Output {
+            key: Some(key.to_owned()),
+        },
+    )
 }
 
 /// A prompt node routed to the default gateway LLM (`agent_id = None`).
@@ -113,7 +123,12 @@ fn agent(id: &str, agent_id: &str, task: &str) -> WorkflowNode {
 }
 
 fn condition(id: &str, expr: &str) -> WorkflowNode {
-    node(id, NodeKind::Condition { expr: expr.to_owned() })
+    node(
+        id,
+        NodeKind::Condition {
+            expr: expr.to_owned(),
+        },
+    )
 }
 
 fn while_loop(id: &str, expr: &str, body_placeholder: &str, max_iterations: u64) -> WorkflowNode {
@@ -147,7 +162,13 @@ fn fanout(id: &str, delegates: Vec<DelegateSpec>) -> WorkflowNode {
     )
 }
 
-fn wf(id: &str, name: &str, description: &str, nodes: Vec<WorkflowNode>, edges: Vec<WorkflowEdge>) -> Workflow {
+fn wf(
+    id: &str,
+    name: &str,
+    description: &str,
+    nodes: Vec<WorkflowNode>,
+    edges: Vec<WorkflowEdge>,
+) -> Workflow {
     Workflow {
         id: id.to_owned(),
         name: name.to_owned(),
@@ -220,7 +241,10 @@ fn meta(
 fn patch_bodies(workflow: &mut Workflow, id_map: &HashMap<String, String>) {
     for n in &mut workflow.nodes {
         match &mut n.kind {
-            NodeKind::While { body_workflow_id: Some(bid), .. } => {
+            NodeKind::While {
+                body_workflow_id: Some(bid),
+                ..
+            } => {
                 if let Some(minted) = id_map.get(bid) {
                     *bid = minted.clone();
                 }
@@ -253,10 +277,7 @@ pub async fn install(template_id: &str) -> Result<String, String> {
 
     // Persist each body with its minted id (patching any inter-body references).
     for (placeholder, mut body) in tmpl.bodies {
-        body.id = id_map
-            .get(&placeholder)
-            .cloned()
-            .unwrap_or_else(mint_id);
+        body.id = id_map.get(&placeholder).cloned().unwrap_or_else(mint_id);
         patch_bodies(&mut body, &id_map);
         super::persist_workflow(body).await?;
     }
@@ -291,7 +312,10 @@ fn autoresearch() -> WorkflowTemplate {
             agent("researcher", "ryu", AUTORESEARCH_TASK),
             output("body_out", "result"),
         ],
-        vec![edge("task_in", "researcher"), edge("researcher", "body_out")],
+        vec![
+            edge("task_in", "researcher"),
+            edge("researcher", "body_out"),
+        ],
     );
 
     let primary = wf(
@@ -384,7 +408,13 @@ fn routing() -> WorkflowTemplate {
             6,
             &["routing", "classify", "branch"],
         ),
-        primary: wf("routing", "Routing", "Classify then branch to a specialized handler.", nodes, edges),
+        primary: wf(
+            "routing",
+            "Routing",
+            "Classify then branch to a specialized handler.",
+            nodes,
+            edges,
+        ),
         bodies: vec![],
     }
 }
@@ -393,14 +423,32 @@ fn routing() -> WorkflowTemplate {
 
 fn parallelization() -> WorkflowTemplate {
     let delegates = vec![
-        delegate("worker-a", "ryu", "Analyze the following from a correctness angle:\n\n{{input}}", PermissionPreset::Research),
-        delegate("worker-b", "ryu", "Analyze the following from a risk/edge-case angle:\n\n{{input}}", PermissionPreset::Research),
-        delegate("worker-c", "ryu", "Analyze the following from a clarity/UX angle:\n\n{{input}}", PermissionPreset::Research),
+        delegate(
+            "worker-a",
+            "ryu",
+            "Analyze the following from a correctness angle:\n\n{{input}}",
+            PermissionPreset::Research,
+        ),
+        delegate(
+            "worker-b",
+            "ryu",
+            "Analyze the following from a risk/edge-case angle:\n\n{{input}}",
+            PermissionPreset::Research,
+        ),
+        delegate(
+            "worker-c",
+            "ryu",
+            "Analyze the following from a clarity/UX angle:\n\n{{input}}",
+            PermissionPreset::Research,
+        ),
     ];
     let nodes = vec![
         input("in", "input"),
         fanout("workers", delegates),
-        prompt("synth", "Synthesize these independent analyses into one coherent answer:\n\n{{nodes.workers}}"),
+        prompt(
+            "synth",
+            "Synthesize these independent analyses into one coherent answer:\n\n{{nodes.workers}}",
+        ),
         output("out", "result"),
     ];
     let edges = vec![
@@ -419,7 +467,13 @@ fn parallelization() -> WorkflowTemplate {
             4,
             &["parallel", "fan-out", "sub-agents"],
         ),
-        primary: wf("parallelization", "Parallelization", "Fan out to clean-context workers, then synthesize.", nodes, edges),
+        primary: wf(
+            "parallelization",
+            "Parallelization",
+            "Fan out to clean-context workers, then synthesize.",
+            nodes,
+            edges,
+        ),
         bodies: vec![],
     }
 }
@@ -428,9 +482,24 @@ fn parallelization() -> WorkflowTemplate {
 
 fn orchestrator_workers() -> WorkflowTemplate {
     let delegates = vec![
-        delegate("sub-1", "ryu", "Complete subtask 1 of this plan. Plan:\n\n{{nodes.plan}}", PermissionPreset::default()),
-        delegate("sub-2", "ryu", "Complete subtask 2 of this plan. Plan:\n\n{{nodes.plan}}", PermissionPreset::default()),
-        delegate("sub-3", "ryu", "Complete subtask 3 of this plan. Plan:\n\n{{nodes.plan}}", PermissionPreset::default()),
+        delegate(
+            "sub-1",
+            "ryu",
+            "Complete subtask 1 of this plan. Plan:\n\n{{nodes.plan}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "sub-2",
+            "ryu",
+            "Complete subtask 2 of this plan. Plan:\n\n{{nodes.plan}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "sub-3",
+            "ryu",
+            "Complete subtask 3 of this plan. Plan:\n\n{{nodes.plan}}",
+            PermissionPreset::default(),
+        ),
     ];
     let nodes = vec![
         input("in", "input"),
@@ -549,9 +618,24 @@ fn autonomous_agent() -> WorkflowTemplate {
 
 fn fan_out_synthesize() -> WorkflowTemplate {
     let delegates = vec![
-        delegate("item-1", "ryu", "Process this item independently and return your result:\n\n{{input}}", PermissionPreset::default()),
-        delegate("item-2", "ryu", "Process this item independently, cross-checking a different aspect:\n\n{{input}}", PermissionPreset::default()),
-        delegate("item-3", "ryu", "Process this item independently, focusing on completeness:\n\n{{input}}", PermissionPreset::default()),
+        delegate(
+            "item-1",
+            "ryu",
+            "Process this item independently and return your result:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "item-2",
+            "ryu",
+            "Process this item independently, cross-checking a different aspect:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "item-3",
+            "ryu",
+            "Process this item independently, focusing on completeness:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
     ];
     let nodes = vec![
         input("in", "input"),
@@ -559,7 +643,11 @@ fn fan_out_synthesize() -> WorkflowTemplate {
         prompt("merge", "Merge these independent results into one deduplicated, complete answer:\n\n{{nodes.fanout}}"),
         output("out", "result"),
     ];
-    let edges = vec![edge("in", "fanout"), edge("fanout", "merge"), edge("merge", "out")];
+    let edges = vec![
+        edge("in", "fanout"),
+        edge("fanout", "merge"),
+        edge("merge", "out"),
+    ];
     WorkflowTemplate {
         meta: meta(
             "fan-out-synthesize",
@@ -606,7 +694,13 @@ fn classify_and_act() -> WorkflowTemplate {
             6,
             &["classify", "routing", "agents"],
         ),
-        primary: wf("classify-and-act", "Classify & Act", "Classify then dispatch to a specialized agent.", nodes, edges),
+        primary: wf(
+            "classify-and-act",
+            "Classify & Act",
+            "Classify then dispatch to a specialized agent.",
+            nodes,
+            edges,
+        ),
         bodies: vec![],
     }
 }
@@ -657,10 +751,30 @@ fn adversarial_verification() -> WorkflowTemplate {
 
 fn tournament() -> WorkflowTemplate {
     let candidates = vec![
-        delegate("c1", "ryu", "Produce candidate solution A to this task:\n\n{{input}}", PermissionPreset::default()),
-        delegate("c2", "ryu", "Produce candidate solution B, taking a different approach:\n\n{{input}}", PermissionPreset::default()),
-        delegate("c3", "ryu", "Produce candidate solution C, optimizing for a different tradeoff:\n\n{{input}}", PermissionPreset::default()),
-        delegate("c4", "ryu", "Produce candidate solution D, the simplest thing that could work:\n\n{{input}}", PermissionPreset::default()),
+        delegate(
+            "c1",
+            "ryu",
+            "Produce candidate solution A to this task:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "c2",
+            "ryu",
+            "Produce candidate solution B, taking a different approach:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "c3",
+            "ryu",
+            "Produce candidate solution C, optimizing for a different tradeoff:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "c4",
+            "ryu",
+            "Produce candidate solution D, the simplest thing that could work:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
     ];
     let nodes = vec![
         input("in", "input"),
@@ -668,7 +782,11 @@ fn tournament() -> WorkflowTemplate {
         prompt("judge", "Compare these candidate solutions pairwise and pick the single best. Return the winning solution in full, with a one-line justification.\n\nTask: {{input}}\n\nCandidates: {{nodes.candidates}}"),
         output("out", "result"),
     ];
-    let edges = vec![edge("in", "candidates"), edge("candidates", "judge"), edge("judge", "out")];
+    let edges = vec![
+        edge("in", "candidates"),
+        edge("candidates", "judge"),
+        edge("judge", "out"),
+    ];
     WorkflowTemplate {
         meta: meta(
             "tournament",
@@ -680,7 +798,13 @@ fn tournament() -> WorkflowTemplate {
             4,
             &["tournament", "compare", "best-of-n"],
         ),
-        primary: wf("tournament", "Tournament", "N candidates → pairwise judge → winner.", nodes, edges),
+        primary: wf(
+            "tournament",
+            "Tournament",
+            "N candidates → pairwise judge → winner.",
+            nodes,
+            edges,
+        ),
         bodies: vec![],
     }
 }
@@ -689,9 +813,24 @@ fn tournament() -> WorkflowTemplate {
 
 fn generate_and_filter() -> WorkflowTemplate {
     let proposals = vec![
-        delegate("p1", "ryu", "Generate a distinct proposal for this task:\n\n{{input}}", PermissionPreset::default()),
-        delegate("p2", "ryu", "Generate a second, meaningfully different proposal:\n\n{{input}}", PermissionPreset::default()),
-        delegate("p3", "ryu", "Generate a third proposal exploring another direction:\n\n{{input}}", PermissionPreset::default()),
+        delegate(
+            "p1",
+            "ryu",
+            "Generate a distinct proposal for this task:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "p2",
+            "ryu",
+            "Generate a second, meaningfully different proposal:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
+        delegate(
+            "p3",
+            "ryu",
+            "Generate a third proposal exploring another direction:\n\n{{input}}",
+            PermissionPreset::default(),
+        ),
     ];
     let nodes = vec![
         input("in", "input"),
@@ -699,7 +838,11 @@ fn generate_and_filter() -> WorkflowTemplate {
         prompt("select", "Score each proposal against the task on a 0–10 scale, then return ONLY the best one (with its score).\n\nTask: {{input}}\n\nProposals: {{nodes.proposals}}"),
         output("out", "result"),
     ];
-    let edges = vec![edge("in", "proposals"), edge("proposals", "select"), edge("select", "out")];
+    let edges = vec![
+        edge("in", "proposals"),
+        edge("proposals", "select"),
+        edge("select", "out"),
+    ];
     WorkflowTemplate {
         meta: meta(
             "generate-and-filter",
@@ -711,7 +854,13 @@ fn generate_and_filter() -> WorkflowTemplate {
             4,
             &["generate", "filter", "select", "best-of-n"],
         ),
-        primary: wf("generate-and-filter", "Generate & Filter", "N proposals → score → select best.", nodes, edges),
+        primary: wf(
+            "generate-and-filter",
+            "Generate & Filter",
+            "N proposals → score → select best.",
+            nodes,
+            edges,
+        ),
         bodies: vec![],
     }
 }
@@ -737,8 +886,9 @@ mod tests {
             WorkflowGraph::build(&t.primary)
                 .unwrap_or_else(|e| panic!("template '{}' primary invalid: {e}", t.meta.id));
             for (ph, body) in &t.bodies {
-                WorkflowGraph::build(body)
-                    .unwrap_or_else(|e| panic!("template '{}' body '{ph}' invalid: {e}", t.meta.id));
+                WorkflowGraph::build(body).unwrap_or_else(|e| {
+                    panic!("template '{}' body '{ph}' invalid: {e}", t.meta.id)
+                });
             }
         }
     }
@@ -759,7 +909,11 @@ mod tests {
     fn every_category_and_pattern_is_known() {
         let cats = ["research", "orchestration", "quality", "automation"];
         for t in catalog() {
-            assert!(cats.contains(&t.meta.category.as_str()), "bad category {}", t.meta.category);
+            assert!(
+                cats.contains(&t.meta.category.as_str()),
+                "bad category {}",
+                t.meta.category
+            );
             assert!(!t.meta.pattern.is_empty());
         }
     }
@@ -769,7 +923,11 @@ mod tests {
         for t in catalog() {
             let placeholders: Vec<&str> = t.bodies.iter().map(|(p, _)| p.as_str()).collect();
             for n in &t.primary.nodes {
-                if let NodeKind::While { body_workflow_id: Some(bid), .. } = &n.kind {
+                if let NodeKind::While {
+                    body_workflow_id: Some(bid),
+                    ..
+                } = &n.kind
+                {
                     assert!(
                         placeholders.contains(&bid.as_str()),
                         "template '{}' while node references undeclared body '{bid}'",
@@ -790,13 +948,21 @@ mod tests {
             "",
             vec![
                 while_loop("l", "nonempty", "ph", 3),
-                node("s", NodeKind::SubWorkflow { workflow_id: "ph".to_owned() }),
+                node(
+                    "s",
+                    NodeKind::SubWorkflow {
+                        workflow_id: "ph".to_owned(),
+                    },
+                ),
             ],
             vec![],
         );
         patch_bodies(&mut w, &map);
         match &w.nodes[0].kind {
-            NodeKind::While { body_workflow_id: Some(b), .. } => assert_eq!(b, "wf_minted"),
+            NodeKind::While {
+                body_workflow_id: Some(b),
+                ..
+            } => assert_eq!(b, "wf_minted"),
             _ => panic!("expected while"),
         }
         match &w.nodes[1].kind {

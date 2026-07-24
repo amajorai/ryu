@@ -210,8 +210,7 @@ async fn handle_socket(
     // Ephemeral sessions get a stable id so ChatEnd + persistence have a key. A
     // client-supplied id is a REUSE of an existing conversation and must be gated;
     // a minted `voice_…` id is brand new and cannot collide with anyone's row.
-    let conversation_id =
-        conversation_id.unwrap_or_else(|| format!("voice_{session_id}"));
+    let conversation_id = conversation_id.unwrap_or_else(|| format!("voice_{session_id}"));
 
     // ── THE GATE ─────────────────────────────────────────────────────────────
     // The same create-or-use gate `chat_stream` uses: an EXISTING row gets the full
@@ -219,8 +218,7 @@ async fn handle_socket(
     // conversation id and having A's history streamed back as context and B's turns
     // appended into A's thread); a NEW id is claimed for this caller so nobody else
     // can take it. No-op on an unbound personal node.
-    if let Err(_resp) =
-        super::gate_and_claim_conversation(&state, &caller, &conversation_id).await
+    if let Err(_resp) = super::gate_and_claim_conversation(&state, &caller, &conversation_id).await
     {
         let _ = ws_tx
             .send(error_frame(
@@ -401,4 +399,81 @@ fn error_frame(code: &str, message: &str) -> Message {
         code: code.to_string(),
         message: message.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    /// Little-endian PCM16 decode: bytes pair into i16 samples LSB-first, including
+    /// negative samples (the mic sends signed audio).
+    #[test]
+    fn pcm_decodes_little_endian_signed_samples() {
+        // 0x0001 LE = 1; 0xFFFF LE = -1; 0x0080 -> 0x8000 is i16::MIN when high byte
+        // set: [0x00, 0x80] = 0x8000 = -32768.
+        let bytes = [0x01, 0x00, 0xFF, 0xFF, 0x00, 0x80];
+        assert_eq!(pcm_from_bytes(&bytes), vec![1_i16, -1, i16::MIN]);
+    }
+
+    /// A trailing odd byte (a torn frame boundary) is dropped, never panics — the
+    /// realtime mic path must survive a half-delivered sample.
+    #[test]
+    fn pcm_drops_trailing_odd_byte() {
+        // Three bytes: one full sample + a dangling byte.
+        let bytes = [0x10, 0x27, 0x42];
+        assert_eq!(pcm_from_bytes(&bytes), vec![0x2710_i16]); // 10000
+    }
+
+    #[test]
+    fn pcm_empty_slice_is_empty() {
+        assert!(pcm_from_bytes(&[]).is_empty());
+        // A lone byte yields no samples (no half-sample emitted).
+        assert!(pcm_from_bytes(&[0x42]).is_empty());
+    }
+
+    /// `bearer_token` accepts a well-formed `Bearer <t>` and rejects everything else
+    /// (missing header, wrong scheme, empty/whitespace token).
+    #[test]
+    fn bearer_token_extracts_only_wellformed_bearer() {
+        let mut h = HeaderMap::new();
+        h.insert("authorization", HeaderValue::from_static("Bearer  tok123 "));
+        // Leading spaces after "Bearer " are part of the token per strip_prefix,
+        // then trimmed — a padded token resolves to its trimmed form.
+        assert_eq!(bearer_token(&h).as_deref(), Some("tok123"));
+
+        let mut wrong = HeaderMap::new();
+        wrong.insert("authorization", HeaderValue::from_static("Basic abc"));
+        assert_eq!(bearer_token(&wrong), None);
+
+        let mut empty = HeaderMap::new();
+        empty.insert("authorization", HeaderValue::from_static("Bearer   "));
+        assert_eq!(bearer_token(&empty), None);
+
+        assert_eq!(bearer_token(&HeaderMap::new()), None);
+    }
+
+    /// The error frame is a tagged-union TEXT message the client can route by
+    /// `type`; it carries the code + message verbatim.
+    #[test]
+    fn error_frame_is_tagged_error_text() {
+        let Message::Text(text) = error_frame("expected_start", "first frame must be `start`")
+        else {
+            panic!("error_frame must produce a TEXT frame");
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["type"], "error");
+        assert_eq!(v["code"], "expected_start");
+        assert_eq!(v["message"], "first frame must be `start`");
+    }
+
+    /// `text_frame` serializes a control message to a routable `type`-tagged frame.
+    #[test]
+    fn text_frame_tags_control_messages() {
+        let Message::Text(text) = text_frame(&VoiceServerMsg::Pong) else {
+            panic!("expected TEXT");
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["type"], "pong");
+    }
 }

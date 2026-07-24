@@ -55,13 +55,15 @@ pub fn window_action(
 
 #[cfg(target_os = "windows")]
 fn windows_focus(app_name: &str) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        ShowWindow, SetForegroundWindow, BringWindowToTop, GetForegroundWindow,
-        GetWindowThreadProcessId, SW_RESTORE,
-    };
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+        ShowWindow, SW_RESTORE,
+    };
 
-    let Some(hwnd) = resolve_hwnd(app_name, None) else { return false; };
+    let Some(hwnd) = resolve_hwnd(app_name, None) else {
+        return false;
+    };
 
     unsafe {
         let _ = ShowWindow(hwnd, SW_RESTORE);
@@ -100,10 +102,10 @@ fn resolve_hwnd(
     app_name: &str,
     window_title: Option<&str>,
 ) -> Option<windows::Win32::Foundation::HWND> {
-    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-    use windows::Win32::Foundation::HWND;
-    use windows::core::PCWSTR;
     use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
     // 1. Exact window-title match (a given window_title wins over app_name).
     let exact = window_title.unwrap_or(app_name);
@@ -135,19 +137,19 @@ fn matching_app_windows(
     app_name: &str,
     title_filter: Option<&str>,
 ) -> Vec<(isize, String, windows::Win32::Foundation::RECT)> {
+    use std::collections::HashSet;
+    use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, INVALID_HANDLE_VALUE, LPARAM, RECT};
     use windows::Win32::System::Diagnostics::ToolHelp::*;
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextW, IsWindowVisible, GetWindowRect, GetWindowThreadProcessId,
+        EnumWindows, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
     };
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, INVALID_HANDLE_VALUE, CloseHandle};
-    use std::collections::HashSet;
 
     // Collect PIDs whose process name matches.
     let name_lower = app_name.to_lowercase();
     let mut target_pids: HashSet<u32> = HashSet::new();
     unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-            .unwrap_or(INVALID_HANDLE_VALUE);
+        let snapshot =
+            CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).unwrap_or(INVALID_HANDLE_VALUE);
         if snapshot != INVALID_HANDLE_VALUE {
             let mut pe = PROCESSENTRY32W {
                 dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
@@ -156,12 +158,19 @@ fn matching_app_windows(
             if Process32FirstW(snapshot, &mut pe).is_ok() {
                 loop {
                     let exe = String::from_utf16_lossy(
-                        pe.szExeFile.iter().take_while(|&&c| c != 0).cloned().collect::<Vec<_>>().as_slice()
+                        pe.szExeFile
+                            .iter()
+                            .take_while(|&&c| c != 0)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .as_slice(),
                     );
                     if exe.to_lowercase().contains(&name_lower) {
                         target_pids.insert(pe.th32ProcessID);
                     }
-                    if Process32NextW(snapshot, &mut pe).is_err() { break; }
+                    if Process32NextW(snapshot, &mut pe).is_err() {
+                        break;
+                    }
                 }
             }
             let _ = CloseHandle(snapshot);
@@ -184,14 +193,22 @@ fn matching_app_windows(
         let data = &mut *(lparam.0 as *mut EnumData);
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if !data.pids.contains(&pid) { return BOOL(1); }
-        if !IsWindowVisible(hwnd).as_bool() { return BOOL(1); }
+        if !data.pids.contains(&pid) {
+            return BOOL(1);
+        }
+        if !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
         let mut buf = [0u16; 512];
         let len = GetWindowTextW(hwnd, &mut buf);
-        if len == 0 { return BOOL(1); }
+        if len == 0 {
+            return BOOL(1);
+        }
         let title = String::from_utf16_lossy(&buf[..len as usize]);
         if let Some(ref f) = data.title_filter {
-            if !title.to_lowercase().contains(f) { return BOOL(1); }
+            if !title.to_lowercase().contains(f) {
+                return BOOL(1);
+            }
         }
         let mut rect = RECT::default();
         let _ = GetWindowRect(hwnd, &mut rect);
@@ -218,28 +235,39 @@ fn windows_window_action(
     if let WindowAction::List = action {
         let windows: Vec<serde_json::Value> = matching_app_windows(app_name, None)
             .into_iter()
-            .map(|(_, title, rect)| serde_json::json!({
-                "title":  title,
-                "x":      rect.left,
-                "y":      rect.top,
-                "width":  (rect.right - rect.left).unsigned_abs(),
-                "height": (rect.bottom - rect.top).unsigned_abs(),
-            }))
+            .map(|(_, title, rect)| {
+                serde_json::json!({
+                    "title":  title,
+                    "x":      rect.left,
+                    "y":      rect.top,
+                    "width":  (rect.right - rect.left).unsigned_abs(),
+                    "height": (rect.bottom - rect.top).unsigned_abs(),
+                })
+            })
             .collect();
         return Ok(serde_json::json!({ "windows": windows }));
     }
 
     let hwnd = resolve_hwnd(app_name, window_title).ok_or_else(|| {
-        anyhow::anyhow!("Window for '{}' not found", window_title.unwrap_or(app_name))
+        anyhow::anyhow!(
+            "Window for '{}' not found",
+            window_title.unwrap_or(app_name)
+        )
     })?;
 
     unsafe {
         match action {
-            WindowAction::Minimize => { ShowWindow(hwnd, SW_MINIMIZE); }
-            WindowAction::Maximize => { ShowWindow(hwnd, SW_MAXIMIZE); }
-            WindowAction::Restore  => { ShowWindow(hwnd, SW_RESTORE); }
-            WindowAction::Close    => {
-                use windows::Win32::Foundation::{WPARAM, LPARAM};
+            WindowAction::Minimize => {
+                ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            WindowAction::Maximize => {
+                ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+            WindowAction::Restore => {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            WindowAction::Close => {
+                use windows::Win32::Foundation::{LPARAM, WPARAM};
                 PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0))?;
             }
             WindowAction::Move { x, y } => {
@@ -252,7 +280,14 @@ fn windows_window_action(
             WindowAction::Resize { width, height } => {
                 let mut rect = windows::Win32::Foundation::RECT::default();
                 GetWindowRect(hwnd, &mut rect)?;
-                MoveWindow(hwnd, rect.left, rect.top, *width as i32, *height as i32, true)?;
+                MoveWindow(
+                    hwnd,
+                    rect.left,
+                    rect.top,
+                    *width as i32,
+                    *height as i32,
+                    true,
+                )?;
             }
             WindowAction::List => unreachable!("handled above"),
         }
@@ -277,9 +312,13 @@ fn macos_focus(app_name: &str) -> bool {
         for i in 0..count {
             let app: *mut objc2::runtime::AnyObject = objc2::msg_send![apps, objectAtIndex: i];
             let name_obj: *mut objc2::runtime::AnyObject = objc2::msg_send![app, localizedName];
-            if name_obj.is_null() { continue; }
+            if name_obj.is_null() {
+                continue;
+            }
             let cptr: *const std::ffi::c_char = objc2::msg_send![name_obj, UTF8String];
-            if cptr.is_null() { continue; }
+            if cptr.is_null() {
+                continue;
+            }
             let name = std::ffi::CStr::from_ptr(cptr).to_string_lossy();
             if name.to_lowercase().contains(&lower) {
                 let _: bool = objc2::msg_send![app, activateWithOptions: 2u64]; // NSApplicationActivateIgnoringOtherApps
@@ -429,7 +468,9 @@ mod macos_ax_window {
                 .ok_or_else(|| anyhow!("Running app '{app_name}' not found"))?;
             let ax_app = AXUIElementCreateApplication(pid);
             if ax_app.is_null() {
-                return Err(anyhow!("AXUIElementCreateApplication failed for {app_name}"));
+                return Err(anyhow!(
+                    "AXUIElementCreateApplication failed for {app_name}"
+                ));
             }
 
             // List enumerates AXWindows; it needs no single target.
@@ -446,14 +487,25 @@ mod macos_ax_window {
                         let (mut x, mut y, mut w, mut h) = (0i32, 0i32, 0u32, 0u32);
                         if let Some(pv) = ax_get(win, "AXPosition") {
                             let mut p = CGPoint { x: 0.0, y: 0.0 };
-                            AXValueGetValue(pv, KAX_VALUE_TYPE_CGPOINT, &mut p as *mut _ as *mut c_void);
+                            AXValueGetValue(
+                                pv,
+                                KAX_VALUE_TYPE_CGPOINT,
+                                &mut p as *mut _ as *mut c_void,
+                            );
                             x = p.x as i32;
                             y = p.y as i32;
                             CFRelease(pv);
                         }
                         if let Some(sv) = ax_get(win, "AXSize") {
-                            let mut s = CGSize { width: 0.0, height: 0.0 };
-                            AXValueGetValue(sv, KAX_VALUE_TYPE_CGSIZE, &mut s as *mut _ as *mut c_void);
+                            let mut s = CGSize {
+                                width: 0.0,
+                                height: 0.0,
+                            };
+                            AXValueGetValue(
+                                sv,
+                                KAX_VALUE_TYPE_CGSIZE,
+                                &mut s as *mut _ as *mut c_void,
+                            );
                             w = s.width as u32;
                             h = s.height as u32;
                             CFRelease(sv);
@@ -552,6 +604,54 @@ mod macos_ax_window {
 #[cfg(target_os = "macos")]
 use macos_ax_window::window_action as macos_window_action;
 
+// macOS: only the TCC-free failure paths are hermetic. `focus_app` and the
+// `pid_for_app` lookup read NSWorkspace's running-app list (no input, no AX), and
+// a bogus app name never matches — so no window is ever activated or manipulated.
+// The real-app action paths (Minimize/Move/Resize/… on a resolved window) touch
+// Accessibility and mutate live windows, so they are deliberately not exercised.
+#[cfg(all(test, target_os = "macos"))]
+mod macos_tests {
+    use super::*;
+
+    const NO_SUCH_APP: &str = "__ryu_ghost_hands_no_such_app_zzz__";
+
+    #[test]
+    fn focus_unknown_app_returns_false() {
+        // Walks every running app, matches none, returns false without activating.
+        assert!(!focus_app(NO_SUCH_APP));
+    }
+
+    #[test]
+    fn window_action_unknown_app_errors() {
+        // pid_for_app finds nothing ⇒ Err before any AX element is created.
+        for action in [
+            WindowAction::List,
+            WindowAction::Minimize,
+            WindowAction::Maximize,
+            WindowAction::Close,
+            WindowAction::Restore,
+            WindowAction::Move { x: 0, y: 0 },
+            WindowAction::Resize {
+                width: 10,
+                height: 10,
+            },
+        ] {
+            let err = window_action(&action, NO_SUCH_APP, None)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("not found"), "action {action:?} ⇒ {err}");
+        }
+    }
+
+    #[test]
+    fn window_action_titled_unknown_app_errors() {
+        let err = window_action(&WindowAction::Minimize, NO_SUCH_APP, Some("some title"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not found"), "got: {err}");
+    }
+}
+
 #[cfg(all(test, target_os = "windows"))]
 mod tests {
     use super::*;
@@ -577,8 +677,7 @@ mod tests {
     #[test]
     fn list_action_is_empty_not_error_for_unknown_app() {
         // A process that does not exist yields an empty list, never an error.
-        let result =
-            window_action(&WindowAction::List, "no_such_app_xyzzy_12345", None).unwrap();
+        let result = window_action(&WindowAction::List, "no_such_app_xyzzy_12345", None).unwrap();
         let windows = result.get("windows").and_then(|w| w.as_array()).unwrap();
         assert!(windows.is_empty());
     }

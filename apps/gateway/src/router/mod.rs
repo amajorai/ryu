@@ -755,7 +755,10 @@ mod router_registry_tests {
         assert_eq!(reg.active_id(), RouterRegistry::BUILTIN);
         assert_eq!(reg.available(), vec![RouterRegistry::BUILTIN.to_string()]);
         // The built-in routes a claude- model to Anthropic via the inherent method.
-        assert_eq!(reg.route("claude-sonnet-4-5").provider, ProviderKind::Anthropic);
+        assert_eq!(
+            reg.route("claude-sonnet-4-5").provider,
+            ProviderKind::Anthropic
+        );
     }
 
     #[test]
@@ -766,7 +769,10 @@ mod router_registry_tests {
             std::sync::Arc::new(StubRouter) as std::sync::Arc<dyn RouterBackend>,
         );
         // Registered but not active: the built-in still answers.
-        assert_eq!(reg.route("claude-sonnet-4-5").provider, ProviderKind::Anthropic);
+        assert_eq!(
+            reg.route("claude-sonnet-4-5").provider,
+            ProviderKind::Anthropic
+        );
 
         assert!(reg.set_active("stub"));
         assert_eq!(reg.active_id(), "stub");

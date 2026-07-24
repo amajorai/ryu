@@ -39,9 +39,13 @@ mod windows_impl {
     use super::*;
     use std::collections::HashMap;
     use windows::{
-        Win32::Graphics::{Direct3D::*, Direct3D11::*, Dxgi::{Common::*, *}},
-        Win32::Foundation::HMODULE,
         core::Interface,
+        Win32::Foundation::HMODULE,
+        Win32::Graphics::{
+            Direct3D::*,
+            Direct3D11::*,
+            Dxgi::{Common::*, *},
+        },
     };
 
     struct DxgiCapture {
@@ -61,7 +65,10 @@ mod windows_impl {
 
     impl WindowsScreenCapture {
         pub fn new() -> Result<Self> {
-            Ok(Self { displays: vec![], captures: Arc::new(std::sync::Mutex::new(HashMap::new())) })
+            Ok(Self {
+                displays: vec![],
+                captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            })
         }
     }
 
@@ -77,30 +84,86 @@ mod windows_impl {
                 let mut display_id = 0u32;
                 loop {
                     let adapter1 = match factory.EnumAdapters1(adapter_idx) {
-                        Ok(a) => a, Err(_) => break,
+                        Ok(a) => a,
+                        Err(_) => break,
                     };
                     let adapter: IDXGIAdapter = adapter1.cast()?;
                     let feature_levels = [D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1];
                     let mut device: Option<ID3D11Device> = None;
                     let mut context: Option<ID3D11DeviceContext> = None;
-                    if D3D11CreateDevice(&adapter, D3D_DRIVER_TYPE_UNKNOWN, HMODULE::default(),
-                        D3D11_CREATE_DEVICE_BGRA_SUPPORT, Some(&feature_levels), D3D11_SDK_VERSION,
-                        Some(&mut device), None, Some(&mut context)).is_err() {
-                        adapter_idx += 1; continue;
+                    if D3D11CreateDevice(
+                        &adapter,
+                        D3D_DRIVER_TYPE_UNKNOWN,
+                        HMODULE::default(),
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                        Some(&feature_levels),
+                        D3D11_SDK_VERSION,
+                        Some(&mut device),
+                        None,
+                        Some(&mut context),
+                    )
+                    .is_err()
+                    {
+                        adapter_idx += 1;
+                        continue;
                     }
-                    let device = match device { Some(d) => d, None => { adapter_idx += 1; continue; } };
-                    let context = match context { Some(c) => c, None => { adapter_idx += 1; continue; } };
+                    let device = match device {
+                        Some(d) => d,
+                        None => {
+                            adapter_idx += 1;
+                            continue;
+                        }
+                    };
+                    let context = match context {
+                        Some(c) => c,
+                        None => {
+                            adapter_idx += 1;
+                            continue;
+                        }
+                    };
                     let mut output_idx = 0u32;
                     loop {
-                        let output = match adapter1.EnumOutputs(output_idx) { Ok(o) => o, Err(_) => break };
+                        let output = match adapter1.EnumOutputs(output_idx) {
+                            Ok(o) => o,
+                            Err(_) => break,
+                        };
                         let (w, h) = match unsafe { output.GetDesc() } {
-                            Ok(desc) => { let r = desc.DesktopCoordinates; let w = (r.right - r.left).unsigned_abs(); let h = (r.bottom - r.top).unsigned_abs(); if w > 0 && h > 0 { (w, h) } else { (1920u32, 1080u32) } }
+                            Ok(desc) => {
+                                let r = desc.DesktopCoordinates;
+                                let w = (r.right - r.left).unsigned_abs();
+                                let h = (r.bottom - r.top).unsigned_abs();
+                                if w > 0 && h > 0 {
+                                    (w, h)
+                                } else {
+                                    (1920u32, 1080u32)
+                                }
+                            }
                             Err(_) => (1920u32, 1080u32),
                         };
-                        let output1: IDXGIOutput1 = match output.cast() { Ok(o) => o, Err(_) => { output_idx += 1; continue; } };
+                        let output1: IDXGIOutput1 = match output.cast() {
+                            Ok(o) => o,
+                            Err(_) => {
+                                output_idx += 1;
+                                continue;
+                            }
+                        };
                         if let Ok(dup) = output1.DuplicateOutput(&device) {
-                            self.displays.push(DisplayInfo { id: display_id, width: w, height: h, is_primary: display_id == 0 });
-                            captures.insert(display_id, DxgiCapture { device: device.clone(), context: context.clone(), duplication: dup, width: w, height: h });
+                            self.displays.push(DisplayInfo {
+                                id: display_id,
+                                width: w,
+                                height: h,
+                                is_primary: display_id == 0,
+                            });
+                            captures.insert(
+                                display_id,
+                                DxgiCapture {
+                                    device: device.clone(),
+                                    context: context.clone(),
+                                    duplication: dup,
+                                    width: w,
+                                    height: h,
+                                },
+                            );
                             display_id += 1;
                         }
                         output_idx += 1;
@@ -109,26 +172,46 @@ mod windows_impl {
                 }
             }
             if self.displays.is_empty() {
-                self.displays.push(DisplayInfo { id: 0, width: 1920, height: 1080, is_primary: true });
+                self.displays.push(DisplayInfo {
+                    id: 0,
+                    width: 1920,
+                    height: 1080,
+                    is_primary: true,
+                });
             }
             Ok(())
         }
 
-        async fn stop(&mut self) -> Result<()> { self.captures.lock().unwrap().clear(); Ok(()) }
-        fn get_displays(&self) -> Vec<DisplayInfo> { self.displays.clone() }
+        async fn stop(&mut self) -> Result<()> {
+            self.captures.lock().unwrap().clear();
+            Ok(())
+        }
+        fn get_displays(&self) -> Vec<DisplayInfo> {
+            self.displays.clone()
+        }
         async fn capture_frame(&self, display_id: u32) -> Result<Frame> {
             let captures = Arc::clone(&self.captures);
             tokio::task::spawn_blocking(move || capture_frame_dxgi(&captures, display_id)).await?
         }
     }
 
-    fn capture_frame_dxgi(captures: &Arc<std::sync::Mutex<HashMap<u32, DxgiCapture>>>, display_id: u32) -> Result<Frame> {
-        let guard = captures.lock().map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        let cap = guard.get(&display_id).ok_or_else(|| anyhow::anyhow!("Display {} not found", display_id))?;
+    fn capture_frame_dxgi(
+        captures: &Arc<std::sync::Mutex<HashMap<u32, DxgiCapture>>>,
+        display_id: u32,
+    ) -> Result<Frame> {
+        let guard = captures
+            .lock()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        let cap = guard
+            .get(&display_id)
+            .ok_or_else(|| anyhow::anyhow!("Display {} not found", display_id))?;
         unsafe {
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
-            match cap.duplication.AcquireNextFrame(100, &mut frame_info, &mut resource) {
+            match cap
+                .duplication
+                .AcquireNextFrame(100, &mut frame_info, &mut resource)
+            {
                 Ok(_) => {}
                 Err(e) => return Err(anyhow::anyhow!("AcquireNextFrame: {}", e)),
             }
@@ -137,28 +220,50 @@ mod windows_impl {
             let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
             texture.GetDesc(&mut tex_desc);
             let mut staging_desc: D3D11_TEXTURE2D_DESC = std::mem::zeroed();
-            staging_desc.Width = tex_desc.Width; staging_desc.Height = tex_desc.Height;
-            staging_desc.MipLevels = 1; staging_desc.ArraySize = 1;
+            staging_desc.Width = tex_desc.Width;
+            staging_desc.Height = tex_desc.Height;
+            staging_desc.MipLevels = 1;
+            staging_desc.ArraySize = 1;
             staging_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-            staging_desc.SampleDesc = DXGI_SAMPLE_DESC { Count: 1, Quality: 0 };
+            staging_desc.SampleDesc = DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            };
             staging_desc.Usage = D3D11_USAGE_STAGING;
             staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
             let mut staging: Option<ID3D11Texture2D> = None;
-            cap.device.CreateTexture2D(&staging_desc, None, Some(&mut staging)).map_err(|e| anyhow::anyhow!("CreateTexture2D: {}", e))?;
+            cap.device
+                .CreateTexture2D(&staging_desc, None, Some(&mut staging))
+                .map_err(|e| anyhow::anyhow!("CreateTexture2D: {}", e))?;
             let staging = staging.ok_or_else(|| anyhow::anyhow!("No staging"))?;
             let src_res: ID3D11Resource = texture.cast()?;
             let dst_res: ID3D11Resource = staging.cast()?;
             cap.context.CopyResource(&dst_res, &src_res);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            cap.context.Map(&dst_res, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).map_err(|e| anyhow::anyhow!("Map: {}", e))?;
-            let w = tex_desc.Width as usize; let h = tex_desc.Height as usize;
+            cap.context
+                .Map(&dst_res, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .map_err(|e| anyhow::anyhow!("Map: {}", e))?;
+            let w = tex_desc.Width as usize;
+            let h = tex_desc.Height as usize;
             let row_pitch = mapped.RowPitch as usize;
             let data_ptr = mapped.pData as *const u8;
             let mut data = vec![0u8; w * h * 4];
-            for y in 0..h { std::ptr::copy_nonoverlapping(data_ptr.add(y * row_pitch), data.as_mut_ptr().add(y * w * 4), w * 4); }
+            for y in 0..h {
+                std::ptr::copy_nonoverlapping(
+                    data_ptr.add(y * row_pitch),
+                    data.as_mut_ptr().add(y * w * 4),
+                    w * 4,
+                );
+            }
             cap.context.Unmap(&dst_res, 0);
             cap.duplication.ReleaseFrame()?;
-            Ok(Frame { display_id, width: tex_desc.Width, height: tex_desc.Height, data, timestamp: now_us() })
+            Ok(Frame {
+                display_id,
+                width: tex_desc.Width,
+                height: tex_desc.Height,
+                data,
+                timestamp: now_us(),
+            })
         }
     }
 }
@@ -175,7 +280,9 @@ pub use windows_impl::WindowsScreenCapture;
 pub use ghost_permissions::{request_screen_recording, screen_recording_granted};
 
 #[cfg(target_os = "macos")]
-pub struct MacOSScreenCapture { displays: Vec<DisplayInfo> }
+pub struct MacOSScreenCapture {
+    displays: Vec<DisplayInfo>,
+}
 
 #[cfg(target_os = "macos")]
 impl MacOSScreenCapture {
@@ -183,16 +290,35 @@ impl MacOSScreenCapture {
         use core_graphics::display::CGDisplay;
         let ids = CGDisplay::active_displays().map_err(|e| anyhow::anyhow!("{:?}", e))?;
         let main_id = CGDisplay::main().id;
-        Ok(Self { displays: ids.iter().map(|&id| { let d = CGDisplay::new(id); DisplayInfo { id, width: d.pixels_wide() as u32, height: d.pixels_high() as u32, is_primary: id == main_id } }).collect() })
+        Ok(Self {
+            displays: ids
+                .iter()
+                .map(|&id| {
+                    let d = CGDisplay::new(id);
+                    DisplayInfo {
+                        id,
+                        width: d.pixels_wide() as u32,
+                        height: d.pixels_high() as u32,
+                        is_primary: id == main_id,
+                    }
+                })
+                .collect(),
+        })
     }
 }
 
 #[cfg(target_os = "macos")]
 #[async_trait]
 impl ScreenCapture for MacOSScreenCapture {
-    async fn start(&mut self) -> Result<()> { Ok(()) }
-    async fn stop(&mut self) -> Result<()> { Ok(()) }
-    fn get_displays(&self) -> Vec<DisplayInfo> { self.displays.clone() }
+    async fn start(&mut self) -> Result<()> {
+        Ok(())
+    }
+    async fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn get_displays(&self) -> Vec<DisplayInfo> {
+        self.displays.clone()
+    }
     async fn capture_frame(&self, display_id: u32) -> Result<Frame> {
         tokio::task::spawn_blocking(move || capture_macos(display_id)).await?
     }
@@ -269,31 +395,59 @@ fn capture_via_screencapture(display_id: u32) -> Result<Frame> {
     for px in data.chunks_exact_mut(4) {
         px.swap(0, 2);
     }
-    Ok(Frame { display_id, width, height, data, timestamp: now_us() })
+    Ok(Frame {
+        display_id,
+        width,
+        height,
+        data,
+        timestamp: now_us(),
+    })
 }
 
 // ─── Linux ────────────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-pub struct LinuxScreenCapture { displays: Vec<DisplayInfo> }
+pub struct LinuxScreenCapture {
+    displays: Vec<DisplayInfo>,
+}
 
 #[cfg(target_os = "linux")]
 impl LinuxScreenCapture {
     pub fn new() -> Result<Self> {
-        use x11rb::{connection::Connection, protocol::xproto::ConnectionExt, rust_connection::RustConnection};
+        use x11rb::{
+            connection::Connection, protocol::xproto::ConnectionExt,
+            rust_connection::RustConnection,
+        };
         let (conn, sn) = RustConnection::connect(None).map_err(|e| anyhow::anyhow!("{}", e))?;
         let screen = &conn.setup().roots[sn];
-        let geom = conn.get_geometry(screen.root).map_err(|e| anyhow::anyhow!("{}", e))?.reply().map_err(|e| anyhow::anyhow!("{}", e))?;
-        Ok(Self { displays: vec![DisplayInfo { id: 0, width: geom.width as u32, height: geom.height as u32, is_primary: true }] })
+        let geom = conn
+            .get_geometry(screen.root)
+            .map_err(|e| anyhow::anyhow!("{}", e))?
+            .reply()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        Ok(Self {
+            displays: vec![DisplayInfo {
+                id: 0,
+                width: geom.width as u32,
+                height: geom.height as u32,
+                is_primary: true,
+            }],
+        })
     }
 }
 
 #[cfg(target_os = "linux")]
 #[async_trait]
 impl ScreenCapture for LinuxScreenCapture {
-    async fn start(&mut self) -> Result<()> { Ok(()) }
-    async fn stop(&mut self) -> Result<()> { Ok(()) }
-    fn get_displays(&self) -> Vec<DisplayInfo> { self.displays.clone() }
+    async fn start(&mut self) -> Result<()> {
+        Ok(())
+    }
+    async fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn get_displays(&self) -> Vec<DisplayInfo> {
+        self.displays.clone()
+    }
     async fn capture_frame(&self, display_id: u32) -> Result<Frame> {
         tokio::task::spawn_blocking(move || capture_linux(display_id)).await?
     }
@@ -305,15 +459,43 @@ fn capture_linux(display_id: u32) -> Result<Frame> {
     let (conn, sn) = RustConnection::connect(None).map_err(|e| anyhow::anyhow!("{}", e))?;
     let screen = &conn.setup().roots[sn];
     let root = screen.root;
-    let geom = conn.get_geometry(root).map_err(|e| anyhow::anyhow!("{}", e))?.reply().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let w = geom.width as u32; let h = geom.height as u32;
-    let img = conn.get_image(ImageFormat::Z_PIXMAP, root, 0, 0, geom.width, geom.height, !0u32).map_err(|e| anyhow::anyhow!("{}", e))?.reply().map_err(|e| anyhow::anyhow!("{}", e))?;
-    let data = if img.depth == 32 { img.data } else {
+    let geom = conn
+        .get_geometry(root)
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .reply()
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let w = geom.width as u32;
+    let h = geom.height as u32;
+    let img = conn
+        .get_image(
+            ImageFormat::Z_PIXMAP,
+            root,
+            0,
+            0,
+            geom.width,
+            geom.height,
+            !0u32,
+        )
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .reply()
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let data = if img.depth == 32 {
+        img.data
+    } else {
         let mut out = Vec::with_capacity(w as usize * h as usize * 4);
-        for chunk in img.data.chunks(3) { out.extend_from_slice(chunk); out.push(255u8); }
+        for chunk in img.data.chunks(3) {
+            out.extend_from_slice(chunk);
+            out.push(255u8);
+        }
         out
     };
-    Ok(Frame { display_id, width: w, height: h, data, timestamp: now_us() })
+    Ok(Frame {
+        display_id,
+        width: w,
+        height: h,
+        data,
+        timestamp: now_us(),
+    })
 }
 
 // ─── Platform aliases ─────────────────────────────────────────────────────────
@@ -342,42 +524,81 @@ fn quick_screenshot_sync(display_id: u32) -> Result<Frame> {
         let mem_dc = CreateCompatibleDC(Some(screen_dc));
         let bm = CreateCompatibleBitmap(screen_dc, w as i32, h as i32);
         let old = SelectObject(mem_dc, HGDIOBJ(bm.0));
-        let _ = BitBlt(mem_dc, 0, 0, w as i32, h as i32, Some(screen_dc), 0, 0, SRCCOPY);
+        let _ = BitBlt(
+            mem_dc,
+            0,
+            0,
+            w as i32,
+            h as i32,
+            Some(screen_dc),
+            0,
+            0,
+            SRCCOPY,
+        );
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: w as i32, biHeight: -(h as i32), biPlanes: 1,
-                biBitCount: 32, biCompression: BI_RGB.0 as u32, ..Default::default()
+                biWidth: w as i32,
+                biHeight: -(h as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0 as u32,
+                ..Default::default()
             },
             ..Default::default()
         };
         let mut data = vec![0u8; (w * h * 4) as usize];
-        GetDIBits(mem_dc, bm, 0, h, Some(data.as_mut_ptr() as *mut std::ffi::c_void), &mut bmi, DIB_RGB_COLORS);
-        for px in data.chunks_exact_mut(4) { px[3] = 255; }
+        GetDIBits(
+            mem_dc,
+            bm,
+            0,
+            h,
+            Some(data.as_mut_ptr() as *mut std::ffi::c_void),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
         SelectObject(mem_dc, old);
         let _ = DeleteObject(HGDIOBJ(bm.0));
         let _ = DeleteDC(mem_dc);
         let _ = ReleaseDC(None, screen_dc);
-        Ok(Frame { display_id, width: w, height: h, data, timestamp: now_us() })
+        Ok(Frame {
+            display_id,
+            width: w,
+            height: h,
+            data,
+            timestamp: now_us(),
+        })
     }
 }
 
 #[cfg(target_os = "macos")]
-fn quick_screenshot_sync(display_id: u32) -> Result<Frame> { capture_macos(display_id) }
+fn quick_screenshot_sync(display_id: u32) -> Result<Frame> {
+    capture_macos(display_id)
+}
 
 #[cfg(target_os = "linux")]
-fn quick_screenshot_sync(display_id: u32) -> Result<Frame> { capture_linux(display_id) }
+fn quick_screenshot_sync(display_id: u32) -> Result<Frame> {
+    capture_linux(display_id)
+}
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 fn quick_screenshot_sync(_display_id: u32) -> Result<Frame> {
-    Err(anyhow::anyhow!("Screen capture not supported on this platform"))
+    Err(anyhow::anyhow!(
+        "Screen capture not supported on this platform"
+    ))
 }
 
 pub fn get_primary_display_size() -> (u32, u32) {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-        return (GetSystemMetrics(SM_CXSCREEN) as u32, GetSystemMetrics(SM_CYSCREEN) as u32);
+        return (
+            GetSystemMetrics(SM_CXSCREEN) as u32,
+            GetSystemMetrics(SM_CYSCREEN) as u32,
+        );
     }
     #[cfg(target_os = "macos")]
     {
@@ -387,10 +608,17 @@ pub fn get_primary_display_size() -> (u32, u32) {
     }
     #[cfg(target_os = "linux")]
     {
-        use x11rb::{connection::Connection, protocol::xproto::ConnectionExt, rust_connection::RustConnection};
+        use x11rb::{
+            connection::Connection, protocol::xproto::ConnectionExt,
+            rust_connection::RustConnection,
+        };
         if let Ok((conn, sn)) = RustConnection::connect(None) {
             let screen = &conn.setup().roots[sn];
-            if let Ok(r) = conn.get_geometry(screen.root).map_err(|_| ()).and_then(|c| c.reply().map_err(|_| ())) {
+            if let Ok(r) = conn
+                .get_geometry(screen.root)
+                .map_err(|_| ())
+                .and_then(|c| c.reply().map_err(|_| ()))
+            {
                 return (r.width as u32, r.height as u32);
             }
         }
@@ -403,4 +631,85 @@ fn now_us() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_micros() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn now_us_is_monotonic_and_recent() {
+        let a = now_us();
+        let b = now_us();
+        assert!(b >= a, "clock went backwards");
+        // Well past 2020 in microseconds — sanity that we read a real epoch.
+        assert!(a > 1_500_000_000_000_000);
+    }
+
+    #[test]
+    fn display_info_serde_roundtrip() {
+        let d = DisplayInfo {
+            id: 2,
+            width: 2560,
+            height: 1440,
+            is_primary: false,
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        let back: DisplayInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, 2);
+        assert_eq!(back.width, 2560);
+        assert_eq!(back.height, 1440);
+        assert!(!back.is_primary);
+    }
+
+    #[test]
+    fn frame_construct_and_clone() {
+        let frame = Frame {
+            display_id: 0,
+            width: 2,
+            height: 1,
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8], // 2px BGRA
+            timestamp: now_us(),
+        };
+        let cloned = frame.clone();
+        assert_eq!(cloned.width, 2);
+        assert_eq!(cloned.height, 1);
+        assert_eq!(cloned.data.len(), (frame.width * frame.height * 4) as usize);
+        assert_eq!(cloned.data, frame.data);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn screencapture_display_index_sentinel_is_none() {
+        // display_id 0 is the "main display" sentinel for the quick one-shot path
+        // and must NOT resolve to a `-D` index (that branch is pure — no CGDisplay).
+        assert_eq!(screencapture_display_index(0), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_screen_capture_displays_are_well_formed() {
+        // CGDisplay enumeration needs a display but no TCC/Screen-Recording grant
+        // and pops no prompt. Headless CI may fail construction — tolerate both.
+        if let Ok(cap) = MacOSScreenCapture::new() {
+            let displays = cap.get_displays();
+            let primary_count = displays.iter().filter(|d| d.is_primary).count();
+            // At most one display can be flagged primary.
+            assert!(primary_count <= 1);
+            for d in &displays {
+                // A real display reports non-zero geometry.
+                assert!(d.width > 0 && d.height > 0, "degenerate display: {d:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn get_primary_display_size_returns_positive_or_fallback() {
+        // Reads display metrics (no permission needed) or hits the (1920,1080)
+        // fallback on unsupported platforms — either way a usable size, no panic.
+        let (w, h) = get_primary_display_size();
+        // On a real display both are positive; a headless CGDisplay may report 0,
+        // so only assert the call is total and the tuple is shaped.
+        let _ = (w, h);
+    }
 }

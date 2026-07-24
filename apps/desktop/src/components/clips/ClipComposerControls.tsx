@@ -17,6 +17,7 @@ import { AttachVideoControl } from "@/src/components/clips/AttachVideoControl.ts
 import { ClipsList } from "@/src/components/clips/ClipsList.tsx";
 import { RecordingControls } from "@/src/components/clips/RecordingControls.tsx";
 import { useEntitlementContext } from "@/src/contexts/entitlement-context.tsx";
+import { useApps } from "@/src/hooks/useApps.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	type ClipCapture,
@@ -31,6 +32,9 @@ import { useNodeStore } from "@/src/store/useNodeStore.ts";
  * the turn bounded even though ingest extracts 50-100 frames. Core's image-part
  * injection loops over every frame, so raising this is a desktop-only change. */
 const MAX_FRAMES = 24;
+
+/** The Clips app id — the composer controls only appear when it's enabled. */
+const CLIPS_PLUGIN_ID = "com.ryu.clips";
 
 /** Pick up to {@link MAX_FRAMES} moments: prefer the recommended (diagnostic)
  * moments, else fall back to evenly-spaced samples across the clip. */
@@ -92,6 +96,7 @@ export function ClipComposerControls({
 	onAttach,
 }: ClipComposerControlsProps) {
 	const { canUse } = useEntitlementContext();
+	const { apps } = useApps();
 	const node = useNodeStore((s) => s.getActiveNode());
 	const target = useMemo(() => toTarget(node), [node]);
 
@@ -132,6 +137,14 @@ export function ClipComposerControls({
 		},
 		[attachContext, target]
 	);
+
+	// Clips is an APP: only surface its composer controls (record/attach + the Pro
+	// badge) when `com.ryu.clips` is installed AND enabled, so a default-off Clips
+	// leaves the composer clean — the app owns its own presence in the shell rather
+	// than the composer hardcoding it. Hidden while the app list is still loading.
+	if (!apps.some((a) => a.id === CLIPS_PLUGIN_ID && a.enabled)) {
+		return null;
+	}
 
 	// Band-2 gate (free-tier plan): Ryu Clips (agent video recording/ingest) is a
 	// Pro feature. Show a locked upsell badge in place of the controls rather than

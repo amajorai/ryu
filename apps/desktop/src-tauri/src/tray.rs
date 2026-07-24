@@ -30,8 +30,15 @@ fn island_control_url() -> String {
 
 /// Shadow capture-control endpoint (device-bound local sidecar). Toggling capture
 /// is a Shadow concern, so the desktop tray talks to it directly rather than
-/// proxying through the island.
-const SHADOW_CAPTURE_URL: &str = "http://127.0.0.1:3030/capture/control";
+/// proxying through the island. Profile-aware port (release 3030, dev 4030),
+/// matching Core's spawn side; the request carries Shadow's shared-secret
+/// bearer (see `shadow_auth`) because every non-`/health` route is gated.
+fn shadow_capture_url() -> String {
+	format!(
+		"http://127.0.0.1:{}/capture/control",
+		crate::profile::port(3030)
+	)
+}
 
 /// Local sidecars answer fast or not at all; keep tray actions snappy.
 const CONTROL_TIMEOUT_SECS: u64 = 2;
@@ -68,8 +75,8 @@ async fn island_control(action: &'static str) {
 /// when Shadow is unreachable / the response is malformed).
 async fn toggle_shadow_capture() -> Option<bool> {
 	let client = control_client()?;
-	let current = client
-		.get(SHADOW_CAPTURE_URL)
+	let url = shadow_capture_url();
+	let current = crate::shadow_auth::with_auth(client.get(&url))
 		.send()
 		.await
 		.ok()?
@@ -81,8 +88,7 @@ async fn toggle_shadow_capture() -> Option<bool> {
 		.and_then(|v| v.as_bool())
 		.unwrap_or(false);
 	let next = !paused;
-	let updated = client
-		.post(SHADOW_CAPTURE_URL)
+	let updated = crate::shadow_auth::with_auth(client.post(&url))
 		.json(&serde_json::json!({ "paused": next }))
 		.send()
 		.await

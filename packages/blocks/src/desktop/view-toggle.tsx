@@ -8,7 +8,7 @@
 
 import { GridViewIcon, ListViewIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Button } from "@ryu/ui/components/button";
+import { Button } from "@ryu/ui/components/button.tsx";
 
 export type ViewMode = "grid" | "list";
 

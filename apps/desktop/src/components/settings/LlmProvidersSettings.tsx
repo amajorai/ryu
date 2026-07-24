@@ -16,7 +16,7 @@
 
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { SvglIcon, type SvglSpec } from "@ryu/blocks/web/svgl-icon.tsx";
+import { SvglIcon } from "@ryu/blocks/web/svgl-icon.tsx";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -50,6 +50,7 @@ import type {
 	PiConfig,
 	PiProvider,
 } from "@/src/lib/api/pi-config.ts";
+import { svglForProvider } from "@/src/lib/provider-brand.tsx";
 import { SettingsCard, SettingsSection } from "./shared/settings-items.tsx";
 
 const GATEWAY = "gateway";
@@ -77,10 +78,28 @@ function matchAuthMethod(
 	authMethods: AcpAuthMethod[]
 ): AcpAuthMethod | null {
 	const hints = SUBSCRIPTION_METHOD_HINTS[providerId] ?? [providerId];
+	const haystack = (m: AcpAuthMethod) => `${m.id} ${m.name}`.toLowerCase();
+	// Prefer a provider-specific method (e.g. a dedicated "claude" / "chatgpt" login).
+	const specific = authMethods.find((m) =>
+		hints.some((h) => haystack(m).includes(h))
+	);
+	if (specific) {
+		return specific;
+	}
+	// Fall back to a GENERIC login method that isn't tied to a DIFFERENT provider.
+	// pi-acp commonly advertises a single catch-all "launch pi in the terminal to
+	// log in" method rather than per-provider OAuth, and that terminal flow logs in
+	// ANY subscription — so the Login button should drive it instead of going dark
+	// with "Login not available" on every card.
+	const otherProviderHints = Object.entries(SUBSCRIPTION_METHOD_HINTS)
+		.filter(([id]) => id !== providerId)
+		.flatMap(([, hs]) => hs);
 	return (
 		authMethods.find((m) => {
-			const hay = `${m.id} ${m.name}`.toLowerCase();
-			return hints.some((h) => hay.includes(h));
+			const hay = haystack(m);
+			const looksGeneric = /login|terminal|sign.?in|oauth/.test(hay);
+			const tiedToOther = otherProviderHints.some((h) => hay.includes(h));
+			return looksGeneric && !tiedToOther;
 		}) ?? null
 	);
 }
@@ -172,40 +191,6 @@ function ModelPicker({
 			)}
 		</div>
 	);
-}
-
-// Map a provider's id/label/api text onto an svgl.app brand slug (themed
-// light/dark where the mark needs it). Ordered most-specific-first so
-// "openai-codex" resolves to the OpenAI mark, etc. A provider with no known
-// mark (custom endpoints) falls back to its initial — never a wrong brand.
-const PROVIDER_SVGL: [string, SvglSpec][] = [
-	["anthropic", "claude"],
-	["claude", "claude"],
-	["codex", { light: "openai", dark: "openai_dark" }],
-	["openai", { light: "openai", dark: "openai_dark" }],
-	["gemini", "gemini"],
-	["google", "gemini"],
-	["mistral", "mistral-ai_logo"],
-	["copilot", { light: "copilot", dark: "copilot_dark" }],
-	["github", { light: "copilot", dark: "copilot_dark" }],
-	["cursor", { light: "cursor_light", dark: "cursor_dark" }],
-	["grok", { light: "grok-light", dark: "grok-dark" }],
-	["xai", { light: "grok-light", dark: "grok-dark" }],
-	["deepseek", "deepseek"],
-	["perplexity", "perplexity"],
-	["cohere", "cohere"],
-	["openrouter", { light: "openrouter_light", dark: "openrouter_dark" }],
-	["ollama", { light: "ollama_light", dark: "ollama_dark" }],
-];
-
-function svglForProvider(haystack: string): SvglSpec | null {
-	const hay = haystack.toLowerCase();
-	for (const [needle, spec] of PROVIDER_SVGL) {
-		if (hay.includes(needle)) {
-			return spec;
-		}
-	}
-	return null;
 }
 
 /**
@@ -537,9 +522,14 @@ function ProviderCard({
 				    manages aria-expanded + keyboard on the trigger button. */}
 				<CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-[10px] p-3.5 text-left hover:bg-muted/40">
 					<div className="flex min-w-0 items-center gap-2.5">
+						{/* Resolve the brand mark on id+label ONLY — never `provider.api`.
+						    The Pi `api` type is a transport ("openai-completions",
+						    "openai-responses"), and every OpenAI-compatible provider's api
+						    literally contains "openai", so folding it into the haystack made
+						    DeepSeek/Groq/Cerebras/Mistral/… all resolve to the OpenAI mark. */}
 						<ProviderBrandMark
 							label={provider.label}
-							providerKey={`${provider.id} ${provider.label} ${provider.api}`}
+							providerKey={`${provider.id} ${provider.label}`}
 						/>
 						<div className="flex min-w-0 flex-col gap-1">
 							<div className="flex flex-wrap items-center gap-2">

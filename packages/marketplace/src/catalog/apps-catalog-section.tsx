@@ -15,6 +15,7 @@ import {
 	WorkflowSquare01Icon,
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
+import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	AlertDialog,
@@ -70,6 +71,8 @@ import {
 	type CatalogNode,
 	useCatalogHost,
 } from "./host.tsx";
+import { resolveCardIcon } from "./icon-url.ts";
+import { REALM_ICONS } from "./realm-icons.ts";
 import type {
 	AddMarketplaceParams,
 	AppCatalogItem,
@@ -85,8 +88,15 @@ import type {
  *  unsplit tab, which web still uses. */
 export type AppsCatalogVariant = "apps" | "plugins" | "all";
 
-/** True when a catalog entry is an "app" — it ships a Companion UI surface. */
-function isCompanionApp(item: AppCatalogItem): boolean {
+/** True when a catalog entry is an "app". Prefers the explicit `type` discriminator
+ *  the catalog now emits; falls back to the legacy "ships a Companion runnable"
+ *  derivation for older wires that don't carry `type`.
+ *  Exported for unit tests (the detail-panel helpers below run only inside the
+ *  Dialog-portaled preview, which `renderToStaticMarkup` cannot emit). */
+export function isCompanionApp(item: AppCatalogItem): boolean {
+	if (item.entry.type) {
+		return item.entry.type === "app";
+	}
 	return item.entry.kinds.includes("companion");
 }
 
@@ -249,6 +259,7 @@ export default function AppsCatalogSection({
 				<AppList
 					canInstall={host.install != null}
 					error={error}
+					fallbackIcon={REALM_ICONS[variant === "plugins" ? "plugins" : "apps"]}
 					fetchNextPage={fetchNextPage}
 					hasNextPage={hasNextPage}
 					items={visibleItems}
@@ -484,6 +495,7 @@ function AppList({
 	fetchNextPage,
 	hasNextPage,
 	nounPlural,
+	fallbackIcon,
 }: {
 	items: AppCatalogItem[];
 	loading: boolean;
@@ -498,6 +510,9 @@ function AppList({
 	fetchNextPage: () => void;
 	hasNextPage: boolean;
 	nounPlural: string;
+	/** Realm glyph shown when an item has no icon of its own (apps→grid,
+	 *  plugins→puzzle), sourced from the shared REALM_ICONS so it matches the tab. */
+	fallbackIcon: IconSvgElement;
 }) {
 	const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
 
@@ -520,7 +535,7 @@ function AppList({
 			<Empty className="h-full p-6">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={GridIcon} />
+						<HugeiconsIcon icon={fallbackIcon} />
 					</EmptyMedia>
 					<EmptyTitle>No {nounPlural} found</EmptyTitle>
 					<EmptyDescription>Try a different search.</EmptyDescription>
@@ -545,12 +560,15 @@ function AppList({
 							/>
 						}
 						description={it.entry.description}
-						icon={<HugeiconsIcon className="size-5" icon={GridIcon} />}
+						dither={it.entry.icon_dither}
+						icon={<HugeiconsIcon className="size-5" icon={fallbackIcon} />}
 						iconBackground={it.entry.icon_background ?? undefined}
+						iconId={it.entry.icon}
 						iconUrl={it.entry.icon_url}
 						key={it.entry.id}
 						name={it.entry.name}
 						onClick={() => onSelect(it.entry.id)}
+						seedId={it.entry.id}
 						selected={it.entry.id === selectedId}
 					/>
 				))}
@@ -1002,9 +1020,11 @@ function AppDetailPanel({
 						</section>
 					) : null}
 
-					<AppIncludedSection runnables={detail?.runnables} />
+					<AppIncludedSection
+						runnables={detail?.runnables ?? entry.runnables}
+					/>
 
-					<BundledAppsSection ids={detail?.bundles ?? entry.bundles} />
+					<RequiredAppsSection requires={entry.requires} />
 
 					<section className="flex flex-col gap-2">
 						<h3 className="flex items-center gap-1.5 font-medium text-sm">
@@ -1055,7 +1075,8 @@ function runnableKindIcon(kind: string): typeof PackageIcon {
 	return RUNNABLE_KIND_ICONS[kind] ?? PackageIcon;
 }
 
-function runnableKindLabel(kind: string): string {
+/** Exported for unit tests — see the note on {@link isCompanionApp}. */
+export function runnableKindLabel(kind: string): string {
 	return (
 		RUNNABLE_KIND_LABELS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)
 	);
@@ -1104,18 +1125,24 @@ function AppIncludedSection({
 	);
 }
 
-/** Prettify a plugin id ("com.ryu.spaces" → "Spaces") for display. */
-function prettyPluginId(id: string): string {
+/** Prettify a plugin id ("com.ryu.spaces" → "Spaces") for display.
+ *  Exported for unit tests — see the note on {@link isCompanionApp}. */
+export function prettyPluginId(id: string): string {
 	const leaf = id.split(".").pop() ?? id;
 	return leaf.charAt(0).toUpperCase() + leaf.slice(1);
 }
 
-/** "Includes these apps": the separate plugins this app bundles — distinct,
- *  independently-installable entities that install/uninstall together with it.
- *  Shown apart from in-plugin runnables ("What's included") since they are whole
- *  plugins, not runnables inside this one. */
-function BundledAppsSection({ ids }: { ids?: string[] | null }) {
-	if (!ids || ids.length === 0) {
+/** The app's plugin dependencies (`requires`) — the apps that must be enabled for
+ *  this one to run. Rendered before install so the dependency chain is clear:
+ *  enabling this app auto-enables these, and uninstalling one of these later prompts
+ *  the disable cascade. Absent/empty ⇒ nothing rendered (self-contained app). */
+function RequiredAppsSection({
+	requires,
+}: {
+	requires?: CatalogEntry["requires"];
+}) {
+	const apps = requires?.apps ?? [];
+	if (apps.length === 0) {
 		return null;
 	}
 	return (
@@ -1123,37 +1150,46 @@ function BundledAppsSection({ ids }: { ids?: string[] | null }) {
 			<h3 className="flex items-center gap-1.5 font-medium text-sm">
 				<HugeiconsIcon
 					className="size-4 text-muted-foreground"
-					icon={LayoutGridIcon}
+					icon={Link01Icon}
 				/>
-				Includes these apps
+				Requires these apps
 			</h3>
 			<ul className="flex flex-col gap-1.5">
-				{ids.map((id) => (
+				{apps.map((dep) => (
 					<li
 						className="flex items-center gap-2.5 rounded-md border px-3 py-2"
-						key={id}
+						key={dep.id}
 					>
 						<HugeiconsIcon
 							className="size-4 shrink-0 text-muted-foreground"
-							icon={LayoutGridIcon}
+							icon={Link01Icon}
 						/>
 						<span className="min-w-0 flex-1 truncate text-sm">
-							{prettyPluginId(id)}
+							{prettyPluginId(dep.id)}
 						</span>
+						{dep.min_version ? (
+							<span className="shrink-0 truncate text-muted-foreground text-xs">
+								≥ {dep.min_version}
+							</span>
+						) : null}
 						<span className="shrink-0 truncate font-mono text-muted-foreground text-xs">
-							{id}
+							{dep.id}
 						</span>
 					</li>
 				))}
 			</ul>
+			<p className="text-muted-foreground text-xs">
+				Enabling this app turns these on automatically.
+			</p>
 		</section>
 	);
 }
 
 /** Return `u` only when it parses as an http(s) URL, else null — a render-layer
  *  guard so an untrusted publisher's `javascript:`/`data:` link never reaches an
- *  `<a href>` even if a backend source forgot to allowlist the scheme. */
-function safeHttpUrl(u?: string | null): string | null {
+ *  `<a href>` even if a backend source forgot to allowlist the scheme.
+ *  Exported for unit tests — see the note on {@link isCompanionApp}. */
+export function safeHttpUrl(u?: string | null): string | null {
 	if (!u) {
 		return null;
 	}
@@ -1309,6 +1345,12 @@ function DitherBanner({
  *  carry banner/icon/accent presentation metadata. */
 function AppHero({ entry }: { entry: CatalogEntry }) {
 	const fallback = entry.icon_background ?? entry.accent_color ?? null;
+	// Raster logo for the hero: `icon_url` (any https host), or a GitHub-image URL
+	// pasted into the `icon` field (mirrors the card's {@link resolveCardIcon} rule).
+	const { iconUrl: previewIconUrl } = resolveCardIcon({
+		icon: entry.icon,
+		iconUrl: entry.icon_url,
+	});
 	return (
 		<div className="relative h-32 overflow-hidden rounded-t-xl rounded-b-lg">
 			<DitherBanner banner={entry.banner} fallback={fallback} />
@@ -1321,12 +1363,12 @@ function AppHero({ entry }: { entry: CatalogEntry }) {
 							: undefined
 					}
 				>
-					{entry.icon_url ? (
+					{previewIconUrl ? (
 						<img
 							alt=""
 							className="size-full object-cover"
 							loading="lazy"
-							src={entry.icon_url}
+							src={previewIconUrl}
 						/>
 					) : (
 						<HugeiconsIcon className="size-6" icon={GridIcon} />

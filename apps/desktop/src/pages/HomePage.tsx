@@ -971,7 +971,7 @@ export default function HomePage() {
 						value={nameDialog?.value ?? ""}
 					/>
 					<DialogFooter>
-						<Button onClick={() => setNameDialog(null)} variant="outline">
+						<Button onClick={() => setNameDialog(null)} variant="ghost">
 							Cancel
 						</Button>
 						<Button

@@ -14,6 +14,7 @@
     "./catalog/host": "./src/catalog/host.tsx",
     "./catalog/types": "./src/catalog/types.ts",
     "./catalog/grant-labels": "./src/catalog/grant-labels.ts",
+    "./catalog/realm-icons": "./src/catalog/realm-icons.ts",
     "./catalog/apps": "./src/catalog/apps-catalog-section.tsx",
     "./catalog/skills": "./src/catalog/skills-catalog-section.tsx",
     "./catalog/models": "./src/catalog/models-catalog-section.tsx",

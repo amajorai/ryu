@@ -448,4 +448,104 @@ mod tests {
         let r = validate_target(&src, &nested, false);
         assert!(!r.ok);
     }
+
+    // ── extra coverage ───────────────────────────────────────────────────────
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        format!("{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed))
+    }
+
+    #[test]
+    fn human_bytes_scales_to_gb_and_tb() {
+        assert_eq!(human_bytes(1024u64.pow(3)), "1.0 GB");
+        assert_eq!(human_bytes(1024u64.pow(4)), "1.0 TB");
+        // Beyond TB stays in TB (the top unit), never overflows the table.
+        assert_eq!(human_bytes(5 * 1024u64.pow(5)), "5120.0 TB");
+        assert_eq!(human_bytes(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn check_target_rejects_empty_and_relative_paths() {
+        let src = std::env::temp_dir().join(format!("ryu-dp-src-{}", uniq()));
+        // Empty target.
+        let r = validate_target(&src, std::path::Path::new(""), false);
+        assert!(!r.ok);
+        assert!(r.error.unwrap().contains("empty"));
+        // Relative target.
+        let r = validate_target(&src, std::path::Path::new("relative/dir"), false);
+        assert!(!r.ok);
+        assert!(r.error.unwrap().contains("absolute"));
+    }
+
+    #[test]
+    fn check_target_rejects_non_empty_dir() {
+        let base = std::env::temp_dir().join(format!("ryu-dp-nonempty-{}", uniq()));
+        let src = base.join("src");
+        let target = base.join("target");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("existing.txt"), b"x").unwrap();
+
+        let r = validate_target(&src, &target, false);
+        assert!(!r.ok);
+        assert!(r.error.unwrap().contains("not empty"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn check_target_accepts_empty_absolute_writable_target() {
+        let base = std::env::temp_dir().join(format!("ryu-dp-ok-{}", uniq()));
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("db.sqlite"), b"data").unwrap();
+        // A not-yet-existing absolute path under a distinct base is accepted.
+        let target = base.join("dest");
+
+        let r = validate_target(&src, &target, false);
+        assert!(r.ok, "unexpected error: {:?}", r.error);
+        assert!(r.source_size_bytes >= 4);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn copy_tree_replicates_files_and_subdirs_with_byte_count() {
+        let base = std::env::temp_dir().join(format!("ryu-dp-copy-{}", uniq()));
+        let from = base.join("from");
+        let sub = from.join("nested");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(from.join("a.txt"), b"hello").unwrap();
+        std::fs::write(sub.join("b.txt"), b"world!").unwrap();
+        let to = base.join("to");
+
+        let mut copied = 0u64;
+        let mut ticks = 0u32;
+        copy_tree(&from, &to, &mut copied, &mut |_| ticks += 1).unwrap();
+
+        assert_eq!(copied, 11, "5 + 6 bytes copied");
+        assert_eq!(ticks, 2, "on_bytes fires once per file");
+        assert_eq!(std::fs::read(to.join("a.txt")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(to.join("nested/b.txt")).unwrap(), b"world!");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn export_zip_of_empty_dir_writes_zero_bytes() {
+        let base = std::env::temp_dir().join(format!("ryu-dp-empty-{}", uniq()));
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let zip = base.join("out.zip");
+        let written = export_zip(&src, &zip).unwrap();
+        assert_eq!(written, 0);
+        assert!(zip.exists(), "an empty archive is still produced");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn run_cli_returns_false_without_the_data_path_token() {
+        // No "data-path" argument → not consumed, Core boots normally.
+        assert!(!run_cli(&["ryu-core".to_string(), "serve".to_string()]));
+        assert!(!run_cli(&[]));
+    }
 }

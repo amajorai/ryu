@@ -33,3 +33,16 @@ impl ryu_vad::VadHost for CoreVadHost {
         crate::paths::ryu_dir()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ryu_vad::VadHost;
+
+    #[test]
+    fn core_vad_host_resolves_the_active_data_dir() {
+        // The host indirection must return exactly Core's resolved data dir so the
+        // Silero model path stays anchored to the user-relocatable ~/.ryu.
+        assert_eq!(CoreVadHost.ryu_dir(), crate::paths::ryu_dir());
+    }
+}

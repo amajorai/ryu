@@ -542,7 +542,9 @@ fn resolve_replay_context() -> Option<Tenancy> {
     };
     // Bound node: require a real signed-in account (the device→user principal). The
     // control-plane device token maps to the account vault written by device login.
-    let user_id = crate::auth::load_accounts().active().map(|a| a.user_id.clone())?;
+    let user_id = crate::auth::load_accounts()
+        .active()
+        .map(|a| a.user_id.clone())?;
     Some(Tenancy::Owned {
         user_id,
         org_id: Some(org.id),
@@ -711,7 +713,9 @@ mod tests {
         assert_eq!(payload.messages.len(), 2);
 
         // Apply to B — this is "device B receiving the sync payload".
-        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed).await.unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
 
         let msgs_a = store_a.get_messages("conv-sync-1").await.unwrap();
         let msgs_b = store_b.get_messages("conv-sync-1").await.unwrap();
@@ -740,8 +744,12 @@ mod tests {
 
         let payload = build_sync_payload(&store_a, "conv-idem").await.unwrap();
 
-        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed).await.unwrap();
-        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed).await.unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        apply_sync_payload(&store_b, &payload, Tenancy::Unattributed)
+            .await
+            .unwrap();
 
         let msgs = store_b.get_messages("conv-idem").await.unwrap();
         assert_eq!(
@@ -802,8 +810,12 @@ mod tests {
         };
 
         // Apply fresh first, then stale — stale must not overwrite.
-        apply_sync_payload(&store_b, &fresh, Tenancy::Unattributed).await.unwrap();
-        apply_sync_payload(&store_b, &stale, Tenancy::Unattributed).await.unwrap();
+        apply_sync_payload(&store_b, &fresh, Tenancy::Unattributed)
+            .await
+            .unwrap();
+        apply_sync_payload(&store_b, &stale, Tenancy::Unattributed)
+            .await
+            .unwrap();
 
         let summaries = store_b.list_conversations().await.unwrap();
         let title = summaries[0].title.as_deref().unwrap_or("");
@@ -825,7 +837,9 @@ mod tests {
             .unwrap();
 
         let p1 = build_sync_payload(&store_a, "conv-incr").await.unwrap();
-        apply_sync_payload(&store_b, &p1, Tenancy::Unattributed).await.unwrap();
+        apply_sync_payload(&store_b, &p1, Tenancy::Unattributed)
+            .await
+            .unwrap();
 
         // A second message added after the first sync.
         store_a
@@ -834,7 +848,9 @@ mod tests {
             .unwrap();
 
         let p2 = build_sync_payload(&store_a, "conv-incr").await.unwrap();
-        apply_sync_payload(&store_b, &p2, Tenancy::Unattributed).await.unwrap();
+        apply_sync_payload(&store_b, &p2, Tenancy::Unattributed)
+            .await
+            .unwrap();
 
         let msgs = store_b.get_messages("conv-incr").await.unwrap();
         assert_eq!(msgs.len(), 2);
@@ -873,7 +889,9 @@ mod tests {
         let anon = build_sync_payload(&store2, "anon-conv").await.unwrap();
         assert!(anon.owner_user_id.is_none());
         assert!(
-            !serde_json::to_string(&anon).unwrap().contains("owner_user_id"),
+            !serde_json::to_string(&anon)
+                .unwrap()
+                .contains("owner_user_id"),
             "an author-less payload must serialize byte-identical to the pre-owner wire"
         );
     }
@@ -920,7 +938,11 @@ mod tests {
 
         // The row is owned by BOB (the payload author), scoped to the node's org —
         // NOT "device-owner".
-        let meta = store.get_access_meta("bob-synced").await.unwrap().expect("row");
+        let meta = store
+            .get_access_meta("bob-synced")
+            .await
+            .unwrap()
+            .expect("row");
         assert_eq!(meta.owner_user_id.as_deref(), Some("bob"));
         assert_eq!(meta.org_id.as_deref(), Some("org1"));
 
@@ -1045,5 +1067,145 @@ mod tests {
             attacker_sees.is_empty(),
             "the impersonated author must not gain access by claiming ownership in a payload"
         );
+    }
+
+    /// Serializes env mutations for the sync-toggle tests so they never race the
+    /// shared `RYU_SYNC_ENABLED` var across the crate's single test binary.
+    static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn sample_payload(id: &str) -> SyncPayload {
+        SyncPayload {
+            conversation_id: id.to_owned(),
+            title: Some("t".to_owned()),
+            agent_id: Some("a".to_owned()),
+            folder_path: None,
+            branch: None,
+            worktree_path: None,
+            run_status: None,
+            owner_user_id: Some("bob".to_owned()),
+            created_at: 1,
+            updated_at: 2,
+            messages: vec![SyncMessage {
+                id: "m1".to_owned(),
+                role: "user".to_owned(),
+                content: "hi".to_owned(),
+                created_at: 1,
+            }],
+        }
+    }
+
+    /// The SSE change-feed parser concatenates multiple `data:` lines with `\n` (SSE
+    /// spec), strips a single leading space, tolerates CRLF, and ignores the leading
+    /// comment + `event:` line. A pretty-printed payload split one physical line per
+    /// `data:` is the realistic multi-line frame (each break is JSON whitespace).
+    #[test]
+    fn parse_change_frame_concatenates_multiline_data() {
+        let payload = sample_payload("conv-sse");
+        let pretty = serde_json::to_string_pretty(&payload).unwrap();
+        assert!(pretty.lines().count() > 1, "pretty JSON must span many lines");
+        let mut frame = String::from(": keepalive comment\r\nevent: change\r\n");
+        for line in pretty.lines() {
+            frame.push_str("data: ");
+            frame.push_str(line);
+            frame.push_str("\r\n");
+        }
+        let parsed = parse_change_frame(&frame).expect("multi-line data frame must decode");
+        assert_eq!(parsed.conversation_id, "conv-sse");
+        assert_eq!(parsed.owner_user_id.as_deref(), Some("bob"));
+        assert_eq!(parsed.messages.len(), 1);
+
+        // The single-line form (whole JSON on one `data:`) is equally valid.
+        let one = format!("data: {}\n", serde_json::to_string(&payload).unwrap());
+        assert_eq!(
+            parse_change_frame(&one).unwrap().conversation_id,
+            "conv-sse"
+        );
+    }
+
+    #[test]
+    fn parse_change_frame_ignores_keepalives_and_bad_json() {
+        // A comment-only keepalive frame carries no `data:` → None (not an error).
+        assert!(parse_change_frame(": ping\n").is_none());
+        assert!(parse_change_frame("event: heartbeat\n").is_none());
+        assert!(parse_change_frame("").is_none());
+        // A `data:` line that is not a valid payload decodes to None, never panics.
+        assert!(parse_change_frame("data: {\"not\":\"a payload\"}\n").is_none());
+        assert!(parse_change_frame("data: not json at all\n").is_none());
+    }
+
+    /// `env_sync_enabled` is truthy only for the documented tokens; anything else
+    /// (including `0`/`false`/unset) keeps the local-first default OFF.
+    #[test]
+    fn env_sync_enabled_only_for_truthy_tokens() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        let prior = std::env::var(SYNC_ENABLED_ENV).ok();
+
+        for truthy in ["1", "true", "TRUE", "yes"] {
+            std::env::set_var(SYNC_ENABLED_ENV, truthy);
+            assert!(env_sync_enabled(), "'{truthy}' must enable sync");
+        }
+        for falsy in ["0", "false", "no", "", "TrUe", "enabled"] {
+            std::env::set_var(SYNC_ENABLED_ENV, falsy);
+            assert!(!env_sync_enabled(), "'{falsy}' must NOT enable sync");
+        }
+        std::env::remove_var(SYNC_ENABLED_ENV);
+        assert!(!env_sync_enabled(), "unset must default to OFF (local-first)");
+
+        // Restore whatever the environment had before this test.
+        match prior {
+            Some(v) => std::env::set_var(SYNC_ENABLED_ENV, v),
+            None => std::env::remove_var(SYNC_ENABLED_ENV),
+        }
+    }
+
+    /// `effective_replay_tenancy`: an unbound context stays byte-identical
+    /// (`Unattributed`, author ignored); a bound context owns the row by the PAYLOAD
+    /// author scoped to the node's org, and an author-less payload collapses to
+    /// `Unattributed` (the pair the caller then refuses on a bound node).
+    #[test]
+    fn effective_replay_tenancy_derives_owner_from_payload() {
+        let authored = sample_payload("c1");
+
+        // Unbound: author ignored, NULL-tenanted.
+        assert_eq!(
+            effective_replay_tenancy(&authored, &Tenancy::Unattributed),
+            Tenancy::Unattributed
+        );
+
+        // Bound: owned by the payload's author ("bob"), scoped to the node's org —
+        // never the context user ("device-owner").
+        let ctx = Tenancy::Owned {
+            user_id: "device-owner".to_owned(),
+            org_id: Some("org1".to_owned()),
+        };
+        assert_eq!(
+            effective_replay_tenancy(&authored, &ctx),
+            Tenancy::owned_by(Some("bob"), Some("org1"))
+        );
+
+        // Bound + author-less payload → Unattributed (fail-closed sentinel).
+        let mut orphan = sample_payload("c2");
+        orphan.owner_user_id = None;
+        assert_eq!(
+            effective_replay_tenancy(&orphan, &ctx),
+            Tenancy::Unattributed
+        );
+    }
+
+    /// `SyncError` renders each variant distinctly and `From<reqwest::Error>` maps to
+    /// the `Http` arm (the `?`-conversion the client relies on).
+    #[test]
+    fn sync_error_display_and_from() {
+        assert_eq!(
+            SyncError::Unauthenticated.to_string(),
+            "no auth token found — complete device login first"
+        );
+        assert_eq!(
+            SyncError::ServerError(503, "down".to_owned()).to_string(),
+            "server returned 503: down"
+        );
+        assert!(SyncError::Store(anyhow::anyhow!("boom"))
+            .to_string()
+            .contains("boom"));
     }
 }

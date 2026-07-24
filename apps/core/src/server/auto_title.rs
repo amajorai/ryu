@@ -95,7 +95,13 @@ async fn auto_title_conversation(state: &ServerState, conversation_id: &str) {
     }
     let user_input: String = first.chars().take(MAX_INPUT_CHARS).collect();
 
-    let Some(raw) = generate(&state.preferences, &state.client, CHAT_SYSTEM_PROMPT, &user_input).await
+    let Some(raw) = generate(
+        &state.preferences,
+        &state.client,
+        CHAT_SYSTEM_PROMPT,
+        &user_input,
+    )
+    .await
     else {
         return; // no local model + no override → keep the derived title
     };
@@ -392,5 +398,30 @@ mod tests {
     fn empty_in_empty_out() {
         assert_eq!(sanitize_title(""), "");
         assert_eq!(sanitize_title("   \n  "), "");
+    }
+
+    /// `extract_content` reads the first choice's message content from an
+    /// OpenAI-compatible completion, and returns `None` for any missing hop rather
+    /// than panicking on a malformed reply.
+    #[test]
+    fn extract_content_reads_first_choice_message() {
+        use super::extract_content;
+        use serde_json::json;
+
+        let body = json!({
+            "choices": [
+                { "message": { "role": "assistant", "content": "Centering a div" } }
+            ]
+        });
+        assert_eq!(extract_content(&body).as_deref(), Some("Centering a div"));
+
+        // Missing content / empty choices / non-string content / wrong shape → None.
+        assert!(extract_content(&json!({ "choices": [] })).is_none());
+        assert!(extract_content(&json!({ "choices": [ { "message": {} } ] })).is_none());
+        assert!(
+            extract_content(&json!({ "choices": [ { "message": { "content": 42 } } ] })).is_none()
+        );
+        assert!(extract_content(&json!({ "error": "boom" })).is_none());
+        assert!(extract_content(&json!(null)).is_none());
     }
 }

@@ -937,4 +937,131 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     }
+
+    #[test]
+    fn owner_repo_shorthand_accepts_only_two_safe_segments() {
+        assert!(is_owner_repo_shorthand("owner/repo"));
+        assert!(is_owner_repo_shorthand("Vercel-Labs/agent_skills.v2"));
+        // Wrong segment count.
+        assert!(!is_owner_repo_shorthand("just-one"));
+        assert!(!is_owner_repo_shorthand("a/b/c"));
+        // Empty / dot segments.
+        assert!(!is_owner_repo_shorthand("owner/"));
+        assert!(!is_owner_repo_shorthand("./repo"));
+        assert!(!is_owner_repo_shorthand("owner/.."));
+        // A space disqualifies it (falls through to the error path in parse_source).
+        assert!(!is_owner_repo_shorthand("owner name/repo"));
+        // A slash-bearing URL-ish string is not shorthand.
+        assert!(!is_owner_repo_shorthand("https://x/y"));
+    }
+
+    #[test]
+    fn strip_git_suffix_only_trims_trailing_dot_git() {
+        assert_eq!(strip_git_suffix("repo.git"), "repo");
+        assert_eq!(strip_git_suffix("repo"), "repo");
+        // Only a trailing suffix is stripped, not a mid-string ".git".
+        assert_eq!(strip_git_suffix("my.gitthing"), "my.gitthing");
+    }
+
+    #[test]
+    fn tarball_url_builders_match_the_documented_shapes() {
+        assert_eq!(
+            github_tarball("owner", "repo", "HEAD"),
+            "https://codeload.github.com/owner/repo/tar.gz/HEAD"
+        );
+        assert_eq!(
+            gitlab_tarball("gitlab.com", "group/sub/repo", "v1.0"),
+            "https://gitlab.com/group/sub/repo/-/archive/v1.0/archive.tar.gz"
+        );
+    }
+
+    #[test]
+    fn clone_host_port_handles_https_ssh_and_scp_forms() {
+        assert_eq!(
+            clone_host_port("https://github.com/o/r.git").unwrap(),
+            ("github.com".to_owned(), 443)
+        );
+        // Explicit port wins over the scheme default.
+        assert_eq!(
+            clone_host_port("https://git.example.com:8443/o/r.git").unwrap(),
+            ("git.example.com".to_owned(), 8443)
+        );
+        assert_eq!(
+            clone_host_port("ssh://git@host.example/o/r").unwrap(),
+            ("host.example".to_owned(), 22)
+        );
+        // scp-like `[user@]host:path` (no scheme) → port 22.
+        assert_eq!(
+            clone_host_port("git@github.com:owner/repo.git").unwrap(),
+            ("github.com".to_owned(), 22)
+        );
+    }
+
+    #[test]
+    fn clone_url_for_derives_git_urls_from_tarball_and_clone_strategies() {
+        // github tarball → github .git clone url.
+        let gh = parse_source("owner/repo").unwrap();
+        assert_eq!(
+            clone_url_for(&gh).unwrap(),
+            "https://github.com/owner/repo.git"
+        );
+        // gitlab archive tarball → <project>.git.
+        let gl = parse_source("https://gitlab.com/group/sub/repo").unwrap();
+        assert_eq!(
+            clone_url_for(&gl).unwrap(),
+            "https://gitlab.com/group/sub/repo.git"
+        );
+        // A GitClone strategy passes its url through verbatim.
+        let ssh = parse_source("git@github.com:o/r.git").unwrap();
+        assert_eq!(clone_url_for(&ssh).unwrap(), "git@github.com:o/r.git");
+    }
+
+    #[test]
+    fn clone_url_for_local_path_has_no_clone_url() {
+        let tmp = std::env::temp_dir().join(format!("ryu-clone-url-local-{}", uniq()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let local = parse_source(tmp.to_str().unwrap()).unwrap();
+        assert!(clone_url_for(&local).is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn repo_root_name_is_the_single_top_dir_or_none() {
+        // One top-level dir → that name.
+        let root = std::env::temp_dir().join(format!("ryu-root-name-{}", uniq()));
+        std::fs::create_dir_all(root.join("repo-main")).unwrap();
+        assert_eq!(repo_root_name(&root).as_deref(), Some("repo-main"));
+
+        // Two top-level entries → None (not a clean tarball root).
+        std::fs::create_dir_all(root.join("second")).unwrap();
+        assert!(repo_root_name(&root).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+
+        // A single top-level FILE (not a dir) → None.
+        let root2 = std::env::temp_dir().join(format!("ryu-root-name-file-{}", uniq()));
+        std::fs::create_dir_all(&root2).unwrap();
+        std::fs::write(root2.join("only.txt"), "x").unwrap();
+        assert!(repo_root_name(&root2).is_none());
+        let _ = std::fs::remove_dir_all(&root2);
+    }
+
+    #[test]
+    fn resolve_subdir_descends_single_top_and_blocks_traversal() {
+        // extract_root/<top>/skills/x  — resolve_subdir descends into <top> then subdir.
+        let root = std::env::temp_dir().join(format!("ryu-resolve-subdir-{}", uniq()));
+        let inner = root.join("repo-main").join("skills").join("x");
+        std::fs::create_dir_all(&inner).unwrap();
+        let resolved = resolve_subdir(&root, Some("skills/x")).unwrap();
+        assert!(resolved.ends_with("repo-main/skills/x"));
+
+        // No subdir → the single top dir itself.
+        let top_only = resolve_subdir(&root, None).unwrap();
+        assert!(top_only.ends_with("repo-main"));
+
+        // A traversal attempt is rejected before any join.
+        assert!(resolve_subdir(&root, Some("../escape")).is_err());
+        // A missing subdir errors.
+        assert!(resolve_subdir(&root, Some("does/not/exist")).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

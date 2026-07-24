@@ -48,4 +48,31 @@ describe("pickRecommendedQuant", () => {
 	it("returns null when there are no files", () => {
 		expect(pickRecommendedQuant([])).toBeNull();
 	});
+
+	it("ranks the full fit ladder great > ok > partial > cpu > unknown > too_big", () => {
+		const best = pickRecommendedQuant([
+			file({ filename: "too_big.gguf", fit: "too_big" }),
+			file({ filename: "unknown.gguf", fit: "unknown" }),
+			file({ filename: "partial.gguf", fit: "partial" }),
+			file({ filename: "cpu.gguf", fit: "cpu" }),
+		]);
+		// No great/ok present → partial is the best of what's left.
+		expect(best?.filename).toBe("partial.gguf");
+	});
+
+	it("treats a null sizeBytes as +Infinity so a sized quant wins the tie", () => {
+		const best = pickRecommendedQuant([
+			file({ filename: "unsized.gguf", fit: "ok", sizeBytes: null }),
+			file({ filename: "sized.gguf", fit: "ok", sizeBytes: 10 }),
+		]);
+		expect(best?.filename).toBe("sized.gguf");
+	});
+
+	it("prefers the installed quant even when a better-fitting one exists later", () => {
+		const best = pickRecommendedQuant([
+			file({ filename: "installed.gguf", fit: "too_big", installed: true }),
+			file({ filename: "great.gguf", fit: "great" }),
+		]);
+		expect(best?.filename).toBe("installed.gguf");
+	});
 });

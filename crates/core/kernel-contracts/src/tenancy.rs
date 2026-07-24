@@ -197,11 +197,7 @@ mod tests {
     /// Round-trip through the collapsed pair is stable (the inverse constructor).
     #[test]
     fn from_tenancy_parts_round_trips() {
-        for (u, o) in [
-            (Some("u1"), Some("acme")),
-            (Some("u1"), None),
-            (None, None),
-        ] {
+        for (u, o) in [(Some("u1"), Some("acme")), (Some("u1"), None), (None, None)] {
             let key = ResourceKey::from_tenancy_parts(u, o);
             assert_eq!(key.to_tenancy_parts(), (u, o));
         }

@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import AppsCatalogSection from "./apps-catalog-section.tsx";
+import StoreItemAction from "./chrome/store-item-action.tsx";
 import {
 	type CatalogHost,
 	CatalogHostProvider,
@@ -130,18 +131,34 @@ describe("CatalogHost seam — Apps section", () => {
 		expect(html).toContain("A sample plugin.");
 	});
 
-	test("with an install layer, shows the Install action (desktop)", () => {
+	test("with an install layer, list rows show the Install action (desktop)", () => {
 		const html = render(MOCK_INSTALL);
-		expect(html).toContain("install-button");
 		expect(html).toContain("Install");
-		// The read-only affordance must NOT render when install is available.
 		expect(html).not.toContain("Open Sample Plugin in Ryu");
 	});
 
-	test("with install:null, swaps to the Open-in-Ryu affordance (web)", () => {
+	test("with install:null, list rows fall back to Details (read-only web)", () => {
 		const html = render(null);
+		expect(html).toContain("Details");
+	});
+
+	test("StoreItemAction shows Install when not installed and no affordance", () => {
+		const html = renderToStaticMarkup(
+			<StoreItemAction installed={false} onInstall={() => undefined} />
+		);
+		expect(html).toContain("Install");
+		expect(html).not.toContain("Open Sample Plugin in Ryu");
+	});
+
+	test("StoreItemAction swaps to the read-only affordance when one is passed (web)", () => {
+		const html = renderToStaticMarkup(
+			<StoreItemAction
+				affordance={<span>Open Sample Plugin in Ryu</span>}
+				installed={false}
+			/>
+		);
 		expect(html).toContain("Open Sample Plugin in Ryu");
 		// No desktop install button when the surface is read-only.
-		expect(html).not.toContain("install-button");
+		expect(html).not.toContain("Install<");
 	});
 });

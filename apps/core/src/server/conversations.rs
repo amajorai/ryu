@@ -953,10 +953,8 @@ impl ConversationStore {
         // the parent chain walked up from this leaf, and new turns attach beneath
         // it.
         if !existing_conv_columns.contains("active_leaf_message_id") {
-            conn.execute_batch(
-                "ALTER TABLE conversations ADD COLUMN active_leaf_message_id TEXT",
-            )
-            .context("adding active_leaf_message_id column to conversations")?;
+            conn.execute_batch("ALTER TABLE conversations ADD COLUMN active_leaf_message_id TEXT")
+                .context("adding active_leaf_message_id column to conversations")?;
         }
 
         Ok(())
@@ -1458,8 +1456,11 @@ impl ConversationStore {
     /// the background-runs view (issue #128) and the sidebar runs section.
     /// **Unfiltered** — see [`Self::list_runs_visible`] for the caller-scoped form.
     pub async fn list_runs(&self) -> Result<Vec<ConversationSummary>> {
-        self.list_summaries("AND c.run_status IS NOT NULL", TenancyFilter::unrestricted())
-            .await
+        self.list_summaries(
+            "AND c.run_status IS NOT NULL",
+            TenancyFilter::unrestricted(),
+        )
+        .await
     }
 
     /// The tenancy-filtered twin of [`Self::list_runs`] — used by `GET /api/runs`
@@ -1497,9 +1498,7 @@ impl ConversationStore {
             owner_user_id,
             org_id,
         };
-        let sql = format!(
-            "SELECT c.id FROM conversations c WHERE {TENANCY_VISIBLE_PREDICATE}"
-        );
+        let sql = format!("SELECT c.id FROM conversations c WHERE {TENANCY_VISIBLE_PREDICATE}");
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(
@@ -2414,10 +2413,7 @@ impl ConversationStore {
                 .filter(|m| m.parent_message_id == msg.parent_message_id)
                 .collect();
             msg.sibling_count = siblings.len();
-            msg.sibling_index = siblings
-                .iter()
-                .position(|m| m.id == msg.id)
-                .unwrap_or(0);
+            msg.sibling_index = siblings.iter().position(|m| m.id == msg.id).unwrap_or(0);
             // Only carry the id list when there is an actual choice to page
             // through — a single-version turn stays a lean payload.
             msg.sibling_ids = if siblings.len() > 1 {
@@ -3197,10 +3193,12 @@ mod tests {
     /// than silently in production.
     #[test]
     fn exactly_one_insert_into_conversations_in_the_whole_store() {
-        let src = include_str!("conversations.rs");
+        // Normalize CRLF first: on a Windows checkout `include_str!` sees `\r\n`,
+        // and an un-normalized marker miss would silently scan the test module too.
+        let src = include_str!("conversations.rs").replace("\r\n", "\n");
         let test_mod = src
             .find("\n#[cfg(test)]\nmod tests {")
-            .unwrap_or(src.len());
+            .expect("test-module marker must exist in this very file");
         let production = &src[..test_mod];
         // Matches every row-creating form, not just the one that exists today, so a
         // future `INSERT OR IGNORE` / `INSERT OR REPLACE` / `REPLACE INTO` cannot slip
@@ -3721,7 +3719,14 @@ mod tests {
     async fn message_feedback_set_list_and_turn_resolution() {
         let store = ConversationStore::open_in_memory().unwrap();
         store
-            .append_message("conv-f", "user", "how do I reverse a string", None, None, None)
+            .append_message(
+                "conv-f",
+                "user",
+                "how do I reverse a string",
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         let asst = store
@@ -3996,7 +4001,13 @@ mod tests {
     async fn session_runnable_kind_round_trips_for_workflow() {
         let store = ConversationStore::open_in_memory().unwrap();
         let session = store
-            .create_session("wf-xyz", RunnableKind::Workflow, None, None, Tenancy::Unattributed)
+            .create_session(
+                "wf-xyz",
+                RunnableKind::Workflow,
+                None,
+                None,
+                Tenancy::Unattributed,
+            )
             .await
             .unwrap();
         let reloaded = store.get_session(&session.id).await.unwrap().unwrap();
@@ -4334,7 +4345,14 @@ mod tests {
 
         // The fresh generation appends as a sibling of the old assistant reply.
         store
-            .append_message("conv-regen", "assistant", "a1-v2", Some("agent-x"), None, None)
+            .append_message(
+                "conv-regen",
+                "assistant",
+                "a1-v2",
+                Some("agent-x"),
+                None,
+                None,
+            )
             .await
             .unwrap();
         let active = store.get_active_messages("conv-regen").await.unwrap();
@@ -4519,7 +4537,10 @@ mod tests {
             .fork_conversation(
                 "src",
                 None,
-                Tenancy::Owned { user_id: "bob".to_owned(), org_id: Some("org1".to_owned()) },
+                Tenancy::Owned {
+                    user_id: "bob".to_owned(),
+                    org_id: Some("org1".to_owned()),
+                },
             )
             .await
             .unwrap()
@@ -4567,7 +4588,11 @@ mod tests {
             Some("alice"),
             "[{path}] created an UNTENANTED row — on an org-bound node its own owner is locked out of it"
         );
-        assert_eq!(meta.org_id.as_deref(), Some(ORG), "[{path}] org not stamped");
+        assert_eq!(
+            meta.org_id.as_deref(),
+            Some(ORG),
+            "[{path}] org not stamped"
+        );
 
         let visible = store
             .visible_conversation_ids(Some("alice"), Some(ORG), true)
@@ -4724,7 +4749,13 @@ mod tests {
             .await
             .unwrap();
         let session = store
-            .create_session("agent-a", RunnableKind::Agent, None, None, Tenancy::Unattributed)
+            .create_session(
+                "agent-a",
+                RunnableKind::Agent,
+                None,
+                None,
+                Tenancy::Unattributed,
+            )
             .await
             .unwrap();
         let forked = store
@@ -4744,7 +4775,10 @@ mod tests {
 
         // node_bound = false ⇒ NO filtering at all: every row is visible, exactly as
         // before the ACL existed.
-        let visible = store.visible_conversation_ids(None, None, false).await.unwrap();
+        let visible = store
+            .visible_conversation_ids(None, None, false)
+            .await
+            .unwrap();
         for id in ["u1", "u2", "u3", "u4", &session.conversation_id, &forked.id] {
             assert!(
                 visible.iter().any(|v| v == id),

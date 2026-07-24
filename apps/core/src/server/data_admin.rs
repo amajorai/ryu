@@ -148,7 +148,13 @@ pub async fn data_clear(
             .clear_conversations_owned_by(owner)
             .await
             .map_err(|e| e.to_string()),
-        (DataCategory::Spaces | DataCategory::Memory | DataCategory::Monitors | DataCategory::Meetings, Some(_)) => {
+        (
+            DataCategory::Spaces
+            | DataCategory::Memory
+            | DataCategory::Monitors
+            | DataCategory::Meetings,
+            Some(_),
+        ) => {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({
@@ -163,6 +169,82 @@ pub async fn data_clear(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e })),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetNodeRequest {
+    /// Client-side type-to-confirm echo (the node name). The server only requires it
+    /// to be present and non-empty; the exact-name match is a UI guard against an
+    /// accidental click, not an auth boundary (auth is the node token / caller).
+    #[serde(default)]
+    pub confirm: String,
+}
+
+/// `POST /api/node/reset`  body: `{ "confirm": "<node name>" }`
+///
+/// Wipe this ENTIRE node back to a fresh, just-installed state: every store DB,
+/// session, download, and preference under the data dir is deleted (only the
+/// encryption key is preserved so the node can still boot), then Core restarts and
+/// re-runs onboarding. Useful for a clean slate during development.
+///
+/// The wipe cannot run live (the SQLite files are open), so this handler only ARMS
+/// it — it writes a marker and returns `restart_required: true`; the desktop then
+/// restarts Core, and the wipe happens at the very start of the next boot
+/// (`paths::apply_pending_reset`).
+///
+/// Refused on an org-bound (shared) node: a full wipe would destroy every user's
+/// data and there is no per-user scoping for it — mirrors the danger-zone refusal
+/// for shared categories. Personal (unbound) nodes only.
+#[utoipa::path(
+    post,
+    path = "/api/node/reset",
+    tag = "Data",
+    summary = "Wipe and reset this node to a fresh state (restart required)",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+pub async fn node_reset(
+    State(_state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(req): Json<ResetNodeRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    // Org-bound node: a full node wipe is never acceptable (it destroys every user's
+    // data with no way to scope it). Require a signed-in caller to even learn this,
+    // then refuse.
+    if super::node_org_id().is_some() {
+        if caller.is_none() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "forbidden: a signed-in user is required on a shared node"
+                })),
+            );
+        }
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "forbidden: resetting a node wipes ALL data on it and is not allowed on a shared (org-bound) node"
+            })),
+        );
+    }
+
+    if req.confirm.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "confirmation required to reset the node" })),
+        );
+    }
+
+    match crate::paths::request_node_reset() {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(json!({ "ok": true, "restart_required": true })),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
         ),
     }
 }

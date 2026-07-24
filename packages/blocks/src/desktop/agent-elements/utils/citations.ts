@@ -77,7 +77,14 @@ function citationsFromWebSearch(
 	part: ToolPartLike
 ): Omit<Citation, "number">[] {
 	const output = normalizeOutput(part.output ?? part.result);
-	const results = isRecord(output) ? output.results : output;
+	// A bare array is already the result list; otherwise pull `.results`. Check
+	// Array.isArray first — arrays are records too, so `isRecord` alone would
+	// misroute a bare-array output into the `.results` (undefined) branch.
+	const results = Array.isArray(output)
+		? output
+		: isRecord(output)
+			? output.results
+			: output;
 	if (!Array.isArray(results)) {
 		return [];
 	}

@@ -98,19 +98,19 @@ pub async fn dispatch(tool: &str, arguments: Value, spaces: Option<&SpaceStore>)
                 .ok_or_else(|| anyhow::anyhow!("missing required string argument 'mime'"))?;
 
             // Resolve content: data_base64 (binary) takes precedence over text.
-            let bytes: Vec<u8> = if let Some(b64) = arguments.get("data_base64").and_then(Value::as_str)
-            {
-                use base64::Engine as _;
-                base64::engine::general_purpose::STANDARD
-                    .decode(b64.as_bytes())
-                    .map_err(|e| anyhow::anyhow!("invalid base64 in 'data_base64': {e}"))?
-            } else if let Some(text) = arguments.get("text").and_then(Value::as_str) {
-                text.as_bytes().to_vec()
-            } else {
-                return Err(anyhow::anyhow!(
-                    "artifact requires content: provide 'data_base64' or 'text'"
-                ));
-            };
+            let bytes: Vec<u8> =
+                if let Some(b64) = arguments.get("data_base64").and_then(Value::as_str) {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::STANDARD
+                        .decode(b64.as_bytes())
+                        .map_err(|e| anyhow::anyhow!("invalid base64 in 'data_base64': {e}"))?
+                } else if let Some(text) = arguments.get("text").and_then(Value::as_str) {
+                    text.as_bytes().to_vec()
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "artifact requires content: provide 'data_base64' or 'text'"
+                    ));
+                };
 
             if bytes.len() > MAX_ARTIFACT_BYTES {
                 return Err(anyhow::anyhow!(
@@ -130,7 +130,10 @@ pub async fn dispatch(tool: &str, arguments: Value, spaces: Option<&SpaceStore>)
             let space_id = match arguments.get("space_id").and_then(Value::as_str) {
                 Some(id) if !id.trim().is_empty() => id.trim().to_owned(),
                 _ => store
-                    .ensure_system_space(ARTIFACTS_SPACE_NAME, Some("Files created by Ryu and agents"))
+                    .ensure_system_space(
+                        ARTIFACTS_SPACE_NAME,
+                        Some("Files created by Ryu and agents"),
+                    )
                     .await
                     .map_err(|e| anyhow::anyhow!("resolving Artifacts space: {e}"))?,
             };
@@ -186,19 +189,23 @@ mod tests {
 
     #[tokio::test]
     async fn missing_title_is_an_error() {
-        assert!(dispatch("create", json!({ "mime": "text/csv", "text": "a,b" }), None)
-            .await
-            .is_err());
+        assert!(
+            dispatch("create", json!({ "mime": "text/csv", "text": "a,b" }), None)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn no_content_is_an_error() {
         let store = SpaceStore::open_in_memory().unwrap();
-        assert!(
-            dispatch("create", json!({ "title": "x", "mime": "text/csv" }), Some(&store))
-                .await
-                .is_err()
-        );
+        assert!(dispatch(
+            "create",
+            json!({ "title": "x", "mime": "text/csv" }),
+            Some(&store)
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
@@ -254,6 +261,9 @@ mod tests {
         let (_mime, bytes) = store.read_file_blob(doc_id).await.unwrap().unwrap();
         assert_eq!(bytes, png);
         // Image renders as a markdown image link.
-        assert!(out["content"][0]["text"].as_str().unwrap().starts_with("!["));
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("!["));
     }
 }

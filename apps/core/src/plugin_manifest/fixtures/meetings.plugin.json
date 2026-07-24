@@ -61,5 +61,41 @@
 	"companion": {
 		"label": "Meetings",
 		"icon": "mic-01"
+	},
+	"contributes": {
+		"settings_tabs": [
+			{
+				"id": "meetings.settings",
+				"title": "Meetings",
+				"scope": "node",
+				"view": "meetings"
+			}
+		],
+		"sidebar_sections": [
+			{
+				"id": "meetings",
+				"title": "Meetings",
+				"icon": "mic-01",
+				"spec": {
+					"source": {
+						"http": { "method": "GET", "path": "/api/meetings" },
+						"items": "meetings"
+					},
+					"itemTarget": "/meetings/{{item.id}}",
+					"itemActions": [
+						{
+							"id": "delete",
+							"label": "Delete",
+							"icon": "lucide:trash-2",
+							"style": "danger",
+							"http": {
+								"method": "DELETE",
+								"path": "/api/meetings/{{item.id}}"
+							}
+						}
+					]
+				}
+			}
+		]
 	}
 }

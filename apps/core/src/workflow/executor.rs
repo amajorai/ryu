@@ -507,7 +507,13 @@ fn resolve_successors(
         // loop replays its stored output down the graph.
         if !has_active_incoming && !run.is_completed(&graph.graph[target].id) {
             pruned_nodes.insert(target);
-            mark(run, &graph.graph[target].id, NodeStatus::Skipped, None, None);
+            mark(
+                run,
+                &graph.graph[target].id,
+                NodeStatus::Skipped,
+                None,
+                None,
+            );
             store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
         }
         queue.push_back(target);

@@ -69,6 +69,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AgentModelPickerField } from "@/components/agent-elements/input/agent-model-picker-field.tsx";
 import { WEB_URL } from "@/lib/app-urls.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { toCatalogItem } from "@/src/components/evaluators/catalog-utils.ts";
@@ -80,16 +81,30 @@ import { ChannelsSection } from "@/src/components/gateway/ChannelsSection.tsx";
 import { UsageCostSection } from "@/src/components/gateway/UsageCostSection.tsx";
 import { WorkspaceSection } from "@/src/components/gateway/WorkspaceSection.tsx";
 import ResizableSettingsLayout from "@/src/components/ResizableSettingsLayout.tsx";
+import { ConnectionsTab } from "@/src/components/settings/ConnectionsTab.tsx";
+import { DangerZoneSettings } from "@/src/components/settings/DangerZoneSettings.tsx";
+import { EmailAlertsSettings } from "@/src/components/settings/EmailAlertsSettings.tsx";
+import { EntitySettings } from "@/src/components/settings/EntitySettings.tsx";
 import { IntegrationsTab } from "@/src/components/settings/IntegrationsTab.tsx";
 import { LlmProvidersSettings } from "@/src/components/settings/LlmProvidersSettings.tsx";
+import { PrivacySettings } from "@/src/components/settings/PrivacySettings.tsx";
+import { StorageSettings } from "@/src/components/settings/StorageSettings.tsx";
 import {
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
 } from "@/src/components/settings/shared/settings-items.tsx";
+import { UpdatesSettings } from "@/src/components/settings/UpdatesSettings.tsx";
 import { useActiveNodeGetter } from "@/src/hooks/useActiveNode.ts";
-import { useEngineModels } from "@/src/hooks/useEngineModels.ts";
 import { useGatewayStatus } from "@/src/hooks/useGatewayStatus.ts";
+import {
+	APP_SECTION_PREFIX,
+	buildEntityNavGroups,
+	isEntitySection,
+	PLUGIN_SECTION_PREFIX,
+	type ScopedNavEntity,
+	useScopedSettingsNav,
+} from "@/src/hooks/useScopedSettingsNav.ts";
 import type { AgentSummary } from "@/src/lib/api/agents.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -155,6 +170,7 @@ import {
 } from "@/src/lib/api/preferences.ts";
 import { deleteProviderKey, setProviderKey } from "@/src/lib/api/secrets.ts";
 import IdentitiesPage from "@/src/pages/IdentitiesPage.tsx";
+import { PreflightPage } from "@/src/pages/PreflightPage.tsx";
 import type { GatewaySection } from "@/src/store/useGatewayDialog.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 
@@ -1156,6 +1172,7 @@ function BudgetRuleDialog({
 	initial,
 	agentIdReadOnly,
 	agents,
+	target,
 	idLabel = "Agent ID",
 	idPlaceholder = "e.g. claude or my-agent",
 	idRequiredError = "Agent ID is required.",
@@ -1167,6 +1184,8 @@ function BudgetRuleDialog({
 	initial?: BudgetFormState;
 	agentIdReadOnly?: boolean;
 	agents?: AgentSummary[];
+	/** Node target — powers the "Downgrade to model" catalog picker. */
+	target: ApiTarget;
 	/** Field label for the identity input (e.g. "Agent ID" or "User ID"). */
 	idLabel?: string;
 	/** Placeholder for the free-text identity input. */
@@ -1300,12 +1319,14 @@ function BudgetRuleDialog({
 					{form.action === "downgrade" ? (
 						<div className="flex flex-col gap-1.5">
 							<Label htmlFor="budget-downgrade-to">Downgrade to model</Label>
-							<Input
-								id="budget-downgrade-to"
-								onChange={(e) =>
-									setForm((f) => ({ ...f, downgrade_to: e.target.value }))
+							<AgentModelPickerField
+								ariaLabel="Downgrade to model"
+								mode="model"
+								onChange={(next) =>
+									setForm((f) => ({ ...f, downgrade_to: next }))
 								}
 								placeholder="e.g. gpt-4o-mini"
+								target={target}
 								value={form.downgrade_to}
 							/>
 							<p className="text-muted-foreground text-xs">
@@ -1738,11 +1759,13 @@ function SmartRoutingCard({
 				{(draft?.strategy ?? "llm") === "llm" ? (
 					<div className="flex flex-col gap-1.5">
 						<Label htmlFor="smart-classifier-model">Classifier model</Label>
-						<Input
+						<AgentModelPickerField
+							ariaLabel="Classifier model"
 							disabled={isDisabled}
-							id="smart-classifier-model"
-							onChange={(e) => patch({ classifier_model: e.target.value })}
+							mode="model"
+							onChange={(next) => patch({ classifier_model: next })}
 							placeholder="e.g. gpt-4o-mini, or a local model"
+							target={target}
 							value={draft?.classifier_model ?? ""}
 						/>
 						<p className="text-muted-foreground text-xs">
@@ -1830,12 +1853,13 @@ function SmartRoutingCard({
 											placeholder="When the request is about… (plain language)"
 											value={rule.description}
 										/>
-										<Input
+										<AgentModelPickerField
+											ariaLabel={`Route to model for rule ${idx + 1}`}
 											disabled={isDisabled}
-											onChange={(e) =>
-												updateRule(rule.id, "model", e.target.value)
-											}
+											mode="model"
+											onChange={(next) => updateRule(rule.id, "model", next)}
 											placeholder="Route to model id (e.g. claude-sonnet-4-5)"
+											target={target}
 											value={rule.model}
 										/>
 									</div>
@@ -1860,11 +1884,13 @@ function SmartRoutingCard({
 					<Label htmlFor="smart-default-model">
 						Default model when no rule matches
 					</Label>
-					<Input
+					<AgentModelPickerField
+						ariaLabel="Default model when no rule matches"
 						disabled={isDisabled}
-						id="smart-default-model"
-						onChange={(e) => patch({ default_model: e.target.value })}
+						mode="model"
+						onChange={(next) => patch({ default_model: next })}
 						placeholder="Leave blank to keep the originally requested model"
+						target={target}
 						value={draft?.default_model ?? ""}
 					/>
 				</div>
@@ -2605,6 +2631,7 @@ function BudgetsCard({
 										formToRule(form)
 									);
 								}}
+								target={target}
 								title="Add user budget"
 								trigger={
 									<Button disabled={!canConfigure} size="sm" variant="ghost">
@@ -2621,6 +2648,7 @@ function BudgetsCard({
 						label="Per-user"
 						onRemove={(id) => removeRule("users", id)}
 						onSave={(id, rule) => saveRule("users", id, rule)}
+						target={target}
 					/>
 					<BudgetScopeSection
 						addDialog={
@@ -2634,6 +2662,7 @@ function BudgetsCard({
 										formToRule(form)
 									);
 								}}
+								target={target}
 								title="Add agent budget"
 								trigger={
 									<Button disabled={!canConfigure} size="sm" variant="ghost">
@@ -2650,11 +2679,13 @@ function BudgetsCard({
 						label="Per-agent"
 						onRemove={(id) => removeRule("agents", id)}
 						onSave={(id, rule) => saveRule("agents", id, rule)}
+						target={target}
 					/>
 					<SessionBudgetEditor
 						canConfigure={canConfigure}
 						onSave={saveSession}
 						rule={budgets?.session ?? DEFAULT_SESSION_BUDGET}
+						target={target}
 					/>
 				</div>
 			)}
@@ -2676,6 +2707,7 @@ function BudgetScopeSection({
 	onSave,
 	onRemove,
 	canConfigure,
+	target,
 }: {
 	label: string;
 	entries: [string, BudgetRule][];
@@ -2686,6 +2718,8 @@ function BudgetScopeSection({
 	onRemove: (id: string) => Promise<void>;
 	/** When false the caller lacks `gateway.configure`; edit/remove disabled. */
 	canConfigure: boolean;
+	/** Node target — threaded to each row's edit dialog for the model picker. */
+	target: ApiTarget;
 }) {
 	const formToRule = (form: BudgetFormState): BudgetRule => {
 		const rule: BudgetRule = {
@@ -2734,6 +2768,7 @@ function BudgetScopeSection({
 										onSave={async (form) => {
 											await onSave(id, formToRule(form));
 										}}
+										target={target}
 										title="Edit budget"
 										trigger={
 											<Button
@@ -2797,11 +2832,14 @@ function SessionBudgetEditor({
 	rule,
 	onSave,
 	canConfigure,
+	target,
 }: {
 	rule: BudgetRule;
 	onSave: (rule: BudgetRule) => Promise<void>;
 	/** When false the caller lacks `gateway.configure`; save disabled. */
 	canConfigure: boolean;
+	/** Node target — powers the "Downgrade to model" catalog picker. */
+	target: ApiTarget;
 }) {
 	const [limit, setLimit] = useState(String(rule.limit));
 	const [action, setAction] = useState<BudgetAction>(rule.action);
@@ -2917,13 +2955,15 @@ function SessionBudgetEditor({
 						<Label htmlFor="session-budget-downgrade-to">
 							Downgrade to model
 						</Label>
-						<Input
-							id="session-budget-downgrade-to"
-							onChange={(e) => {
-								setDowngradeTo(e.target.value);
+						<AgentModelPickerField
+							ariaLabel="Downgrade to model"
+							mode="model"
+							onChange={(next) => {
+								setDowngradeTo(next);
 								setSaveOk(false);
 							}}
 							placeholder="e.g. gpt-4o-mini"
+							target={target}
 							value={downgradeTo}
 						/>
 						<p className="text-muted-foreground text-xs">
@@ -2983,7 +3023,8 @@ const POLICY_LABELS: Record<GatewayFirewallPolicy, string> = {
  * firewall / allow-deny rules configured in the cards above.
  */
 function CommandApprovalCard({ target }: { target: ApiTarget }) {
-	const [enabled, setEnabled] = useState(false);
+	// Armed by default (matches Core: unset pref scans; explicit off disarms).
+	const [enabled, setEnabled] = useState(true);
 	const [loaded, setLoaded] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 
@@ -3018,7 +3059,7 @@ function CommandApprovalCard({ target }: { target: ApiTarget }) {
 
 	return (
 		<SettingsSection
-			caption="Pre-scan every agent's native tool calls (Claude/Codex Bash, Write, Edit, and the rest) through the command-approval scanner before they run — closing the gap where an agent's own file/shell tools bypassed the gateway. Fail-closed when on: it defers to the firewall and allow/deny rules above. Restart the node to apply."
+			caption="Pre-scan every agent's native tool calls (Claude/Codex Bash, Write, Edit, and the rest) through the command-approval scanner before they run — closing the gap where an agent's own file/shell tools bypassed the gateway. On by default and fail-closed: it defers to the firewall and allow/deny rules above, and it is the only governance on headless runs (their permission prompts auto-approve). Restart the node to apply."
 			title="Command approval"
 		>
 			<div className="flex flex-col gap-3">
@@ -3585,13 +3626,7 @@ function FirewallCard({ ctx, caption }: { ctx: ScopeCtx; caption: string }) {
 	);
 }
 
-function InspectorCard({
-	ctx,
-	modelIds,
-}: {
-	ctx: ScopeCtx;
-	modelIds: string[];
-}) {
+function InspectorCard({ ctx, target }: { ctx: ScopeCtx; target: ApiTarget }) {
 	const nodeInspector = ctx.node.inspector ?? DEFAULT_INSPECTOR;
 	const broaderLocked = ctx.broaderLocked.has("inspector");
 	const overlayInspector = ctx.overlay.inspector ?? null;
@@ -3678,19 +3713,15 @@ function InspectorCard({
 
 						<div className="flex flex-col gap-1.5 px-3">
 							<Label htmlFor="inspector-model">Model</Label>
-							<Input
+							<AgentModelPickerField
+								ariaLabel="Inspector model"
 								disabled={editorDisabled}
-								id="inspector-model"
-								list="inspector-model-options"
-								onChange={(e) => patchInspector({ model: e.target.value })}
+								mode="model"
+								onChange={(next) => patchInspector({ model: next })}
 								placeholder="Gateway default model"
+								target={target}
 								value={effective.model}
 							/>
-							<datalist id="inspector-model-options">
-								{modelIds.map((id) => (
-									<option key={id} value={id} />
-								))}
-							</datalist>
 							<p className="text-muted-foreground text-xs">
 								Any routable model id. Leave empty to use the gateway default.
 							</p>
@@ -4025,7 +4056,6 @@ function GuardrailsSection({
 	const [config, setConfig] = useState<GatewayConfig | null>(null);
 	const [draft, setDraft] = useState<GatewayConfig | null>(null);
 	const [configError, setConfigError] = useState<string | null>(null);
-	const [agents, setAgents] = useState<AgentSummary[]>([]);
 	const [scope, setScope] = useState<FwScope>("node");
 	const [orgId, setOrgId] = useState("");
 	const [agentId, setAgentId] = useState("");
@@ -4033,31 +4063,16 @@ function GuardrailsSection({
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [saveOk, setSaveOk] = useState(false);
 
-	const engineModels = useEngineModels();
-	const modelIds = useMemo(() => {
-		const set = new Set<string>();
-		for (const opts of Object.values(engineModels)) {
-			for (const o of opts) {
-				set.add(o.id);
-			}
-		}
-		return Array.from(set).sort();
-	}, [engineModels]);
-
 	useEffect(() => {
 		if (!reachable || config !== null) {
 			return;
 		}
 		let cancelled = false;
-		Promise.all([
-			fetchGatewayConfig(target),
-			fetchAgents(target).catch(() => [] as AgentSummary[]),
-		])
-			.then(([cfg, agentList]) => {
+		fetchGatewayConfig(target)
+			.then((cfg) => {
 				if (!cancelled) {
 					setConfig(cfg);
 					setDraft(cfg);
-					setAgents(agentList);
 					setConfigError(null);
 				}
 			})
@@ -4123,17 +4138,6 @@ function GuardrailsSection({
 		});
 		clearSaveState();
 	};
-
-	const agentIdOptions = useMemo(() => {
-		const set = new Set<string>();
-		for (const a of agents) {
-			set.add(a.id);
-		}
-		for (const id of Object.keys(draft?.firewall_agent_overlays ?? {})) {
-			set.add(id);
-		}
-		return Array.from(set).sort();
-	}, [agents, draft]);
 
 	const handleSave = async () => {
 		if (!draft) {
@@ -4257,19 +4261,15 @@ function GuardrailsSection({
 					{scope === "agent" ? (
 						<div className="flex flex-col gap-1.5 px-3">
 							<Label htmlFor="fw-agent-id">Agent</Label>
-							<Input
+							<AgentModelPickerField
+								ariaLabel="Agent"
 								disabled={!reachable}
-								id="fw-agent-id"
-								list="fw-agent-ids"
-								onChange={(e) => setAgentId(e.target.value)}
+								mode="agent"
+								onChange={setAgentId}
 								placeholder="Agent id (x-ryu-agent-id)"
+								target={target}
 								value={agentId}
 							/>
-							<datalist id="fw-agent-ids">
-								{agentIdOptions.map((id) => (
-									<option key={id} value={id} />
-								))}
-							</datalist>
 							{overlayReady ? null : (
 								<p className="text-muted-foreground text-xs">
 									Choose or enter an agent id to author its overlay.
@@ -4284,7 +4284,7 @@ function GuardrailsSection({
 				<>
 					<FirewallCard caption={scopeCaption(scope, activeId)} ctx={ctx} />
 					<DlpCard ctx={ctx} />
-					<InspectorCard ctx={ctx} modelIds={modelIds} />
+					<InspectorCard ctx={ctx} target={target} />
 					<EvaluatorsCard ctx={ctx} target={target} />
 					<div className="flex items-center gap-3 px-1">
 						<Button
@@ -4775,6 +4775,14 @@ const GATEWAY_SECTIONS: {
 	{ value: "usage", label: "Usage & Cost", icon: Dollar01Icon },
 	{ value: "audit", label: "Audit", icon: Activity01Icon },
 	{ value: "evals", label: "Evals", icon: Activity01Icon },
+	// Moved from the App Settings dialog (node-level Core infra, not apps).
+	{ value: "connections", label: "Connections", icon: Share08Icon },
+	{ value: "email-alerts", label: "Email & Alerts", icon: BubbleChatIcon },
+	{ value: "privacy", label: "Privacy", icon: SquareLock01Icon },
+	{ value: "storage", label: "Storage", icon: Key01Icon },
+	{ value: "updates", label: "Updates", icon: Refresh01Icon },
+	{ value: "health", label: "Health", icon: Shield01Icon },
+	{ value: "danger", label: "Danger Zone", icon: Delete01Icon },
 ];
 
 /** Health + metrics observability block, shown on the Overview tab. */
@@ -4928,6 +4936,20 @@ const GATEWAY_NAV_GROUPS: { items: GatewaySection[]; title?: string }[] = [
 		],
 	},
 	{ title: "Observability", items: ["usage", "audit", "evals"] },
+	// Node-level Core-infra tabs moved out of the App Settings dialog (not apps —
+	// apps register their own tabs dynamically under the Apps/Plugins headers).
+	{
+		title: "Node",
+		items: [
+			"connections",
+			"email-alerts",
+			"privacy",
+			"storage",
+			"updates",
+			"health",
+		],
+	},
+	{ title: "Danger", items: ["danger"] },
 ];
 
 /**
@@ -4940,7 +4962,7 @@ export function GatewayDialog({
 	onOpenChange,
 	defaultSection = "overview",
 }: {
-	defaultSection?: GatewaySection;
+	defaultSection?: string;
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
 }) {
@@ -4949,8 +4971,25 @@ export function GatewayDialog({
 	const getActiveNode = useActiveNodeGetter();
 	const [configProviders, setConfigProviders] =
 		useState<GatewayProvidersConfig | null>(null);
-	const [section, setSection] = useState<GatewaySection>(defaultSection);
+	// Section is a string, not just GatewaySection: dynamic app/plugin entities use
+	// `app:<id>` / `plugin:<id>` values that aren't part of the static union.
+	const [section, setSection] = useState<string>(defaultSection);
 	const openSettings = useSettingsDialog((s) => s.openSettings);
+
+	// Node-scoped app/plugin settings tabs (user-scoped ones render in the App
+	// Settings dialog instead). Each becomes its own nav item under Apps / Plugins.
+	const { apps: appEntities, plugins: pluginEntities } =
+		useScopedSettingsNav("node");
+	const entityById = useMemo(() => {
+		const map = new Map<string, ScopedNavEntity>();
+		for (const e of appEntities) {
+			map.set(`${APP_SECTION_PREFIX}${e.id}`, e);
+		}
+		for (const e of pluginEntities) {
+			map.set(`${PLUGIN_SECTION_PREFIX}${e.id}`, e);
+		}
+		return map;
+	}, [appEntities, pluginEntities]);
 
 	// Cross-link back to the desktop App Settings dialog. Both are 85vw/85vh
 	// modals, so close this one before opening the other to avoid stacking two
@@ -4965,6 +5004,31 @@ export function GatewayDialog({
 			setSection(defaultSection);
 		}
 	}, [open, defaultSection]);
+
+	// If the selected app/plugin entity disappears (disabled/uninstalled) while its
+	// tab is open, fall back to the overview so the pane never shows nothing.
+	useEffect(() => {
+		if (isEntitySection(section) && !entityById.has(section)) {
+			setSection("overview");
+		}
+	}, [section, entityById]);
+
+	// Static gateway nav (labels resolved from GATEWAY_SECTIONS) + the dynamic
+	// Apps/Plugins groups for node-scoped app settings.
+	const navGroups = useMemo(
+		() => [
+			...GATEWAY_NAV_GROUPS.map((group) => ({
+				title: group.title,
+				items: group.items.map((value) => ({
+					value: value as string,
+					label:
+						GATEWAY_SECTIONS.find((s) => s.value === value)?.label ?? value,
+				})),
+			})),
+			...buildEntityNavGroups(appEntities, pluginEntities),
+		],
+		[appEntities, pluginEntities]
+	);
 
 	const node = getActiveNode();
 	const target: ApiTarget = { url: node.url, token: node.token ?? null };
@@ -4986,8 +5050,11 @@ export function GatewayDialog({
 	const reachable = status?.reachable ?? false;
 	const health = status?.health ?? null;
 	const metrics = status?.metrics ?? null;
+	const activeEntity = entityById.get(section);
 	const activeLabel =
-		GATEWAY_SECTIONS.find((s) => s.value === section)?.label ?? "";
+		activeEntity?.label ??
+		GATEWAY_SECTIONS.find((s) => s.value === section)?.label ??
+		"";
 
 	const body = (() => {
 		if (loading && !status) {
@@ -5121,6 +5188,18 @@ export function GatewayDialog({
 				) : null}
 				{section === "audit" ? <AuditPanel target={target} /> : null}
 				{section === "evals" ? <RunEvalsPanel target={target} /> : null}
+				{/* Node-level Core-infra tabs (moved out of the App Settings dialog). */}
+				{section === "connections" ? <ConnectionsTab /> : null}
+				{section === "email-alerts" ? <EmailAlertsSettings /> : null}
+				{section === "privacy" ? <PrivacySettings /> : null}
+				{section === "storage" ? <StorageSettings /> : null}
+				{section === "updates" ? <UpdatesSettings /> : null}
+				{section === "health" ? <PreflightPage embedded /> : null}
+				{section === "danger" ? <DangerZoneSettings /> : null}
+				{/* Dynamic node-scoped app/plugin settings (manifest-registered). */}
+				{activeEntity ? (
+					<EntitySettings entity={activeEntity} target={target} />
+				) : null}
 			</div>
 		);
 	})();
@@ -5142,20 +5221,19 @@ export function GatewayDialog({
 					}
 					sidebar={
 						<>
-							{GATEWAY_NAV_GROUPS.map((group) => (
+							{navGroups.map((group) => (
 								<SidebarGroup className="py-1" key={group.title ?? "general"}>
 									{group.title && (
 										<SidebarGroupLabel>{group.title}</SidebarGroupLabel>
 									)}
 									<SidebarMenu>
-										{group.items.map((value) => (
-											<SidebarMenuItem key={value}>
+										{group.items.map((item) => (
+											<SidebarMenuItem key={item.value}>
 												<SidebarMenuButton
-													isActive={section === value}
-													onClick={() => setSection(value)}
+													isActive={section === item.value}
+													onClick={() => setSection(item.value)}
 												>
-													{GATEWAY_SECTIONS.find((s) => s.value === value)
-														?.label ?? value}
+													{item.label}
 												</SidebarMenuButton>
 											</SidebarMenuItem>
 										))}

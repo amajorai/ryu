@@ -56,3 +56,50 @@ pub struct VideoJob {
     /// Failure detail. `None` unless the job failed.
     pub error: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn as_str_covers_every_variant() {
+        assert_eq!(JobStatus::Queued.as_str(), "queued");
+        assert_eq!(JobStatus::Running.as_str(), "running");
+        assert_eq!(JobStatus::Succeeded.as_str(), "succeeded");
+        assert_eq!(JobStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn is_terminal_only_for_succeeded_and_failed() {
+        assert!(!JobStatus::Queued.is_terminal());
+        assert!(!JobStatus::Running.is_terminal());
+        assert!(JobStatus::Succeeded.is_terminal());
+        assert!(JobStatus::Failed.is_terminal());
+    }
+
+    #[test]
+    fn serde_uses_lowercase_rename() {
+        assert_eq!(
+            serde_json::to_value(JobStatus::Running).unwrap(),
+            json!("running")
+        );
+        let s: JobStatus = serde_json::from_value(json!("succeeded")).unwrap();
+        assert_eq!(s, JobStatus::Succeeded);
+        // A capitalized value must NOT parse (rename_all = lowercase is strict).
+        assert!(serde_json::from_value::<JobStatus>(json!("Succeeded")).is_err());
+    }
+
+    #[test]
+    fn video_job_holds_provider_ref_and_output() {
+        let job = VideoJob {
+            provider_ref: "pred_123".to_string(),
+            status: JobStatus::Succeeded,
+            output: Some(json!({ "data": [{ "url": "https://x/v.mp4" }] })),
+            error: None,
+        };
+        assert_eq!(job.provider_ref, "pred_123");
+        assert!(job.status.is_terminal());
+        assert_eq!(job.output.unwrap()["data"][0]["url"], json!("https://x/v.mp4"));
+    }
+}

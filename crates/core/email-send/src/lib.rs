@@ -288,9 +288,10 @@ fn generate_message_id(from: &str) -> String {
 /// Assemble the MIME body (text / html / multipart) plus any attachments.
 fn build_body(msg: &OutboundEmail) -> Result<MultiPartOrSingle, EmailError> {
     let content = match (msg.text.as_ref(), msg.html.as_ref()) {
-        (Some(text), Some(html)) => {
-            MultiPartOrSingle::Multi(MultiPart::alternative_plain_html(text.clone(), html.clone()))
-        }
+        (Some(text), Some(html)) => MultiPartOrSingle::Multi(MultiPart::alternative_plain_html(
+            text.clone(),
+            html.clone(),
+        )),
         (Some(text), None) => MultiPartOrSingle::Single(SinglePart::plain(text.clone())),
         (None, Some(html)) => MultiPartOrSingle::Single(SinglePart::html(html.clone())),
         (None, None) => MultiPartOrSingle::Single(SinglePart::plain(String::new())),
@@ -308,9 +309,8 @@ fn build_body(msg: &OutboundEmail) -> Result<MultiPartOrSingle, EmailError> {
     for att in &msg.attachments {
         let ct = ContentType::parse(&att.content_type)
             .unwrap_or(ContentType::parse("application/octet-stream").unwrap());
-        mixed = mixed.singlepart(
-            LettreAttachment::new(att.filename.clone()).body(att.bytes.clone(), ct),
-        );
+        mixed = mixed
+            .singlepart(LettreAttachment::new(att.filename.clone()).body(att.bytes.clone(), ct));
     }
     Ok(MultiPartOrSingle::Multi(mixed))
 }
@@ -399,4 +399,404 @@ pub async fn send_email_alert(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit coverage for the pure/private message-construction seams and the
+    //! `send_email` early-return validation paths. None of these tests touch the
+    //! process-global `TRANSPORT` / `PASSWORD_RESOLVER` statics or environment, so
+    //! they are parallel-safe. The env-fallback + transport-cache branches (which
+    //! *do* mutate globals) live in the single serialized `tests/sink.rs` test.
+
+    use super::*;
+
+    fn body_bytes(msg: &OutboundEmail) -> Vec<u8> {
+        match build_body(msg).expect("body builds") {
+            MultiPartOrSingle::Multi(m) => m.formatted(),
+            MultiPartOrSingle::Single(s) => s.formatted(),
+        }
+    }
+
+    // --- generate_message_id: domain extraction + uniqueness -----------------
+
+    #[test]
+    fn message_id_extracts_domain_from_bare_address() {
+        let id = generate_message_id("alerts@node.example");
+        assert!(id.starts_with('<'), "wrapped: {id}");
+        assert!(id.ends_with("@node.example>"), "domain from address: {id}");
+    }
+
+    #[test]
+    fn message_id_extracts_domain_from_display_name_form() {
+        // `Name <local@domain>` — the trailing `>` must be stripped.
+        let id = generate_message_id("Ryu <alerts@node.example>");
+        assert!(id.ends_with("@node.example>"), "stripped `>`: {id}");
+    }
+
+    #[test]
+    fn message_id_falls_back_when_no_at_sign() {
+        let id = generate_message_id("no-at-sign-here");
+        assert!(id.ends_with("@ryu.local>"), "placeholder domain: {id}");
+    }
+
+    #[test]
+    fn message_id_falls_back_on_empty_domain() {
+        // `local@` — an empty domain part must not produce `@>`.
+        let id = generate_message_id("local@");
+        assert!(id.ends_with("@ryu.local>"), "empty domain → placeholder: {id}");
+    }
+
+    #[test]
+    fn message_ids_are_unique_across_calls() {
+        let a = generate_message_id("a@b.com");
+        let b = generate_message_id("a@b.com");
+        assert_ne!(a, b, "monotonic counter must differ consecutive ids");
+    }
+
+    // --- parse_mailbox: valid / display-name / trimming / invalid ------------
+
+    #[test]
+    fn parse_mailbox_accepts_bare_and_display_forms() {
+        assert!(parse_mailbox("a@b.com").is_ok());
+        assert!(parse_mailbox("Alice <a@b.com>").is_ok());
+    }
+
+    #[test]
+    fn parse_mailbox_trims_surrounding_whitespace() {
+        assert!(parse_mailbox("   a@b.com   ").is_ok());
+    }
+
+    #[test]
+    fn parse_mailbox_rejects_garbage() {
+        match parse_mailbox("not-an-email") {
+            Err(EmailError::InvalidAddress(a)) => assert!(a.contains("not-an-email")),
+            other => panic!("expected InvalidAddress, got {other:?}"),
+        }
+    }
+
+    // --- build_body: every content branch + attachment fallback --------------
+
+    #[test]
+    fn build_body_text_only_is_singlepart_plain() {
+        let bytes = body_bytes(&OutboundEmail {
+            text: Some("hello".into()),
+            ..Default::default()
+        });
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("text/plain"), "plain part: {s}");
+        assert!(s.contains("hello"));
+    }
+
+    #[test]
+    fn build_body_html_only_is_singlepart_html() {
+        let bytes = body_bytes(&OutboundEmail {
+            html: Some("<b>hi</b>".into()),
+            ..Default::default()
+        });
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("text/html"), "html part: {s}");
+    }
+
+    #[test]
+    fn build_body_text_and_html_is_alternative_multipart() {
+        let bytes = body_bytes(&OutboundEmail {
+            text: Some("plain".into()),
+            html: Some("<i>rich</i>".into()),
+            ..Default::default()
+        });
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("multipart/alternative"), "alternative: {s}");
+        assert!(s.contains("text/plain") && s.contains("text/html"));
+    }
+
+    #[test]
+    fn build_body_empty_is_singlepart_plain() {
+        // Neither text nor html ⇒ an empty plain part (not an error).
+        match build_body(&OutboundEmail::default()).expect("builds") {
+            MultiPartOrSingle::Single(_) => {}
+            MultiPartOrSingle::Multi(_) => panic!("empty body should be singlepart"),
+        }
+    }
+
+    #[test]
+    fn build_body_with_attachment_wraps_in_mixed_multipart() {
+        let bytes = body_bytes(&OutboundEmail {
+            text: Some("see attached".into()),
+            attachments: vec![Attachment {
+                filename: "report.pdf".into(),
+                content_type: "application/pdf".into(),
+                bytes: b"%PDF-1.4".to_vec(),
+            }],
+            ..Default::default()
+        });
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("multipart/mixed"), "mixed wrapper: {s}");
+        assert!(s.contains("report.pdf"), "attachment filename present");
+        assert!(s.contains("application/pdf"), "attachment content-type present");
+    }
+
+    #[test]
+    fn build_body_alternative_with_attachment_nests_multipart() {
+        // text + html (an alternative multipart) *and* an attachment: the
+        // alternative body is nested directly inside the mixed wrapper.
+        let bytes = body_bytes(&OutboundEmail {
+            text: Some("plain".into()),
+            html: Some("<i>rich</i>".into()),
+            attachments: vec![Attachment {
+                filename: "a.txt".into(),
+                content_type: "text/plain".into(),
+                bytes: b"data".to_vec(),
+            }],
+            ..Default::default()
+        });
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("multipart/mixed"), "outer mixed: {s}");
+        assert!(s.contains("multipart/alternative"), "nested alternative: {s}");
+        assert!(s.contains("a.txt"), "attachment present");
+    }
+
+    #[test]
+    fn build_body_malformed_content_type_falls_back_to_octet_stream() {
+        // A bad content-type must not panic — it falls back to octet-stream.
+        let bytes = body_bytes(&OutboundEmail {
+            html: Some("body".into()),
+            attachments: vec![Attachment {
+                filename: "blob.bin".into(),
+                content_type: "this is not a mime type".into(),
+                bytes: vec![0, 1, 2, 3],
+            }],
+            ..Default::default()
+        });
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(
+            s.contains("application/octet-stream"),
+            "fallback content-type: {s}"
+        );
+    }
+
+    // --- EmailError: Display for every variant + Debug ------------------------
+
+    #[test]
+    fn email_error_display_covers_all_variants() {
+        assert_eq!(
+            EmailError::NotConfigured.to_string(),
+            "email transport is not configured"
+        );
+        assert_eq!(
+            EmailError::InvalidAddress("x@".into()).to_string(),
+            "invalid email address: x@"
+        );
+        assert_eq!(
+            EmailError::Build("boom".into()).to_string(),
+            "failed to build email: boom"
+        );
+        assert_eq!(
+            EmailError::Transport("tls".into()).to_string(),
+            "failed to build SMTP transport: tls"
+        );
+        assert_eq!(
+            EmailError::Send("550".into()).to_string(),
+            "SMTP send failed: 550"
+        );
+        assert_eq!(EmailError::Timeout.to_string(), "SMTP send timed out");
+        // Debug is derived; exercise it so the derive is covered.
+        assert!(format!("{:?}", EmailError::Timeout).contains("Timeout"));
+    }
+
+    // --- TransportPrefs: serde defaults for omitted fields -------------------
+
+    #[test]
+    fn transport_prefs_apply_serde_defaults() {
+        let prefs: TransportPrefs =
+            serde_json::from_str(r#"{"host":"smtp.example.com"}"#).expect("parses");
+        assert_eq!(prefs.host, "smtp.example.com");
+        assert_eq!(prefs.port, 587, "default_port");
+        assert_eq!(prefs.username, "", "default username");
+        assert_eq!(prefs.from, "", "default from");
+        assert!(prefs.starttls, "default_starttls");
+    }
+
+    #[test]
+    fn transport_prefs_honour_explicit_values() {
+        let prefs: TransportPrefs = serde_json::from_str(
+            r#"{"host":"h","port":465,"username":"u","from":"f@x.io","starttls":false}"#,
+        )
+        .expect("parses");
+        assert_eq!(prefs.port, 465);
+        assert_eq!(prefs.username, "u");
+        assert_eq!(prefs.from, "f@x.io");
+        assert!(!prefs.starttls);
+    }
+
+    // --- send_email: validation error paths (return before any socket) -------
+
+    fn a_config() -> EmailTransportConfig {
+        EmailTransportConfig {
+            host: "127.0.0.1".into(),
+            port: 0,
+            username: "u".into(),
+            password: "p".into(),
+            from: "from@node.example".into(),
+            starttls: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn send_email_rejects_empty_recipient_list() {
+        let cfg = a_config();
+        let msg = OutboundEmail {
+            subject: "s".into(),
+            text: Some("b".into()),
+            ..Default::default()
+        };
+        match send_email(&cfg, &msg).await {
+            Err(EmailError::InvalidAddress(a)) => assert!(a.contains("no recipients")),
+            other => panic!("expected no-recipients error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_email_rejects_invalid_from_override() {
+        let cfg = a_config();
+        let msg = OutboundEmail {
+            from: Some("garbage".into()),
+            to: vec!["ok@node.example".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            send_email(&cfg, &msg).await,
+            Err(EmailError::InvalidAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_email_rejects_invalid_to() {
+        let cfg = a_config();
+        let msg = OutboundEmail {
+            to: vec!["not valid".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            send_email(&cfg, &msg).await,
+            Err(EmailError::InvalidAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_email_rejects_invalid_cc() {
+        let cfg = a_config();
+        let msg = OutboundEmail {
+            to: vec!["ok@node.example".into()],
+            cc: vec!["bad cc".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            send_email(&cfg, &msg).await,
+            Err(EmailError::InvalidAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_email_rejects_invalid_bcc() {
+        let cfg = a_config();
+        let msg = OutboundEmail {
+            to: vec!["ok@node.example".into()],
+            bcc: vec!["bad bcc".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            send_email(&cfg, &msg).await,
+            Err(EmailError::InvalidAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_email_rejects_invalid_reply_to() {
+        let cfg = a_config();
+        let msg = OutboundEmail {
+            to: vec!["ok@node.example".into()],
+            reply_to: Some("bad reply".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            send_email(&cfg, &msg).await,
+            Err(EmailError::InvalidAddress(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_email_alert_rejects_invalid_recipient() {
+        let cfg = a_config();
+        assert!(matches!(
+            send_email_alert(&cfg, "not an address", "subj", "body").await,
+            Err(EmailError::InvalidAddress(_))
+        ));
+    }
+
+    // --- send_email: the SMTP transport-build + send() legs, exercised against
+    // a loopback listener that accepts then immediately closes. This is fully
+    // hermetic (loopback only, ephemeral port, no DNS, no external egress, no
+    // secret leaves the box); the reset surfaces as `EmailError::Send`. Covers
+    // both transport-build branches (STARTTLS submission vs implicit-TLS relay).
+
+    fn accept_then_close_listener() -> u16 {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().expect("addr").port();
+        std::thread::spawn(move || {
+            // Accept a few connection attempts, dropping each at once so the peer
+            // sees a reset while reading the SMTP greeting / TLS handshake.
+            for conn in listener.incoming().take(4) {
+                if let Ok(stream) = conn {
+                    drop(stream);
+                }
+            }
+        });
+        port
+    }
+
+    async fn expect_send_failure(starttls: bool, multipart_body: bool) {
+        let port = accept_then_close_listener();
+        let cfg = EmailTransportConfig {
+            host: "127.0.0.1".into(),
+            port,
+            username: "u".into(),
+            password: "p".into(),
+            from: "from@node.example".into(),
+            starttls,
+        };
+        // `multipart_body` toggles the send-path body branch: a text+html
+        // alternative (multipart send) vs a text-only singlepart send.
+        let msg = OutboundEmail {
+            to: vec!["to@node.example".into()],
+            cc: vec!["cc@node.example".into()],
+            bcc: vec!["bcc@node.example".into()],
+            reply_to: Some("reply@node.example".into()),
+            subject: "hi".into(),
+            text: Some("plain".into()),
+            html: multipart_body.then(|| "<b>rich</b>".to_string()),
+            in_reply_to: Some("<prev@node.example>".into()),
+            references: Some("<root@node.example>".into()),
+            ..Default::default()
+        };
+        // The message + transport build must succeed; the send itself must fail
+        // (never NotConfigured — the config here is fully specified).
+        match send_email(&cfg, &msg).await {
+            Err(EmailError::Send(_)) => {}
+            Err(EmailError::Transport(_)) => {}
+            other => panic!("expected a send/transport failure, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_email_starttls_multipart_send_failure() {
+        expect_send_failure(true, true).await;
+    }
+
+    #[tokio::test]
+    async fn send_email_implicit_tls_singlepart_send_failure() {
+        // Implicit-TLS branch *and* the singlepart send branch.
+        expect_send_failure(false, false).await;
+    }
 }

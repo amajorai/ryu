@@ -177,7 +177,11 @@ pub fn build_skill_md(existing: Option<&str>, draft: &SkillDraft) -> Result<Stri
     let yaml = serde_yml::to_string(&Value::Mapping(map))
         .map_err(|e| format!("failed to render front-matter: {e}"))?;
 
-    Ok(format!("---\n{yaml}---\n\n{body}\n", yaml = yaml, body = draft.body.trim()))
+    Ok(format!(
+        "---\n{yaml}---\n\n{body}\n",
+        yaml = yaml,
+        body = draft.body.trim()
+    ))
 }
 
 // ── Writing skills ──────────────────────────────────────────────────────────
@@ -219,8 +223,9 @@ pub enum CreateError {
 /// existing skill of the same slug. The new skill is left for the caller to
 /// activate + reload.
 pub fn create_skill(draft: &SkillDraft) -> Result<WriteResult, CreateError> {
-    let slug = sanitize_slug(&draft.name)
-        .ok_or_else(|| CreateError::Invalid(format!("could not derive an id from '{}'", draft.name)))?;
+    let slug = sanitize_slug(&draft.name).ok_or_else(|| {
+        CreateError::Invalid(format!("could not derive an id from '{}'", draft.name))
+    })?;
 
     let skill_dir = SkillRegistry::skills_dir().join(&slug);
     if skill_dir.exists() {
@@ -233,7 +238,11 @@ pub fn create_skill(draft: &SkillDraft) -> Result<WriteResult, CreateError> {
         .map_err(|e| CreateError::Invalid(format!("skill did not round-trip: {e}")))?;
 
     let path = write_skill_md(&slug, &source).map_err(CreateError::Io)?;
-    Ok(WriteResult { id: slug, path, source })
+    Ok(WriteResult {
+        id: slug,
+        path,
+        source,
+    })
 }
 
 /// Update an existing skill from a draft, preserving any front-matter keys the
@@ -395,10 +404,7 @@ pub fn load_skill_version(
 /// undoable, then writes the captured source back verbatim (lossless). Returns the
 /// restored source, or `None` when the version does not exist. The caller reloads
 /// the registry so the change is live.
-pub fn restore_skill_version(
-    skill_id: &str,
-    version_id: &str,
-) -> std::io::Result<Option<String>> {
+pub fn restore_skill_version(skill_id: &str, version_id: &str) -> std::io::Result<Option<String>> {
     let Some(version) = load_skill_version(skill_id, version_id)? else {
         return Ok(None);
     };
@@ -493,7 +499,9 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].label.as_deref(), Some("v1"));
 
-        let full = load_skill_version(&skill_id, &meta.id).expect("load").expect("some");
+        let full = load_skill_version(&skill_id, &meta.id)
+            .expect("load")
+            .expect("some");
         assert_eq!(full.source, src);
 
         assert!(delete_skill_versions(&skill_id).expect("delete"));

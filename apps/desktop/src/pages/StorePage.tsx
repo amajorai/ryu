@@ -3,17 +3,14 @@ import {
 	Download01Icon,
 	GridIcon,
 	Home01Icon,
-	Package01Icon,
-	PlugSocketIcon,
-	PuzzleIcon,
-	Robot01Icon,
-	ServerStack01Icon,
+	Link01Icon,
 	Wallet01Icon,
-	WorkflowSquare01Icon,
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { StoreComingSoon, StoreSectionNav } from "@ryu/blocks/desktop/store";
+import { StoreCatalogHeaderProvider } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
+import { REALM_ICONS } from "@ryu/marketplace/catalog/realm-icons";
 import { useCallback, useState } from "react";
 import { DesktopMarketplaceHost } from "@/src/components/marketplace/host.tsx";
 import AccountSection from "@/src/components/store/AccountSection.tsx";
@@ -22,10 +19,10 @@ import AppsCatalogSection from "@/src/components/store/AppsCatalogSection.tsx";
 import { DesktopCatalogHost } from "@/src/components/store/catalog-host.tsx";
 import EnginesCatalogSection from "@/src/components/store/EnginesCatalogSection.tsx";
 import InstalledSection from "@/src/components/store/InstalledSection.tsx";
+import IntegrationsCatalogSection from "@/src/components/store/IntegrationsCatalogSection.tsx";
 import McpCatalogSection from "@/src/components/store/McpCatalogSection.tsx";
 import ModelsCatalogSection from "@/src/components/store/ModelsCatalogSection.tsx";
 import SkillsCatalogSection from "@/src/components/store/SkillsCatalogSection.tsx";
-import StoreAsideLayout from "@/src/components/store/StoreAsideLayout.tsx";
 import StoreHome from "@/src/components/store/StoreHome.tsx";
 import StoreSearchResults from "@/src/components/store/StoreSearchResults.tsx";
 import {
@@ -41,6 +38,7 @@ import ToolsPage from "@/src/pages/ToolsPage.tsx";
 
 type StoreSection =
 	| "home"
+	| "integrations"
 	| "apps"
 	| "plugins"
 	| "models"
@@ -63,27 +61,53 @@ const SECTIONS: {
 	// "everything" has one front door before the per-realm sections. The
 	// store-wide search lives in the nav rail, above the section list.
 	{ value: "home", label: "Home", icon: Home01Icon, group: "discover" },
+	// Integrations: the brand-first front door — one card per service (Notion,
+	// Slack, …) merged from the integrations.sh directory and Composio's toolkit
+	// catalog. Opening a brand surfaces every related Skill/MCP/Plugin in one
+	// place. Sits first in the browse cluster, so the group divider falls between
+	// Home and it — one separator, then Integrations atop the per-realm catalogs.
+	{
+		value: "integrations",
+		label: "Integrations",
+		icon: Link01Icon,
+		group: "catalog",
+	},
 	// Browse — the per-realm catalogs (Core catalogs + inline paid Marketplace
 	// items). Apps = plugins that ship a Companion UI surface; Plugins = the
 	// rest (tools/agents/channels/policies + integration descriptors).
-	{ value: "apps", label: "Apps", icon: GridIcon, group: "catalog" },
+	{ value: "apps", label: "Apps", icon: REALM_ICONS.apps, group: "catalog" },
 	{
 		value: "plugins",
 		label: "Plugins",
-		icon: PlugSocketIcon,
+		icon: REALM_ICONS.plugins,
 		group: "catalog",
 	},
-	{ value: "models", label: "Models", icon: Package01Icon, group: "catalog" },
-	{ value: "skills", label: "Skills", icon: PuzzleIcon, group: "catalog" },
+	{
+		value: "models",
+		label: "Models",
+		icon: REALM_ICONS.models,
+		group: "catalog",
+	},
+	{
+		value: "skills",
+		label: "Skills",
+		icon: REALM_ICONS.skills,
+		group: "catalog",
+	},
 	// MCP servers from the official registry (and registries behind the seam).
-	{ value: "mcp", label: "MCP", icon: ServerStack01Icon, group: "catalog" },
-	{ value: "agents", label: "Agents", icon: Robot01Icon, group: "catalog" },
+	{ value: "mcp", label: "MCP", icon: REALM_ICONS.mcp, group: "catalog" },
+	{
+		value: "agents",
+		label: "Agents",
+		icon: REALM_ICONS.agents,
+		group: "catalog",
+	},
 	// Workflow Templates: ready-made agent-pattern workflows (evaluator-optimizer,
 	// routing, orchestrator-workers, the autoresearch git-ledger loop, …).
 	{
 		value: "workflows",
 		label: "Workflows",
-		icon: WorkflowSquare01Icon,
+		icon: REALM_ICONS.workflows,
 		group: "catalog",
 	},
 	// Engines = all local inference runtimes, grouped inside by modality
@@ -108,6 +132,100 @@ const SECTIONS: {
 function isStoreSection(value: string): value is StoreSection {
 	return SECTIONS.some((s) => s.value === value);
 }
+
+/** Per-section two-line header (title + one-line description), shown above the
+ *  active section's content pane. The typography mirrors the onboarding card
+ *  headers (`onboarding.tsx` FeatureStep): a foreground `font-semibold text-lg`
+ *  title over a muted `text-sm` subtext, so the whole app reads as one system. */
+const SECTION_HEADERS: Record<
+	StoreSection,
+	{ title: string; subtitle: string }
+> = {
+	home: {
+		title: "Home",
+		subtitle: "Featured picks and fresh arrivals from across the marketplace.",
+	},
+	integrations: {
+		title: "Integrations",
+		subtitle:
+			"Find the service you use, then everything that connects to it in one place.",
+	},
+	apps: {
+		title: "Apps",
+		subtitle: "Plugins that ship a companion interface you open inside Ryu.",
+	},
+	plugins: {
+		title: "Plugins",
+		subtitle: "Tools, agents, channels, and integrations that extend Ryu.",
+	},
+	models: {
+		title: "Models",
+		subtitle: "Download and manage local models to run inference on-device.",
+	},
+	skills: {
+		title: "Skills",
+		subtitle: "Reusable instructions your agents load on demand for a task.",
+	},
+	mcp: {
+		title: "MCP",
+		subtitle:
+			"Connect Model Context Protocol servers to give agents new tools.",
+	},
+	agents: {
+		title: "Agents",
+		subtitle: "Prebuilt agents you can install and start using in one click.",
+	},
+	workflows: {
+		title: "Workflows",
+		subtitle: "Ready-made automation templates built on proven agent patterns.",
+	},
+	engines: {
+		title: "Engines",
+		subtitle:
+			"Local inference runtimes for text, image, speech, and embeddings.",
+	},
+	tools: {
+		title: "Tools",
+		subtitle: "Manage and invoke the MCP tools registered on this node.",
+	},
+	installed: {
+		title: "Installed",
+		subtitle: "Everything installed on the active node, gathered in one place.",
+	},
+	account: {
+		title: "Account",
+		subtitle: "Licenses, connections, and the marketplace money layer.",
+	},
+};
+
+function StoreSectionHeader({ section }: { section: StoreSection }) {
+	const header = SECTION_HEADERS[section];
+	return (
+		<div className="shrink-0 px-4 pt-4 pb-3">
+			<p className="font-semibold text-lg">{header.title}</p>
+		</div>
+	);
+}
+
+/** Sections that render inside {@link StoreCatalogLayout} — a centered, max-width
+ *  card grid with a preview aside. For these the header lives INSIDE the layout
+ *  column (via {@link StoreCatalogHeaderProvider}) so title, search and cards
+ *  stay aligned even when the aside opens; the rest keep a full-width header. */
+const CATALOG_SECTIONS = new Set<StoreSection>([
+	"integrations",
+	"apps",
+	"plugins",
+	"skills",
+	"mcp",
+	"agents",
+	"workflows",
+	// Manage sections converted to the same App Store card/preview shape — their
+	// header lives inside the centered layout column too, so it must NOT also get
+	// the outer full-width StoreSectionHeader (that would render the title twice).
+	"engines",
+	"tools",
+	"installed",
+]);
 
 /**
  * Unified Store shell, App Store-shaped: a full-width content pane above a
@@ -187,11 +305,27 @@ export default function StorePage({
 									onOpenRealm={(realm) => openRealm(realm, searchQuery)}
 								/>
 							) : (
-								<StoreContent
-									initialQuery={sectionInitialQuery}
-									onOpenRealm={openRealm}
-									section={section}
-								/>
+								<div className="flex h-full flex-col">
+									{/* Catalog sections render their header INSIDE the centered
+									    layout column (via the provider); Home renders its own
+									    centered header. Only full-width master-detail sections
+									    (Models, Tools, …) get the inline full-width header here. */}
+									{CATALOG_SECTIONS.has(section) ||
+									section === "home" ? null : (
+										<StoreSectionHeader section={section} />
+									)}
+									<div className="min-h-0 flex-1 overflow-hidden">
+										<StoreCatalogHeaderProvider
+											header={<StoreSectionHeader section={section} />}
+										>
+											<StoreContent
+												initialQuery={sectionInitialQuery}
+												onOpenRealm={openRealm}
+												section={section}
+											/>
+										</StoreCatalogHeaderProvider>
+									</div>
+								</div>
 							)}
 						</div>
 						{/* Floating bottom toolbar — same pattern as the Library page
@@ -230,6 +364,14 @@ function StoreContent({
 	if (section === "home") {
 		return <StoreHome onOpenRealm={onOpenRealm} />;
 	}
+	if (section === "integrations") {
+		return (
+			<IntegrationsCatalogSection
+				initialQuery={initialQuery}
+				onOpenRealm={onOpenRealm}
+			/>
+		);
+	}
 	if (section === "apps") {
 		return <AppsCatalogSection initialQuery={initialQuery} variant="apps" />;
 	}
@@ -255,25 +397,13 @@ function StoreContent({
 		return <EnginesCatalogSection />;
 	}
 	if (section === "tools") {
-		return (
-			<StoreAsideLayout>
-				<ToolsPage />
-			</StoreAsideLayout>
-		);
+		return <ToolsPage />;
 	}
 	if (section === "installed") {
-		return (
-			<StoreAsideLayout>
-				<InstalledSection />
-			</StoreAsideLayout>
-		);
+		return <InstalledSection />;
 	}
 	if (section === "account") {
-		return (
-			<StoreAsideLayout>
-				<AccountSection />
-			</StoreAsideLayout>
-		);
+		return <AccountSection />;
 	}
 	const meta = SECTIONS.find((s) => s.value === section);
 	return (

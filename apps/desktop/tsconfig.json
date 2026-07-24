@@ -17,7 +17,9 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@ryu/ui/*": ["../../packages/ui/src/*"],
+      "@ryu/blocks/*": ["../../packages/blocks/src/*"]
     }
   },
   "include": ["src", "components", "contexts", "lib", "store"]

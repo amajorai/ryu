@@ -227,4 +227,84 @@ mod tests {
     fn rejects_out_of_range() {
         assert!(CronSchedule::parse("99 * * * *").is_err());
     }
+
+    // ── extra coverage ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_field_rejects_malformed_inputs() {
+        // Step of zero.
+        assert!(CronSchedule::parse("*/0 * * * *").is_err());
+        // Non-numeric step.
+        assert!(CronSchedule::parse("*/x * * * *").is_err());
+        // Range with a non-numeric bound.
+        assert!(CronSchedule::parse("a-5 * * * *").is_err());
+        assert!(CronSchedule::parse("5-b * * * *").is_err());
+        // Inverted range (start > end).
+        assert!(CronSchedule::parse("30-10 * * * *").is_err());
+        // Value out of the field's own range (day-of-month max is 31).
+        assert!(CronSchedule::parse("* * 32 * *").is_err());
+        // Month field 0 is below the [1-12] minimum.
+        assert!(CronSchedule::parse("* * * 0 *").is_err());
+        // A plain non-numeric value.
+        assert!(CronSchedule::parse("foo * * * *").is_err());
+    }
+
+    #[test]
+    fn list_and_stepped_range_expand_and_dedup() {
+        // A comma list plus a stepped range; both hours match, minute on the list.
+        let s = CronSchedule::parse("0,30 10-14/2 * * *").unwrap();
+        assert!(s.matches(at(2026, 6, 3, 10, 0)));
+        assert!(s.matches(at(2026, 6, 3, 12, 30)));
+        assert!(s.matches(at(2026, 6, 3, 14, 0)));
+        // 11 is not on the /2 step from 10.
+        assert!(!s.matches(at(2026, 6, 3, 11, 0)));
+        // 15 was beyond the 10-14 range.
+        assert!(!s.matches(at(2026, 6, 3, 15, 0)));
+    }
+
+    #[test]
+    fn dom_and_dow_both_restricted_matches_either() {
+        // Friday the 13th convention: DOM=13 OR DOW=Fri(5) fires.
+        let s = CronSchedule::parse("0 0 13 * 5").unwrap();
+        // 2026-06-13 is a Saturday — matches on day-of-month.
+        assert!(s.matches(at(2026, 6, 13, 0, 0)));
+        // 2026-06-05 is a Friday — matches on day-of-week.
+        assert!(s.matches(at(2026, 6, 5, 0, 0)));
+        // 2026-06-06 is a Saturday, not the 13th — no match.
+        assert!(!s.matches(at(2026, 6, 6, 0, 0)));
+    }
+
+    #[test]
+    fn dom_restricted_dow_wild_requires_dom_only() {
+        // When only day-of-month is restricted, it must match (AND with the wild dow).
+        let s = CronSchedule::parse("0 0 15 * *").unwrap();
+        assert!(s.matches(at(2026, 6, 15, 0, 0)));
+        assert!(!s.matches(at(2026, 6, 16, 0, 0)));
+    }
+
+    #[test]
+    fn next_after_returns_none_for_impossible_date() {
+        // February never has a 30th, so this never fires within the one-year scan.
+        let s = CronSchedule::parse("0 0 30 2 *").unwrap();
+        assert!(s.next_after(at(2026, 1, 1, 0, 0)).is_none());
+    }
+
+    #[test]
+    fn next_after_skips_to_matching_weekday() {
+        // Every Monday at 09:00. From a Wednesday, the next match is the following Monday.
+        let s = CronSchedule::parse("0 9 * * 1").unwrap();
+        // 2026-06-03 is a Wednesday.
+        let next = s.next_after(at(2026, 6, 3, 12, 0)).unwrap();
+        // 2026-06-08 is the next Monday.
+        assert_eq!(next, at(2026, 6, 8, 9, 0));
+        assert_eq!(next.weekday().num_days_from_sunday(), 1);
+    }
+
+    #[test]
+    fn seven_and_zero_both_mean_sunday_deduped() {
+        // "0,7" collapses to a single Sunday entry (dedup), still matching Sunday.
+        let s = CronSchedule::parse("0 0 * * 0,7").unwrap();
+        assert!(s.matches(at(2026, 6, 7, 0, 0))); // Sunday
+        assert!(!s.matches(at(2026, 6, 8, 0, 0))); // Monday
+    }
 }

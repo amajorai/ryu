@@ -415,7 +415,7 @@ function MotionNavigationMenuList({
 	return (
 		<Highlight
 			className={cn(
-				"pointer-events-none rounded-md bg-accent",
+				"pointer-events-none rounded-full bg-accent",
 				highlightClassName
 			)}
 			containerClassName="relative"
@@ -458,7 +458,7 @@ function MotionNavigationMenuItem({
 }
 
 const motionNavigationMenuTriggerStyle = cva(
-	"group inline-flex h-9 w-max items-center justify-center rounded-md bg-transparent px-4 py-2 font-medium text-sm outline-none transition-colors hover:text-accent-foreground focus:text-accent-foreground focus-visible:outline-1 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:text-accent-foreground"
+	"group inline-flex h-9 w-max items-center justify-center rounded-full bg-transparent px-3 py-2 font-medium text-sm outline-none transition-colors hover:text-accent-foreground focus:text-accent-foreground focus-visible:outline-1 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:text-accent-foreground"
 );
 
 function MotionNavigationMenuTrigger({

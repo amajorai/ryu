@@ -246,3 +246,237 @@ pub async fn record_stop() -> (StatusCode, Json<Value>) {
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{
+        env_lock, host_lock, install_fake_host, recipe_json, set_script, Script, TempStore,
+    };
+    use crate::{RecorderStarted, RecorderStopped};
+
+    // Handlers are called directly and asserted on the `(StatusCode, Json<Value>)`
+    // they return (`.0` = status, `.1 .0` = body value), so no HTTP transport /
+    // tower is needed. Store-backed handlers run under `env_lock` + `TempStore`;
+    // host-backed handlers under `host_lock` + the fake-host script.
+
+    #[test]
+    fn routes_and_openapi_build() {
+        // The router assembles without panicking and the OpenAPI sub-doc lists the
+        // recipe paths.
+        let _router = routes(RecipesCtx::new());
+        let spec = openapi();
+        let paths = spec.paths.paths;
+        assert!(paths.contains_key("/api/recipes"));
+        assert!(paths.contains_key("/api/recipes/{name}"));
+        assert!(paths.contains_key("/api/recipes/{name}/run"));
+        assert!(paths.contains_key("/api/recipes/record/start"));
+    }
+
+    #[tokio::test]
+    async fn list_recipes_returns_saved_rows() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        crate::save(&recipe_json("alpha")).unwrap();
+        let (status, Json(body)) = list_recipes().await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = body["recipes"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["name"], json!("alpha"));
+    }
+
+    #[tokio::test]
+    async fn get_recipe_ok_and_not_found() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        crate::save(&recipe_json("shown")).unwrap();
+
+        let (status, Json(body)) = get_recipe(Path("shown".to_string())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["recipe"]["name"], json!("shown"));
+
+        let (status, Json(body)) = get_recipe(Path("absent".to_string())).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body["error"].as_str().unwrap().contains("absent"));
+    }
+
+    #[tokio::test]
+    async fn save_recipe_accepts_object_body() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        let body = SaveRecipeBody {
+            recipe: Some(json!({
+                "schema_version": 2, "name": "objsave", "description": "d", "steps": []
+            })),
+            recipe_json: None,
+        };
+        let (status, Json(out)) = save_recipe(Json(body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["saved"], json!(true));
+        assert_eq!(out["name"], json!("objsave"));
+        assert!(crate::get("objsave").is_ok());
+    }
+
+    #[tokio::test]
+    async fn save_recipe_accepts_stringified_body() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        let body = SaveRecipeBody {
+            recipe: None,
+            recipe_json: Some(recipe_json("strsave")),
+        };
+        let (status, Json(out)) = save_recipe(Json(body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["name"], json!("strsave"));
+    }
+
+    #[tokio::test]
+    async fn save_recipe_rejects_empty_body() {
+        // No env/store needed — the handler short-circuits before touching the store.
+        let body = SaveRecipeBody {
+            recipe: None,
+            recipe_json: None,
+        };
+        let (status, Json(out)) = save_recipe(Json(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(out["error"].as_str().unwrap().contains("provide"));
+    }
+
+    #[tokio::test]
+    async fn save_recipe_rejects_malformed_recipe() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        let body = SaveRecipeBody {
+            recipe: None,
+            recipe_json: Some("{\"name\":\"broken\"}".to_string()),
+        };
+        let (status, Json(out)) = save_recipe(Json(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(out["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn delete_recipe_ok_and_not_found() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        crate::save(&recipe_json("temp")).unwrap();
+
+        let (status, Json(out)) = delete_recipe(Path("temp".to_string())).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["deleted"], json!(true));
+
+        let (status, Json(out)) = delete_recipe(Path("temp".to_string())).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(out["error"].is_string());
+    }
+
+    #[tokio::test]
+    async fn run_recipe_ok_and_default_params() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            run_ok: Some(json!({ "content": [{ "type": "text", "text": "{\"done\":1}" }] })),
+            ..Default::default()
+        });
+        // With an explicit body.
+        let body = RunRecipeBody { params: json!({ "n": 1 }) };
+        let (status, Json(out)) = run_recipe(Path("r".to_string()), Some(Json(body))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["result"], json!({ "done": 1 }));
+
+        // With no body (params default to null) — still reaches the host.
+        let (status, Json(out)) = run_recipe(Path("r".to_string()), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["result"], json!({ "done": 1 }));
+    }
+
+    #[tokio::test]
+    async fn run_recipe_maps_host_error_to_500() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            run_err: Some("ghost down".to_string()),
+            ..Default::default()
+        });
+        let (status, Json(out)) = run_recipe(Path("r".to_string()), None).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(out["error"].as_str().unwrap().contains("ghost down"));
+    }
+
+    #[tokio::test]
+    async fn record_start_handler_ok_and_conflict() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            start_ok: Some(RecorderStarted {
+                started_at: "t0".to_string(),
+                info: json!({}),
+            }),
+            ..Default::default()
+        });
+        let body = RecordStartBody { task: "do it".to_string() };
+        let (status, Json(out)) = record_start(Some(Json(body))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["task"], json!("do it"));
+
+        // A host error (e.g. already-recording) maps to 409 CONFLICT.
+        set_script(Script {
+            start_err: Some("already recording".to_string()),
+            ..Default::default()
+        });
+        let (status, Json(out)) = record_start(None).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(out["error"].as_str().unwrap().contains("already recording"));
+    }
+
+    #[tokio::test]
+    async fn record_status_handler_ok() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            status_ok: Some(None),
+            ..Default::default()
+        });
+        let (status, Json(out)) = record_status().await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(out["recording"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn record_status_handler_maps_error_to_500() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            status_err: Some("poll failed".to_string()),
+            ..Default::default()
+        });
+        let (status, Json(out)) = record_status().await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(out["error"].as_str().unwrap().contains("poll failed"));
+    }
+
+    #[tokio::test]
+    async fn record_stop_handler_ok_and_bad_request() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            stop_ok: Some(RecorderStopped {
+                task: "t".to_string(),
+                started_at: "t0".to_string(),
+                payload: json!({ "recording": false, "events": [] }),
+            }),
+            ..Default::default()
+        });
+        let (status, Json(out)) = record_stop().await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(out["draft"].is_object());
+
+        set_script(Script {
+            stop_err: Some("no session".to_string()),
+            ..Default::default()
+        });
+        let (status, Json(out)) = record_stop().await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(out["error"].as_str().unwrap().contains("no session"));
+    }
+}

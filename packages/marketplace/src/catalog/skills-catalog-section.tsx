@@ -3,10 +3,10 @@ import {
 	CheckmarkCircle02Icon,
 	Download01Icon,
 	PencilEdit01Icon,
-	PuzzleIcon,
 	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { REALM_ICONS } from "./realm-icons.ts";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
@@ -89,8 +89,10 @@ const SORT_OPTIONS: { value: SkillSort; label: string }[] = [
 	{ value: "name", label: "Name (A–Z)" },
 ];
 
-/** Format a large count as a friendly short string (1234567 → "1.2M"). */
-function formatCount(n: number): string {
+/** Format a large count as a friendly short string (1234567 → "1.2M").
+ *  Exported for unit tests (the detail/metadata/file helpers below run only
+ *  inside the Dialog-portaled preview, which `renderToStaticMarkup` cannot emit). */
+export function formatCount(n: number): string {
 	if (n >= 1_000_000) {
 		return `${(n / 1_000_000).toFixed(1)}M`;
 	}
@@ -107,7 +109,7 @@ function formatCount(n: number): string {
  * known installed key, so the caller can hide the toggle instead of targeting a
  * non-existent id.
  */
-function resolveSkillKey(
+export function resolveSkillKey(
 	enabledByKey: Record<string, boolean>,
 	card: SkillCard
 ): string | null {
@@ -120,7 +122,7 @@ function resolveSkillKey(
 	return null;
 }
 
-function formatDateLabel(value: string | null): string | null {
+export function formatDateLabel(value: string | null): string | null {
 	if (!value) {
 		return null;
 	}
@@ -135,7 +137,7 @@ function formatDateLabel(value: string | null): string | null {
 	});
 }
 
-function isMarkdownFile(path: string): boolean {
+export function isMarkdownFile(path: string): boolean {
 	const lower = path.toLowerCase();
 	return lower.endsWith(".md") || lower.endsWith(".mdx");
 }
@@ -647,9 +649,10 @@ function SkillList({
 								? `${s.source} · ${formatCount(s.installs)} installs`
 								: s.source
 						}
-						icon={<HugeiconsIcon className="size-5" icon={PuzzleIcon} />}
+						icon={<HugeiconsIcon className="size-5" icon={REALM_ICONS.skills} />}
 						key={s.id}
 						name={s.name}
+						seedId={s.id}
 						onClick={() => onSelect(s.id)}
 						selected={s.id === selectedId}
 					/>

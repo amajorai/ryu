@@ -18,5 +18,18 @@
       }
     }
   ],
+  "sidecars": [
+    {
+      "name": "headroom",
+      "process": {
+        "kind": "local",
+        "command": "headroom",
+        "command_env": "RYU_HEADROOM_BIN",
+        "args": ["proxy", "--host", "127.0.0.1", "--port", "8787"]
+      },
+      "port": 8787,
+      "health_path": "/health"
+    }
+  ],
   "permission_grants": []
 }

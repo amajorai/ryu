@@ -8,12 +8,32 @@ use tokio::sync::mpsc::UnboundedReceiver;
 /// Raw input event.
 #[derive(Debug, Clone)]
 pub enum InputEvent {
-    KeyDown   { vk_code: u32 },
-    KeyUp     { vk_code: u32 },
-    MouseDown { x: i32, y: i32, button: u8 },
-    MouseUp   { x: i32, y: i32, button: u8 },
-    MouseMove { x: i32, y: i32 },
-    Scroll    { x: i32, y: i32, delta_x: i32, delta_y: i32 },
+    KeyDown {
+        vk_code: u32,
+    },
+    KeyUp {
+        vk_code: u32,
+    },
+    MouseDown {
+        x: i32,
+        y: i32,
+        button: u8,
+    },
+    MouseUp {
+        x: i32,
+        y: i32,
+        button: u8,
+    },
+    MouseMove {
+        x: i32,
+        y: i32,
+    },
+    Scroll {
+        x: i32,
+        y: i32,
+        delta_x: i32,
+        delta_y: i32,
+    },
 }
 
 /// Input monitor trait — start/stop global hooks.
@@ -30,10 +50,11 @@ pub trait InputMonitor: Send + Sync {
 mod windows_impl {
     use super::*;
     use std::sync::{Mutex, OnceLock};
-    use windows::Win32::Foundation::{LRESULT, WPARAM, LPARAM};
+    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::*;
 
-    static INPUT_TX: OnceLock<Mutex<tokio::sync::mpsc::UnboundedSender<InputEvent>>> = OnceLock::new();
+    static INPUT_TX: OnceLock<Mutex<tokio::sync::mpsc::UnboundedSender<InputEvent>>> =
+        OnceLock::new();
 
     unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code >= 0 {
@@ -43,7 +64,11 @@ mod windows_impl {
             } else {
                 InputEvent::KeyUp { vk_code: kb.vkCode }
             };
-            if let Some(tx) = INPUT_TX.get() { if let Ok(tx) = tx.lock() { let _ = tx.send(event); } }
+            if let Some(tx) = INPUT_TX.get() {
+                if let Ok(tx) = tx.lock() {
+                    let _ = tx.send(event);
+                }
+            }
         }
         unsafe { CallNextHookEx(None, code, wparam, lparam) }
     }
@@ -51,41 +76,68 @@ mod windows_impl {
     unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code >= 0 {
             let ms = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-            let x = ms.pt.x; let y = ms.pt.y;
+            let x = ms.pt.x;
+            let y = ms.pt.y;
             let event = match wparam.0 as u32 {
                 WM_LBUTTONDOWN => Some(InputEvent::MouseDown { x, y, button: 0 }),
                 WM_RBUTTONDOWN => Some(InputEvent::MouseDown { x, y, button: 1 }),
                 WM_MBUTTONDOWN => Some(InputEvent::MouseDown { x, y, button: 2 }),
-                WM_LBUTTONUP   => Some(InputEvent::MouseUp   { x, y, button: 0 }),
-                WM_RBUTTONUP   => Some(InputEvent::MouseUp   { x, y, button: 1 }),
-                WM_MBUTTONUP   => Some(InputEvent::MouseUp   { x, y, button: 2 }),
+                WM_LBUTTONUP => Some(InputEvent::MouseUp { x, y, button: 0 }),
+                WM_RBUTTONUP => Some(InputEvent::MouseUp { x, y, button: 1 }),
+                WM_MBUTTONUP => Some(InputEvent::MouseUp { x, y, button: 2 }),
                 WM_MOUSEMOVE => {
-                    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    static LAST: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
                     let packed = ((x as u32 as u64) << 32) | (y as u32 as u64);
                     let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
-                    let lx = (last >> 32) as i32; let ly = (last & 0xFFFF_FFFF) as i32;
-                    if ((x - lx).pow(2) + (y - ly).pow(2)) < 2500 { None } else {
+                    let lx = (last >> 32) as i32;
+                    let ly = (last & 0xFFFF_FFFF) as i32;
+                    if ((x - lx).pow(2) + (y - ly).pow(2)) < 2500 {
+                        None
+                    } else {
                         LAST.store(packed, std::sync::atomic::Ordering::Relaxed);
                         Some(InputEvent::MouseMove { x, y })
                     }
                 }
                 WM_MOUSEWHEEL => {
                     let delta = ((ms.mouseData >> 16) as i16) as i32;
-                    Some(InputEvent::Scroll { x, y, delta_x: 0, delta_y: delta })
+                    Some(InputEvent::Scroll {
+                        x,
+                        y,
+                        delta_x: 0,
+                        delta_y: delta,
+                    })
                 }
                 WM_MOUSEHWHEEL => {
                     let delta = ((ms.mouseData >> 16) as i16) as i32;
-                    Some(InputEvent::Scroll { x, y, delta_x: delta, delta_y: 0 })
+                    Some(InputEvent::Scroll {
+                        x,
+                        y,
+                        delta_x: delta,
+                        delta_y: 0,
+                    })
                 }
                 _ => None,
             };
-            if let Some(ev) = event { if let Some(tx) = INPUT_TX.get() { if let Ok(tx) = tx.lock() { let _ = tx.send(ev); } } }
+            if let Some(ev) = event {
+                if let Some(tx) = INPUT_TX.get() {
+                    if let Ok(tx) = tx.lock() {
+                        let _ = tx.send(ev);
+                    }
+                }
+            }
         }
         unsafe { CallNextHookEx(None, code, wparam, lparam) }
     }
 
-    pub struct WindowsInputMonitor { stop_tx: Option<tokio::sync::oneshot::Sender<()>> }
-    impl WindowsInputMonitor { pub fn new() -> Result<Self> { Ok(Self { stop_tx: None }) } }
+    pub struct WindowsInputMonitor {
+        stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    }
+    impl WindowsInputMonitor {
+        pub fn new() -> Result<Self> {
+            Ok(Self { stop_tx: None })
+        }
+    }
 
     #[async_trait]
     impl InputMonitor for WindowsInputMonitor {
@@ -94,12 +146,16 @@ mod windows_impl {
             let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
             INPUT_TX.get_or_init(|| Mutex::new(event_tx));
             std::thread::spawn(|| unsafe {
-                let kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0).expect("keyboard hook");
-                let mouse_hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0).expect("mouse hook");
+                let kb_hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), None, 0)
+                    .expect("keyboard hook");
+                let mouse_hook =
+                    SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0).expect("mouse hook");
                 let mut msg = MSG::default();
                 loop {
                     let ret = GetMessageW(&mut msg, None, 0, 0);
-                    if ret.0 == 0 || ret.0 == -1 { break; }
+                    if ret.0 == 0 || ret.0 == -1 {
+                        break;
+                    }
                     let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
@@ -111,7 +167,9 @@ mod windows_impl {
         }
 
         async fn stop(&mut self) -> Result<()> {
-            if let Some(tx) = self.stop_tx.take() { let _ = tx.send(()); }
+            if let Some(tx) = self.stop_tx.take() {
+                let _ = tx.send(());
+            }
             Ok(())
         }
     }
@@ -128,24 +186,53 @@ mod macos_impl {
     use std::ffi::c_void;
     use std::sync::{Mutex, OnceLock};
 
-    static INPUT_TX: OnceLock<Mutex<tokio::sync::mpsc::UnboundedSender<InputEvent>>> = OnceLock::new();
+    static INPUT_TX: OnceLock<Mutex<tokio::sync::mpsc::UnboundedSender<InputEvent>>> =
+        OnceLock::new();
 
-    const KCG_EVENT_LEFT_MOUSE_DOWN:  u32 = 1;  const KCG_EVENT_LEFT_MOUSE_UP:    u32 = 2;
-    const KCG_EVENT_RIGHT_MOUSE_DOWN: u32 = 3;  const KCG_EVENT_RIGHT_MOUSE_UP:   u32 = 4;
-    const KCG_EVENT_MOUSE_MOVED:      u32 = 5;  const KCG_EVENT_OTHER_MOUSE_DOWN: u32 = 25;
-    const KCG_EVENT_OTHER_MOUSE_UP:   u32 = 26; const KCG_EVENT_KEY_DOWN:         u32 = 10;
-    const KCG_EVENT_KEY_UP:           u32 = 11; const KCG_EVENT_SCROLL_WHEEL:     u32 = 22;
-    const KCG_KEYBOARD_EVENT_KEYCODE: u32 = 9;  const KCG_MOUSE_EVENT_BUTTON:     u32 = 71;
-    const KCG_SCROLL_DELTA_AXIS_1:    u32 = 96; const KCG_SCROLL_DELTA_AXIS_2:    u32 = 97;
-    const KCG_SESSION_EVENT_TAP:      u32 = 1;  const KCG_HEAD_INSERT:            u32 = 0;
-    const KCG_LISTEN_ONLY:            u32 = 1;
+    const KCG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
+    const KCG_EVENT_LEFT_MOUSE_UP: u32 = 2;
+    const KCG_EVENT_RIGHT_MOUSE_DOWN: u32 = 3;
+    const KCG_EVENT_RIGHT_MOUSE_UP: u32 = 4;
+    const KCG_EVENT_MOUSE_MOVED: u32 = 5;
+    const KCG_EVENT_OTHER_MOUSE_DOWN: u32 = 25;
+    const KCG_EVENT_OTHER_MOUSE_UP: u32 = 26;
+    const KCG_EVENT_KEY_DOWN: u32 = 10;
+    const KCG_EVENT_KEY_UP: u32 = 11;
+    const KCG_EVENT_SCROLL_WHEEL: u32 = 22;
+    const KCG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
+    const KCG_MOUSE_EVENT_BUTTON: u32 = 71;
+    const KCG_SCROLL_DELTA_AXIS_1: u32 = 96;
+    const KCG_SCROLL_DELTA_AXIS_2: u32 = 97;
+    const KCG_SESSION_EVENT_TAP: u32 = 1;
+    const KCG_HEAD_INSERT: u32 = 0;
+    const KCG_LISTEN_ONLY: u32 = 1;
 
-    #[repr(C)] struct CGPoint { x: f64, y: f64 }
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
     extern "C" {
         fn CGEventGetLocation(event: *const c_void) -> CGPoint;
         fn CGEventGetIntegerValueField(event: *const c_void, field: u32) -> i64;
-        fn CGEventTapCreate(tap: u32, place: u32, options: u32, mask: u64, callback: extern "C" fn(*const c_void, u32, *const c_void, *const c_void) -> *const c_void, info: *const c_void) -> *const c_void;
-        fn CFMachPortCreateRunLoopSource(alloc: *const c_void, port: *const c_void, order: isize) -> *const c_void;
+        fn CGEventTapCreate(
+            tap: u32,
+            place: u32,
+            options: u32,
+            mask: u64,
+            callback: extern "C" fn(
+                *const c_void,
+                u32,
+                *const c_void,
+                *const c_void,
+            ) -> *const c_void,
+            info: *const c_void,
+        ) -> *const c_void;
+        fn CFMachPortCreateRunLoopSource(
+            alloc: *const c_void,
+            port: *const c_void,
+            order: isize,
+        ) -> *const c_void;
         fn CFRunLoopGetCurrent() -> *const c_void;
         fn CFRunLoopAddSource(rl: *const c_void, source: *const c_void, mode: *const c_void);
         fn CFRunLoopRun();
@@ -153,39 +240,86 @@ mod macos_impl {
         static kCFRunLoopCommonModes: *const c_void;
     }
 
-    extern "C" fn tap_cb(_proxy: *const c_void, etype: u32, event: *const c_void, _info: *const c_void) -> *const c_void {
+    extern "C" fn tap_cb(
+        _proxy: *const c_void,
+        etype: u32,
+        event: *const c_void,
+        _info: *const c_void,
+    ) -> *const c_void {
         unsafe {
             let pt = CGEventGetLocation(event);
-            let x = pt.x as i32; let y = pt.y as i32;
+            let x = pt.x as i32;
+            let y = pt.y as i32;
             let ev = match etype {
-                t if t == KCG_EVENT_KEY_DOWN => { let kc = CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u32; Some(InputEvent::KeyDown { vk_code: kc }) }
-                t if t == KCG_EVENT_KEY_UP   => { let kc = CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u32; Some(InputEvent::KeyUp { vk_code: kc }) }
-                t if t == KCG_EVENT_LEFT_MOUSE_DOWN  => Some(InputEvent::MouseDown { x, y, button: 0 }),
-                t if t == KCG_EVENT_LEFT_MOUSE_UP    => Some(InputEvent::MouseUp   { x, y, button: 0 }),
-                t if t == KCG_EVENT_RIGHT_MOUSE_DOWN => Some(InputEvent::MouseDown { x, y, button: 1 }),
-                t if t == KCG_EVENT_RIGHT_MOUSE_UP   => Some(InputEvent::MouseUp   { x, y, button: 1 }),
-                t if t == KCG_EVENT_OTHER_MOUSE_DOWN => { let btn = CGEventGetIntegerValueField(event, KCG_MOUSE_EVENT_BUTTON) as u8; Some(InputEvent::MouseDown { x, y, button: btn }) }
-                t if t == KCG_EVENT_OTHER_MOUSE_UP   => { let btn = CGEventGetIntegerValueField(event, KCG_MOUSE_EVENT_BUTTON) as u8; Some(InputEvent::MouseUp { x, y, button: btn }) }
+                t if t == KCG_EVENT_KEY_DOWN => {
+                    let kc = CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u32;
+                    Some(InputEvent::KeyDown { vk_code: kc })
+                }
+                t if t == KCG_EVENT_KEY_UP => {
+                    let kc = CGEventGetIntegerValueField(event, KCG_KEYBOARD_EVENT_KEYCODE) as u32;
+                    Some(InputEvent::KeyUp { vk_code: kc })
+                }
+                t if t == KCG_EVENT_LEFT_MOUSE_DOWN => {
+                    Some(InputEvent::MouseDown { x, y, button: 0 })
+                }
+                t if t == KCG_EVENT_LEFT_MOUSE_UP => Some(InputEvent::MouseUp { x, y, button: 0 }),
+                t if t == KCG_EVENT_RIGHT_MOUSE_DOWN => {
+                    Some(InputEvent::MouseDown { x, y, button: 1 })
+                }
+                t if t == KCG_EVENT_RIGHT_MOUSE_UP => Some(InputEvent::MouseUp { x, y, button: 1 }),
+                t if t == KCG_EVENT_OTHER_MOUSE_DOWN => {
+                    let btn = CGEventGetIntegerValueField(event, KCG_MOUSE_EVENT_BUTTON) as u8;
+                    Some(InputEvent::MouseDown { x, y, button: btn })
+                }
+                t if t == KCG_EVENT_OTHER_MOUSE_UP => {
+                    let btn = CGEventGetIntegerValueField(event, KCG_MOUSE_EVENT_BUTTON) as u8;
+                    Some(InputEvent::MouseUp { x, y, button: btn })
+                }
                 t if t == KCG_EVENT_MOUSE_MOVED => {
-                    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    static LAST: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
                     let packed = ((x as u32 as u64) << 32) | (y as u32 as u64);
                     let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
-                    if ((x - (last >> 32) as i32).pow(2) + (y - (last & 0xFFFF_FFFF) as i32).pow(2)) < 2500 { None } else { LAST.store(packed, std::sync::atomic::Ordering::Relaxed); Some(InputEvent::MouseMove { x, y }) }
+                    if ((x - (last >> 32) as i32).pow(2) + (y - (last & 0xFFFF_FFFF) as i32).pow(2))
+                        < 2500
+                    {
+                        None
+                    } else {
+                        LAST.store(packed, std::sync::atomic::Ordering::Relaxed);
+                        Some(InputEvent::MouseMove { x, y })
+                    }
                 }
                 t if t == KCG_EVENT_SCROLL_WHEEL => {
                     let dy = CGEventGetIntegerValueField(event, KCG_SCROLL_DELTA_AXIS_1) as i32;
                     let dx = CGEventGetIntegerValueField(event, KCG_SCROLL_DELTA_AXIS_2) as i32;
-                    Some(InputEvent::Scroll { x, y, delta_x: dx, delta_y: dy })
+                    Some(InputEvent::Scroll {
+                        x,
+                        y,
+                        delta_x: dx,
+                        delta_y: dy,
+                    })
                 }
                 _ => None,
             };
-            if let Some(e) = ev { if let Some(tx) = INPUT_TX.get() { if let Ok(g) = tx.lock() { let _ = g.send(e); } } }
+            if let Some(e) = ev {
+                if let Some(tx) = INPUT_TX.get() {
+                    if let Ok(g) = tx.lock() {
+                        let _ = g.send(e);
+                    }
+                }
+            }
         }
         event
     }
 
-    pub struct MacOSInputMonitor { stop_tx: Option<tokio::sync::oneshot::Sender<()>> }
-    impl MacOSInputMonitor { pub fn new() -> Result<Self> { Ok(Self { stop_tx: None }) } }
+    pub struct MacOSInputMonitor {
+        stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    }
+    impl MacOSInputMonitor {
+        pub fn new() -> Result<Self> {
+            Ok(Self { stop_tx: None })
+        }
+    }
 
     #[async_trait]
     impl InputMonitor for MacOSInputMonitor {
@@ -194,9 +328,28 @@ mod macos_impl {
             let (stop_tx, _stop_rx) = tokio::sync::oneshot::channel::<()>();
             INPUT_TX.get_or_init(|| Mutex::new(event_tx));
             std::thread::spawn(|| unsafe {
-                let mask: u64 = (1u64 << KCG_EVENT_KEY_DOWN) | (1 << KCG_EVENT_KEY_UP) | (1 << KCG_EVENT_LEFT_MOUSE_DOWN) | (1 << KCG_EVENT_LEFT_MOUSE_UP) | (1 << KCG_EVENT_RIGHT_MOUSE_DOWN) | (1 << KCG_EVENT_RIGHT_MOUSE_UP) | (1 << KCG_EVENT_OTHER_MOUSE_DOWN) | (1 << KCG_EVENT_OTHER_MOUSE_UP) | (1 << KCG_EVENT_MOUSE_MOVED) | (1 << KCG_EVENT_SCROLL_WHEEL);
-                let tap = CGEventTapCreate(KCG_SESSION_EVENT_TAP, KCG_HEAD_INSERT, KCG_LISTEN_ONLY, mask, tap_cb, std::ptr::null());
-                if tap.is_null() { tracing::warn!("CGEventTapCreate failed — grant Accessibility permission"); return; }
+                let mask: u64 = (1u64 << KCG_EVENT_KEY_DOWN)
+                    | (1 << KCG_EVENT_KEY_UP)
+                    | (1 << KCG_EVENT_LEFT_MOUSE_DOWN)
+                    | (1 << KCG_EVENT_LEFT_MOUSE_UP)
+                    | (1 << KCG_EVENT_RIGHT_MOUSE_DOWN)
+                    | (1 << KCG_EVENT_RIGHT_MOUSE_UP)
+                    | (1 << KCG_EVENT_OTHER_MOUSE_DOWN)
+                    | (1 << KCG_EVENT_OTHER_MOUSE_UP)
+                    | (1 << KCG_EVENT_MOUSE_MOVED)
+                    | (1 << KCG_EVENT_SCROLL_WHEEL);
+                let tap = CGEventTapCreate(
+                    KCG_SESSION_EVENT_TAP,
+                    KCG_HEAD_INSERT,
+                    KCG_LISTEN_ONLY,
+                    mask,
+                    tap_cb,
+                    std::ptr::null(),
+                );
+                if tap.is_null() {
+                    tracing::warn!("CGEventTapCreate failed — grant Accessibility permission");
+                    return;
+                }
                 let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
                 CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
                 CGEventTapEnable(tap, true);
@@ -206,7 +359,9 @@ mod macos_impl {
             Ok(event_rx)
         }
         async fn stop(&mut self) -> Result<()> {
-            if let Some(tx) = self.stop_tx.take() { let _ = tx.send(()); }
+            if let Some(tx) = self.stop_tx.take() {
+                let _ = tx.send(());
+            }
             Ok(())
         }
     }
@@ -218,9 +373,15 @@ pub use macos_impl::MacOSInputMonitor;
 // ─── Linux: evdev ─────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-pub struct LinuxInputMonitor { stop_tx: Option<tokio::sync::oneshot::Sender<()>> }
+pub struct LinuxInputMonitor {
+    stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
+}
 #[cfg(target_os = "linux")]
-impl LinuxInputMonitor { pub fn new() -> Result<Self> { Ok(Self { stop_tx: None }) } }
+impl LinuxInputMonitor {
+    pub fn new() -> Result<Self> {
+        Ok(Self { stop_tx: None })
+    }
+}
 
 #[cfg(target_os = "linux")]
 #[async_trait]
@@ -252,7 +413,12 @@ impl InputMonitor for LinuxInputMonitor {
         self.stop_tx = Some(stop_tx);
         Ok(event_rx)
     }
-    async fn stop(&mut self) -> Result<()> { if let Some(tx) = self.stop_tx.take() { let _ = tx.send(()); } Ok(()) }
+    async fn stop(&mut self) -> Result<()> {
+        if let Some(tx) = self.stop_tx.take() {
+            let _ = tx.send(());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -302,8 +468,12 @@ mod linux_impl {
                             }
                         }
                         _ => match ev.value() {
-                            1 => Some(InputEvent::KeyDown { vk_code: key.0 as u32 }),
-                            0 => Some(InputEvent::KeyUp { vk_code: key.0 as u32 }),
+                            1 => Some(InputEvent::KeyDown {
+                                vk_code: key.0 as u32,
+                            }),
+                            0 => Some(InputEvent::KeyUp {
+                                vk_code: key.0 as u32,
+                            }),
                             _ => None, // 2 = autorepeat
                         },
                     },
@@ -348,3 +518,93 @@ pub type PlatformInputMonitor = WindowsInputMonitor;
 pub type PlatformInputMonitor = MacOSInputMonitor;
 #[cfg(target_os = "linux")]
 pub type PlatformInputMonitor = LinuxInputMonitor;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_events_carry_vk_code() {
+        let down = InputEvent::KeyDown { vk_code: 65 };
+        let up = InputEvent::KeyUp { vk_code: 65 };
+        match down {
+            InputEvent::KeyDown { vk_code } => assert_eq!(vk_code, 65),
+            _ => panic!("expected KeyDown"),
+        }
+        match up {
+            InputEvent::KeyUp { vk_code } => assert_eq!(vk_code, 65),
+            _ => panic!("expected KeyUp"),
+        }
+    }
+
+    #[test]
+    fn mouse_events_carry_position_and_button() {
+        let ev = InputEvent::MouseDown {
+            x: -3,
+            y: 42,
+            button: 1,
+        };
+        match ev.clone() {
+            InputEvent::MouseDown { x, y, button } => {
+                assert_eq!((x, y, button), (-3, 42, 1));
+            }
+            _ => panic!("expected MouseDown"),
+        }
+        // Debug is used in tracing/log lines — must render, not panic.
+        assert!(format!("{ev:?}").contains("MouseDown"));
+    }
+
+    #[test]
+    fn scroll_event_holds_both_axes() {
+        let ev = InputEvent::Scroll {
+            x: 5,
+            y: 6,
+            delta_x: -10,
+            delta_y: 20,
+        };
+        if let InputEvent::Scroll {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } = ev
+        {
+            assert_eq!((x, y, delta_x, delta_y), (5, 6, -10, 20));
+        } else {
+            panic!("expected Scroll");
+        }
+    }
+
+    #[test]
+    fn mouse_move_and_up_variants() {
+        let mv = InputEvent::MouseMove { x: 1, y: 2 };
+        let up = InputEvent::MouseUp {
+            x: 1,
+            y: 2,
+            button: 2,
+        };
+        assert!(format!("{mv:?}").contains("MouseMove"));
+        match up {
+            InputEvent::MouseUp { button, .. } => assert_eq!(button, 2),
+            _ => panic!("expected MouseUp"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_input_monitor_start_stop() {
+        // CGEventTapCreate is LISTEN_ONLY and pops no prompt; without an
+        // Accessibility grant it returns NULL and the worker thread exits early.
+        // `start` hands back a receiver regardless; `stop` must be idempotent.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let mut mon = MacOSInputMonitor::new().expect("new");
+            let _rx = mon.start().await.expect("start returns a receiver");
+            mon.stop().await.expect("stop ok");
+            // Second stop is a no-op (stop_tx already taken).
+            mon.stop().await.expect("second stop ok");
+        });
+    }
+}

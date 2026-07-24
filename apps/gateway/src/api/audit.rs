@@ -59,7 +59,13 @@ pub async fn query_audit(
     // it, access is allowed ONLY under the zero-config dev posture (loopback peer,
     // no base auth, no mesh/fleet, no provisioned master key). The shared gate
     // (config/audit/budget-spend) owns this decision so it cannot drift.
-    crate::api::config::require_local_admin(&state, &peer, ctx.is_master_key, "Audit log access")?;
+    crate::api::config::require_local_admin(
+        &state,
+        &peer,
+        ctx.is_master_key,
+        &headers,
+        "Audit log access",
+    )?;
 
     if !state.audit.is_enabled() {
         return Err(GatewayError::Internal(anyhow::anyhow!(
@@ -422,7 +428,324 @@ pub async fn check_exec_budget(
 
 #[cfg(test)]
 mod tests {
-    use super::estimate_cost_micro_usd;
+    use super::{
+        check_exec_budget, estimate_cost_micro_usd, ingest_exec_audit, query_audit,
+        widget_call_allowed, widget_followup_allowed, AuditQueryParams, ExecAuditBody,
+        ExecBudgetCheckBody, WidgetRateLimiter,
+    };
+    use crate::audit::{AuditLogger, AuditRecord};
+    use crate::config::{ApiKeyConfig, AuditConfig, AuthConfig, EvalsConfig, GatewayConfig};
+    use crate::error::GatewayError;
+    use crate::evals::EvalsRunner;
+    use crate::state::{AppState, SharedState};
+    use crate::tools::exec::WidgetEnvelope;
+    use axum::extract::{ConnectInfo, Query, State};
+    use axum::http::HeaderMap;
+    use axum::Json;
+    use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    fn unique_db_path() -> String {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        std::env::temp_dir()
+            .join(format!("ryu-gw-audit-test-{pid}-{n}.db"))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    /// A trusted-forwarder key ("Core"), plus a plain untrusted key.
+    fn trusted_key() -> ApiKeyConfig {
+        ApiKeyConfig {
+            key: "sk-core".to_string(),
+            name: "core".to_string(),
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            requests_per_minute: None,
+            tokens_per_minute: None,
+            token_budget_total: None,
+            downgrade_to: None,
+            trusted_forwarder: true,
+        }
+    }
+
+    fn plain_key() -> ApiKeyConfig {
+        ApiKeyConfig {
+            key: "sk-plain".to_string(),
+            name: "plain".to_string(),
+            trusted_forwarder: false,
+            ..trusted_key()
+        }
+    }
+
+    fn state_with(audit_enabled: bool) -> SharedState {
+        let db_path = if audit_enabled {
+            unique_db_path()
+        } else {
+            String::new()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: audit_enabled,
+            db_path,
+        })
+        .expect("audit logger");
+        let config = GatewayConfig {
+            auth: AuthConfig {
+                require_auth: true,
+                master_key: Some("sk-master".to_string()),
+                api_keys: vec![trusted_key(), plain_key()],
+            },
+            ..GatewayConfig::default()
+        };
+        Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ))
+    }
+
+    fn bearer(key: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert("authorization", format!("Bearer {key}").parse().unwrap());
+        h
+    }
+
+    fn loopback() -> ConnectInfo<SocketAddr> {
+        ConnectInfo("127.0.0.1:1".parse().unwrap())
+    }
+
+    // ── WidgetRateLimiter ─────────────────────────────────────────────────────
+
+    #[test]
+    fn widget_bucket_is_unlimited_at_zero_and_caps_at_max() {
+        let limiter = WidgetRateLimiter::default();
+        // 0 = unlimited: always allowed.
+        assert!(limiter.try_consume("k0".to_string(), 0));
+        assert!(limiter.try_consume("k0".to_string(), 0));
+        // max=2: two allowed, the third denied within the same minute.
+        assert!(limiter.try_consume("k2".to_string(), 2));
+        assert!(limiter.try_consume("k2".to_string(), 2));
+        assert!(!limiter.try_consume("k2".to_string(), 2));
+        // A different key has its own independent budget.
+        assert!(limiter.try_consume("other".to_string(), 2));
+    }
+
+    #[test]
+    fn widget_call_and_followup_allowed_bypass_when_disabled() {
+        let mut cfg = crate::config::WidgetConfig::default();
+        cfg.enabled = false;
+        // Disabled ⇒ always allowed regardless of the (unique) instance.
+        assert!(widget_call_allowed(&cfg, "inst-disabled-call"));
+        assert!(widget_followup_allowed(&cfg, "inst-disabled-followup"));
+
+        // Enabled with a tiny follow-up budget ⇒ the (stricter) bucket exhausts.
+        cfg.enabled = true;
+        cfg.max_followups_per_min = 1;
+        assert!(widget_followup_allowed(&cfg, "inst-strict"));
+        assert!(!widget_followup_allowed(&cfg, "inst-strict"));
+    }
+
+    // ── ingest_exec_audit ─────────────────────────────────────────────────────
+
+    fn exec_body() -> ExecAuditBody {
+        ExecAuditBody {
+            backend: "wasmtime".to_string(),
+            command: "echo hi".to_string(),
+            duration_ms: 42,
+            exit_code: 0,
+            session_id: Some("s1".to_string()),
+            error: None,
+            event_type: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn ingest_exec_rejects_untrusted_keys() {
+        let state = state_with(false);
+        let res = ingest_exec_audit(State(state), bearer("sk-plain"), Json(exec_body())).await;
+        assert!(
+            matches!(res, Err(GatewayError::Unauthorized(_))),
+            "a non-trusted key must not forge exec rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn ingest_exec_records_and_advances_the_budget_counter() {
+        let state = state_with(false);
+        assert_eq!(state.exec_budget.current_count(), 0);
+        let Json(body) = ingest_exec_audit(State(Arc::clone(&state)), bearer("sk-master"), Json(exec_body()))
+            .await
+            .expect("master key may ingest");
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["exec_count"], 1);
+        assert_eq!(state.exec_budget.current_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn ingest_credential_read_does_not_drain_the_exec_budget() {
+        let state = state_with(false);
+        let mut b = exec_body();
+        b.event_type = Some("credential_read".to_string());
+        let Json(body) = ingest_exec_audit(State(Arc::clone(&state)), bearer("sk-core"), Json(b))
+            .await
+            .expect("trusted forwarder may ingest");
+        assert_eq!(body["ok"], true);
+        // A credential read is a distinct event and must NOT count against exec budget.
+        assert_eq!(state.exec_budget.current_count(), 0);
+    }
+
+    // ── check_exec_budget ─────────────────────────────────────────────────────
+
+    fn check_body(widget: Option<WidgetEnvelope>) -> ExecBudgetCheckBody {
+        ExecBudgetCheckBody {
+            backend: "wasmtime".to_string(),
+            command: "echo".to_string(),
+            feature: None,
+            widget,
+        }
+    }
+
+    #[tokio::test]
+    async fn check_exec_budget_allows_under_default_unlimited_budget() {
+        let state = state_with(false);
+        let Json(resp) = check_exec_budget(State(state), bearer("sk-master"), Json(check_body(None)))
+            .await
+            .expect("master key");
+        assert!(resp.allowed);
+        assert!(resp.reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn check_exec_budget_rejects_untrusted_keys() {
+        let state = state_with(false);
+        let res = check_exec_budget(State(state), bearer("sk-plain"), Json(check_body(None))).await;
+        assert!(matches!(res, Err(GatewayError::Unauthorized(_))));
+    }
+
+    #[tokio::test]
+    async fn check_exec_budget_denies_a_widget_over_its_per_instance_rate() {
+        // Drive the widget max_calls_per_min down to 1 so the second call denies.
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .unwrap();
+        let mut config = GatewayConfig {
+            auth: AuthConfig {
+                require_auth: true,
+                master_key: Some("sk-master".to_string()),
+                api_keys: vec![],
+            },
+            ..GatewayConfig::default()
+        };
+        config.widget.enabled = true;
+        config.widget.max_calls_per_min = 1;
+        let state = Arc::new(AppState::new_for_test(
+            config,
+            audit,
+            EvalsRunner::new(EvalsConfig::default()),
+        ));
+
+        let envelope = || {
+            Some(WidgetEnvelope {
+                instance_id: "widget-rate-instance".to_string(),
+                origin_server: "com.acme.app".to_string(),
+            })
+        };
+        // First widget call is allowed.
+        let Json(first) = check_exec_budget(
+            State(Arc::clone(&state)),
+            bearer("sk-master"),
+            Json(check_body(envelope())),
+        )
+        .await
+        .unwrap();
+        assert!(first.allowed);
+        // Second, same instance, same minute ⇒ denied with a rate-limit reason.
+        let Json(second) = check_exec_budget(
+            State(Arc::clone(&state)),
+            bearer("sk-master"),
+            Json(check_body(envelope())),
+        )
+        .await
+        .unwrap();
+        assert!(!second.allowed);
+        assert!(second.reason.unwrap().contains("rate limit"));
+    }
+
+    // ── query_audit ───────────────────────────────────────────────────────────
+
+    fn empty_params() -> Query<AuditQueryParams> {
+        Query(serde_json::from_value(serde_json::json!({})).unwrap())
+    }
+
+    #[tokio::test]
+    async fn query_audit_errors_when_logging_is_disabled() {
+        let state = state_with(false);
+        let res = query_audit(
+            State(state),
+            loopback(),
+            bearer("sk-master"),
+            empty_params(),
+        )
+        .await;
+        assert!(
+            matches!(res, Err(GatewayError::Internal(_))),
+            "a disabled audit log must surface an error, not empty data"
+        );
+    }
+
+    #[tokio::test]
+    async fn query_audit_returns_rows_with_derived_cost() {
+        let state = state_with(true);
+        // Log one model_call row, then let the background writer flush.
+        state.audit.log(AuditRecord {
+            request_id: "r1".to_string(),
+            api_key: "sk-master".to_string(),
+            user_name: None,
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            input_tokens: 1000,
+            output_tokens: 0,
+            cache_hit: false,
+            latency_ms: 5,
+            eval_score: None,
+            error: None,
+            skill_ids: None,
+            session_id: None,
+            user_id: None,
+            agent_id: None,
+            feature: None,
+            event_type: crate::audit::EventType::ModelCall,
+            backend: None,
+            command: None,
+            duration_ms: None,
+            exit_code: None,
+            widget_instance_id: None,
+        });
+        // The writer is a background thread over a bounded channel; give it a beat
+        // to persist before the read connection queries (mirrors the audit crate's
+        // own test pattern).
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let Json(body) = query_audit(
+            State(Arc::clone(&state)),
+            loopback(),
+            bearer("sk-master"),
+            empty_params(),
+        )
+        .await
+        .expect("master key may read the audit log");
+        assert_eq!(body["count"], 1);
+        // Derived cost at the default 2000/1k rate: 1000 tokens ⇒ 2000 micro-USD.
+        assert_eq!(body["entries"][0]["cost_micro_usd"], 2000);
+    }
 
     #[test]
     fn cost_estimate_matches_pipeline_rounding() {

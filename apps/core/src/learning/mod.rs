@@ -48,7 +48,7 @@
 //! `apps/core` dep) is the decoupling that matters; the process boundary is not.
 //! Consequences of this verdict, all already true in the tree:
 //! - The fixture (`plugin_manifest/fixtures/learning.plugin.json`, byte-identical to
-//!   `apps-store/learning/ui/plugin.json`) is **companion-only**: no `public_mount`, no
+//!   `apps-store/learning/plugin.json`) is **companion-only**: no `public_mount`, no
 //!   sidecar spec. Core serves `/api/learn/*` in-process (`server/learning.rs`).
 //! - Core never spawns/health-checks a learning sidecar (no `RYU_LEARNING_BIN`, no
 //!   port 8002 in `apps/core`). The `[[bin]] ryu-learning` in the crate is dormant
@@ -141,7 +141,11 @@ impl LearningHost for CoreLearningHost {
     }
 
     async fn get_messages(&self, conversation_id: &str) -> anyhow::Result<Vec<Msg>> {
-        let rows = self.state.conversations.get_messages(conversation_id).await?;
+        let rows = self
+            .state
+            .conversations
+            .get_messages(conversation_id)
+            .await?;
         Ok(rows
             .into_iter()
             .map(|m| Msg {
@@ -408,4 +412,40 @@ fn truncate_snippet(text: &str, max: usize) -> String {
     let mut out: String = trimmed.chars().take(max).collect();
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_snippet_trims_and_leaves_short_text_unchanged() {
+        assert_eq!(truncate_snippet("  hello  ", 10), "hello");
+        // Exactly `max` chars is not truncated (no ellipsis).
+        assert_eq!(truncate_snippet("abcde", 5), "abcde");
+    }
+
+    #[test]
+    fn truncate_snippet_cuts_long_text_and_appends_ellipsis() {
+        let out = truncate_snippet("abcdefghij", 3);
+        assert_eq!(out, "abc…");
+        // The ellipsis is a single char, not three dots.
+        assert_eq!(out.chars().count(), 4);
+    }
+
+    #[test]
+    fn truncate_snippet_counts_chars_not_bytes_for_multibyte() {
+        // Four multibyte codepoints; max=2 keeps two whole chars + ellipsis.
+        let out = truncate_snippet("héllo wörld ☃☃", 2);
+        assert_eq!(out, "hé…");
+        // Never splits a multibyte codepoint (would panic on a byte boundary).
+        assert!(out.chars().count() == 3);
+    }
+
+    #[test]
+    fn truncate_snippet_zero_max_is_just_ellipsis_for_nonempty() {
+        assert_eq!(truncate_snippet("x", 0), "…");
+        // Empty (after trim) stays empty even at max 0.
+        assert_eq!(truncate_snippet("   ", 0), "");
+    }
 }

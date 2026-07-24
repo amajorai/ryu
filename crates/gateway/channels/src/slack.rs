@@ -1058,8 +1058,14 @@ mod tests {
         let total: Duration = (1..MAX_RECONNECT_ATTEMPTS).map(backoff_for).sum();
         // Generous enough to ride out a real outage, finite enough to surface a
         // permanent misconfiguration to the operator.
-        assert!(total >= Duration::from_secs(60), "budget too eager to give up");
-        assert!(total <= Duration::from_secs(15 * 60), "budget never terminates");
+        assert!(
+            total >= Duration::from_secs(60),
+            "budget too eager to give up"
+        );
+        assert!(
+            total <= Duration::from_secs(15 * 60),
+            "budget never terminates"
+        );
     }
 
     #[test]

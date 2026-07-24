@@ -44,8 +44,9 @@ export const DEFAULT_HIDDEN_SECTIONS = [
 	"engines",
 ] as const;
 
-// Header chrome buttons that start hidden until the user opts in. (Empty since the
-// fine-tuning chrome moved to the `com.ryu.finetune` app, listed under "Apps".)
+// Header chrome buttons that start hidden until the user opts in. (Empty: Memory is
+// no longer a hardcoded chrome button — it's app-registered by com.ryu.memory via a
+// `sidebar_buttons` contribution, so its visibility follows that app's enabled state.)
 export const DEFAULT_HIDDEN_CHROME = [] as const;
 
 /** Window event fired whenever the hidden-sections set changes, so every mounted

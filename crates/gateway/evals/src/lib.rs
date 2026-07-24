@@ -374,7 +374,12 @@ impl EvalsRegistry {
     }
 
     /// See [`EvalsBackend::score`].
-    pub fn score(&self, latency_ms: u64, response: &Value, policy_pass: bool) -> Option<EvalResult> {
+    pub fn score(
+        &self,
+        latency_ms: u64,
+        response: &Value,
+        policy_pass: bool,
+    ) -> Option<EvalResult> {
         self.active.score(latency_ms, response, policy_pass)
     }
 

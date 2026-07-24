@@ -45,7 +45,9 @@ pub enum RyuError {
 
 impl RyuError {
     fn msg(message: impl Into<String>) -> Self {
-        RyuError::Ryu { message: message.into() }
+        RyuError::Ryu {
+            message: message.into(),
+        }
     }
 }
 
@@ -189,8 +191,9 @@ impl ModelClient {
         base_url: Option<String>,
         token: Option<String>,
     ) -> Result<std::sync::Arc<Self>, RyuError> {
-        let inner = ryu_sdk::ModelClient::new(model, ryu_sdk::ModelClientOptions { base_url, token })
-            .map_err(|e| RyuError::msg(e.to_string()))?;
+        let inner =
+            ryu_sdk::ModelClient::new(model, ryu_sdk::ModelClientOptions { base_url, token })
+                .map_err(|e| RyuError::msg(e.to_string()))?;
         Ok(std::sync::Arc::new(Self { inner }))
     }
 
@@ -199,7 +202,10 @@ impl ModelClient {
     pub fn chat(&self, messages: Vec<ChatMessage>) -> Result<ChatResult, RyuError> {
         let msgs: Vec<ryu_sdk::ChatMessage> = messages
             .into_iter()
-            .map(|m| ryu_sdk::ChatMessage { role: m.role, content: m.content })
+            .map(|m| ryu_sdk::ChatMessage {
+                role: m.role,
+                content: m.content,
+            })
             .collect();
         let res = runtime()
             .block_on(self.inner.chat(&msgs))
@@ -226,7 +232,10 @@ impl ModelClient {
 
         let msgs: Vec<ryu_sdk::ChatMessage> = messages
             .into_iter()
-            .map(|m| ryu_sdk::ChatMessage { role: m.role, content: m.content })
+            .map(|m| ryu_sdk::ChatMessage {
+                role: m.role,
+                content: m.content,
+            })
             .collect();
         runtime().block_on(async {
             let stream = self.inner.stream(&msgs);
@@ -251,7 +260,11 @@ impl ModelClient {
                     }
                 }
             }
-            sink.on_done(ChatResult { content, finish_reason, usage: None });
+            sink.on_done(ChatResult {
+                content,
+                finish_reason,
+                usage: None,
+            });
         });
     }
 }
@@ -290,9 +303,11 @@ impl EmbeddingClient {
         base_url: Option<String>,
         token: Option<String>,
     ) -> Result<std::sync::Arc<Self>, RyuError> {
-        let inner =
-            ryu_sdk::EmbeddingClient::new(model, ryu_sdk::EmbeddingClientOptions { base_url, token })
-                .map_err(|e| RyuError::msg(e.to_string()))?;
+        let inner = ryu_sdk::EmbeddingClient::new(
+            model,
+            ryu_sdk::EmbeddingClientOptions { base_url, token },
+        )
+        .map_err(|e| RyuError::msg(e.to_string()))?;
         Ok(std::sync::Arc::new(Self { inner }))
     }
 
@@ -335,7 +350,10 @@ mod tests {
         let bad = r#"{"id":"com.example.x","name":"X","version":"nope","runnables":[]}"#;
         let err = parse_and_validate_manifest(bad.into()).unwrap_err();
         let RyuError::Ryu { message } = err;
-        assert!(message.contains("semver"), "expected semver error, got: {message}");
+        assert!(
+            message.contains("semver"),
+            "expected semver error, got: {message}"
+        );
     }
 
     #[test]
@@ -356,19 +374,11 @@ mod tests {
     #[test]
     fn model_client_rejects_direct_provider() {
         // Direct-provider base URL is rejected at construction.
-        let bad = ModelClient::new(
-            "gpt-4o".into(),
-            Some("https://api.openai.com".into()),
-            None,
-        );
+        let bad = ModelClient::new("gpt-4o".into(), Some("https://api.openai.com".into()), None);
         assert!(bad.is_err());
 
         // Gateway URL constructs a client.
-        let ok = ModelClient::new(
-            "gemma4".into(),
-            Some("http://127.0.0.1:7981".into()),
-            None,
-        );
+        let ok = ModelClient::new("gemma4".into(), Some("http://127.0.0.1:7981".into()), None);
         assert!(ok.is_ok());
     }
 

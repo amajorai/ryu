@@ -32,6 +32,8 @@ const EMPTY: PluginContributions = {
 	slash_commands: [],
 	turn_hooks: [],
 	views: [],
+	sidebar_sections: [],
+	sidebar_buttons: [],
 	channels: [],
 	companions: [],
 };

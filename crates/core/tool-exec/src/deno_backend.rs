@@ -807,8 +807,7 @@ pub async fn run_eval_js(source: &str, payload: &Value, deadline: Duration) -> E
     }
 
     let program = build_eval_program(source, payload);
-    let script_path =
-        std::env::temp_dir().join(format!("ryu-eval-{}.js", uuid::Uuid::new_v4()));
+    let script_path = std::env::temp_dir().join(format!("ryu-eval-{}.js", uuid::Uuid::new_v4()));
     // Secure write mirrors the tool-exec path: owner-only (`0o600`) + `create_new`
     // so a pre-planted symlink at the (uuid-random) path can't redirect the write.
     let write_result = (|| -> std::io::Result<()> {
@@ -857,9 +856,7 @@ pub async fn run_eval_js(source: &str, payload: &Value, deadline: Duration) -> E
                     if let Some(rest) = line.strip_prefix(TAG_EVAL_OK) {
                         return Some(match serde_json::from_str::<Value>(rest) {
                             Ok(v) => EvalJsOutcome::Value(v),
-                            Err(e) => {
-                                EvalJsOutcome::Error(format!("unparseable eval output: {e}"))
-                            }
+                            Err(e) => EvalJsOutcome::Error(format!("unparseable eval output: {e}")),
                         });
                     }
                     if let Some(rest) = line.strip_prefix(TAG_EVAL_ERR) {
@@ -879,9 +876,9 @@ pub async fn run_eval_js(source: &str, payload: &Value, deadline: Duration) -> E
     let outcome = match tokio::time::timeout(deadline, read_result).await {
         Ok(Some(o)) => o,
         Ok(None) => EvalJsOutcome::Error("eval produced no result before exit".to_owned()),
-        Err(_) => EvalJsOutcome::Error(
-            "eval exceeded the wall-clock deadline and was killed".to_owned(),
-        ),
+        Err(_) => {
+            EvalJsOutcome::Error("eval exceeded the wall-clock deadline and was killed".to_owned())
+        }
     };
     // Reap the child (kill_on_drop covers the timeout path; this is belt-and-braces).
     let _ = child.kill().await;
@@ -1081,8 +1078,14 @@ mod tests {
         let flags = permission_flags(Some(&perms));
         assert!(flags.contains(&"--allow-read=/data/in".to_string()));
         assert!(flags.contains(&"--allow-write=/data/out".to_string()));
-        assert!(flags.contains(&"--allow-net".to_string()), "true → bare --allow-net");
-        assert!(flags.contains(&"--allow-run".to_string()), "child_process → --allow-run");
+        assert!(
+            flags.contains(&"--allow-net".to_string()),
+            "true → bare --allow-net"
+        );
+        assert!(
+            flags.contains(&"--allow-run".to_string()),
+            "child_process → --allow-run"
+        );
         // `tool` is stdio-brokered, never a Deno flag.
         assert!(
             !flags.iter().any(|f| f.contains("web_search")),
@@ -1115,10 +1118,8 @@ mod tests {
         assert!(bare.contains(&"--allow-run".to_string()));
         assert!(!bare.iter().any(|f| f.starts_with("--allow-run=")));
         // Without child_process, a run allow-list is inert (no run flag at all).
-        let no_child = permission_flags_scoped(
-            Some(&PermissionSet::default()),
-            &["ryu-cap".to_string()],
-        );
+        let no_child =
+            permission_flags_scoped(Some(&PermissionSet::default()), &["ryu-cap".to_string()]);
         assert!(!no_child.iter().any(|f| f.starts_with("--allow-run")));
     }
 
@@ -1132,7 +1133,10 @@ mod tests {
             "cdn.example.com".to_string(),
         ]);
         let flags = permission_flags(Some(&perms));
-        assert!(flags.contains(&"--allow-read=/a,/b".to_string()), "paths comma-joined");
+        assert!(
+            flags.contains(&"--allow-read=/a,/b".to_string()),
+            "paths comma-joined"
+        );
         assert!(
             flags.contains(&"--allow-net=api.example.com:443,cdn.example.com".to_string()),
             "hosts comma-joined into --allow-net=…"

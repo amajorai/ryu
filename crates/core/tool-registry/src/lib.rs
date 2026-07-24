@@ -49,7 +49,8 @@ pub trait ToolEmbedder: Send + Sync {
 }
 
 /// Source plane of a tool. Serializes lowercase: `mcp|builtin|composio|app`,
-/// plus `core-api` for Core's own HTTP endpoints exposed as agent-drivable tools.
+/// plus `core-api` for Core's own HTTP endpoints exposed as agent-drivable tools,
+/// and `command` for a declarative app tool that execs an allowlisted local CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolKind {
@@ -62,6 +63,10 @@ pub enum ToolKind {
     /// `rename_all = "lowercase"` default `coreapi`.
     #[serde(rename = "core-api")]
     CoreApi,
+    /// A declarative `command` app tool: execs an allowlisted local CLI through
+    /// the governed tool-exec path. Surfaced as its own kind so `?kind=command`
+    /// selects these; the other app backends (http/inline_deno/alias) stay `App`.
+    Command,
 }
 
 impl ToolKind {
@@ -76,6 +81,7 @@ impl ToolKind {
             // Accept both the canonical hyphenated form and the underscore/no-sep
             // variants callers may send.
             "core-api" | "core_api" | "coreapi" => Some(ToolKind::CoreApi),
+            "command" => Some(ToolKind::Command),
             _ => None, // "any" or unknown
         }
     }
@@ -494,6 +500,15 @@ mod tests {
             serde_json::to_string(&ToolKind::CoreApi).unwrap(),
             "\"core-api\""
         );
+        // Command serializes to the lowercase `command` and round-trips.
+        assert_eq!(
+            serde_json::to_string(&ToolKind::Command).unwrap(),
+            "\"command\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ToolKind>("\"command\"").unwrap(),
+            ToolKind::Command
+        );
     }
 
     #[test]
@@ -506,6 +521,8 @@ mod tests {
         assert_eq!(ToolKind::parse_filter("core-api"), Some(ToolKind::CoreApi));
         assert_eq!(ToolKind::parse_filter("core_api"), Some(ToolKind::CoreApi));
         assert_eq!(ToolKind::parse_filter("CoreApi"), Some(ToolKind::CoreApi));
+        assert_eq!(ToolKind::parse_filter("command"), Some(ToolKind::Command));
+        assert_eq!(ToolKind::parse_filter("COMMAND"), Some(ToolKind::Command));
     }
 
     #[test]
@@ -598,7 +615,13 @@ mod tests {
             "properties": { "url": { "type": "string" } },
             "required": ["url"]
         });
-        let d = describe_from_parts("spider__crawl", "crawl", "", ToolKind::Builtin, Some(&schema));
+        let d = describe_from_parts(
+            "spider__crawl",
+            "crawl",
+            "",
+            ToolKind::Builtin,
+            Some(&schema),
+        );
         assert!(!d.shallow);
         assert_eq!(d.kind, ToolKind::Builtin);
         assert_eq!(d.args.len(), 1);
@@ -634,7 +657,16 @@ mod tests {
         // `kind = None`: everything is ranked; no Composio unless the caller
         // passed candidates (mirrors Core's key-gated fetch — empty here).
         let builtins = vec![desc("foo__search", "search", "the web", ToolKind::Mcp)];
-        let out = run_search("search", builtins, Vec::new(), None, 25, ToolRanker::Bm25, None).await;
+        let out = run_search(
+            "search",
+            builtins,
+            Vec::new(),
+            None,
+            25,
+            ToolRanker::Bm25,
+            None,
+        )
+        .await;
         assert_eq!(out.len(), 1);
         assert!(out.iter().all(|d| d.kind != ToolKind::Composio));
     }

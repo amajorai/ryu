@@ -88,8 +88,8 @@ fn no_redirect_client(shared: &Client) -> Client {
 
 /// GET `{v3}{path}` with the user's Composio key, returning parsed JSON.
 async fn get_json(client: &Client, path: &str, query: &[(&str, &str)]) -> Result<Value> {
-    let key = crate::auth::key()
-        .ok_or_else(|| anyhow!("Composio API key not set (Gateway → Keys)"))?;
+    let key =
+        crate::auth::key().ok_or_else(|| anyhow!("Composio API key not set (Gateway → Keys)"))?;
     let url = format!("{}{}", connect_base_url()?, path);
     let pairs: Vec<(&str, &str)> = query
         .iter()
@@ -117,8 +117,8 @@ async fn get_json(client: &Client, path: &str, query: &[(&str, &str)]) -> Result
 
 /// POST `{v3}{path}` with a JSON body and the user's Composio key.
 async fn post_json(client: &Client, path: &str, body: &Value) -> Result<Value> {
-    let key = crate::auth::key()
-        .ok_or_else(|| anyhow!("Composio API key not set (Gateway → Keys)"))?;
+    let key =
+        crate::auth::key().ok_or_else(|| anyhow!("Composio API key not set (Gateway → Keys)"))?;
     let url = format!("{}{}", connect_base_url()?, path);
     let resp = no_redirect_client(client)
         .post(&url)
@@ -340,18 +340,63 @@ mod tests {
 
     #[test]
     fn entity_defaults_to_default() {
+        // COMPOSIO_ENTITY_ID is process-global and set by sibling tests; take the
+        // shared env lock so this reads a stable value, and restore it after.
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var(ENTITY_ENV).ok();
         std::env::remove_var(ENTITY_ENV);
         assert_eq!(entity(), "default");
+        match prev {
+            Some(v) => std::env::set_var(ENTITY_ENV, v),
+            None => std::env::remove_var(ENTITY_ENV),
+        }
+    }
+
+    #[test]
+    fn entity_reads_env_override() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var(ENTITY_ENV).ok();
+        std::env::set_var(ENTITY_ENV, "  member-9  ");
+        assert_eq!(entity(), "member-9");
+        // A whitespace-only override falls back to the default.
+        std::env::set_var(ENTITY_ENV, "   ");
+        assert_eq!(entity(), "default");
+        match prev {
+            Some(v) => std::env::set_var(ENTITY_ENV, v),
+            None => std::env::remove_var(ENTITY_ENV),
+        }
     }
 
     #[test]
     fn connect_base_is_v3_on_allowlisted_host() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var("COMPOSIO_BASE_URL").ok();
         std::env::remove_var("COMPOSIO_BASE_URL");
         // Default catalog base is …/api/v3.1 → connect base is …/api/v3.
         assert_eq!(
             connect_base_url().unwrap(),
             "https://backend.composio.dev/api/v3"
         );
+        match prev {
+            Some(v) => std::env::set_var("COMPOSIO_BASE_URL", v),
+            None => std::env::remove_var("COMPOSIO_BASE_URL"),
+        }
+    }
+
+    #[test]
+    fn connect_base_url_rejects_off_policy_override() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var("COMPOSIO_BASE_URL").ok();
+        // Non-https catalog base → connect base build fails.
+        std::env::set_var("COMPOSIO_BASE_URL", "http://backend.composio.dev/api/v3.1");
+        assert!(connect_base_url().is_err());
+        // Off-allowlist host over https → fails (key must never leave for it).
+        std::env::set_var("COMPOSIO_BASE_URL", "https://evil.example.com/api/v3.1");
+        assert!(connect_base_url().is_err());
+        match prev {
+            Some(v) => std::env::set_var("COMPOSIO_BASE_URL", v),
+            None => std::env::remove_var("COMPOSIO_BASE_URL"),
+        }
     }
 
     #[test]
@@ -385,5 +430,67 @@ mod tests {
         let n = normalize_connection(&item);
         assert_eq!(n["toolkit"], "slack");
         assert_eq!(n["active"], false);
+    }
+
+    #[test]
+    fn normalize_connection_reads_camel_appname_and_alt_status_and_id_keys() {
+        let item = json!({
+            "connected_account_id": "ca_789",
+            "connectionStatus": "active",
+            "appName": "notion",
+        });
+        let n = normalize_connection(&item);
+        assert_eq!(n["id"], "ca_789");
+        assert_eq!(n["toolkit"], "notion");
+        assert_eq!(n["status"], "active");
+        assert_eq!(n["active"], true);
+    }
+
+    #[test]
+    fn normalize_connection_missing_fields_default_empty_and_inactive() {
+        let n = normalize_connection(&json!({}));
+        assert_eq!(n["id"], "");
+        assert_eq!(n["toolkit"], "");
+        assert_eq!(n["status"], "");
+        assert_eq!(n["active"], false);
+    }
+
+    #[test]
+    fn items_of_reads_connection_specific_keys() {
+        // The connect module additionally recognises connected_accounts / accounts.
+        assert_eq!(
+            items_of(&json!({ "connected_accounts": [{"id":"a"}] })).len(),
+            1
+        );
+        assert_eq!(items_of(&json!({ "accounts": [{"id":"b"},{"id":"c"}] })).len(), 2);
+        // Falls through to items/data and bare arrays too.
+        assert_eq!(items_of(&json!({ "items": [{"id":"d"}] })).len(), 1);
+        assert_eq!(items_of(&json!([{"id":"e"}])).len(), 1);
+        assert!(items_of(&json!({ "nope": 1 })).is_empty());
+    }
+
+    #[test]
+    fn str_field_meta_fallback() {
+        let item = json!({ "id": "", "meta": { "id": "from-meta" } });
+        assert_eq!(str_field(&item, &["id"]).as_deref(), Some("from-meta"));
+        assert!(str_field(&item, &["missing"]).is_none());
+    }
+
+    #[tokio::test]
+    async fn initiate_rejects_empty_toolkit() {
+        let http = Client::new();
+        let err = initiate(&http, "   ")
+            .await
+            .expect_err("empty toolkit must error before any HTTP");
+        assert!(err.to_string().contains("toolkit is required"));
+    }
+
+    #[tokio::test]
+    async fn connection_status_rejects_empty_id() {
+        let http = Client::new();
+        let err = connection_status(&http, "  ")
+            .await
+            .expect_err("empty id must error before any HTTP");
+        assert!(err.to_string().contains("connection id is required"));
     }
 }

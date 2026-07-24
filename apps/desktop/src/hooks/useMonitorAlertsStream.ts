@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type Alert, streamMonitorAlerts } from "@/src/lib/api/monitors.ts";
 import { useActiveNode } from "./useActiveNode.ts";
@@ -55,7 +55,7 @@ export function useMonitorAlertsStream(): void {
 		const target: ApiTarget = { url, token };
 
 		const onAlert = (alert: Alert) => {
-			sileo.error({ title: alert.title, description: alert.message });
+			toast.error({ title: alert.title, description: alert.message });
 			osNotify(alert);
 			Promise.resolve(qc.invalidateQueries({ queryKey: ["monitors"] })).catch(
 				() => undefined

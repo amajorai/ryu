@@ -35,11 +35,12 @@
 //! `channel_send` node performs is the Gateway's job and lives there.
 
 use std::collections::BTreeMap;
-use std::sync::RwLock;
+use std::sync::{Mutex, OnceLock, RwLock};
 
 use serde_json::Value;
 
 use super::host::{host, WorkflowWebhookSecret};
+use super::ryu_relay::SeenDeliveries;
 use super::WEBHOOK_PATH;
 
 /// The URL-path prefix/suffix bracketing a per-workflow webhook trigger route
@@ -102,6 +103,21 @@ pub fn last_delivery(path: &str) -> Option<i64> {
     LAST_DELIVERY.read().ok().and_then(|g| g.get(path).copied())
 }
 
+// ── Direct-HTTP delivery dedup (relay parity) ─────────────────────────────────
+
+/// Process-global dedup set for DIRECT-HTTP deliveries. The relay transport
+/// keeps its own per-subscription set (ryu_relay.rs); this one covers the
+/// public HTTP handlers, which face the same at-least-once retry semantics.
+/// Returns true when `id` is new (dispatch) — false when already seen (skip).
+/// An empty id is always "new": deliveries without a delivery-id header are
+/// not dedupable and pass through unchanged.
+pub fn first_http_delivery(id: &str) -> bool {
+    static SEEN: OnceLock<Mutex<SeenDeliveries>> = OnceLock::new();
+    let lock = SEEN.get_or_init(|| Mutex::new(SeenDeliveries::default()));
+    let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    guard.insert(id)
+}
+
 // ── Replay window (acceptance #5) ─────────────────────────────────────────────
 
 /// Whether an inbound delivery is fresh enough to accept, given the value of a
@@ -150,6 +166,11 @@ pub enum WorkflowWebhookOutcome {
     BadBody(String),
     /// The signature verified but starting the run failed. Carries the error.
     RunError(String),
+    /// The signature verified but `delivery_id` was already seen (at-least-once
+    /// retry) — the run already fired on the first delivery, so this one is a
+    /// no-op. Relay parity: mirrors `ryu_relay.rs`'s `SeenDeliveries` dedup for
+    /// the direct-HTTP path.
+    Duplicate,
 }
 
 /// Verify and (on success) fire a per-workflow webhook trigger. This is the
@@ -157,12 +178,21 @@ pub enum WorkflowWebhookOutcome {
 /// handler and the relay dispatcher both call it, guaranteeing identical
 /// fail-closed semantics.
 ///
+/// `delivery_id` is checked against the process-global HTTP seen-set
+/// ([`first_http_delivery`]) immediately AFTER the signature verifies (never
+/// before — an unauthenticated caller must not be able to poison the seen-set
+/// with a forged id and suppress a later legitimate delivery) and BEFORE the
+/// run fires. An empty `delivery_id` (no id header, or a caller — such as the
+/// relay — that already deduped upstream) is always treated as new, so passing
+/// `""` is a safe no-op.
+///
 /// On success it records the delivery against [`workflow_webhook_path`] so the
 /// registry reflects relay-delivered firings too.
 pub async fn deliver_workflow_webhook(
     id: &str,
     raw_body: &[u8],
     signature: Option<&str>,
+    delivery_id: &str,
 ) -> WorkflowWebhookOutcome {
     let Ok(host) = host() else {
         // No host installed → treat as unresolvable (fail-closed, never fires).
@@ -180,6 +210,11 @@ pub async fn deliver_workflow_webhook(
     };
     if !host.verify_workflow_webhook_signature(&secret, raw_body, signature) {
         return WorkflowWebhookOutcome::BadSignature;
+    }
+    // Dedup AFTER auth so an unauthenticated caller cannot poison the seen-set
+    // with a forged id and suppress a legitimate delivery.
+    if !first_http_delivery(delivery_id) {
+        return WorkflowWebhookOutcome::Duplicate;
     }
     // The raw JSON body becomes the run's trigger payload; validate it parses so
     // a malformed body fails fast rather than seeding unusable trigger state.
@@ -223,7 +258,11 @@ pub enum InboundOutcome {
 /// `signature` is the pre-extracted signature-header value (the relay frame /
 /// HTTP handler picks the right header spelling). `raw_body` is the exact bytes
 /// the signature was computed over.
-pub async fn deliver_inbound(path: &str, raw_body: &[u8], signature: Option<&str>) -> InboundOutcome {
+pub async fn deliver_inbound(
+    path: &str,
+    raw_body: &[u8],
+    signature: Option<&str>,
+) -> InboundOutcome {
     if path == WEBHOOK_PATH {
         let Ok(host) = host() else {
             return InboundOutcome::Rejected("webhook-ingress host unavailable".to_owned());
@@ -249,7 +288,11 @@ pub async fn deliver_inbound(path: &str, raw_body: &[u8], signature: Option<&str
     }
 
     if let Some(id) = parse_workflow_webhook_path(path) {
-        return match deliver_workflow_webhook(&id, raw_body, signature).await {
+        // "" for `delivery_id`: every `deliver_inbound` caller (the relay's
+        // `Inbound` arm, and Core's real-wiring test) already deduped by the
+        // frame/delivery id upstream — see `ryu_relay.rs`'s `dispatch_frame` —
+        // so a second dedup here would be redundant, and "" keeps it a no-op.
+        return match deliver_workflow_webhook(&id, raw_body, signature, "").await {
             WorkflowWebhookOutcome::Ran(run_id) => InboundOutcome::Delivered {
                 detail: format!("workflow '{id}' run {run_id}"),
             },
@@ -259,9 +302,9 @@ pub async fn deliver_inbound(path: &str, raw_body: &[u8], signature: Option<&str
             WorkflowWebhookOutcome::NoWebhookTrigger => {
                 InboundOutcome::Rejected(format!("workflow '{id}' has no webhook trigger"))
             }
-            WorkflowWebhookOutcome::NoSecret => {
-                InboundOutcome::Rejected(format!("workflow '{id}' webhook has no secret configured"))
-            }
+            WorkflowWebhookOutcome::NoSecret => InboundOutcome::Rejected(format!(
+                "workflow '{id}' webhook has no secret configured"
+            )),
             WorkflowWebhookOutcome::BadSignature => {
                 InboundOutcome::Rejected(format!("workflow '{id}': invalid or missing signature"))
             }
@@ -270,6 +313,11 @@ pub async fn deliver_inbound(path: &str, raw_body: &[u8], signature: Option<&str
             }
             WorkflowWebhookOutcome::RunError(e) => {
                 InboundOutcome::Rejected(format!("workflow '{id}' run failed: {e}"))
+            }
+            // "" is always treated as new by `first_http_delivery`, so this arm
+            // is unreachable from this call site — kept exhaustive for the enum.
+            WorkflowWebhookOutcome::Duplicate => {
+                InboundOutcome::Rejected(format!("workflow '{id}': duplicate delivery"))
             }
         };
     }
@@ -388,7 +436,10 @@ mod tests {
 
     #[tokio::test]
     async fn last_delivery_round_trips() {
-        let path = format!("/api/workflows/ld-{}/webhook", uuid::Uuid::new_v4().simple());
+        let path = format!(
+            "/api/workflows/ld-{}/webhook",
+            uuid::Uuid::new_v4().simple()
+        );
         assert!(last_delivery(&path).is_none());
         record_delivery(&path);
         assert!(last_delivery(&path).is_some());
@@ -459,5 +510,74 @@ mod tests {
         // A bad signature is rejected fail-closed (never fires the run).
         let rejected = deliver_inbound(&path, br#"{"event":"tampered"}"#, Some("bad")).await;
         assert!(matches!(rejected, InboundOutcome::Rejected(_)));
+    }
+
+    // ── first_http_delivery (Plan 013) ─────────────────────────────────────────
+    //
+    // `first_http_delivery` backs a process-global `OnceLock<Mutex<SeenDeliveries>>`
+    // shared by every test in this (and any other) process. cargo runs tests as
+    // parallel threads in one process, so ids are prefixed per-test to avoid
+    // cross-test interference — mirrors `last_delivery_round_trips`'s uuid-suffix
+    // pattern above.
+
+    #[test]
+    fn first_http_delivery_dedups_repeats() {
+        let id = format!("http-dlv-{}", uuid::Uuid::new_v4().simple());
+        assert!(first_http_delivery(&id), "first sight is new");
+        assert!(!first_http_delivery(&id), "second sight is a duplicate");
+    }
+
+    #[test]
+    fn first_http_delivery_empty_id_always_new() {
+        // No id to dedup on → never suppress dispatch (matches SeenDeliveries).
+        assert!(first_http_delivery(""));
+        assert!(first_http_delivery(""));
+    }
+
+    #[test]
+    fn first_http_delivery_distinct_ids_do_not_interfere() {
+        let a = format!("http-dlv-a-{}", uuid::Uuid::new_v4().simple());
+        let b = format!("http-dlv-b-{}", uuid::Uuid::new_v4().simple());
+        assert!(first_http_delivery(&a));
+        assert!(
+            first_http_delivery(&b),
+            "a different id is unaffected by a's insert"
+        );
+        assert!(!first_http_delivery(&a), "a is still deduped");
+        assert!(!first_http_delivery(&b), "b is still deduped");
+    }
+
+    /// `deliver_workflow_webhook` acceptance (Plan 013): a valid signature with a
+    /// repeated `delivery_id` yields `Ran` on the first call and `Duplicate` on
+    /// the second — the dedup sits after auth (a bad-signature call never
+    /// consumes the seen-set, proven by the second assertion below) and before
+    /// the run.
+    #[tokio::test]
+    async fn deliver_workflow_webhook_dedups_by_delivery_id() {
+        ensure_mock_host();
+
+        let id = format!("wf-dedup-{}", uuid::Uuid::new_v4().simple());
+        let delivery_id = format!("dlv-{}", uuid::Uuid::new_v4().simple());
+        let body = br#"{"event":"first"}"#;
+
+        // First delivery: valid signature, fresh id → runs.
+        let first = deliver_workflow_webhook(&id, body, Some("good"), &delivery_id).await;
+        assert!(matches!(first, WorkflowWebhookOutcome::Ran(_)));
+
+        // Retried delivery: same id → duplicate, no second run.
+        let retried = deliver_workflow_webhook(&id, body, Some("good"), &delivery_id).await;
+        assert!(matches!(retried, WorkflowWebhookOutcome::Duplicate));
+
+        // An unauthenticated forged id never reaches (and so never poisons) the
+        // seen-set: a fresh id with a bad signature is rejected, not deduped —
+        // and that same id is still usable afterwards for a real delivery.
+        let forged_id = format!("dlv-forged-{}", uuid::Uuid::new_v4().simple());
+        let bad = deliver_workflow_webhook(&id, body, Some("bad"), &forged_id).await;
+        assert!(matches!(bad, WorkflowWebhookOutcome::BadSignature));
+        let now_valid = deliver_workflow_webhook(&id, body, Some("good"), &forged_id).await;
+        assert!(
+            matches!(now_valid, WorkflowWebhookOutcome::Ran(_)),
+            "a forged-signature attempt must not poison the seen-set for the real id"
+        );
     }
 }

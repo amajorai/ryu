@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { sileo } from "sileo";
 import {
 	type ApprovalRequest,
 	approveApproval,
@@ -39,7 +39,7 @@ export function useApprovals(): UseApprovalsResult {
 
 	const onError = useCallback((error: unknown) => {
 		const message = error instanceof Error ? error.message : "request failed";
-		sileo.error({ title: "Approvals", description: message });
+		toast.error({ title: "Approvals", description: message });
 	}, []);
 
 	const approveMutation = useMutation({

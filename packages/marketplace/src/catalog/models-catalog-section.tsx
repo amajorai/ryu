@@ -106,7 +106,7 @@ type FitStyle = (fit: string) => { className: string; dot: string };
 const TOKEN_LABEL = new Map(CATALOG_TOKENS.map((t) => [t.id, t.label]));
 
 /** Refine loaded models to those carrying every active token-badge filter. */
-function filterModelsByTokens(
+export function filterModelsByTokens(
 	models: ModelCard[],
 	activeTokens: Set<string>,
 	org: string
@@ -130,7 +130,7 @@ function filterModelsByTokens(
 }
 
 /** Build the toolbar's removable chips for the active org + token filters. */
-function buildModelChips(
+export function buildModelChips(
 	org: string,
 	activeTokens: Set<string>,
 	setOrg: (o: string) => void,
@@ -200,7 +200,7 @@ const RELATIVE_TIME = new Intl.RelativeTimeFormat(undefined, {
 /** Relative age of an ISO-8601 timestamp, e.g. "3 months ago". `null` when the
  *  date is missing or unparseable, so callers can omit the chip entirely.
  *  Uses the native Intl formatter — no third-party date dependency. */
-function formatAgo(iso: string | null): string | null {
+export function formatAgo(iso: string | null): string | null {
 	if (!iso) {
 		return null;
 	}
@@ -219,7 +219,7 @@ function formatAgo(iso: string | null): string | null {
 }
 
 /** Absolute calendar date for a detail line, e.g. "10 Jun 2026". */
-function formatDate(iso: string | null): string | null {
+export function formatDate(iso: string | null): string | null {
 	if (!iso) {
 		return null;
 	}
@@ -235,7 +235,7 @@ function formatDate(iso: string | null): string | null {
 }
 
 /** Format a large count as a friendly short string (1234567 → "1.2M"). */
-function formatCount(n: number): string {
+export function formatCount(n: number): string {
 	if (n >= 1_000_000) {
 		return `${(n / 1_000_000).toFixed(1)}M`;
 	}
@@ -247,7 +247,7 @@ function formatCount(n: number): string {
 
 /** Friendly context-window string (32768 → "32K", 1048576 → "1M"). `null` when
  *  the Hub didn't report a context length, so callers can omit the chip. */
-function formatContext(tokens: number | null): string | null {
+export function formatContext(tokens: number | null): string | null {
 	if (!tokens || tokens <= 0) {
 		return null;
 	}
@@ -263,7 +263,7 @@ function formatContext(tokens: number | null): string | null {
 
 /** Friendly parameter-count string (999885952 → "1.0B", 8e9 → "8.0B"). `null`
  *  when unknown. Uses 1B = 1e9 (HF reports decimal parameter counts). */
-function formatParams(n: number | null): string | null {
+export function formatParams(n: number | null): string | null {
 	if (!n || n <= 0) {
 		return null;
 	}
@@ -278,7 +278,7 @@ function formatParams(n: number | null): string | null {
 }
 
 /** Multi-line hardware summary for the detail overview. */
-function deviceSummaryLines(device: ModelDetail["device"]): string[] {
+export function deviceSummaryLines(device: ModelDetail["device"]): string[] {
 	if (device.unifiedMemory && device.ramHuman) {
 		return [`${device.ramHuman} unified memory`];
 	}

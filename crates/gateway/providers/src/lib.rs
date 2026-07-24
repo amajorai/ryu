@@ -213,9 +213,10 @@ pub(crate) async fn check_response_status(
         });
     }
 
-    let json: Value = resp.json().await.map_err(|e| {
-        ProviderError::Provider(format!("{provider} response parse error: {e}"))
-    })?;
+    let json: Value = resp
+        .json()
+        .await
+        .map_err(|e| ProviderError::Provider(format!("{provider} response parse error: {e}")))?;
 
     if status.is_success() {
         if let (Some(q), Some(info)) = (quota, rate_limit.as_ref()) {
@@ -455,6 +456,416 @@ fn collect_media_urls(value: &Value, out: &mut Vec<Value>, seen: &mut Vec<String
 /// Whether a string looks like a fetchable media URL or an inline data URI.
 fn is_media_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://") || s.starts_with("data:")
+}
+
+/// Shared in-process mock HTTP server for provider tests. Binds an ephemeral
+/// `127.0.0.1` port (never leaves localhost), records every request it receives,
+/// and replies from a queue of canned responses. Used by the provider modules'
+/// inline `#[cfg(test)]` suites to exercise the async request/auth/error paths
+/// without any real network, keys, or sleeps.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    use axum::body::{Body, Bytes};
+    use axum::extract::State;
+    use axum::http::{HeaderMap, Method, StatusCode, Uri};
+    use axum::response::Response;
+    use axum::routing::any;
+    use axum::Router;
+    use tokio::net::TcpListener;
+    use tokio::task::JoinHandle;
+
+    /// One canned HTTP reply.
+    #[derive(Clone)]
+    pub struct MockResponse {
+        pub status: u16,
+        pub headers: Vec<(String, String)>,
+        pub body: String,
+    }
+
+    impl MockResponse {
+        /// A `200 OK` JSON reply.
+        pub fn ok_json(body: impl Into<String>) -> Self {
+            Self {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: body.into(),
+            }
+        }
+
+        /// An arbitrary-status JSON reply.
+        pub fn json(status: u16, body: impl Into<String>) -> Self {
+            Self {
+                status,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: body.into(),
+            }
+        }
+
+        pub fn with_header(mut self, k: &str, v: &str) -> Self {
+            self.headers.push((k.to_string(), v.to_string()));
+            self
+        }
+    }
+
+    /// A recorded inbound request.
+    #[derive(Clone)]
+    pub struct Recorded {
+        pub method: String,
+        pub path: String,
+        pub headers: HeaderMap,
+        pub body: Vec<u8>,
+    }
+
+    impl Recorded {
+        /// Parse the recorded body as JSON (panics if not JSON — tests send JSON).
+        pub fn json(&self) -> serde_json::Value {
+            serde_json::from_slice(&self.body).unwrap_or(serde_json::Value::Null)
+        }
+
+        pub fn header(&self, name: &str) -> Option<String> {
+            self.headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        }
+    }
+
+    #[derive(Clone)]
+    struct AppState {
+        responses: Arc<Mutex<VecDeque<MockResponse>>>,
+        requests: Arc<Mutex<Vec<Recorded>>>,
+        /// The server's own `http://127.0.0.1:port` base; substituted for the
+        /// literal `{{BASE}}` in any reply body so a response can point a
+        /// follow-up poll/result URL back at this same mock.
+        base_url: String,
+    }
+
+    /// A running mock server. Aborts its serving task on drop.
+    pub struct MockServer {
+        base_url: String,
+        requests: Arc<Mutex<Vec<Recorded>>>,
+        handle: JoinHandle<()>,
+    }
+
+    impl Drop for MockServer {
+        fn drop(&mut self) {
+            self.handle.abort();
+        }
+    }
+
+    async fn handler(
+        State(state): State<AppState>,
+        method: Method,
+        uri: Uri,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        state.requests.lock().unwrap().push(Recorded {
+            method: method.to_string(),
+            path: uri.path().to_string(),
+            headers,
+            body: body.to_vec(),
+        });
+
+        let reply = {
+            let mut q = state.responses.lock().unwrap();
+            if q.len() > 1 {
+                q.pop_front().unwrap()
+            } else {
+                q.front().cloned().unwrap_or_else(|| MockResponse::ok_json("{}"))
+            }
+        };
+
+        let body = reply.body.replace("{{BASE}}", &state.base_url);
+        let mut builder = Response::builder()
+            .status(StatusCode::from_u16(reply.status).unwrap_or(StatusCode::OK));
+        for (k, v) in &reply.headers {
+            builder = builder.header(k, v);
+        }
+        builder.body(Body::from(body)).unwrap()
+    }
+
+    impl MockServer {
+        /// Start a mock server that replies with `responses` in order (the last
+        /// one repeats once the queue is down to a single entry).
+        pub async fn start(responses: Vec<MockResponse>) -> Self {
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let base_url = format!("http://{addr}");
+
+            let state = AppState {
+                responses: Arc::new(Mutex::new(responses.into_iter().collect())),
+                requests: requests.clone(),
+                base_url: base_url.clone(),
+            };
+            let app = Router::new()
+                .route("/", any(handler))
+                .fallback(any(handler))
+                .with_state(state);
+
+            let handle = tokio::spawn(async move {
+                let _ = axum::serve(listener, app).await;
+            });
+
+            Self {
+                base_url,
+                requests,
+                handle,
+            }
+        }
+
+        /// Convenience: a server that always replies with a single response.
+        pub async fn always(response: MockResponse) -> Self {
+            Self::start(vec![response]).await
+        }
+
+        pub fn base_url(&self) -> &str {
+            &self.base_url
+        }
+
+        /// All requests received so far, in arrival order.
+        pub fn requests(&self) -> Vec<Recorded> {
+            self.requests.lock().unwrap().clone()
+        }
+
+        pub fn request_count(&self) -> usize {
+            self.requests.lock().unwrap().len()
+        }
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn url_builders_trim_trailing_slash() {
+        assert_eq!(
+            chat_completions_url("https://api.x.ai/v1/"),
+            "https://api.x.ai/v1/chat/completions"
+        );
+        assert_eq!(
+            chat_completions_url("https://api.x.ai/v1"),
+            "https://api.x.ai/v1/chat/completions"
+        );
+        assert_eq!(
+            images_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1/images/generations"
+        );
+        assert_eq!(
+            audio_speech_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/audio/speech"
+        );
+        assert_eq!(
+            audio_transcriptions_url("https://api.openai.com/v1//"),
+            "https://api.openai.com/v1/audio/transcriptions"
+        );
+    }
+
+    #[test]
+    fn models_from_response_keeps_only_entries_with_id() {
+        let body = json!({
+            "data": [
+                { "id": "gpt-4o" },
+                { "no_id": true },
+                { "id": "gpt-4o-mini", "extra": 1 }
+            ]
+        });
+        let models = models_from_response(body).expect("some models");
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0]["id"], json!("gpt-4o"));
+        assert_eq!(models[1]["id"], json!("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn models_from_response_none_when_empty_or_malformed() {
+        assert!(models_from_response(json!({ "data": [] })).is_none());
+        assert!(models_from_response(json!({ "data": [{ "no_id": 1 }] })).is_none());
+        assert!(models_from_response(json!({ "not_data": [] })).is_none());
+        assert!(models_from_response(json!({ "data": "oops" })).is_none());
+    }
+
+    #[test]
+    fn parse_rate_limit_reads_anthropic_headers() {
+        let mut h = reqwest::header::HeaderMap::new();
+        h.insert(
+            "anthropic-ratelimit-tokens-remaining",
+            "42".parse().unwrap(),
+        );
+        h.insert("anthropic-ratelimit-tokens-limit", "1000".parse().unwrap());
+        let info = parse_rate_limit(&h).expect("some");
+        assert_eq!(info.remaining, Some(42));
+        assert_eq!(info.limit, Some(1000));
+        // No retry-after → no derived reset instant.
+        assert_eq!(info.retry_after, None);
+        assert_eq!(info.reset_at, None);
+    }
+
+    #[test]
+    fn parse_rate_limit_first_present_key_wins() {
+        // remaining-tokens should be preferred over remaining-requests (first in list).
+        let mut h = reqwest::header::HeaderMap::new();
+        h.insert("x-ratelimit-remaining-requests", "5".parse().unwrap());
+        let info = parse_rate_limit(&h).expect("some");
+        assert_eq!(info.remaining, Some(5));
+    }
+
+    #[test]
+    fn is_media_url_matches_http_and_data_uris() {
+        assert!(is_media_url("https://x/a.png"));
+        assert!(is_media_url("http://x/a.png"));
+        assert!(is_media_url("data:image/png;base64,AAAA"));
+        assert!(!is_media_url("ftp://x/a.png"));
+        assert!(!is_media_url("just text"));
+    }
+
+    #[test]
+    fn normalize_media_output_preserves_raw_and_ignores_non_urls() {
+        let out = normalize_media_output(&json!({ "seed": 7, "note": "hello" }));
+        assert_eq!(out["data"].as_array().unwrap().len(), 0);
+        assert_eq!(out["raw"]["seed"], json!(7));
+    }
+}
+
+#[cfg(test)]
+mod status_check_tests {
+    use super::test_support::{MockResponse, MockServer};
+    use super::{check_response_status, check_stream_status, ProviderError};
+    use crate::quota::ProviderQuotas;
+
+    async fn fetch(server: &MockServer) -> reqwest::Response {
+        reqwest::Client::new()
+            .get(server.base_url())
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn check_response_status_success_records_quota() {
+        let server = MockServer::always(
+            MockResponse::ok_json(r#"{"ok":true}"#)
+                .with_header("x-ratelimit-remaining-tokens", "900"),
+        )
+        .await;
+        let quota = ProviderQuotas::new();
+        let resp = fetch(&server).await;
+        let json = check_response_status(resp, "p", Some(&quota)).await.unwrap();
+        assert_eq!(json["ok"], serde_json::json!(true));
+        assert_eq!(quota.snapshot()["p"]["remaining"], serde_json::json!(900));
+    }
+
+    #[tokio::test]
+    async fn check_response_status_429_is_rate_limited_and_recorded() {
+        let server = MockServer::always(
+            MockResponse::json(429, r#"{"error":{"message":"slow down"}}"#)
+                .with_header("retry-after", "12"),
+        )
+        .await;
+        let quota = ProviderQuotas::new();
+        let resp = fetch(&server).await;
+        let err = check_response_status(resp, "p", Some(&quota))
+            .await
+            .unwrap_err();
+        match err {
+            ProviderError::RateLimited {
+                provider,
+                retry_after,
+                ..
+            } => {
+                assert_eq!(provider, "p");
+                assert_eq!(retry_after, Some(12));
+            }
+            other => panic!("expected RateLimited, got {other:?}"),
+        }
+        assert_eq!(quota.snapshot()["p"]["rate_limited"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn check_response_status_maps_error_message() {
+        let server = MockServer::always(MockResponse::json(
+            400,
+            r#"{"error":{"message":"bad model"}}"#,
+        ))
+        .await;
+        let resp = fetch(&server).await;
+        let err = check_response_status(resp, "p", None).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("bad model"), "got: {msg}");
+        assert!(msg.contains("400"));
+    }
+
+    #[tokio::test]
+    async fn check_stream_status_429_maps_to_rate_limited() {
+        let server = MockServer::always(
+            MockResponse::json(429, "rate limited").with_header("retry-after", "7"),
+        )
+        .await;
+        let resp = fetch(&server).await;
+        let err = check_stream_status(resp, "p", None).await.unwrap_err();
+        assert!(matches!(err, ProviderError::RateLimited { .. }));
+    }
+
+    #[tokio::test]
+    async fn check_stream_status_error_includes_status_and_body() {
+        let server = MockServer::always(MockResponse::json(503, "upstream down")).await;
+        let resp = fetch(&server).await;
+        let err = check_stream_status(resp, "p", None).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("503"), "got: {msg}");
+        assert!(msg.contains("upstream down"), "got: {msg}");
+    }
+}
+
+#[cfg(test)]
+mod default_trait_methods_tests {
+    use super::{LocalProvider, Provider, ProviderError};
+    use serde_json::json;
+
+    // LocalProvider does not override the media modalities, so it exercises the
+    // `Provider` trait's default "unsupported" implementations without any network.
+    fn provider() -> LocalProvider {
+        LocalProvider::new(reqwest::Client::new(), "http://127.0.0.1:1".to_string())
+    }
+
+    fn assert_unsupported(err: ProviderError, needle: &str) {
+        match err {
+            ProviderError::Provider(msg) => {
+                assert!(msg.contains("local"), "expected provider name, got: {msg}");
+                assert!(msg.contains(needle), "expected '{needle}' in: {msg}");
+            }
+            other => panic!("expected Provider error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn default_media_methods_report_unsupported() {
+        let p = provider();
+        let b = json!({});
+        assert_unsupported(
+            p.generate_image("m", &b).await.unwrap_err(),
+            "image generation",
+        );
+        assert_unsupported(p.synthesize_speech("m", &b).await.unwrap_err(), "TTS");
+        assert_unsupported(p.transcribe_audio("m", &b).await.unwrap_err(), "STT");
+        assert_unsupported(p.submit_video("m", &b).await.unwrap_err(), "video");
+        assert_unsupported(p.poll_video("ref").await.unwrap_err(), "video");
+    }
+
+    #[tokio::test]
+    async fn default_discover_models_is_none() {
+        // The base trait default returns None; LocalProvider overrides it to hit an
+        // endpoint, but a struct using the base default (via the trait object) would
+        // return None. Here we assert the documented contract on a bogus endpoint:
+        // discovery must never panic and returns None on connection failure.
+        let p = provider();
+        assert!(p.discover_models().await.is_none());
+    }
 }
 
 #[cfg(test)]

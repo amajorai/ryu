@@ -1,3 +1,4 @@
+import { File, Files, Folder } from "fumadocs-ui/components/files";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
@@ -14,6 +15,9 @@ export function getMDXComponents(components?: MDXComponents) {
     Architecture,
     AutoCards,
     DocCard,
+    File,
+    Files,
+    Folder,
     Mermaid,
     Quiz,
     Step,

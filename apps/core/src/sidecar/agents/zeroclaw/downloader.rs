@@ -233,4 +233,30 @@ mod tests {
         tokio::fs::remove_dir_all(&tmp_dir).await.ok();
         Ok(())
     }
+
+    #[test]
+    fn platform_tag_is_a_rust_triple_for_this_target() {
+        let tag = zeroclaw_platform_tag();
+        // Every branch resolves to a `<arch>-<vendor>-<os>` release triple.
+        assert!(tag.split('-').count() >= 3, "unexpected tag: {tag}");
+        if cfg!(target_os = "windows") {
+            assert!(tag.contains("windows"));
+        } else if cfg!(target_os = "macos") {
+            assert!(tag.contains("apple-darwin"));
+        } else {
+            assert!(tag.contains("linux"));
+        }
+    }
+
+    #[test]
+    fn binary_path_is_under_ryu_bin() {
+        let p = binary_path();
+        assert_eq!(p, bin_path());
+        assert!(p.ends_with(if cfg!(target_os = "windows") {
+            "zeroclaw.exe"
+        } else {
+            "zeroclaw"
+        }));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
+    }
 }

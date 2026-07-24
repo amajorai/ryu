@@ -233,13 +233,11 @@ impl Provider for AnthropicProvider {
                 let requested_model = body["model"].as_str().unwrap_or(model);
                 return Ok(self.from_anthropic_response(&json, requested_model));
             }
-            Err(
-                last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                    provider: "anthropic".to_string(),
-                    retry_after: None,
-                    reset_at: None,
-                }),
-            )
+            Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
+                provider: "anthropic".to_string(),
+                retry_after: None,
+                reset_at: None,
+            }))
         })
     }
 
@@ -309,13 +307,11 @@ impl Provider for AnthropicProvider {
                 let translated = translate_anthropic_stream(raw_stream, requested_model);
                 return Ok(Body::from_stream(translated));
             }
-            Err(
-                last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                    provider: "anthropic".to_string(),
-                    retry_after: None,
-                    reset_at: None,
-                }),
-            )
+            Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
+                provider: "anthropic".to_string(),
+                retry_after: None,
+                reset_at: None,
+            }))
         })
     }
 }
@@ -411,4 +407,304 @@ fn translate_anthropic_stream(
                 }
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{MockResponse, MockServer};
+    use futures_util::StreamExt;
+    use std::sync::Arc;
+
+    fn provider_with(base_url: String, keys: Vec<&str>) -> AnthropicProvider {
+        AnthropicProvider::new(
+            reqwest::Client::new(),
+            keys.into_iter().map(String::from).collect(),
+            base_url,
+            Arc::new(ProviderQuotas::new()),
+        )
+    }
+
+    fn dummy() -> AnthropicProvider {
+        provider_with("http://127.0.0.1:1".to_string(), vec!["k"])
+    }
+
+    #[test]
+    fn to_anthropic_body_hoists_system_and_sets_max_tokens_default() {
+        let p = dummy();
+        let body = json!({
+            "messages": [
+                { "role": "system", "content": "be terse" },
+                { "role": "user", "content": "hi" }
+            ]
+        });
+        let out = p.to_anthropic_body("claude-3", &body);
+        assert_eq!(out["model"], json!("claude-3"));
+        assert_eq!(out["system"], json!("be terse"));
+        // System message is filtered out of the messages array.
+        assert_eq!(out["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(out["messages"][0]["role"], json!("user"));
+        // Anthropic requires max_tokens; default is 4096 when unset.
+        assert_eq!(out["max_tokens"], json!(4096));
+    }
+
+    #[test]
+    fn to_anthropic_body_joins_multiple_system_messages() {
+        let p = dummy();
+        let body = json!({
+            "messages": [
+                { "role": "system", "content": "one" },
+                { "role": "system", "content": "two" },
+                { "role": "user", "content": "hi" }
+            ],
+            "max_tokens": 100
+        });
+        let out = p.to_anthropic_body("m", &body);
+        assert_eq!(out["system"], json!("one\n\ntwo"));
+        assert_eq!(out["max_tokens"], json!(100));
+    }
+
+    #[test]
+    fn to_anthropic_body_maps_stop_string_and_forwards_sampling() {
+        let p = dummy();
+        let body = json!({
+            "messages": [{ "role": "user", "content": "hi" }],
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "stop": "STOP"
+        });
+        let out = p.to_anthropic_body("m", &body);
+        assert_eq!(out["temperature"], json!(0.7));
+        assert_eq!(out["top_p"], json!(0.9));
+        // A string `stop` becomes a single-element `stop_sequences` array.
+        assert_eq!(out["stop_sequences"], json!(["STOP"]));
+        // No system message → no `system` field.
+        assert!(out.get("system").is_none());
+    }
+
+    #[test]
+    fn to_anthropic_body_passes_stop_array_through() {
+        let p = dummy();
+        let body = json!({
+            "messages": [{ "role": "user", "content": "hi" }],
+            "stop": ["A", "B"]
+        });
+        let out = p.to_anthropic_body("m", &body);
+        assert_eq!(out["stop_sequences"], json!(["A", "B"]));
+    }
+
+    #[test]
+    fn from_anthropic_response_maps_content_and_usage_and_stop_reason() {
+        let p = dummy();
+        let resp = json!({
+            "id": "msg_42",
+            "content": [{ "type": "text", "text": "hello world" }],
+            "stop_reason": "max_tokens",
+            "usage": { "input_tokens": 10, "output_tokens": 7 }
+        });
+        let out = p.from_anthropic_response(&resp, "gpt-4o-alias");
+        assert_eq!(out["id"], json!("msg_42"));
+        assert_eq!(out["object"], json!("chat.completion"));
+        assert_eq!(out["model"], json!("gpt-4o-alias"));
+        assert_eq!(out["choices"][0]["message"]["content"], json!("hello world"));
+        // max_tokens → OpenAI "length".
+        assert_eq!(out["choices"][0]["finish_reason"], json!("length"));
+        assert_eq!(out["usage"]["prompt_tokens"], json!(10));
+        assert_eq!(out["usage"]["completion_tokens"], json!(7));
+        assert_eq!(out["usage"]["total_tokens"], json!(17));
+    }
+
+    #[test]
+    fn from_anthropic_response_stop_reason_variants() {
+        let p = dummy();
+        let mk = |reason: &str| {
+            json!({ "content": [{ "text": "x" }], "stop_reason": reason,
+                    "usage": { "input_tokens": 0, "output_tokens": 0 } })
+        };
+        assert_eq!(
+            p.from_anthropic_response(&mk("end_turn"), "m")["choices"][0]["finish_reason"],
+            json!("stop")
+        );
+        assert_eq!(
+            p.from_anthropic_response(&mk("tool_use"), "m")["choices"][0]["finish_reason"],
+            json!("tool_calls")
+        );
+        // Unknown / missing stop_reason defaults to "stop".
+        assert_eq!(
+            p.from_anthropic_response(&mk("weird"), "m")["choices"][0]["finish_reason"],
+            json!("stop")
+        );
+    }
+
+    #[test]
+    fn from_anthropic_response_handles_missing_fields() {
+        let p = dummy();
+        // Empty response: content missing, usage missing, id missing.
+        let out = p.from_anthropic_response(&json!({}), "m");
+        assert_eq!(out["id"], json!("msg_unknown"));
+        assert_eq!(out["choices"][0]["message"]["content"], json!(""));
+        assert_eq!(out["usage"]["total_tokens"], json!(0));
+    }
+
+    #[test]
+    fn next_key_rotates_round_robin() {
+        let p = provider_with("http://x".into(), vec!["a", "b", "c"]);
+        // Round-robin across the three keys, then wraps.
+        let seq: Vec<String> = (0..4).map(|_| p.next_key()).collect();
+        assert_eq!(seq, vec!["a", "b", "c", "a"]);
+    }
+
+    #[test]
+    fn next_key_single_key_is_stable() {
+        let p = provider_with("http://x".into(), vec!["only"]);
+        assert_eq!(p.next_key(), "only");
+        assert_eq!(p.next_key(), "only");
+    }
+
+    async fn collect_stream(
+        chunks: Vec<&'static str>,
+        model: &str,
+    ) -> String {
+        let raw = futures_util::stream::iter(
+            chunks
+                .into_iter()
+                .map(|c| Ok::<Bytes, reqwest::Error>(Bytes::from(c)))
+                .collect::<Vec<_>>(),
+        );
+        let translated = translate_anthropic_stream(raw, model.to_string());
+        let mut out = String::new();
+        futures_util::pin_mut!(translated);
+        while let Some(item) = translated.next().await {
+            out.push_str(std::str::from_utf8(&item.unwrap()).unwrap());
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn translate_anthropic_stream_emits_openai_deltas_and_done() {
+        let sse = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n",
+        );
+        let out = collect_stream(vec![sse], "my-model").await;
+        assert!(out.contains(r#""content":"Hel""#), "got: {out}");
+        assert!(out.contains(r#""content":"lo""#), "got: {out}");
+        assert!(out.contains(r#""object":"chat.completion.chunk""#));
+        assert!(out.contains(r#""model":"my-model""#));
+        assert!(out.contains(r#""finish_reason":"stop""#));
+        assert!(out.contains("data: [DONE]"));
+    }
+
+    #[tokio::test]
+    async fn translate_anthropic_stream_ignores_unknown_events() {
+        let sse = concat!(
+            "event: ping\n",
+            "data: {\"type\":\"ping\"}\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\"}\n",
+        );
+        let out = collect_stream(vec![sse], "m").await;
+        // No text deltas, no stop → no OpenAI chunks emitted.
+        assert!(out.is_empty(), "expected empty, got: {out}");
+    }
+
+    #[tokio::test]
+    async fn complete_translates_and_sends_anthropic_headers() {
+        let server = MockServer::always(MockResponse::ok_json(
+            r#"{"id":"msg_1","content":[{"type":"text","text":"hi there"}],
+                "stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":5}}"#,
+        ))
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec!["sk-secret-KEY"]);
+        let body = json!({ "model": "claude-alias", "messages": [{ "role": "user", "content": "hi" }] });
+        let out = p.complete("claude-3-5", &body).await.unwrap();
+
+        assert_eq!(out["choices"][0]["message"]["content"], json!("hi there"));
+        assert_eq!(out["usage"]["total_tokens"], json!(8));
+        // Response is shaped with the caller's *requested* model, not the routed one.
+        assert_eq!(out["model"], json!("claude-alias"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].path, "/v1/messages");
+        assert_eq!(reqs[0].header("x-api-key").as_deref(), Some("sk-secret-KEY"));
+        assert_eq!(
+            reqs[0].header("anthropic-version").as_deref(),
+            Some("2023-06-01")
+        );
+        // The routed model (not the alias) is what goes upstream.
+        assert_eq!(reqs[0].json()["model"], json!("claude-3-5"));
+    }
+
+    #[tokio::test]
+    async fn complete_error_does_not_leak_the_api_key() {
+        const SECRET: &str = "sk-ant-DO-NOT-LEAK-0xDEADBEEF";
+        let server = MockServer::always(MockResponse::json(
+            400,
+            r#"{"error":{"message":"invalid request"}}"#,
+        ))
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec![SECRET]);
+        let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        let err = p.complete("m", &body).await.unwrap_err();
+
+        // The key WAS used for auth (constructed correctly)...
+        assert_eq!(
+            server.requests()[0].header("x-api-key").as_deref(),
+            Some(SECRET)
+        );
+        // ...but it must never appear in the error surfaced to the caller.
+        let rendered = format!("{err}{err:?}");
+        assert!(!rendered.contains(SECRET), "key leaked in error: {rendered}");
+        assert!(rendered.contains("invalid request"));
+    }
+
+    #[tokio::test]
+    async fn complete_rotates_key_on_429() {
+        let server = MockServer::start(vec![
+            MockResponse::json(429, "slow down"),
+            MockResponse::ok_json(
+                r#"{"id":"m","content":[{"text":"ok"}],"stop_reason":"end_turn",
+                    "usage":{"input_tokens":1,"output_tokens":1}}"#,
+            ),
+        ])
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec!["key-A", "key-B"]);
+        let body = json!({ "messages": [{ "role": "user", "content": "hi" }] });
+        let out = p.complete("m", &body).await.unwrap();
+        assert_eq!(out["choices"][0]["message"]["content"], json!("ok"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs.len(), 2, "should have rotated to the second key");
+        assert_eq!(reqs[0].header("x-api-key").as_deref(), Some("key-A"));
+        assert_eq!(reqs[1].header("x-api-key").as_deref(), Some("key-B"));
+    }
+
+    #[tokio::test]
+    async fn complete_surfaces_rate_limited_when_all_keys_exhausted() {
+        let server = MockServer::always(
+            MockResponse::json(429, "nope").with_header("retry-after", "9"),
+        )
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec!["a", "b"]);
+        let body = json!({ "messages": [] });
+        let err = p.complete("m", &body).await.unwrap_err();
+        match err {
+            ProviderError::RateLimited {
+                provider,
+                retry_after,
+                ..
+            } => {
+                assert_eq!(provider, "anthropic");
+                assert_eq!(retry_after, Some(9));
+            }
+            other => panic!("expected RateLimited, got {other:?}"),
+        }
+        // Both keys were tried before giving up.
+        assert_eq!(server.request_count(), 2);
+    }
 }

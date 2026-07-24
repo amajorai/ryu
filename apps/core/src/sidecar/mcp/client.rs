@@ -84,10 +84,7 @@ impl McpToolResult {
         let structured_content = raw.get("structuredContent").cloned();
         let content = raw.get("content").cloned();
         let meta = raw.get("_meta").cloned();
-        let is_error = raw
-            .get("isError")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let is_error = raw.get("isError").and_then(Value::as_bool).unwrap_or(false);
         Self {
             structured_content,
             content,
@@ -341,9 +338,7 @@ pub async fn list_resources(cmd: &McpStdioCommand) -> Result<Vec<McpResource>> {
 /// server sends back.
 pub async fn read_resource(cmd: &McpStdioCommand, uri: &str) -> Result<Vec<McpResourceContents>> {
     let mut conn = McpConnection::connect(cmd).await?;
-    let result = conn
-        .request("resources/read", json!({ "uri": uri }))
-        .await;
+    let result = conn.request("resources/read", json!({ "uri": uri })).await;
     conn.shutdown().await;
     let result = result?;
 
@@ -412,5 +407,73 @@ impl McpSession {
     /// Gracefully close the connection and kill the child process.
     pub async fn shutdown(self) {
         self.conn.shutdown().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_result_value_splits_all_channels() {
+        let raw = json!({
+            "content": [{ "type": "text", "text": "hello" }],
+            "structuredContent": { "answer": 42 },
+            "_meta": { "ryu/outputTemplate": "ui://widget" },
+            "isError": false,
+        });
+        let result = McpToolResult::from_result_value(raw.clone());
+        assert_eq!(
+            result.content,
+            Some(json!([{ "type": "text", "text": "hello" }]))
+        );
+        assert_eq!(result.structured_content, Some(json!({ "answer": 42 })));
+        assert_eq!(
+            result.meta,
+            Some(json!({ "ryu/outputTemplate": "ui://widget" }))
+        );
+        assert!(!result.is_error);
+        // The raw value is preserved untouched.
+        assert_eq!(result.raw, raw);
+    }
+
+    #[test]
+    fn from_result_value_defaults_missing_channels_to_none() {
+        let result = McpToolResult::from_result_value(json!({}));
+        assert!(result.structured_content.is_none());
+        assert!(result.content.is_none());
+        assert!(result.meta.is_none());
+        assert!(!result.is_error, "isError defaults to false when absent");
+    }
+
+    #[test]
+    fn from_result_value_reads_is_error_true() {
+        let result = McpToolResult::from_result_value(json!({
+            "content": [{ "type": "text", "text": "boom" }],
+            "isError": true,
+        }));
+        assert!(result.is_error);
+        assert!(result.content.is_some());
+    }
+
+    #[test]
+    fn from_result_value_ignores_non_bool_is_error() {
+        // A non-boolean `isError` (spec violation) must not be coerced to true;
+        // `as_bool` returns None and the field falls back to the false default.
+        let result = McpToolResult::from_result_value(json!({ "isError": "yes" }));
+        assert!(!result.is_error);
+    }
+
+    #[test]
+    fn from_result_value_tolerates_non_object_raw() {
+        // A non-object result (e.g. the server returned a bare array) yields all
+        // None channels rather than panicking, and preserves the raw value.
+        let raw = json!(["not", "an", "object"]);
+        let result = McpToolResult::from_result_value(raw.clone());
+        assert!(result.structured_content.is_none());
+        assert!(result.content.is_none());
+        assert!(result.meta.is_none());
+        assert!(!result.is_error);
+        assert_eq!(result.raw, raw);
     }
 }

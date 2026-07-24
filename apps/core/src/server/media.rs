@@ -220,13 +220,29 @@ pub async fn upload_media(
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok());
 
-    match state.media.save(&body, &name, content_type) {
-        Ok(obj) => (StatusCode::OK, Json(json!(obj))).into_response(),
-        Err(e) => (
+    // Run the fs write in spawn_blocking so we don't block the async runtime.
+    let media = state.media.clone();
+    let content_type_owned = content_type.map(str::to_owned);
+    let result = tokio::task::spawn_blocking(move || {
+        media.save(&body, &name, content_type_owned.as_deref())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(obj)) => (StatusCode::OK, Json(json!(obj))).into_response(),
+        Ok(Err(e)) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": e.to_string() })),
         )
             .into_response(),
+        Err(e) => {
+            tracing::error!("upload_media: join error: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "internal error storing media" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -244,8 +260,12 @@ pub async fn serve_media(
     State(state): State<super::ServerState>,
     Path(file): Path<String>,
 ) -> Response {
-    match state.media.load(&file) {
-        Ok((bytes, content_type)) => (
+    // Run the fs read in spawn_blocking so we don't block the async runtime.
+    let media = state.media.clone();
+    let result = tokio::task::spawn_blocking(move || media.load(&file)).await;
+
+    match result {
+        Ok(Ok((bytes, content_type))) => (
             StatusCode::OK,
             [
                 (header::CONTENT_TYPE, content_type),
@@ -257,7 +277,11 @@ pub async fn serve_media(
             bytes,
         )
             .into_response(),
-        Err(_) => (StatusCode::NOT_FOUND, "media not found").into_response(),
+        Ok(Err(_)) => (StatusCode::NOT_FOUND, "media not found").into_response(),
+        Err(e) => {
+            tracing::error!("serve_media: join error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+        }
     }
 }
 
@@ -318,9 +342,14 @@ pub async fn generate_video(
     // Cloud provider selected → submit a Gateway video job (job-based; poll via
     // `GET /api/video/jobs/:id`). Else the local engine (synchronous).
     if let Some(provider) = ryu_image::cloud_provider(&body) {
-        let (code, value) =
-            ryu_image::forward_to_gateway(&host, "video", "/v1/videos/generations", &provider, body)
-                .await;
+        let (code, value) = ryu_image::forward_to_gateway(
+            &host,
+            "video",
+            "/v1/videos/generations",
+            &provider,
+            body,
+        )
+        .await;
         return (status(code), Json(value));
     }
     let (code, value) = ryu_image::proxy(&host.sd_base_url(), "/sdcpp/v1/vid_gen", body).await;

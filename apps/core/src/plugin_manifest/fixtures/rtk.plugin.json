@@ -2,8 +2,59 @@
   "id": "rtk",
   "name": "RTK (Rust Token Killer)",
   "version": "1.0.0",
-  "runnables": [],
-  "permission_grants": [],
+  "description": "Run a dev command through RTK (Rust Token Killer) and get a token-compressed version of its output (60-90% fewer tokens), exposed as a declarative `command` tool that shells out to the locally-installed `rtk` binary. BYO — no API key.",
+  "tagline": "Token-compress noisy dev-command output for agents",
+  "category": "Developer Tools",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
+  "runnables": [
+    {
+      "id": "tool-rtk-run",
+      "name": "RTK Run",
+      "kind": "tool",
+      "config": {
+        "slug": "rtk__run",
+        "backend": "command",
+        "bin": "rtk",
+        "timeout_secs": 120,
+        "description": "Run a dev command through RTK (Rust Token Killer) and return a token-compressed version of its output (60-90% fewer tokens). Prefer this over running noisy commands (git status/log/diff, test runners, build tools, ls/find/grep) directly — you get the same information for a fraction of the context.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The dev command to run through RTK, e.g. \"git status\", \"cargo test\", \"ls -la\". RTK runs it and returns a token-compressed version of its output."
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["wrap", "proxy", "test", "err"],
+              "description": "wrap (default): filter+compress the output. proxy: run raw with tracking (no filtering). test: keep only failures. err: keep only errors."
+            }
+          },
+          "required": ["command"]
+        },
+        "args": [
+          {
+            "from": "mode",
+            "map": {
+              "wrap": [],
+              "proxy": ["proxy"],
+              "test": ["test"],
+              "err": ["err"]
+            },
+            "default": "wrap"
+          },
+          {
+            "from": "command",
+            "split": "shell",
+            "required": true
+          }
+        ]
+      }
+    }
+  ],
+  "permission_grants": ["tool:command:rtk"],
   "activation_events": [],
   "contributes": {
     "settings_tabs": [

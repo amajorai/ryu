@@ -362,9 +362,352 @@ pub fn extract_mcp_json(result: &Value) -> Result<Value> {
     }
 }
 
+/// Shared test scaffolding used by both the `lib.rs` and `api.rs` `#[cfg(test)]`
+/// modules (they compile into the SAME lib test binary, so a single env lock, a
+/// single host `OnceLock`, and a single fake-host script must be shared to keep the
+/// process-global store path + host deterministic under parallel tests).
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static HOST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serialize every test that mutates `GHOST_DATA_DIR` (process-global env).
+    pub(crate) fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Serialize every test that drives the fake host through the shared script.
+    pub(crate) fn host_lock() -> MutexGuard<'static, ()> {
+        HOST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// RAII temp store: points `GHOST_DATA_DIR` at a fresh, empty dir for the
+    /// duration of a test and removes it (and the env var) on drop, so the store
+    /// ops never touch the real `~/.ghost/recipes`. Hold the [`env_lock`] guard
+    /// alongside it.
+    pub(crate) struct TempStore {
+        pub(crate) base: PathBuf,
+    }
+
+    impl TempStore {
+        pub(crate) fn new() -> Self {
+            static N: AtomicU64 = AtomicU64::new(0);
+            let n = N.fetch_add(1, Ordering::Relaxed);
+            let base = std::env::temp_dir()
+                .join(format!("ryu-recipes-test-{}-{n}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            std::env::set_var("GHOST_DATA_DIR", &base);
+            Self { base }
+        }
+    }
+
+    impl Drop for TempStore {
+        fn drop(&mut self) {
+            std::env::remove_var("GHOST_DATA_DIR");
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    /// A canonical minimal-valid recipe JSON document (the store's validator
+    /// accepts it) for the given name.
+    pub(crate) fn recipe_json(name: &str) -> String {
+        format!(
+            r#"{{"schema_version":2,"name":"{name}","description":"d","steps":[]}}"#
+        )
+    }
+
+    /// The fake-host script: each field, when set, is what the corresponding
+    /// [`RecipesHost`] method returns on its next call. `*_err` wins over `*_ok`.
+    #[derive(Default)]
+    pub(crate) struct Script {
+        pub(crate) run_ok: Option<Value>,
+        pub(crate) run_err: Option<String>,
+        pub(crate) start_ok: Option<RecorderStarted>,
+        pub(crate) start_err: Option<String>,
+        pub(crate) status_ok: Option<Option<RecorderStatus>>,
+        pub(crate) status_err: Option<String>,
+        pub(crate) stop_ok: Option<RecorderStopped>,
+        pub(crate) stop_err: Option<String>,
+    }
+
+    fn script() -> &'static Mutex<Script> {
+        static S: OnceLock<Mutex<Script>> = OnceLock::new();
+        S.get_or_init(|| Mutex::new(Script::default()))
+    }
+
+    /// Load the script the [`FakeHost`] will replay next. Call under [`host_lock`].
+    pub(crate) fn set_script(s: Script) {
+        *script().lock().unwrap_or_else(|e| e.into_inner()) = s;
+    }
+
+    struct FakeHost;
+
+    #[async_trait]
+    impl RecipesHost for FakeHost {
+        async fn call_ghost_run(&self, _recipe: &str, _params: Value) -> Result<Value> {
+            let s = script().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(e) = &s.run_err {
+                return Err(anyhow!(e.clone()));
+            }
+            Ok(s.run_ok.clone().unwrap_or(Value::Null))
+        }
+
+        async fn recorder_start(&self, _task: &str) -> Result<RecorderStarted> {
+            let s = script().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(e) = &s.start_err {
+                return Err(anyhow!(e.clone()));
+            }
+            Ok(s.start_ok.clone().expect("start_ok not set"))
+        }
+
+        async fn recorder_status(&self) -> Result<Option<RecorderStatus>> {
+            let s = script().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(e) = &s.status_err {
+                return Err(anyhow!(e.clone()));
+            }
+            Ok(s.status_ok.clone().unwrap_or(None))
+        }
+
+        async fn recorder_stop(&self) -> Result<RecorderStopped> {
+            let s = script().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(e) = &s.stop_err {
+                return Err(anyhow!(e.clone()));
+            }
+            Ok(s.stop_ok.clone().expect("stop_ok not set"))
+        }
+    }
+
+    /// Install the fake host (idempotent — the `OnceLock` keeps the first, which is
+    /// always this `FakeHost`, whose behavior is driven per-test via [`set_script`]).
+    pub(crate) fn install_fake_host() {
+        set_global_host(Arc::new(FakeHost));
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_support::*;
     use super::*;
+
+    // ── Stateless store ops (GHOST_DATA_DIR → temp) ───────────────────────────
+
+    #[test]
+    fn save_then_get_roundtrips() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        let saved = save(&recipe_json("alpha")).unwrap();
+        assert_eq!(saved.name, "alpha");
+        let got = get("alpha").unwrap();
+        assert_eq!(got.name, "alpha");
+        assert_eq!(got.description, "d");
+        assert_eq!(got.schema_version, 2);
+    }
+
+    #[test]
+    fn get_missing_recipe_errors() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        let err = get("nope").unwrap_err().to_string();
+        assert!(err.contains("nope"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn save_invalid_json_errors() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        assert!(save("{not a recipe}").is_err());
+        // Valid JSON but missing required fields is also rejected by the validator.
+        assert!(save(r#"{"name":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn delete_removes_then_missing_errors() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        save(&recipe_json("gone")).unwrap();
+        assert!(delete("gone").is_ok());
+        assert!(get("gone").is_err());
+        // Deleting a now-absent recipe surfaces a not-found error.
+        let err = delete("gone").unwrap_err().to_string();
+        assert!(err.contains("gone"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn list_empty_store_is_empty() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        assert!(list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_is_sorted_and_summarizes_params_and_steps() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        // Params intentionally out of order (b before a) + one step.
+        let with_params = r#"{"schema_version":2,"name":"zeta","description":"d",
+            "params":{"b":{"type":"string","description":"x"},
+                      "a":{"type":"string","description":"y"}},
+            "steps":[{"id":1,"action":"click"}]}"#;
+        save(with_params).unwrap();
+        save(&recipe_json("alpha")).unwrap();
+
+        let rows = list().unwrap();
+        assert_eq!(rows.len(), 2);
+        // Sorted by name → alpha, zeta.
+        assert_eq!(rows[0].name, "alpha");
+        assert_eq!(rows[1].name, "zeta");
+        // alpha has no params, no steps.
+        assert!(rows[0].params.is_empty());
+        assert_eq!(rows[0].step_count, 0);
+        // zeta's param names are sorted → ["a","b"], step_count 1.
+        assert_eq!(rows[1].params, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(rows[1].step_count, 1);
+    }
+
+    #[test]
+    fn save_overwrites_existing() {
+        let _g = env_lock();
+        let _store = TempStore::new();
+        save(&recipe_json("dup")).unwrap();
+        let updated = r#"{"schema_version":3,"name":"dup","description":"changed","steps":[]}"#;
+        save(updated).unwrap();
+        let got = get("dup").unwrap();
+        assert_eq!(got.schema_version, 3);
+        assert_eq!(got.description, "changed");
+        // Still exactly one file on disk.
+        assert_eq!(list().unwrap().len(), 1);
+    }
+
+    // ── Host-backed wrappers (fake host via shared script) ────────────────────
+
+    #[tokio::test]
+    async fn run_unwraps_ghost_envelope() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            run_ok: Some(json!({ "content": [{ "type": "text", "text": "{\"ok\":true}" }] })),
+            ..Default::default()
+        });
+        let out = run("r", json!({ "x": 1 })).await.unwrap();
+        assert_eq!(out, json!({ "ok": true }));
+    }
+
+    #[tokio::test]
+    async fn run_maps_host_error() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            run_err: Some("boom".to_string()),
+            ..Default::default()
+        });
+        let err = run("r", json!({})).await.unwrap_err().to_string();
+        assert!(err.contains("recipe replay failed"), "unexpected: {err}");
+        assert!(err.contains("boom"), "unexpected: {err}");
+    }
+
+    #[tokio::test]
+    async fn record_start_wraps_started_payload() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            start_ok: Some(RecorderStarted {
+                started_at: "t0".to_string(),
+                info: json!({ "pid": 7 }),
+            }),
+            ..Default::default()
+        });
+        let out = record_start("demo task").await.unwrap();
+        assert_eq!(out["recording"], json!(true));
+        assert_eq!(out["task"], json!("demo task"));
+        assert_eq!(out["started_at"], json!("t0"));
+        assert_eq!(out["info"], json!({ "pid": 7 }));
+    }
+
+    #[tokio::test]
+    async fn record_status_none_reports_not_recording() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            status_ok: Some(None),
+            ..Default::default()
+        });
+        let out = record_status().await.unwrap();
+        assert_eq!(out, json!({ "recording": false }));
+    }
+
+    #[tokio::test]
+    async fn record_status_some_reports_fields() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            status_ok: Some(Some(RecorderStatus {
+                task: "t".to_string(),
+                started_at: "t0".to_string(),
+                status: json!({ "events": 3 }),
+            })),
+            ..Default::default()
+        });
+        let out = record_status().await.unwrap();
+        assert_eq!(out["recording"], json!(true));
+        assert_eq!(out["task"], json!("t"));
+        assert_eq!(out["started_at"], json!("t0"));
+        assert_eq!(out["status"], json!({ "events": 3 }));
+    }
+
+    #[tokio::test]
+    async fn record_stop_flattens_payload_and_adds_draft() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            stop_ok: Some(RecorderStopped {
+                task: "Add numbers".to_string(),
+                started_at: "t0".to_string(),
+                payload: json!({
+                    "recording": false,
+                    "event_count": 1,
+                    "events": [{ "event_type": "type", "key": "42", "element_name": "Field" }],
+                    "suggestion": "s",
+                }),
+            }),
+            ..Default::default()
+        });
+        let out = record_stop().await.unwrap();
+        // Session metadata + flattened ghost payload fields.
+        assert_eq!(out["task"], json!("Add numbers"));
+        assert_eq!(out["started_at"], json!("t0"));
+        assert_eq!(out["recording"], json!(false));
+        assert_eq!(out["event_count"], json!(1));
+        assert!(out["events"].is_array());
+        // Deterministic draft synthesized on top.
+        let draft = &out["draft"];
+        assert_eq!(draft["name"], json!("add-numbers"));
+        assert_eq!(draft["schema_version"], json!(2));
+        let steps = draft["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0]["action"], json!("type"));
+        assert_eq!(steps[0]["params"]["text"], json!("42"));
+    }
+
+    #[tokio::test]
+    async fn record_stop_without_events_yields_empty_draft() {
+        let _g = host_lock();
+        install_fake_host();
+        set_script(Script {
+            stop_ok: Some(RecorderStopped {
+                task: "t".to_string(),
+                started_at: "t0".to_string(),
+                payload: json!({ "recording": false }),
+            }),
+            ..Default::default()
+        });
+        let out = record_stop().await.unwrap();
+        assert_eq!(out["draft"]["steps"].as_array().unwrap().len(), 0);
+    }
 
     #[test]
     fn extract_unwraps_text_json() {
@@ -414,5 +757,96 @@ mod tests {
         assert_eq!(steps[2]["params"]["text"], json!("42"));
         assert_eq!(steps[3]["action"], json!("scroll"));
         assert_eq!(steps[3]["params"]["direction"], json!("down"));
+    }
+
+    #[test]
+    fn draft_maps_press_and_hotkey_events() {
+        let events = json!([
+            { "event_type": "press", "key": "Enter" },
+            { "event_type": "hotkey", "key": "cmd+c" },
+        ]);
+        let draft = draft_from_events("keys", events.as_array().unwrap());
+        let steps = draft["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["action"], json!("press"));
+        assert_eq!(steps[0]["params"]["key"], json!("Enter"));
+        assert_eq!(steps[1]["action"], json!("hotkey"));
+        assert_eq!(steps[1]["params"]["keys"], json!("cmd+c"));
+    }
+
+    #[test]
+    fn draft_unknown_event_type_defaults_to_click() {
+        let events = json!([{ "event_type": "wiggle", "element_name": "Thing" }]);
+        let draft = draft_from_events("t", events.as_array().unwrap());
+        let steps = draft["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["action"], json!("click"));
+        assert_eq!(steps[0]["note"], json!("Thing"));
+    }
+
+    #[test]
+    fn draft_scroll_uses_key_direction_when_present() {
+        let events = json!([{ "event_type": "scroll", "key": "up" }]);
+        let draft = draft_from_events("t", events.as_array().unwrap());
+        let steps = draft["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["params"]["direction"], json!("up"));
+    }
+
+    #[test]
+    fn draft_target_is_null_when_no_locator_fields() {
+        // A click event with no element_name/role/id/app ⇒ target is JSON null.
+        let events = json!([{ "event_type": "click" }]);
+        let draft = draft_from_events("t", events.as_array().unwrap());
+        let steps = draft["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["action"], json!("click"));
+        assert_eq!(steps[0]["target"], Value::Null);
+    }
+
+    #[test]
+    fn draft_empty_task_and_no_events_uses_defaults() {
+        let draft = draft_from_events("", &[]);
+        assert_eq!(draft["name"], json!("recorded-recipe"));
+        assert_eq!(draft["description"], json!("Recorded workflow"));
+        assert_eq!(draft["app"], Value::Null);
+        assert_eq!(draft["steps"].as_array().unwrap().len(), 0);
+        assert_eq!(draft["on_failure"], json!("abort"));
+    }
+
+    #[test]
+    fn draft_step_ids_are_one_indexed() {
+        let events = json!([
+            { "event_type": "press", "key": "a" },
+            { "event_type": "press", "key": "b" },
+        ]);
+        let draft = draft_from_events("t", events.as_array().unwrap());
+        let steps = draft["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["id"], json!(1));
+        assert_eq!(steps[1]["id"], json!(2));
+    }
+
+    #[test]
+    fn slugify_collapses_runs_and_trims_edges() {
+        assert_eq!(slugify_task("--Hello,,,  World!!--"), "hello-world");
+        assert_eq!(slugify_task("A_B_C"), "a-b-c");
+        assert_eq!(slugify_task("already-good"), "already-good");
+        assert_eq!(slugify_task("!!!"), "recorded-recipe");
+    }
+
+    #[test]
+    fn extract_returns_whole_result_when_no_content() {
+        // No `content` array ⇒ the raw result is returned verbatim.
+        let env = json!({ "some": "value" });
+        assert_eq!(extract_mcp_json(&env).unwrap(), env);
+    }
+
+    #[test]
+    fn extract_returns_clone_when_text_missing() {
+        let env = json!({ "content": [{ "type": "image" }] });
+        assert_eq!(extract_mcp_json(&env).unwrap(), env);
+    }
+
+    #[test]
+    fn extract_is_error_without_text_uses_default_message() {
+        let env = json!({ "content": [{ "type": "text" }], "isError": true });
+        let err = extract_mcp_json(&env).unwrap_err().to_string();
+        assert!(err.contains("tool error"), "unexpected: {err}");
     }
 }

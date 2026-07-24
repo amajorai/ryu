@@ -26,7 +26,12 @@ once_cell = { version = "1", optional = true }
 transcribe-rs = { version = "0.3.11", default-features = false, features = ["onnx"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "net"] }
+# The HTTP-proxy engine tests (whisper.cpp `/inference` and Gateway-routed
+# `/v1/audio/transcriptions`) stand up a loopback server to exercise the
+# success / non-2xx / bad-body branches deterministically — the same idiom the
+# `ryu-downloads` crate uses (already a workspace dev-dep).
+axum = { version = "0.7", features = ["multipart"] }
 
 [features]
 # Off by default (keep `cargo test`/CI lean, same posture as Core's pre-extraction

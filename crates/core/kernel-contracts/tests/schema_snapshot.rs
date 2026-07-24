@@ -22,8 +22,8 @@ const SCHEMA_PATH: &str = concat!(
 fn generated_schema() -> String {
     let schema = serde_json::to_value(schemars::schema_for!(PluginManifest))
         .expect("PluginManifest JsonSchema serialises to a JSON value");
-    let mut pretty = serde_json::to_string_pretty(&schema)
-        .expect("schema value serialises to pretty JSON");
+    let mut pretty =
+        serde_json::to_string_pretty(&schema).expect("schema value serialises to pretty JSON");
     pretty.push('\n');
     pretty
 }

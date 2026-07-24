@@ -505,8 +505,7 @@ impl CreditsConfig {
         seconds: u64,
     ) -> u64 {
         let vcpu = u64::from(vcpu);
-        let billable_storage =
-            u64::from(storage_gib).saturating_sub(self.sandbox_free_storage_gib);
+        let billable_storage = u64::from(storage_gib).saturating_sub(self.sandbox_free_storage_gib);
         let eff_gpu = match gpu {
             GpuKind::None => 0,
             _ => u64::from(gpu_count.max(1)),
@@ -517,8 +516,7 @@ impl CreditsConfig {
                 u64::from(mem_gib).saturating_mul(self.cost_per_sandbox_mem_gib_second_nano_usd),
             )
             .saturating_add(
-                billable_storage
-                    .saturating_mul(self.cost_per_sandbox_storage_gib_second_nano_usd),
+                billable_storage.saturating_mul(self.cost_per_sandbox_storage_gib_second_nano_usd),
             )
             .saturating_add(eff_gpu.saturating_mul(self.gpu_rate_nano(gpu)))
             .saturating_add(match os {
@@ -1500,8 +1498,12 @@ pub struct FirewallConfig {
     /// locked field, keeps the stricter value. Canonical names are the serde
     /// field names: `enabled`, `scan_inbound`, `scan_outbound`, `policy`,
     /// `log_detections`, `redact_pii`, `redact_secrets`,
-    /// `wrap_untrusted_tool_results`, `inspector`. Empty by default.
-    #[serde(default)]
+    /// `wrap_untrusted_tool_results`, `inspector`. Defaults to locking
+    /// `enabled`, `scan_inbound`, and `policy` — the three dials whose
+    /// loosening silently disables the inbound firewall for a scope — so an
+    /// org/agent overlay can only tighten them. A node admin opts out with an
+    /// explicit `locked_fields = []`.
+    #[serde(default = "default_firewall_locked_fields")]
     pub locked_fields: Vec<String>,
 
     /// Per-agent evaluator enablement (the unified-evaluator P1 dial). Each entry
@@ -1593,7 +1595,7 @@ pub struct InspectorConfig {
     #[serde(default = "default_inspector_timeout_ms")]
     pub timeout_ms: u64,
     /// The action taken when the inspector flags a turn, reusing the firewall's
-    /// [`FirewallPolicy`] (Block / Sanitize / WarnAndContinue). Default: sanitize
+    /// [`FirewallPolicy`] (Block / Sanitize / WarnAndContinue). Default: block
     /// (the shared [`FirewallPolicy`] default).
     #[serde(default)]
     pub action: FirewallPolicy,
@@ -1681,10 +1683,23 @@ impl Default for FirewallConfig {
             custom_patterns: Vec::new(),
             alert: AlertTier::default(),
             inspector: InspectorConfig::default(),
-            locked_fields: Vec::new(),
+            locked_fields: default_firewall_locked_fields(),
             evaluators: Vec::new(),
         }
     }
+}
+
+/// The node-base lock set applied when `locked_fields` is omitted: the three
+/// dials whose loosening lets an org/agent overlay silently disable the inbound
+/// firewall for its scope. Kept in sorted order so a resolve of the bare node
+/// base is byte-identical to the resolver's sorted lock union (stable
+/// scanner-cache keys).
+fn default_firewall_locked_fields() -> Vec<String> {
+    vec![
+        "enabled".to_string(),
+        "policy".to_string(),
+        "scan_inbound".to_string(),
+    ]
 }
 
 fn default_true() -> bool {
@@ -1694,17 +1709,20 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum FirewallPolicy {
-    /// Reject the request with a 403
+    /// Reject the request with a 403. This is the **default**: prompt-injection
+    /// matches are not meaningfully redactable, so blocking is the only action
+    /// that actually stops a detected injection from reaching the model.
+    /// Redact-and-continue is opt-in via `Sanitize`.
+    #[default]
     Block,
     /// Log the detection but allow the request through
     WarnAndContinue,
-    /// Replace detected patterns with placeholder text. This is the **default**:
-    /// a detected secret/PII is redacted before egress (the leak is closed) while
-    /// the request still succeeds (local-first UX preserved). Prompt-injection
-    /// matches are not meaningfully redactable, so under Sanitize they proceed
-    /// with any co-located PII/secrets scrubbed and the injection text left intact
-    /// (blocking injection is high-FP; that stays opt-in via `Block`).
-    #[default]
+    /// Replace detected patterns with placeholder text: a detected secret/PII is
+    /// redacted before egress (the leak is closed) while the request still
+    /// succeeds (local-first UX preserved). Prompt-injection matches are not
+    /// meaningfully redactable, so under Sanitize they proceed with any
+    /// co-located PII/secrets scrubbed and the injection text left intact —
+    /// which is why Sanitize is opt-in rather than the default.
     Sanitize,
 }
 
@@ -1762,10 +1780,14 @@ pub struct RateLimitConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Token-based limit per minute per API key (approximate).
+    /// Token-based limit per minute per API key (approximate). Omitted from a
+    /// partial `[rate_limit]` section ⇒ the `Default` value, NOT unlimited.
+    #[serde(default = "default_tokens_per_minute")]
     pub tokens_per_minute: Option<u64>,
 
-    /// Request count limit per minute per API key.
+    /// Request count limit per minute per API key. Same partial-section
+    /// semantics as `tokens_per_minute`.
+    #[serde(default = "default_requests_per_minute")]
     pub requests_per_minute: Option<u64>,
 
     /// Maximum requests per second per key before bot-detection triggers (0 = disabled).
@@ -1777,12 +1799,20 @@ fn default_burst_rps() -> u32 {
     10
 }
 
+fn default_tokens_per_minute() -> Option<u64> {
+    Some(100_000)
+}
+
+fn default_requests_per_minute() -> Option<u64> {
+    Some(500)
+}
+
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            tokens_per_minute: Some(100_000),
-            requests_per_minute: Some(500),
+            tokens_per_minute: default_tokens_per_minute(),
+            requests_per_minute: default_requests_per_minute(),
             max_burst_per_second: default_burst_rps(),
         }
     }
@@ -2471,7 +2501,9 @@ impl GatewayConfig {
             ),
             (
                 "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_PRO_6000_SECOND_NANO_USD",
-                &mut config.credits.cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd,
+                &mut config
+                    .credits
+                    .cost_per_sandbox_gpu_rtx_pro_6000_second_nano_usd,
             ),
             (
                 "GATEWAY_CREDITS_COST_PER_SANDBOX_GPU_RTX_5090_SECOND_NANO_USD",
@@ -2938,8 +2970,8 @@ mod provider_id_tests {
             "model_map": { "my-model": { "provider": "acme" } }
         });
 
-        let routing: RoutingConfig =
-            serde_json::from_value(json).expect("routing config with a novel provider id must parse");
+        let routing: RoutingConfig = serde_json::from_value(json)
+            .expect("routing config with a novel provider id must parse");
 
         // Legacy name lowers to the same string it always was (back-compat).
         assert_eq!(routing.default_provider, ProviderId::from("acme"));
@@ -2947,8 +2979,14 @@ mod provider_id_tests {
         assert_eq!(routing.fallback_chain[1], ProviderId::from("acme"));
 
         // The map KEY is the serde trap — both legacy and novel keys must survive.
-        assert_eq!(routing.provider_tiers.get(&ProviderId::from("openai")), Some(&0));
-        assert_eq!(routing.provider_tiers.get(&ProviderId::from("acme")), Some(&2));
+        assert_eq!(
+            routing.provider_tiers.get(&ProviderId::from("openai")),
+            Some(&0)
+        );
+        assert_eq!(
+            routing.provider_tiers.get(&ProviderId::from("acme")),
+            Some(&2)
+        );
 
         assert_eq!(
             routing.model_map.get("my-model").unwrap().provider,
@@ -2967,7 +3005,10 @@ mod provider_id_tests {
     #[test]
     fn default_provider_id_is_openai() {
         assert_eq!(ProviderId::default(), ProviderKind::OpenAi);
-        assert_eq!(RoutingConfig::default().default_provider, ProviderKind::OpenAi);
+        assert_eq!(
+            RoutingConfig::default().default_provider,
+            ProviderKind::OpenAi
+        );
     }
 }
 
@@ -3027,7 +3068,7 @@ mod capacity_config_tests {
 
 #[cfg(test)]
 mod credits_config_tests {
-    use super::{CreditsConfig, WalletEmptyAction};
+    use super::{CreditsConfig, GpuKind, Modality, OsKind, WalletEmptyAction};
 
     #[test]
     fn debit_amount_passthrough_at_zero_bps() {
@@ -3095,6 +3136,121 @@ mod credits_config_tests {
     fn wallet_empty_action_defaults_to_stop() {
         assert_eq!(WalletEmptyAction::default(), WalletEmptyAction::Stop);
     }
+
+    #[test]
+    fn tool_call_cost_is_flat_per_call_and_saturates() {
+        let c = CreditsConfig {
+            cost_per_tool_call_micro_usd: 500,
+            ..Default::default()
+        };
+        assert_eq!(c.tool_call_cost_micro_usd(0), 0);
+        assert_eq!(c.tool_call_cost_micro_usd(3), 1500);
+        // Saturating on overflow rather than wrapping.
+        assert_eq!(c.tool_call_cost_micro_usd(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn media_cost_is_per_modality_and_chat_is_never_metered() {
+        let c = CreditsConfig {
+            cost_per_image_micro_usd: 10,
+            cost_per_video_micro_usd: 20,
+            cost_per_tts_micro_usd: 3,
+            cost_per_stt_micro_usd: 4,
+            ..Default::default()
+        };
+        assert_eq!(c.media_cost_micro_usd(&Modality::Image), 10);
+        assert_eq!(c.media_cost_micro_usd(&Modality::Video), 20);
+        assert_eq!(c.media_cost_micro_usd(&Modality::Tts), 3);
+        assert_eq!(c.media_cost_micro_usd(&Modality::Stt), 4);
+        // Chat is billed on real token usage, never on a flat media rate.
+        assert_eq!(c.media_cost_micro_usd(&Modality::Chat), 0);
+    }
+
+    #[test]
+    fn gpu_rate_nano_maps_each_tier_and_none_is_free() {
+        let c = CreditsConfig::default();
+        assert_eq!(c.gpu_rate_nano(GpuKind::None), 0);
+        assert_eq!(c.gpu_rate_nano(GpuKind::H200), 1_261_000);
+        assert_eq!(c.gpu_rate_nano(GpuKind::H100), 1_097_000);
+        assert_eq!(c.gpu_rate_nano(GpuKind::RtxPro6000), 842_000);
+        assert_eq!(c.gpu_rate_nano(GpuKind::Rtx5090), 358_000);
+        assert_eq!(c.gpu_rate_nano(GpuKind::Rtx4090), 275_000);
+    }
+
+    #[test]
+    fn sandbox_tick_sums_cpu_mem_storage_above_free_tier() {
+        let c = CreditsConfig::default();
+        // 2 vcpu (14000) + 4 GiB mem (4500) + (10-5)=5 billable storage GiB (30),
+        // Linux, no GPU, 1 second:
+        //   2*14000 + 4*4500 + 5*30 = 28000 + 18000 + 150 = 46150 nano/sec.
+        //   (46150 + 500) / 1000 = 46 micro (round-half-up).
+        assert_eq!(
+            c.sandbox_tick_cost_raw_micro(2, 4, 10, GpuKind::None, 0, OsKind::Linux, 1),
+            46
+        );
+    }
+
+    #[test]
+    fn sandbox_tick_bills_no_storage_within_the_free_tier() {
+        let c = CreditsConfig::default();
+        // 5 GiB storage == the free tier ⇒ zero storage cost. Only 1 vcpu counts.
+        //   1*14000 = 14000 nano ⇒ (14000+500)/1000 = 14 micro.
+        assert_eq!(
+            c.sandbox_tick_cost_raw_micro(1, 0, 5, GpuKind::None, 0, OsKind::Linux, 1),
+            14
+        );
+    }
+
+    #[test]
+    fn sandbox_tick_bills_a_zero_count_gpu_as_one() {
+        let c = CreditsConfig::default();
+        // A non-None GPU tier with gpu_count=0 still bills as 1 GPU (the invariant
+        // in the doc comment): 1 vcpu (14000) + 1 * H200 (1_261_000) = 1_275_000 nano
+        //   ⇒ (1_275_000 + 500)/1000 = 1275 micro.
+        assert_eq!(
+            c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::H200, 0, OsKind::Linux, 1),
+            1275
+        );
+    }
+
+    #[test]
+    fn sandbox_tick_adds_windows_vcpu_surcharge() {
+        let c = CreditsConfig::default();
+        // Windows adds a per-vcpu surcharge (23800 nano/vcpu-sec) on top of the base
+        // vcpu rate: 1*14000 + 1*23800 = 37800 ⇒ (37800+500)/1000 = 38 micro.
+        assert_eq!(
+            c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Windows, 1),
+            38
+        );
+        // Linux has no such surcharge — same shape costs less.
+        assert_eq!(
+            c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, 1),
+            14
+        );
+    }
+
+    #[test]
+    fn sandbox_tick_scales_with_seconds() {
+        let c = CreditsConfig::default();
+        let one = c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, 1);
+        let ten = c.sandbox_tick_cost_raw_micro(1, 0, 0, GpuKind::None, 0, OsKind::Linux, 10);
+        // 10 seconds ⇒ 10x the per-second nano before the single micro conversion:
+        //   14000*10 = 140000 ⇒ (140000+500)/1000 = 140 micro (== 10 * 14).
+        assert_eq!(one, 14);
+        assert_eq!(ten, 140);
+    }
+
+    #[test]
+    fn sandbox_debit_applies_its_own_markup_not_the_global_one() {
+        // sandbox_markup_bps defaults to 3000 (× 1.30), distinct from markup_bps (0).
+        let c = CreditsConfig::default();
+        assert_eq!(c.sandbox_markup_bps, 3000);
+        // 100 * 13000 = 1_300_000, +5000 = 1_305_000, /10000 = 130.
+        assert_eq!(c.sandbox_debit_amount(100), 130);
+        // The at-cost path (debit_amount, markup_bps=0) leaves 100 untouched — proof
+        // the two ledgers use different markups.
+        assert_eq!(c.debit_amount(100), 100);
+    }
 }
 
 #[cfg(test)]
@@ -3119,8 +3275,8 @@ mod alert_tier_backcompat_tests {
 
     #[test]
     fn firewall_without_alert_parses_to_silent() {
-        let cfg: FirewallConfig =
-            toml::from_str("enabled = true\npolicy = \"block\"\n").expect("legacy firewall must parse");
+        let cfg: FirewallConfig = toml::from_str("enabled = true\npolicy = \"block\"\n")
+            .expect("legacy firewall must parse");
         assert_eq!(cfg.alert, AlertTier::Silent);
     }
 
@@ -3140,5 +3296,218 @@ mod alert_tier_backcompat_tests {
             serde_json::to_string(&AlertTier::Fanout).unwrap(),
             "\"fanout\""
         );
+    }
+}
+
+#[cfg(test)]
+mod pure_helper_tests {
+    use super::{
+        parse_bool_env, FirewallPolicy, Modality, ProviderId, ProviderKind, RouteStrategy,
+        SmartRoutingConfig, SmartRule,
+    };
+    use std::str::FromStr;
+
+    #[test]
+    fn provider_kind_as_str_covers_every_variant() {
+        assert_eq!(ProviderKind::OpenAi.as_str(), "openai");
+        assert_eq!(ProviderKind::Anthropic.as_str(), "anthropic");
+        assert_eq!(ProviderKind::Local.as_str(), "local");
+        assert_eq!(ProviderKind::OpenRouter.as_str(), "openrouter");
+        assert_eq!(ProviderKind::Core.as_str(), "core");
+        assert_eq!(ProviderKind::Modal.as_str(), "modal");
+        assert_eq!(ProviderKind::GenAi.as_str(), "genai");
+        assert_eq!(ProviderKind::Replicate.as_str(), "replicate");
+        assert_eq!(ProviderKind::Fal.as_str(), "fal");
+    }
+
+    #[test]
+    fn provider_kind_from_str_roundtrips_and_is_case_insensitive() {
+        for kind in [
+            ProviderKind::OpenAi,
+            ProviderKind::Anthropic,
+            ProviderKind::Local,
+            ProviderKind::OpenRouter,
+            ProviderKind::Core,
+            ProviderKind::Modal,
+            ProviderKind::GenAi,
+            ProviderKind::Replicate,
+            ProviderKind::Fal,
+        ] {
+            assert_eq!(ProviderKind::from_str(kind.as_str()).unwrap(), kind);
+        }
+        // Case-insensitive.
+        assert_eq!(
+            ProviderKind::from_str("OpenAI").unwrap(),
+            ProviderKind::OpenAi
+        );
+        // Unknown ids are a typed error naming the bad value.
+        let err = ProviderKind::from_str("acme").unwrap_err();
+        assert!(err.contains("acme"));
+    }
+
+    #[test]
+    fn provider_id_display_default_and_as_str() {
+        assert_eq!(ProviderId::default().as_str(), "openai");
+        let id = ProviderId::from("acme");
+        assert_eq!(id.as_str(), "acme");
+        assert_eq!(id.to_string(), "acme");
+    }
+
+    #[test]
+    fn modality_as_str_covers_every_variant() {
+        assert_eq!(Modality::Chat.as_str(), "chat");
+        assert_eq!(Modality::Image.as_str(), "image");
+        assert_eq!(Modality::Tts.as_str(), "tts");
+        assert_eq!(Modality::Stt.as_str(), "stt");
+        assert_eq!(Modality::Video.as_str(), "video");
+    }
+
+    #[test]
+    fn smart_routing_is_active_gates_on_enabled_rules_and_strategy() {
+        let rule = SmartRule {
+            description: "code".to_string(),
+            model: "claude".to_string(),
+        };
+
+        // Disabled ⇒ inert regardless of rules.
+        let mut cfg = SmartRoutingConfig {
+            enabled: false,
+            rules: vec![rule.clone()],
+            classifier_model: "gemma".to_string(),
+            ..Default::default()
+        };
+        assert!(!cfg.is_active());
+
+        // Enabled but no rules ⇒ inert.
+        cfg.enabled = true;
+        cfg.rules = vec![];
+        assert!(!cfg.is_active());
+
+        // Llm strategy needs a non-empty classifier model.
+        cfg.rules = vec![rule.clone()];
+        cfg.strategy = RouteStrategy::Llm;
+        cfg.classifier_model = "  ".to_string();
+        assert!(!cfg.is_active(), "blank classifier ⇒ Llm inert");
+        cfg.classifier_model = "gemma".to_string();
+        assert!(cfg.is_active());
+
+        // Keyword / Embedding only need rules (no classifier).
+        cfg.classifier_model = String::new();
+        cfg.strategy = RouteStrategy::Keyword;
+        assert!(cfg.is_active());
+        cfg.strategy = RouteStrategy::Embedding;
+        assert!(cfg.is_active());
+    }
+
+    #[test]
+    fn firewall_policy_from_env_accepts_aliases_and_rejects_junk() {
+        assert_eq!(FirewallPolicy::from_env("block"), Some(FirewallPolicy::Block));
+        assert_eq!(
+            FirewallPolicy::from_env(" WARN "),
+            Some(FirewallPolicy::WarnAndContinue)
+        );
+        assert_eq!(
+            FirewallPolicy::from_env("warn-and-continue"),
+            Some(FirewallPolicy::WarnAndContinue)
+        );
+        assert_eq!(
+            FirewallPolicy::from_env("redact"),
+            Some(FirewallPolicy::Sanitize)
+        );
+        assert_eq!(FirewallPolicy::from_env("nonsense"), None);
+    }
+
+    #[test]
+    fn parse_bool_env_accepts_truthy_falsey_and_rejects_junk() {
+        for t in ["1", "true", "YES", "on"] {
+            assert_eq!(parse_bool_env(t), Some(true), "{t}");
+        }
+        for f in ["0", "false", "No", "off"] {
+            assert_eq!(parse_bool_env(f), Some(false), "{f}");
+        }
+        assert_eq!(parse_bool_env("maybe"), None);
+    }
+}
+
+#[cfg(test)]
+mod toml_roundtrip_tests {
+    use super::*;
+
+    /// The default config must survive a TOML serialize → deserialize round-trip
+    /// unchanged. This is the exact `save()` → `load()` path (minus disk) and
+    /// exercises the Serialize/Deserialize derives across every nested config
+    /// struct, guarding against a `#[serde(default)]`/rename drift that would make
+    /// a written config fail to re-parse.
+    #[test]
+    fn default_config_survives_toml_roundtrip() {
+        let cfg = GatewayConfig::default();
+        let text = toml::to_string_pretty(&cfg).expect("serialize default config");
+        let back: GatewayConfig = toml::from_str(&text).expect("re-parse default config");
+        // Spot-check load-bearing fields across several sub-configs.
+        assert_eq!(back.bind, cfg.bind);
+        assert_eq!(back.routing.default_provider, cfg.routing.default_provider);
+        assert_eq!(back.firewall.policy, cfg.firewall.policy);
+        assert_eq!(back.cache.enabled, cfg.cache.enabled);
+        assert_eq!(
+            back.circuit_breaker.failure_threshold,
+            cfg.circuit_breaker.failure_threshold
+        );
+        assert_eq!(
+            back.control_plane.cost_per_1k_micro_usd,
+            cfg.control_plane.cost_per_1k_micro_usd
+        );
+        assert_eq!(back.credits.sandbox_markup_bps, cfg.credits.sandbox_markup_bps);
+        assert_eq!(back.fleet, cfg.fleet);
+    }
+
+    /// A richly-populated config (providers with multi-account keys, routing with a
+    /// tiered fallback chain, a non-default firewall policy, control-plane pricing)
+    /// round-trips through TOML with every value preserved.
+    #[test]
+    fn populated_config_roundtrips_every_value() {
+        let mut cfg = GatewayConfig::default();
+        cfg.providers.openai = Some(OpenAiProviderConfig {
+            api_key: "sk-primary".to_string(),
+            api_keys: vec!["sk-a".to_string(), "sk-b".to_string()],
+            base_url: "https://proxy.example/v1".to_string(),
+        });
+        cfg.routing.default_provider = ProviderId::from("primary");
+        cfg.routing.fallback_chain =
+            vec![ProviderId::from("primary"), ProviderId::from("secondary")];
+        cfg.routing
+            .provider_tiers
+            .insert(ProviderId::from("secondary"), 2);
+        cfg.firewall.policy = FirewallPolicy::Sanitize;
+        cfg.control_plane.enabled = true;
+        cfg.control_plane.gateway_key = Some("gw-key".to_string());
+        cfg.control_plane.cost_per_1k_micro_usd = 4321;
+        cfg.control_plane.model_pricing.insert(
+            "claude-sonnet".to_string(),
+            ModelPrice {
+                input_per_1k_micro_usd: 3000,
+                output_per_1k_micro_usd: 15000,
+            },
+        );
+        cfg.credits.markup_bps = 700;
+
+        let text = toml::to_string_pretty(&cfg).expect("serialize populated config");
+        let back: GatewayConfig = toml::from_str(&text).expect("re-parse populated config");
+
+        let openai = back.providers.openai.expect("openai survives");
+        assert_eq!(openai.all_keys(), vec!["sk-primary", "sk-a", "sk-b"]);
+        assert_eq!(openai.base_url, "https://proxy.example/v1");
+        assert_eq!(back.routing.default_provider, ProviderId::from("primary"));
+        assert_eq!(back.routing.fallback_chain.len(), 2);
+        assert_eq!(
+            back.routing.provider_tiers.get(&ProviderId::from("secondary")),
+            Some(&2)
+        );
+        assert_eq!(back.firewall.policy, FirewallPolicy::Sanitize);
+        assert!(back.control_plane.enabled);
+        assert_eq!(back.control_plane.gateway_key.as_deref(), Some("gw-key"));
+        assert_eq!(back.control_plane.cost_per_1k_micro_usd, 4321);
+        // The per-model price table survived and still resolves via longest-prefix.
+        assert_eq!(back.control_plane.cost_for("claude-sonnet-4-5", 1000, 1000), 18000);
+        assert_eq!(back.credits.markup_bps, 700);
     }
 }

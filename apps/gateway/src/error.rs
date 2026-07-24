@@ -137,9 +137,11 @@ impl IntoResponse for GatewayError {
                 "provider_rate_limited",
                 "Upstream provider rate limit reached. Please retry after a moment.",
             ),
-            GatewayError::CircuitOpen(provider) => {
-                (StatusCode::SERVICE_UNAVAILABLE, "circuit_open", provider.as_str())
-            }
+            GatewayError::CircuitOpen(provider) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "circuit_open",
+                provider.as_str(),
+            ),
             GatewayError::Overloaded(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "engine_overloaded",
@@ -198,5 +200,191 @@ impl IntoResponse for GatewayError {
         }
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AlertTier;
+
+    /// Read the JSON error envelope out of a `GatewayError` response.
+    async fn body_json(err: GatewayError) -> (StatusCode, serde_json::Value) {
+        let resp = err.into_response();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("error body must collect");
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("error body must be JSON");
+        (status, json)
+    }
+
+    /// The `error.{type,code}` fields are the stable wire contract clients match
+    /// on, so the full mapping is asserted per variant — status + type + code.
+    #[tokio::test]
+    async fn status_and_code_mapping_is_stable_per_variant() {
+        let cases: Vec<(GatewayError, StatusCode, &str)> = vec![
+            (
+                GatewayError::Unauthorized("bad key".into()),
+                StatusCode::UNAUTHORIZED,
+                "invalid_api_key",
+            ),
+            (
+                GatewayError::RateLimited,
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_exceeded",
+            ),
+            (
+                GatewayError::FirewallBlocked("ssn".into(), None),
+                StatusCode::FORBIDDEN,
+                "policy_violation",
+            ),
+            (
+                GatewayError::PolicyViolation("blocked".into()),
+                StatusCode::FORBIDDEN,
+                "policy_violation",
+            ),
+            (
+                GatewayError::NoProvider("gpt-9".into()),
+                StatusCode::NOT_FOUND,
+                "model_not_found",
+            ),
+            (
+                GatewayError::ProviderError("upstream 500".into()),
+                StatusCode::BAD_GATEWAY,
+                "provider_error",
+            ),
+            (
+                GatewayError::ProviderRateLimited {
+                    provider: "openai".into(),
+                    retry_after: Some(5),
+                    reset_at: None,
+                },
+                StatusCode::TOO_MANY_REQUESTS,
+                "provider_rate_limited",
+            ),
+            (
+                GatewayError::CircuitOpen("openai".into()),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "circuit_open",
+            ),
+            (
+                GatewayError::Overloaded("queue full".into()),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "engine_overloaded",
+            ),
+            (
+                GatewayError::BudgetExceeded(None),
+                StatusCode::PAYMENT_REQUIRED,
+                "budget_exceeded",
+            ),
+            (
+                GatewayError::InsufficientCredits,
+                StatusCode::PAYMENT_REQUIRED,
+                "insufficient_credits",
+            ),
+            (
+                GatewayError::AllProvidersUnavailable("all down".into()),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "all_providers_unavailable",
+            ),
+            (
+                GatewayError::BadRequest("nope".into()),
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+            ),
+            (
+                GatewayError::Internal(anyhow::anyhow!("boom")),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+            ),
+        ];
+
+        for (err, want_status, want_code) in cases {
+            let (status, json) = body_json(err).await;
+            assert_eq!(status, want_status, "status for code {want_code}");
+            assert_eq!(json["error"]["type"], want_code, "type field");
+            assert_eq!(json["error"]["code"], want_code, "code field");
+            assert!(
+                json["error"]["message"].is_string(),
+                "message must be present for {want_code}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn message_passthrough_uses_the_variant_string() {
+        // Variants carrying a caller-facing string surface it verbatim in message.
+        let (_, json) = body_json(GatewayError::Unauthorized("no header".into())).await;
+        assert_eq!(json["error"]["message"], "no header");
+    }
+
+    #[tokio::test]
+    async fn internal_error_does_not_leak_the_underlying_message() {
+        // Internal(anyhow) must be redacted to a generic message, never echoing the
+        // source error (which could carry secrets or internals).
+        let (_, json) = body_json(GatewayError::Internal(anyhow::anyhow!(
+            "db password=hunter2 leaked"
+        )))
+        .await;
+        assert_eq!(json["error"]["message"], "An internal error occurred.");
+    }
+
+    #[test]
+    fn from_provider_error_maps_generic_to_provider_error() {
+        let e: GatewayError = ryu_gw_providers::ProviderError::Provider("boom".into()).into();
+        match e {
+            GatewayError::ProviderError(msg) => assert_eq!(msg, "boom"),
+            other => panic!("expected ProviderError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_provider_error_preserves_rate_limit_signal_fields() {
+        // The rate-limit arm must survive intact so the pipeline can demote tiers /
+        // rotate accounts WITHOUT tripping the circuit breaker.
+        let e: GatewayError = ryu_gw_providers::ProviderError::RateLimited {
+            provider: "anthropic".into(),
+            retry_after: Some(12),
+            reset_at: Some(99),
+        }
+        .into();
+        match e {
+            GatewayError::ProviderRateLimited {
+                provider,
+                retry_after,
+                reset_at,
+            } => {
+                assert_eq!(provider, "anthropic");
+                assert_eq!(retry_after, Some(12));
+                assert_eq!(reset_at, Some(99));
+            }
+            other => panic!("expected ProviderRateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_alert_variant_stamps_no_policy_alert_header() {
+        // Only BudgetExceeded / FirewallBlocked carry a PolicyAlert; every other
+        // variant must leave the header absent.
+        let resp = GatewayError::ProviderError("x".into()).into_response();
+        assert!(resp.headers().get(POLICY_ALERT_HEADER).is_none());
+    }
+
+    #[test]
+    fn budget_exceeded_without_alert_stamps_no_header() {
+        // A budget stop with no attached alert (tier below Warn) writes no header.
+        let resp = GatewayError::BudgetExceeded(None).into_response();
+        assert_eq!(resp.status(), StatusCode::PAYMENT_REQUIRED);
+        assert!(resp.headers().get(POLICY_ALERT_HEADER).is_none());
+    }
+
+    #[test]
+    fn firewall_blocked_with_alert_stamps_header() {
+        let alert = PolicyAlert::firewall("block", AlertTier::Warn, "org1");
+        let resp = GatewayError::FirewallBlocked("blocked".into(), Some(alert)).into_response();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert!(resp.headers().get(POLICY_ALERT_HEADER).is_some());
     }
 }

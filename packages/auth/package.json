@@ -10,7 +10,8 @@
     }
   },
   "scripts": {
-    "backfill:orgs": "bun run scripts/backfill-personal-orgs.ts"
+    "backfill:orgs": "bun run scripts/backfill-personal-orgs.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

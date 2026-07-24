@@ -28,12 +28,12 @@ jobs:
       matrix:
         dir: [gateway, cli]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: apps/${{ matrix.dir }}
       - name: Build
@@ -48,7 +48,7 @@ jobs:
     name: gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Run gitleaks (CLI — no org license required)

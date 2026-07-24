@@ -413,3 +413,176 @@ async fn reconcile_budget(state: &SharedState) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::AuditEntry;
+    use crate::state::{AppState, SharedState};
+    use std::sync::Arc;
+
+    fn test_state() -> SharedState {
+        Arc::new(AppState::new_for_test_default())
+    }
+
+    /// A fully-defaulted audit row; tests override only the fields they exercise.
+    fn base_entry() -> AuditEntry {
+        AuditEntry {
+            id: 1,
+            timestamp: "2026-07-23T12:00:00".to_string(),
+            request_id: "req-1".to_string(),
+            api_key: "sk-xxxx".to_string(),
+            user_name: None,
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_hit: false,
+            latency_ms: 0,
+            eval_score: None,
+            error: None,
+            skill_ids: None,
+            session_id: None,
+            event_type: "model_call".to_string(),
+            backend: None,
+            command: None,
+            duration_ms: None,
+            exit_code: None,
+            user_id: None,
+            agent_id: None,
+            feature: None,
+            widget_instance_id: None,
+        }
+    }
+
+    #[test]
+    fn cost_micro_usd_uses_flat_rate() {
+        let state = test_state();
+        // Default control-plane rate is 2000 micro-USD / 1k combined tokens.
+        assert_eq!(cost_micro_usd(&state, 500, 500), 2000);
+        assert_eq!(cost_micro_usd(&state, 0, 0), 0);
+    }
+
+    #[test]
+    fn build_user_daily_skips_rows_without_a_user_id() {
+        let state = test_state();
+        // Two rows, neither carries a forwarded user_id ⇒ empty rollup (self-hosted).
+        let entries = vec![base_entry(), base_entry()];
+        assert!(build_user_daily(&state, &entries).is_empty());
+    }
+
+    #[test]
+    fn build_user_daily_aggregates_tokens_models_and_sessions_per_day() {
+        let state = test_state();
+        let mut a = base_entry();
+        a.user_id = Some("u1".to_string());
+        a.input_tokens = 100;
+        a.output_tokens = 50;
+        a.session_id = Some("s1".to_string());
+        a.feature = Some("chat".to_string());
+        a.duration_ms = Some(2500);
+
+        let mut b = base_entry();
+        b.user_id = Some("u1".to_string());
+        b.input_tokens = 20;
+        b.output_tokens = 10;
+        b.model = "claude".to_string();
+        b.session_id = Some("s2".to_string());
+        b.feature = Some("agent".to_string());
+        b.skill_ids = Some("skill-a, skill-b".to_string());
+
+        let rows = build_user_daily(&state, &[a, b]);
+        assert_eq!(rows.len(), 1, "same user + same UTC day ⇒ one bucket");
+        let r = &rows[0];
+        assert_eq!(r["userId"], "u1");
+        assert_eq!(r["day"], "2026-07-23");
+        assert_eq!(r["inputTokens"], 120);
+        assert_eq!(r["outputTokens"], 60);
+        assert_eq!(r["requestCount"], 2);
+        assert_eq!(r["sessionCount"], 2, "two distinct session ids");
+        assert_eq!(r["agentSeconds"], 2, "2500ms ⇒ 2 whole seconds");
+        // 180 tokens * 2000/1k = 360 micro-USD via the flat rate.
+        assert_eq!(r["costMicroUsd"], 360);
+        assert_eq!(r["byModel"]["gpt-4o"], 1);
+        assert_eq!(r["byModel"]["claude"], 1);
+        assert_eq!(r["bySkill"]["skill-a"], 1);
+        assert_eq!(r["bySkill"]["skill-b"], 1);
+        assert_eq!(r["byTransport"]["gateway"], 2);
+        assert_eq!(r["byFeature"]["chat"], 1);
+        assert_eq!(r["byFeature"]["agent"], 1);
+        // Untouched surfaces stay absent (sparse payload).
+        assert!(r["byFeature"].get("island").is_none());
+    }
+
+    #[test]
+    fn build_user_daily_splits_buckets_across_days() {
+        let state = test_state();
+        let mut day1 = base_entry();
+        day1.user_id = Some("u1".to_string());
+        day1.timestamp = "2026-07-23T23:59:00".to_string();
+        let mut day2 = base_entry();
+        day2.user_id = Some("u1".to_string());
+        day2.timestamp = "2026-07-24T00:01:00".to_string();
+        let rows = build_user_daily(&state, &[day1, day2]);
+        assert_eq!(rows.len(), 2, "same user, two UTC days ⇒ two buckets");
+    }
+
+    #[test]
+    fn build_user_daily_non_model_call_rows_do_not_count_as_requests() {
+        let state = test_state();
+        let mut exec = base_entry();
+        exec.user_id = Some("u1".to_string());
+        exec.event_type = "exec".to_string();
+        exec.input_tokens = 5;
+        exec.output_tokens = 5;
+        exec.duration_ms = Some(1000);
+        let rows = build_user_daily(&state, &[exec]);
+        let r = &rows[0];
+        // Tokens still fold in, but requestCount / byModel / cost are model_call-only.
+        assert_eq!(r["inputTokens"], 5);
+        assert_eq!(r["requestCount"], 0);
+        assert_eq!(r["costMicroUsd"], 0);
+        assert_eq!(r["agentSeconds"], 1);
+        assert!(r["byModel"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn predict_feature_emits_shown_and_zero_accepted() {
+        let state = test_state();
+        let mut p = base_entry();
+        p.user_id = Some("u1".to_string());
+        p.feature = Some("predict".to_string());
+        let rows = build_user_daily(&state, &[p]);
+        assert_eq!(rows[0]["byFeature"]["predict"]["shown"], 1);
+        assert_eq!(rows[0]["byFeature"]["predict"]["accepted"], 0);
+    }
+
+    #[test]
+    fn build_agent_daily_requires_both_user_and_agent_ids() {
+        let state = test_state();
+        let mut only_user = base_entry();
+        only_user.user_id = Some("u1".to_string());
+        let mut both = base_entry();
+        both.user_id = Some("u1".to_string());
+        both.agent_id = Some("a1".to_string());
+        both.input_tokens = 30;
+        both.output_tokens = 10;
+        both.session_id = Some("s1".to_string());
+
+        let rows = build_agent_daily(&state, &[only_user, both]);
+        assert_eq!(rows.len(), 1, "the user-only row is skipped");
+        let r = &rows[0];
+        assert_eq!(r["userId"], "u1");
+        assert_eq!(r["agentId"], "a1");
+        assert_eq!(r["inputTokens"], 30);
+        assert_eq!(r["outputTokens"], 10);
+        assert_eq!(r["requestCount"], 1);
+        assert_eq!(r["sessionCount"], 1);
+        // 40 tokens * 2000/1k = 80 micro-USD.
+        assert_eq!(r["costMicroUsd"], 80);
+        assert_eq!(r["byModel"]["gpt-4o"], 1);
+    }
+}

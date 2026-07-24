@@ -423,8 +423,7 @@ mod version_store_tests {
         let wf_id = format!("wftest{}", uuid::Uuid::new_v4().simple());
 
         // Snapshot returns metadata that echoes the label + workflow id.
-        let meta = save_workflow_version(&make_wf(&wf_id, "v1"), Some("first"))
-            .expect("save v1");
+        let meta = save_workflow_version(&make_wf(&wf_id, "v1"), Some("first")).expect("save v1");
         assert_eq!(meta.workflow_id, wf_id);
         assert_eq!(meta.label.as_deref(), Some("first"));
         assert_eq!(meta.name, "v1");
@@ -442,27 +441,22 @@ mod version_store_tests {
         assert_eq!(full.workflow.name, "v1");
 
         // Missing versions load as None rather than erroring.
-        assert!(
-            load_workflow_version(&wf_id, "wv_does_not_exist")
-                .expect("load missing")
-                .is_none()
-        );
+        assert!(load_workflow_version(&wf_id, "wv_does_not_exist")
+            .expect("load missing")
+            .is_none());
 
         // Exceeding the cap bounds retained history to exactly MAX.
         for i in 0..MAX_WORKFLOW_VERSIONS + 5 {
-            save_workflow_version(&make_wf(&wf_id, &format!("n{i}")), None)
-                .expect("save n");
+            save_workflow_version(&make_wf(&wf_id, &format!("n{i}")), None).expect("save n");
         }
         let bounded = list_workflow_versions(&wf_id).expect("list bounded");
         assert_eq!(bounded.len(), MAX_WORKFLOW_VERSIONS);
 
         // Delete clears the whole history.
         assert!(delete_workflow_versions(&wf_id).expect("delete"));
-        assert!(
-            list_workflow_versions(&wf_id)
-                .expect("list after delete")
-                .is_empty()
-        );
+        assert!(list_workflow_versions(&wf_id)
+            .expect("list after delete")
+            .is_empty());
         // Deleting an absent history is a no-op, not an error.
         assert!(!delete_workflow_versions(&wf_id).expect("delete again"));
     }

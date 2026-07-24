@@ -139,8 +139,10 @@ impl ComposioClient {
 
         if !resp.status().is_success() {
             let status = resp.status();
+            // The error body is third-party integration data (may carry PII);
+            // log only its size, never its content.
             let body = resp.text().await.unwrap_or_default();
-            warn!(action = action_name, %status, %body, "Composio action failed");
+            warn!(action = action_name, %status, body_len = body.len(), "Composio action failed");
             return Err(GatewayError::ProviderError(format!(
                 "Composio action {action_name} failed: {status}"
             )));

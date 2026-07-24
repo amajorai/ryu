@@ -19,6 +19,7 @@ import { Input } from "@ryu/ui/components/input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
+import { restartRyuCore } from "@/lib/tauri-bridge.ts";
 import {
 	SettingsGroup,
 	SettingsItem,
@@ -31,6 +32,7 @@ import {
 	type DataCategory,
 	type DataCounts,
 	fetchDataCounts,
+	resetNode,
 } from "@/src/lib/api/data-admin.ts";
 
 interface CategoryDef {
@@ -93,6 +95,46 @@ export function DangerZoneSettings() {
 	const [active, setActive] = useState<CategoryDef | null>(null);
 	const [typed, setTyped] = useState("");
 	const [busy, setBusy] = useState(false);
+
+	// Reset node: a full wipe of this node (own type-to-confirm on the node name,
+	// separate from the per-category deletes above).
+	const nodeName = getNode().name;
+	const [resetOpen, setResetOpen] = useState(false);
+	const [resetTyped, setResetTyped] = useState("");
+	const [resetBusy, setResetBusy] = useState(false);
+	const resetArmed = resetTyped.trim().toLowerCase() === nodeName.toLowerCase();
+
+	const runReset = async () => {
+		setResetBusy(true);
+		try {
+			const { restartRequired } = await resetNode(
+				toTarget(getNode()),
+				nodeName
+			);
+			sileo.success({
+				title: "Node reset",
+				description: restartRequired
+					? "Restarting to wipe and start fresh…"
+					: "This node has been reset.",
+			});
+			setResetOpen(false);
+			// The wipe runs at the next boot (Core can't delete open DB files live),
+			// so restart Core now to trigger it. Best-effort: if the restart call
+			// fails the marker is still armed and the next manual start will wipe.
+			if (restartRequired) {
+				await restartRyuCore().catch(() => undefined);
+			}
+		} catch (e) {
+			console.error("Failed to reset node", e);
+			sileo.error({
+				title: "Could not reset node",
+				description:
+					"Something went wrong. A node reset is not allowed on a shared node, and needs a connection to this node.",
+			});
+		} finally {
+			setResetBusy(false);
+		}
+	};
 
 	const {
 		data: counts,
@@ -193,6 +235,80 @@ export function DangerZoneSettings() {
 					</SettingsGroup>
 				)}
 			</SettingsSection>
+
+			<SettingsSection
+				caption="Wipe this entire node and start over: every chat, space, memory, session, download, and setting is permanently deleted and onboarding runs again. Only the node's encryption key is kept so it can boot. Useful for a completely fresh state during development."
+				title="Reset node"
+			>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Button
+								onClick={() => {
+									setResetTyped("");
+									setResetOpen(true);
+								}}
+								size="sm"
+								variant="destructive"
+							>
+								Reset node
+							</Button>
+						}
+						description={`Fully resets "${nodeName}" and restarts it`}
+						title="Reset node to a fresh state"
+					/>
+				</SettingsGroup>
+			</SettingsSection>
+
+			<AlertDialog
+				onOpenChange={(open) => {
+					if (!open) {
+						setResetOpen(false);
+					}
+				}}
+				open={resetOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Reset this node?</AlertDialogTitle>
+						<AlertDialogDescription>
+							This permanently deletes ALL data on{" "}
+							<span className="font-medium text-foreground">{nodeName}</span> —
+							every chat, space, memory, session, download, and setting — then
+							restarts it to a fresh, just-installed state. This cannot be
+							undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+
+					<div className="flex flex-col gap-1.5">
+						<span className="text-muted-foreground text-xs">
+							Type{" "}
+							<span className="font-medium text-foreground">{nodeName}</span> to
+							confirm.
+						</span>
+						<Input
+							autoComplete="off"
+							onChange={(e) => setResetTyped(e.target.value)}
+							placeholder={nodeName}
+							value={resetTyped}
+						/>
+					</div>
+
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancel</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={!resetArmed || resetBusy}
+							onClick={(e) => {
+								e.preventDefault();
+								runReset().catch(() => undefined);
+							}}
+							variant="destructive"
+						>
+							{resetBusy ? "Resetting…" : "Reset node"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 
 			<AlertDialog
 				onOpenChange={(open) => {

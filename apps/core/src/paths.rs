@@ -118,6 +118,74 @@ pub fn is_custom() -> bool {
     ryu_dir() != default_ryu_dir()
 }
 
+// ── Node reset ("wipe this node") ────────────────────────────────────────────
+//
+// A full node reset returns the node to a fresh, just-installed state: every
+// store DB, session, download, and preference under the data dir is deleted, so
+// the next start re-runs onboarding. It CANNOT be done live: the SQLite files are
+// open (a live delete corrupts the `-wal`/`-shm` sidecars, and on Windows an open
+// file can't be deleted at all). So the flow mirrors the data-path reset — the API
+// handler only drops a marker and asks the desktop to restart Core; the actual
+// wipe runs at the very start of the next boot, before any store opens.
+
+/// Marker filename requesting a wipe on the next Core start (see [`request_node_reset`]).
+const RESET_MARKER: &str = ".reset-pending";
+
+/// Files inside the data dir that a reset must PRESERVE. The encryption-key custody
+/// files live in the data dir when no OS keychain is available; deleting them would
+/// change the node's identity and (on keychain-less machines) orphan the key needed
+/// to boot. Everything else — every DB, download, and cache — is wiped.
+const RESET_PRESERVE: &[&str] = &["master.key", "memory.key"];
+
+/// Path of the reset marker inside the active data dir.
+pub fn reset_marker_path() -> PathBuf {
+    ryu_dir().join(RESET_MARKER)
+}
+
+/// Request a full node reset on the next Core start. Best-effort creates the data
+/// dir first so the marker can be written even on an otherwise-empty install.
+pub fn request_node_reset() -> std::io::Result<()> {
+    let dir = ryu_dir();
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join(RESET_MARKER), b"1")
+}
+
+/// If a reset was requested, wipe every entry in the data dir except the key
+/// custody files, then clear the marker. MUST run at startup BEFORE any store
+/// opens its DB. Idempotent and best-effort: a partial wipe still leaves the node
+/// bootable (a fresh key is regenerated only if none survived).
+pub fn apply_pending_reset() {
+    let dir = ryu_dir();
+    if dir.join(RESET_MARKER).exists() {
+        wipe_dir_preserving_keys(&dir);
+    }
+}
+
+/// Delete every entry in `dir` except the reset marker and the key custody files,
+/// then remove the marker. Split out from [`apply_pending_reset`] so it is testable
+/// against an arbitrary directory (the public entry point is bound to the cached
+/// `ryu_dir()`).
+fn wipe_dir_preserving_keys(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Keep the marker (removed last) and the key custody files.
+            if name_str == RESET_MARKER || RESET_PRESERVE.contains(&name_str.as_ref()) {
+                continue;
+            }
+            let path = entry.path();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let _ = if is_dir {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+        }
+    }
+    let _ = std::fs::remove_file(dir.join(RESET_MARKER));
+}
+
 // ── Sizing / free space (used by the data-path API + relocate validation) ────────
 
 /// Recursively sum the byte size of a directory tree. Best-effort: unreadable
@@ -218,6 +286,31 @@ mod tests {
     fn empty_pointer_serializes_without_data_dir() {
         let json = serde_json::to_string(&DataPathPointer::default()).unwrap();
         assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn reset_wipes_all_but_keys() {
+        let base = std::env::temp_dir().join("ryu-reset-test");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        // Data to wipe: a DB file and a nested store dir.
+        std::fs::write(base.join("conversations.db"), b"x").unwrap();
+        std::fs::create_dir_all(base.join("models")).unwrap();
+        std::fs::write(base.join("models").join("a.bin"), b"y").unwrap();
+        // Custody files to preserve.
+        std::fs::write(base.join("master.key"), b"k").unwrap();
+        std::fs::write(base.join("memory.key"), b"m").unwrap();
+        // The marker that arms the wipe.
+        std::fs::write(base.join(RESET_MARKER), b"1").unwrap();
+
+        wipe_dir_preserving_keys(&base);
+
+        assert!(!base.join("conversations.db").exists());
+        assert!(!base.join("models").exists());
+        assert!(!base.join(RESET_MARKER).exists());
+        assert!(base.join("master.key").exists());
+        assert!(base.join("memory.key").exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

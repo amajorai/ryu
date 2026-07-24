@@ -341,7 +341,10 @@ mod tests {
         // loss). Assert the contract it checks.
         let source = project(&database_doc()).unwrap();
         let value: Value = serde_json::from_str(&source).unwrap();
-        assert!(value["columns"].is_array(), "parseDatabaseDoc requires this");
+        assert!(
+            value["columns"].is_array(),
+            "parseDatabaseDoc requires this"
+        );
         assert!(value["rows"].is_array(), "parseDatabaseDoc requires this");
         assert!(value["views"].is_array());
     }

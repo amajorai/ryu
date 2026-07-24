@@ -176,7 +176,12 @@ pub async fn sandbox_tick(
     .await;
 
     // Step 6 — verdict, in the frozen priority order.
-    let verdict = compute_verdict(accrued, body.per_run_budget_micro_usd, balance, billed_micro);
+    let verdict = compute_verdict(
+        accrued,
+        body.per_run_budget_micro_usd,
+        balance,
+        billed_micro,
+    );
 
     // Step 7 — a kill verdict ends the run; evict its accrual state.
     if matches!(

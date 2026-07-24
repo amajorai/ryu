@@ -16,11 +16,7 @@
 //! rather than silently passing. `moderation` has no pattern set in the firewall
 //! today, so it is accepted but not enforced (a documented no-op).
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    Json,
-};
+use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

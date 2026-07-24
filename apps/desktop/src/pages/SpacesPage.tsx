@@ -57,12 +57,10 @@ export default function SpacesPage({
 	// loaded list (spaces may still be loading on mount).
 	const initialApplied = useRef(false);
 
-	// The auto-created "Meetings" space is surfaced via the Meetings sidebar
-	// section, so hide it from the general Spaces list (its docs are still
-	// openable directly by id from a meeting's "Open notes").
-	const visibleSpaces = spaces.filter(
-		(s) => s.name !== "Meetings" && s.name !== "Canvas"
-	);
+	// The "Meetings" system space is shown in the general Spaces list again (it is
+	// its own dedicated space) in addition to the Meetings sidebar section. Canvas
+	// stays hidden here because it has its own dedicated app surface.
+	const visibleSpaces = spaces.filter((s) => s.name !== "Canvas");
 	const selected = visibleSpaces.find((s) => s.id === selectedId) ?? null;
 
 	// Selected-space detail state, hoisted out of the (now presentational) detail.

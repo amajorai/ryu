@@ -34,10 +34,17 @@ pub struct ImportedTool {
     pub method: String,
     /// Base URL + path, keeping `{name}` path placeholders for run_http_tool.
     pub url: String,
-    /// Arg names sent as request headers (auth + `in: header` params).
+    /// Arg names sent as request headers (`in: header` params). Auth headers are
+    /// NOT here — they live in [`secret_headers`], sourced server-side.
+    ///
+    /// [`secret_headers`]: ImportedTool::secret_headers
     pub header_params: Vec<String>,
+    /// Auth headers whose VALUES are injected server-side and never model-visible:
+    /// wire header name → `env:RYU_TOOL_<SLUG>_AUTH` source (the connect flow
+    /// populates that env). Keeps the token out of `input_schema`/`header_params`.
+    pub secret_headers: std::collections::BTreeMap<String, String>,
     /// JSON Schema (`type: object`) for discovery; unions path/query/header params
-    /// and the JSON request body's properties.
+    /// and the JSON request body's properties. NEVER contains an auth header.
     pub input_schema: Value,
 }
 
@@ -77,7 +84,8 @@ pub fn spec_to_api(spec: &Value, cap: usize) -> Result<ImportedApi, String> {
         .unwrap_or("API")
         .to_owned();
     let base_url = resolve_base_url(spec).ok_or("no resolvable server/base URL in spec")?;
-    let domain = host_of(&base_url).ok_or_else(|| format!("could not parse host from '{base_url}'"))?;
+    let domain =
+        host_of(&base_url).ok_or_else(|| format!("could not parse host from '{base_url}'"))?;
     let schemes = security_schemes(spec);
     let global_security = spec.get("security");
 
@@ -155,8 +163,14 @@ fn collect_params(raw: Option<&Value>) -> Vec<Param> {
         out.push(Param {
             name: name.to_owned(),
             location: location.to_owned(),
-            required: obj.get("required").and_then(Value::as_bool).unwrap_or(false),
-            schema: obj.get("schema").cloned().unwrap_or(json!({ "type": "string" })),
+            required: obj
+                .get("required")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            schema: obj
+                .get("schema")
+                .cloned()
+                .unwrap_or(json!({ "type": "string" })),
             description: obj
                 .get("description")
                 .and_then(Value::as_str)
@@ -199,6 +213,8 @@ fn build_tool(
     let mut properties = Map::new();
     let mut required: Vec<String> = Vec::new();
     let mut header_params: Vec<String> = Vec::new();
+    let mut secret_headers: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
 
     // Merge path-level then operation-level params (op wins on name+in collision).
     let mut params = Vec::new();
@@ -253,13 +269,16 @@ fn build_tool(
         }
     }
 
-    // Security → auth args. A header apiKey / http-bearer scheme becomes a header
-    // param the identity vault fills; a query apiKey is a normal query arg.
+    // Security → auth headers. A header apiKey / http-bearer scheme becomes a
+    // SERVER-SIDE secret header (never a model-visible arg); a query apiKey stays a
+    // normal query arg. The secret's value is sourced from `env:RYU_TOOL_<SLUG>_AUTH`,
+    // which the connect flow populates — the token never enters `input_schema`.
     apply_security(
         op.get("security").or(global_security),
         schemes,
+        &slug,
         &mut properties,
-        &mut header_params,
+        &mut secret_headers,
     );
 
     let input_schema = json!({
@@ -275,20 +294,44 @@ fn build_tool(
         method: method.to_ascii_uppercase(),
         url: format!("{}{}", base_url.trim_end_matches('/'), path),
         header_params,
+        secret_headers,
         input_schema,
     })
 }
 
-/// Map the operation's security requirements onto header/query auth args.
+/// The per-tool env var name the connect flow populates with an imported tool's
+/// auth header value: `RYU_TOOL_<SLUG>_AUTH` (slug uppercased, non-alnum → `_`).
+fn auth_env_var(slug: &str) -> String {
+    let up: String = slug
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("RYU_TOOL_{up}_AUTH")
+}
+
+/// Map the operation's security requirements onto auth args. A HEADER apiKey or an
+/// http-bearer scheme becomes a SERVER-SIDE [`ImportedTool::secret_headers`] entry
+/// (wire header name → `env:RYU_TOOL_<SLUG>_AUTH`) so the token is NEVER exposed in
+/// the model-visible `input_schema`/`header_params`. A QUERY apiKey stays a normal
+/// (non-secret) query arg — it is a locator, not a bearer secret, and lowers onto
+/// the query string like any other arg.
 fn apply_security(
     security: Option<&Value>,
     schemes: &Map<String, Value>,
+    slug: &str,
     properties: &mut Map<String, Value>,
-    header_params: &mut Vec<String>,
+    secret_headers: &mut std::collections::BTreeMap<String, String>,
 ) {
     let Some(reqs) = security.and_then(Value::as_array) else {
         return;
     };
+    let source = format!("env:{}", auth_env_var(slug));
     for req in reqs {
         let Some(obj) = req.as_object() else { continue };
         for scheme_name in obj.keys() {
@@ -304,26 +347,28 @@ fn apply_security(
                         .and_then(Value::as_str)
                         .unwrap_or("api_key")
                         .to_owned();
-                    properties.entry(name.clone()).or_insert_with(|| {
-                        json!({ "type": "string", "description": "API key" })
-                    });
-                    if loc == "header" && !header_params.iter().any(|h| h == &name) {
-                        header_params.push(name);
+                    if loc == "header" {
+                        // Header apiKey = a secret, sourced server-side. Not a model arg.
+                        secret_headers.entry(name).or_insert_with(|| source.clone());
+                    } else {
+                        // Query apiKey stays a normal query arg.
+                        properties.entry(name).or_insert_with(
+                            || json!({ "type": "string", "description": "API key" }),
+                        );
                     }
                 }
                 "http" => {
                     let bearer = scheme
                         .get("scheme")
                         .and_then(Value::as_str)
-                        .map_or(true, |s| s.eq_ignore_ascii_case("bearer"));
+                        .is_none_or(|s| s.eq_ignore_ascii_case("bearer"));
                     if bearer {
-                        let name = "Authorization".to_owned();
-                        properties.entry(name.clone()).or_insert_with(|| {
-                            json!({ "type": "string", "description": "Bearer token (include the 'Bearer ' prefix)" })
-                        });
-                        if !header_params.iter().any(|h| h == &name) {
-                            header_params.push(name);
-                        }
+                        // Bearer token = a secret header, sourced server-side. The
+                        // env value must include the `Bearer ` prefix (spliced
+                        // verbatim by `run_http_tool`).
+                        secret_headers
+                            .entry("Authorization".to_owned())
+                            .or_insert_with(|| source.clone());
                     }
                 }
                 _ => {}
@@ -472,13 +517,24 @@ mod tests {
         let get = api.tools.iter().find(|t| t.slug == "getpet").unwrap();
         assert_eq!(get.method, "GET");
         assert_eq!(get.url, "https://api.petstore.example/v1/pets/{petId}");
-        // apiKey header from the security scheme is routed to headers.
-        assert!(get.header_params.contains(&"X-API-Key".to_owned()));
+        // apiKey HEADER from the security scheme is routed to secret_headers
+        // (server-side sourced), NOT to header_params or the model-visible schema.
+        assert!(!get.header_params.contains(&"X-API-Key".to_owned()));
+        assert_eq!(
+            get.secret_headers.get("X-API-Key").map(String::as_str),
+            Some("env:RYU_TOOL_GETPET_AUTH")
+        );
         let props = get.input_schema.pointer("/properties").unwrap();
         assert!(props.get("petId").is_some());
         assert!(props.get("verbose").is_some());
-        assert!(props.get("X-API-Key").is_some());
-        let required = get.input_schema.pointer("/required").unwrap().as_array().unwrap();
+        // The auth header must NOT leak into the model-visible input schema.
+        assert!(props.get("X-API-Key").is_none());
+        let required = get
+            .input_schema
+            .pointer("/required")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert!(required.iter().any(|r| r == "petId"));
     }
 
@@ -491,7 +547,12 @@ mod tests {
         let props = post.input_schema.pointer("/properties").unwrap();
         assert!(props.get("name").is_some());
         // Body-declared `required` propagates.
-        let required = post.input_schema.pointer("/required").unwrap().as_array().unwrap();
+        let required = post
+            .input_schema
+            .pointer("/required")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert!(required.iter().any(|r| r == "name"));
     }
 

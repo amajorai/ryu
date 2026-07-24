@@ -17,7 +17,7 @@ const AMAJOR_HREF = "https://amajor.ai";
 const DEMO_HREF = "https://cal.com/jiaweing/ryu-demo";
 
 const HERO_TITLE =
-	"We help companies save time and money\nwith AI agents that do real work.";
+	"We scale companies to 24/7 private and secure AI agent-native ops without hiring, in minutes.";
 
 export default function Hero() {
 	return (

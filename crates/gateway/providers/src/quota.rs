@@ -136,3 +136,122 @@ fn now_secs() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limit_info_is_some_detects_any_field() {
+        assert!(!RateLimitInfo::default().is_some());
+        assert!(RateLimitInfo {
+            remaining: Some(1),
+            ..Default::default()
+        }
+        .is_some());
+        assert!(RateLimitInfo {
+            limit: Some(1),
+            ..Default::default()
+        }
+        .is_some());
+        assert!(RateLimitInfo {
+            reset_at: Some(1),
+            ..Default::default()
+        }
+        .is_some());
+        assert!(RateLimitInfo {
+            retry_after: Some(1),
+            ..Default::default()
+        }
+        .is_some());
+    }
+
+    #[test]
+    fn record_success_stores_reported_fields() {
+        let q = ProviderQuotas::new();
+        q.record_success(
+            "openai",
+            &RateLimitInfo {
+                remaining: Some(500),
+                limit: Some(1000),
+                reset_at: Some(now_secs() + 60),
+                retry_after: None,
+            },
+        );
+        let snap = q.snapshot();
+        assert_eq!(snap["openai"]["remaining"], json!(500));
+        assert_eq!(snap["openai"]["limit"], json!(1000));
+        assert_eq!(snap["openai"]["rate_limited"], json!(false));
+        // reset_in_secs is a live countdown (<= 60, > 0) derived from reset_at.
+        let reset_in = snap["openai"]["reset_in_secs"].as_u64().unwrap();
+        assert!(reset_in <= 60 && reset_in > 0, "reset_in={reset_in}");
+    }
+
+    #[test]
+    fn record_success_partial_headers_do_not_wipe_prior_values() {
+        let q = ProviderQuotas::new();
+        q.record_success(
+            "p",
+            &RateLimitInfo {
+                remaining: Some(500),
+                limit: Some(1000),
+                ..Default::default()
+            },
+        );
+        // A later success reports only `remaining` — `limit` must survive.
+        q.record_success(
+            "p",
+            &RateLimitInfo {
+                remaining: Some(400),
+                ..Default::default()
+            },
+        );
+        let snap = q.snapshot();
+        assert_eq!(snap["p"]["remaining"], json!(400));
+        assert_eq!(snap["p"]["limit"], json!(1000));
+    }
+
+    #[test]
+    fn record_rate_limited_sets_flag_and_zero_remaining() {
+        let q = ProviderQuotas::new();
+        let reset = now_secs() + 30;
+        q.record_rate_limited("anthropic", Some(15), Some(reset));
+        let snap = q.snapshot();
+        assert_eq!(snap["anthropic"]["rate_limited"], json!(true));
+        assert_eq!(snap["anthropic"]["remaining"], json!(0));
+        assert_eq!(snap["anthropic"]["retry_after"], json!(15));
+        assert_eq!(snap["anthropic"]["reset_at"], json!(reset));
+    }
+
+    #[test]
+    fn success_after_rate_limit_clears_flag_and_retry_after() {
+        let q = ProviderQuotas::new();
+        q.record_rate_limited("p", Some(20), None);
+        q.record_success(
+            "p",
+            &RateLimitInfo {
+                remaining: Some(100),
+                ..Default::default()
+            },
+        );
+        let snap = q.snapshot();
+        assert_eq!(snap["p"]["rate_limited"], json!(false));
+        // record_success unconditionally clears retry_after.
+        assert_eq!(snap["p"]["retry_after"], Value::Null);
+    }
+
+    #[test]
+    fn snapshot_reset_in_secs_saturates_to_zero_for_past_reset() {
+        let q = ProviderQuotas::new();
+        // A reset instant in the past must not underflow — saturating_sub → 0.
+        q.record_rate_limited("p", Some(1), Some(1));
+        let snap = q.snapshot();
+        assert_eq!(snap["p"]["reset_in_secs"], json!(0));
+    }
+
+    #[test]
+    fn snapshot_of_empty_store_is_empty_object() {
+        let q = ProviderQuotas::new();
+        assert_eq!(q.snapshot(), json!({}));
+    }
+}

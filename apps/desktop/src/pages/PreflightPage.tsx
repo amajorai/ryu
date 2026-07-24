@@ -454,11 +454,15 @@ export function PreflightPage({
 
 	return (
 		<div
+			// Full-window (non-embedded) boot screen renders outside Layout, so it
+			// has no TitleBar drag region — mark the background draggable so the
+			// window can still be moved. Embedded (inside Settings) must not drag.
 			className={cn(
 				embedded
 					? "flex w-full flex-col gap-5"
 					: "flex h-full w-full items-center justify-center overflow-y-auto bg-background p-6"
 			)}
+			data-tauri-drag-region={embedded ? undefined : true}
 		>
 			<div
 				className={cn("flex w-full flex-col gap-5", !embedded && "max-w-md")}

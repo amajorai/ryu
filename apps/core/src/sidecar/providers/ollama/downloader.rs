@@ -241,3 +241,98 @@ impl Default for OllamaDownloader {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn tar_of(name: &str, data: &[u8]) -> Vec<u8> {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        let mut builder = tar::Builder::new(Vec::new());
+        builder.append_data(&mut header, name, data).unwrap();
+        builder.into_inner().unwrap()
+    }
+
+    fn make_tar_gz(name: &str, data: &[u8]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        let mut enc = GzEncoder::new(Vec::new(), Compression::fast());
+        enc.write_all(&tar_of(name, data)).unwrap();
+        enc.finish().unwrap()
+    }
+
+    fn make_tar_zst(name: &str, data: &[u8]) -> Vec<u8> {
+        let tar = tar_of(name, data);
+        zstd::encode_all(std::io::Cursor::new(tar), 1).unwrap()
+    }
+
+    fn make_zip(name: &str, data: &[u8]) -> Vec<u8> {
+        use std::io::Cursor;
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+        let mut zw = ZipWriter::new(Cursor::new(Vec::new()));
+        zw.start_file(name, FileOptions::default()).unwrap();
+        zw.write_all(data).unwrap();
+        zw.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn asset_info_pairs_filename_with_format() {
+        let (asset, fmt) = asset_info();
+        assert!(!asset.is_empty());
+        assert!(["zip", "tgz", "zst"].contains(&fmt));
+        // The filename extension is consistent with the declared archive format.
+        match fmt {
+            "zip" => assert!(asset.ends_with(".zip")),
+            "tgz" => assert!(asset.ends_with(".tgz")),
+            "zst" => assert!(asset.ends_with(".tar.zst")),
+            other => panic!("unexpected format {other}"),
+        }
+    }
+
+    #[test]
+    fn extract_from_zip_finds_binary_by_suffix() {
+        // Ollama's zip nests the binary; the extractor matches on a name suffix.
+        let data = make_zip("ollama/ollama.exe", b"win-bin");
+        let out = OllamaDownloader::extract_from_zip(&data, "ollama.exe").unwrap();
+        assert_eq!(out, b"win-bin");
+    }
+
+    #[test]
+    fn extract_from_zip_missing_errors() {
+        let data = make_zip("readme.txt", b"hi");
+        let err = OllamaDownloader::extract_from_zip(&data, "ollama").unwrap_err();
+        assert!(err.to_string().contains("ollama"));
+    }
+
+    #[test]
+    fn extract_from_tar_gz_finds_exact_basename() {
+        let data = make_tar_gz("bin/ollama", b"posix-bin");
+        let out = OllamaDownloader::extract_from_tar_gz(&data, "ollama").unwrap();
+        assert_eq!(out, b"posix-bin");
+    }
+
+    #[test]
+    fn extract_from_tar_gz_missing_errors() {
+        let data = make_tar_gz("bin/other", b"x");
+        assert!(OllamaDownloader::extract_from_tar_gz(&data, "ollama").is_err());
+    }
+
+    #[test]
+    fn extract_from_tar_zst_finds_binary() {
+        let data = make_tar_zst("bin/ollama", b"zst-bin");
+        let out = OllamaDownloader::extract_from_tar_zst(&data, "ollama").unwrap();
+        assert_eq!(out, b"zst-bin");
+    }
+
+    #[test]
+    fn extract_from_tar_zst_missing_errors() {
+        let data = make_tar_zst("bin/other", b"x");
+        let err = OllamaDownloader::extract_from_tar_zst(&data, "ollama").unwrap_err();
+        assert!(err.to_string().contains("ollama"));
+    }
+}

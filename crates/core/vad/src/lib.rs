@@ -327,10 +327,7 @@ pub const SILERO_MODEL_SHA256: &str =
 /// data dir through the installed [`VadHost`] (panics if the host is not yet set —
 /// only reachable post-boot).
 pub fn silero_model_path() -> std::path::PathBuf {
-    host()
-        .ryu_dir()
-        .join("models")
-        .join(SILERO_MODEL_FILE)
+    host().ryu_dir().join("models").join(SILERO_MODEL_FILE)
 }
 
 /// Download spec for the Silero VAD model (used by onboarding). Honors the

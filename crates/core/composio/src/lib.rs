@@ -28,6 +28,4 @@ pub mod host;
 pub mod triggers;
 
 pub use host::{set_global_host, ComposioHost};
-pub use triggers::{
-    set_global, ComposioTriggerStore, TriggerSubscription,
-};
+pub use triggers::{set_global, ComposioTriggerStore, TriggerSubscription};

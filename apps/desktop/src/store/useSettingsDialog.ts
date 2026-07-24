@@ -5,6 +5,10 @@ import { create } from "zustand";
 // command palette, deep links — can request a specific section without
 // importing the dialog component (which would pull the whole settings UI into
 // those entry points). Mirrors useGatewayDialog.ts.
+// Desktop-client / user-account sections only. Node-level tabs (meetings, memory,
+// privacy, storage, updates, email-alerts, connections, health, predict, tasks) and
+// the Danger Zone moved to the Gateway dialog (see `GatewaySection`); per-app/plugin
+// user-scoped tabs are dynamic and use `app:<id>` / `plugin:<id>` values.
 export type SettingsSectionValue =
 	| "general"
 	| "account"
@@ -12,8 +16,6 @@ export type SettingsSectionValue =
 	| "keyboard"
 	| "island"
 	| "shadow"
-	| "plugins"
-	| "connections"
 	| "integrations"
 	| "sessions"
 	| "authorized-apps"
@@ -21,20 +23,10 @@ export type SettingsSectionValue =
 	| "referrals"
 	| "teams"
 	| "credits"
-	| "updates"
 	| "voice"
-	| "memory"
 	| "goals"
 	| "double-check"
-	| "predict"
-	| "meetings"
-	| "quests"
-	| "email-alerts"
-	| "privacy"
-	| "storage"
-	| "health"
-	| "experimental"
-	| "danger";
+	| "experimental";
 
 interface SettingsDialogState {
 	/** Whether the App Settings dialog is open. */

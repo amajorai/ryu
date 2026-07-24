@@ -738,10 +738,7 @@ pub fn register_sidecar_provider(
     }
 
     let mut patch = Map::new();
-    patch.insert(
-        "baseUrl".to_owned(),
-        Value::String(spec.base_url(port)),
-    );
+    patch.insert("baseUrl".to_owned(), Value::String(spec.base_url(port)));
     patch.insert(
         "api".to_owned(),
         Value::String(spec.effective_api().to_owned()),
@@ -2253,16 +2250,29 @@ mod tests {
             // path in settings.json "extensions".
             ensure_pi_mcp_extension().expect("first ensure");
             let ext_path = pi_mcp_extension_path();
-            assert!(ext_path.exists(), "extension file is shipped to the managed dir");
+            assert!(
+                ext_path.exists(),
+                "extension file is shipped to the managed dir"
+            );
             let shipped = fs::read_to_string(&ext_path).unwrap();
-            assert_eq!(shipped, PI_MCP_EXTENSION_SRC, "shipped source matches the embed");
+            assert_eq!(
+                shipped, PI_MCP_EXTENSION_SRC,
+                "shipped source matches the embed"
+            );
 
             let abs = ext_path.to_string_lossy().into_owned();
             let settings = read_settings();
-            let exts = settings.extra.get("extensions").and_then(Value::as_array).cloned();
+            let exts = settings
+                .extra
+                .get("extensions")
+                .and_then(Value::as_array)
+                .cloned();
             let exts = exts.expect("extensions array present");
             assert!(
-                exts.iter().filter(|v| v.as_str() == Some(abs.as_str())).count() == 1,
+                exts.iter()
+                    .filter(|v| v.as_str() == Some(abs.as_str()))
+                    .count()
+                    == 1,
                 "registered exactly once"
             );
 
@@ -2276,7 +2286,10 @@ mod tests {
                 .cloned()
                 .expect("extensions array present");
             assert_eq!(
-                exts2.iter().filter(|v| v.as_str() == Some(abs.as_str())).count(),
+                exts2
+                    .iter()
+                    .filter(|v| v.as_str() == Some(abs.as_str()))
+                    .count(),
                 1,
                 "second ensure does not duplicate the registration"
             );
@@ -2310,7 +2323,10 @@ mod tests {
     #[test]
     fn explicit_cache_control_format_matches_claude_and_qwen_only() {
         // Explicit Anthropic-style cache_control families.
-        assert_eq!(explicit_cache_control_format("claude-sonnet-4"), Some("anthropic"));
+        assert_eq!(
+            explicit_cache_control_format("claude-sonnet-4"),
+            Some("anthropic")
+        );
         assert_eq!(
             explicit_cache_control_format("anthropic/claude-3.5-sonnet"),
             Some("anthropic")
@@ -2323,7 +2339,10 @@ mod tests {
         assert_eq!(explicit_cache_control_format("gpt-4o"), None);
         assert_eq!(explicit_cache_control_format("openai/gpt-4o"), None);
         assert_eq!(explicit_cache_control_format("google/gemini-2.5-pro"), None);
-        assert_eq!(explicit_cache_control_format("deepseek/deepseek-chat"), None);
+        assert_eq!(
+            explicit_cache_control_format("deepseek/deepseek-chat"),
+            None
+        );
         assert_eq!(explicit_cache_control_format("x-ai/grok-4"), None);
     }
 
@@ -2444,9 +2463,7 @@ mod tests {
             assert_eq!(entry["apiKey"], "ext-tok");
 
             assert!(deregister_sidecar_provider("com.example.bridge", "chatgpt-bridge").unwrap());
-            assert!(read_models()["providers"]
-                .get("chatgpt-bridge")
-                .is_none());
+            assert!(read_models()["providers"].get("chatgpt-bridge").is_none());
         });
     }
 
@@ -2485,7 +2502,8 @@ mod tests {
             };
             register_sidecar_provider("com.first.plugin", &spec, 7001, None).unwrap();
 
-            let err = register_sidecar_provider("com.second.plugin", &spec, 7002, None).unwrap_err();
+            let err =
+                register_sidecar_provider("com.second.plugin", &spec, 7002, None).unwrap_err();
             assert!(
                 err.to_string().contains("already owned by"),
                 "expected ownership refusal, got: {err}"
@@ -2513,8 +2531,8 @@ mod tests {
                     base_path: None,
                     models: vec![],
                 };
-                let err = register_sidecar_provider("com.example.bridge", &spec, 7003, None)
-                    .unwrap_err();
+                let err =
+                    register_sidecar_provider("com.example.bridge", &spec, 7003, None).unwrap_err();
                 assert!(
                     err.to_string().contains("not a safe token"),
                     "id {bad:?} should be refused, got: {err}"
@@ -2543,7 +2561,8 @@ mod tests {
                 base_path: None,
                 models: vec![],
             };
-            let err = register_sidecar_provider("com.example.bridge", &spec, 7004, None).unwrap_err();
+            let err =
+                register_sidecar_provider("com.example.bridge", &spec, 7004, None).unwrap_err();
             assert!(
                 err.to_string().contains("unowned provider"),
                 "expected unowned refusal, got: {err}"

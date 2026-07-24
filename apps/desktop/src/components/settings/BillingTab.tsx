@@ -4,6 +4,8 @@ import { settingsApi, useSubscription } from "@ryu/settings";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
+import type { PlanTier } from "@ryu/ui/components/plan-badge";
+import { PlanBadge } from "@ryu/ui/components/plan-badge";
 import {
 	Select,
 	SelectContent,
@@ -227,23 +229,6 @@ function LowBalanceAlertCard() {
 	);
 }
 
-function PlanBadge({ plan }: { plan: string }) {
-	const variants: Record<string, string> = {
-		Lifetime: "bg-warning text-warning dark:bg-warning/30 dark:text-warning",
-		Pro: "bg-info text-info dark:bg-info/30 dark:text-info",
-		Trial:
-			"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
-		Free: "bg-muted text-muted-foreground",
-	};
-	return (
-		<span
-			className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs ${variants[plan] ?? variants.Free}`}
-		>
-			{plan}
-		</span>
-	);
-}
-
 /**
  * Desktop trial + license access (epic #496, Unit C1). Surfaces the trial
  * countdown, the resolved access state, and a "manage license/upgrade" action.
@@ -296,7 +281,7 @@ function DesktopAccessSection() {
 					}
 					title={
 						<span className="flex items-center gap-2">
-							<PlanBadge plan={verdict.proUnlocked ? "Pro" : "Free"} />
+							<PlanBadge plan={verdict.proUnlocked ? "pro" : null} />
 							<span className="font-normal text-muted-foreground text-xs">
 								{reasonLabel[verdict.reason]}
 							</span>
@@ -654,13 +639,13 @@ export function BillingTab() {
 		queryFn: settingsApi.billing.getInvoices,
 	});
 
-	const plan = isLifetime
-		? "Lifetime"
+	const plan: PlanTier | null = isLifetime
+		? "desktop-license"
 		: isTrialing
-			? "Trial"
+			? "pro"
 			: hasProSubscription
-				? "Pro"
-				: "Free";
+				? "pro"
+				: null;
 
 	const handleManageSubscription = async () => {
 		setPendingAction("manage");

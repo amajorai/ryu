@@ -15,6 +15,7 @@ import {
 	Sun01Icon,
 	WebhookIcon,
 } from "@hugeicons/core-free-icons";
+import { renderTemplate } from "@ryu/app-host/views";
 import { CommandPalette as SharedCommandPalette } from "@ryu/command/CommandPalette";
 import type { CommandAction } from "@ryu/command/types";
 import { useHotkey } from "@ryu/hotkeys/react";
@@ -39,6 +40,7 @@ import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { contributionRegistry } from "@/src/contributions/registry.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
+import { useContributedSectionItems } from "@/src/hooks/useContributedCommands.ts";
 import {
 	pluginCompanionPath,
 	usePluginContributions,
@@ -134,10 +136,18 @@ export function CommandPalette() {
 		url: activeNode.url,
 		token: activeNode.token ?? null,
 	};
-	// Enabled plugins' declarative contributions (companions + slash commands),
-	// shared via react-query cache with the route-registration hook in Layout.
-	const { companions: pluginCompanions, slash_commands: pluginCommands } =
-		usePluginContributions();
+	// Enabled plugins' declarative contributions (companions + slash commands +
+	// app-registered sidebar buttons), shared via react-query cache with the
+	// route-registration hook in Layout.
+	const {
+		companions: pluginCompanions,
+		slash_commands: pluginCommands,
+		sidebar_buttons: contributedButtons,
+	} = usePluginContributions();
+	// Live items of every app-contributed sidebar section (meeting notes, canvas
+	// boards, …), fetched only while the palette is open so they're searchable
+	// here without the shell hardcoding a single list.
+	const contributedSectionItems = useContributedSectionItems(open);
 	const [query, setQuery] = useState("");
 	const [pendingMemory, setPendingMemory] = useState<string | null>(null);
 	const [shadowResults, setShadowResults] = useState<ShadowSearchResult[]>([]);
@@ -394,6 +404,49 @@ export function CommandPalette() {
 				icon,
 				onSelect: () => handleNavigate(to, label),
 			});
+		}
+
+		// App-registered sidebar buttons (Home, Memory, …) — navigable entries from
+		// the contributions feed, so the palette isn't a second hardcoded nav list.
+		// Skip any whose target already appears in NAV_ITEMS to avoid a dupe row.
+		const navTargets = new Set<string>(NAV_ITEMS.map((n) => n.to));
+		for (const button of contributedButtons) {
+			if (navTargets.has(button.target)) {
+				continue;
+			}
+			items.push({
+				id: `nav-contrib-${button.plugin}-${button.id}`,
+				group: "Navigation",
+				title: button.title,
+				value: `navigate ${button.title}`,
+				icon: ArrowRight01Icon,
+				onSelect: () => handleNavigate(button.target, button.title),
+			});
+		}
+
+		// App-registered sidebar sections' live items (meeting notes, canvas boards,
+		// …), each searchable and grouped under its section name — so the palette
+		// reaches an app's own lists without the shell knowing they exist.
+		for (const section of contributedSectionItems) {
+			const itemTarget = section.itemTarget;
+			if (!itemTarget) {
+				continue;
+			}
+			for (const row of section.items) {
+				const route = renderTemplate(
+					itemTarget,
+					{ item: row.raw },
+					{ uriEncode: true }
+				);
+				items.push({
+					id: `section-${section.plugin}-${section.sectionId}-${row.item.id}`,
+					group: section.title,
+					title: row.item.title,
+					value: `${section.title} ${row.item.title} ${row.item.subtitle ?? ""}`,
+					icon: ArrowRight01Icon,
+					onSelect: () => handleNavigate(route, row.item.title),
+				});
+			}
 		}
 
 		// Secondary destinations that aren't in the primary sidebar list but are

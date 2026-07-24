@@ -9,9 +9,35 @@
 import { useCallback, useState } from "react";
 import { sileo } from "sileo";
 import { useMarketplaceHost } from "./host.tsx";
-import type { MarketplaceDetailTarget, MarketplaceKind } from "./types.ts";
+import type {
+	MarketplaceDetailTarget,
+	MarketplaceKind,
+	PurchaseResult,
+} from "./types.ts";
 
 export type { MarketplaceDetailTarget };
+
+/** The next step a `buy()` should take, derived from a {@link PurchaseResult}. */
+export type PurchaseAction =
+	| { kind: "owned" }
+	| { kind: "checkout"; url: string }
+	| { kind: "error" };
+
+/**
+ * Classify a purchase result into the action `buy()` performs. The
+ * `alreadyLicensed` check MUST come first: an already-owned result carries an
+ * empty `url` (see {@link PurchaseResult}), so testing `url` first would
+ * misroute an owned item into the error branch.
+ */
+export function purchaseAction(result: PurchaseResult): PurchaseAction {
+	if (result.alreadyLicensed) {
+		return { kind: "owned" };
+	}
+	if (!result.url) {
+		return { kind: "error" };
+	}
+	return { kind: "checkout", url: result.url };
+}
 
 export interface UseMarketplacePurchaseResult {
 	buy: (card: { id: string; kind: MarketplaceKind }) => Promise<void>;
@@ -35,16 +61,17 @@ export function useMarketplacePurchase(): UseMarketplacePurchaseResult {
 			setBuying(card.id);
 			try {
 				const result = await startPurchase({ kind: card.kind, id: card.id });
-				if (result.alreadyLicensed) {
+				const action = purchaseAction(result);
+				if (action.kind === "owned") {
 					sileo.success({ title: "You already own this item." });
 					await refreshLicenses();
 					return;
 				}
-				if (!result.url) {
+				if (action.kind === "error") {
 					sileo.error({ title: "Could not start checkout." });
 					return;
 				}
-				await openExternal(result.url);
+				await openExternal(action.url);
 				sileo.success({
 					title: "Opening checkout…",
 					description:

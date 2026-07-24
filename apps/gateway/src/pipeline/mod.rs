@@ -33,6 +33,23 @@ use crate::{
 /// `None` when the resolved firewall's `alert` tier is below `Warn` (so a
 /// firewall with no configured tier fires no alert). `enforcement` is `block`
 /// (Block) or `notify` (WarnAndContinue).
+/// Constant-time string equality — no early return on the first differing byte, so
+/// comparing a caller-supplied key against the configured master key leaks no timing
+/// signal about how many leading bytes matched. Length mismatch short-circuits (key
+/// length is not secret). The Gateway defaults to a `0.0.0.0` bind, making a naive
+/// `==` a remotely-observable side channel.
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 fn firewall_policy_alert(
     cfg: &crate::config::FirewallConfig,
     ctx: &RequestContext,
@@ -352,7 +369,7 @@ pub async fn authenticate(
             // `admin_loopback_allowed`).
             if let (Some(master), Some(raw)) = (&auth.master_key, raw_api_key) {
                 let key = raw.strip_prefix("Bearer ").unwrap_or(raw);
-                if key == master.as_str() {
+                if ct_eq(key, master.as_str()) {
                     return StaticOutcome::Matched(build_ctx(
                         true,
                         key.to_string(),
@@ -393,7 +410,7 @@ pub async fn authenticate(
         let key = key.strip_prefix("Bearer ").unwrap_or(key);
 
         if let Some(master) = &auth.master_key {
-            if key == master.as_str() {
+            if ct_eq(key, master.as_str()) {
                 return StaticOutcome::Matched(build_ctx(
                     true,
                     key.to_string(),
@@ -412,7 +429,12 @@ pub async fn authenticate(
         }
 
         for cfg_key in &auth.api_keys {
-            if key == cfg_key.key.as_str() {
+            // Constant-time compare (as the master-key branch above already does):
+            // a naive `==` short-circuits on the first differing byte, a timing
+            // oracle that leaks the key byte-by-byte to a network attacker (the
+            // default bind is 0.0.0.0). Keep first-match semantics — only the
+            // per-byte signal is removed.
+            if ct_eq(key, cfg_key.key.as_str()) {
                 // The budget identity must not be spoofable. Only honor the
                 // client-supplied x-ryu-user-id / x-ryu-agent-id headers when this
                 // key is an explicitly trusted forwarder (e.g. Ryu Core relaying a
@@ -829,10 +851,8 @@ async fn pre_process(
                             "companion DLP: redacted PII/secrets from companion-sourced prompt before egress"
                         );
                         // Emit an audit record so redaction events are observable (AC2).
-                        let category_names: Vec<&str> = redacted_categories
-                            .iter()
-                            .map(|c| c.as_str())
-                            .collect();
+                        let category_names: Vec<&str> =
+                            redacted_categories.iter().map(|c| c.as_str()).collect();
                         state.metrics.inc_firewall_blocked();
                         state.audit.log(crate::audit::AuditRecord {
                             request_id: ctx.request_id.clone(),
@@ -872,29 +892,25 @@ async fn pre_process(
             // over eval/model routing (M3 / #164); eval-driven A/B routing only
             // applies when no slot is set and the classifier did not already choose.
             PipelineStage::Route => {
-                decision = Some(
-                    if ctx.slot_provider.is_some() || ctx.slot_model.is_some() {
-                        state.router.route_modality_with_slot(
-                            &crate::config::Modality::Chat,
-                            &requested_model,
-                            ctx.slot_provider.as_ref(),
-                            ctx.slot_model.as_deref(),
-                        )
-                    } else if smart_routed {
-                        // The classifier already chose this model — route it straight
-                        // to its provider and skip eval/A-B routing, which would
-                        // otherwise reassign the provider and break the smart-routed
-                        // model (#473 smart routing).
-                        state.router.route(&requested_model)
-                    } else {
-                        state
-                            .router
-                            .eval_route(&requested_model, |p| {
-                                state.evals.provider_score(p.as_str())
-                            })
-                            .unwrap_or_else(|| state.router.route(&requested_model))
-                    },
-                );
+                decision = Some(if ctx.slot_provider.is_some() || ctx.slot_model.is_some() {
+                    state.router.route_modality_with_slot(
+                        &crate::config::Modality::Chat,
+                        &requested_model,
+                        ctx.slot_provider.as_ref(),
+                        ctx.slot_model.as_deref(),
+                    )
+                } else if smart_routed {
+                    // The classifier already chose this model — route it straight
+                    // to its provider and skip eval/A-B routing, which would
+                    // otherwise reassign the provider and break the smart-routed
+                    // model (#473 smart routing).
+                    state.router.route(&requested_model)
+                } else {
+                    state
+                        .router
+                        .eval_route(&requested_model, |p| state.evals.provider_score(p.as_str()))
+                        .unwrap_or_else(|| state.router.route(&requested_model))
+                });
             }
 
             // Ordering anchor only. Auditing needs the provider response, so the
@@ -946,7 +962,10 @@ fn merge_alert(a: Option<PolicyAlert>, b: Option<PolicyAlert>) -> Option<PolicyA
 
 /// The inline action for a binding: the binding's `inline_action` wins; otherwise
 /// the catalog evaluator's default `inline.action`; otherwise warn-and-continue.
-fn inline_action_for(binding: &crate::evaluators::EvaluatorBinding, ev: &Evaluator) -> FirewallPolicy {
+fn inline_action_for(
+    binding: &crate::evaluators::EvaluatorBinding,
+    ev: &Evaluator,
+) -> FirewallPolicy {
     binding
         .inline_action
         .clone()
@@ -994,7 +1013,10 @@ async fn flag_inline_binding(
                     flagged: true,
                     reason: format!("{}:{}", m.kind.as_str(), m.pattern_name),
                 },
-                None => InlineFlag::Ran { flagged: false, reason: String::new() },
+                None => InlineFlag::Ran {
+                    flagged: false,
+                    reason: String::new(),
+                },
             }
         }
         EvaluatorImpl::LlmJudge { rubric } => {
@@ -1003,7 +1025,11 @@ async fn flag_inline_binding(
                 return InlineFlag::Skip;
             }
             let ins = &scanner.config().inspector;
-            let timeout = if ins.timeout_ms == 0 { 1500 } else { ins.timeout_ms };
+            let timeout = if ins.timeout_ms == 0 {
+                1500
+            } else {
+                ins.timeout_ms
+            };
             let model_router = state.router.active();
             let verdict = InspectorClient::inspect_rubric(
                 text,
@@ -1035,7 +1061,11 @@ async fn flag_inline_binding(
                 }
             };
             let flagged = backstop_flag(verdict.available, verdict.flagged, seed_hit);
-            let reason = if seed_hit { seed_reason } else { verdict.reason };
+            let reason = if seed_hit {
+                seed_reason
+            } else {
+                verdict.reason
+            };
             InlineFlag::Ran { flagged, reason }
         }
         EvaluatorImpl::Code { .. } => {
@@ -1046,9 +1076,10 @@ async fn flag_inline_binding(
             debug!(evaluator = %ev.id, %detector, "inline evaluator: builtin impl not wired — no-op");
             InlineFlag::Skip
         }
-        EvaluatorImpl::Wasm { module_base64, fail_open } => {
-            flag_wasm_binding(ev, module_base64, *fail_open, text, state).await
-        }
+        EvaluatorImpl::Wasm {
+            module_base64,
+            fail_open,
+        } => flag_wasm_binding(ev, module_base64, *fail_open, text, state).await,
     }
 }
 
@@ -1074,7 +1105,10 @@ async fn flag_wasm_binding(
     let fail = |reason: String| -> InlineFlag {
         if fail_open {
             warn!(evaluator = %ev.id, %reason, "wasm policy failed OPEN (declared) — allowing");
-            InlineFlag::Ran { flagged: false, reason: String::new() }
+            InlineFlag::Ran {
+                flagged: false,
+                reason: String::new(),
+            }
         } else {
             warn!(evaluator = %ev.id, %reason, "wasm policy failed CLOSED — blocking");
             InlineFlag::ForceBlock {
@@ -1095,8 +1129,14 @@ async fn flag_wasm_binding(
         return fail("wasm policy host unavailable".to_string());
     };
     match host.evaluate(&bytes, text).await {
-        crate::wasm_policy::WasmVerdict::Allow => InlineFlag::Ran { flagged: false, reason: String::new() },
-        crate::wasm_policy::WasmVerdict::Deny { reason } => InlineFlag::Ran { flagged: true, reason },
+        crate::wasm_policy::WasmVerdict::Allow => InlineFlag::Ran {
+            flagged: false,
+            reason: String::new(),
+        },
+        crate::wasm_policy::WasmVerdict::Deny { reason } => InlineFlag::Ran {
+            flagged: true,
+            reason,
+        },
         crate::wasm_policy::WasmVerdict::Fail { reason } => fail(reason),
     }
 }
@@ -1193,7 +1233,10 @@ async fn apply_inline_input_evaluators(
                     "inline evaluator: fail-closed block (inbound)"
                 );
                 return Err(GatewayError::FirewallBlocked(
-                    format!("Inbound content blocked by evaluator '{}': {}", ev.id, reason),
+                    format!(
+                        "Inbound content blocked by evaluator '{}': {}",
+                        ev.id, reason
+                    ),
                     firewall_policy_alert(scanner.config(), ctx, "block"),
                 ));
             }
@@ -1212,7 +1255,10 @@ async fn apply_inline_input_evaluators(
                     "inline evaluator: blocked inbound content"
                 );
                 return Err(GatewayError::FirewallBlocked(
-                    format!("Inbound content blocked by evaluator '{}': {}", ev.id, reason),
+                    format!(
+                        "Inbound content blocked by evaluator '{}': {}",
+                        ev.id, reason
+                    ),
                     firewall_policy_alert(scanner.config(), ctx, "block"),
                 ));
             }
@@ -1291,7 +1337,10 @@ async fn apply_inline_output_evaluators(
                         "inline evaluator: fail-closed block (outbound)"
                     );
                     return Err(GatewayError::FirewallBlocked(
-                        format!("Outbound response blocked by evaluator '{}': {}", ev.id, reason),
+                        format!(
+                            "Outbound response blocked by evaluator '{}': {}",
+                            ev.id, reason
+                        ),
                         firewall_policy_alert(scanner.config(), ctx, "block"),
                     ));
                 }
@@ -1319,7 +1368,10 @@ async fn apply_inline_output_evaluators(
                     "inline evaluator: blocked outbound response"
                 );
                 return Err(GatewayError::FirewallBlocked(
-                    format!("Outbound response blocked by evaluator '{}': {}", ev.id, reason),
+                    format!(
+                        "Outbound response blocked by evaluator '{}': {}",
+                        ev.id, reason
+                    ),
                     firewall_policy_alert(scanner.config(), ctx, "block"),
                 ));
             }
@@ -1431,8 +1483,9 @@ pub async fn run(
     // model so the rest of the pipeline routes to the classifier's choice.
     let smart_routed = apply_smart_routing(&state, &ctx, &mut body).await;
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-    let (mut decision, cache_key, pre_alert) =
-        pre_process(&state, &ctx, &mut body, smart_routed).await.map_err(|e| {
+    let (mut decision, cache_key, pre_alert) = pre_process(&state, &ctx, &mut body, smart_routed)
+        .await
+        .map_err(|e| {
             state.metrics.inc_errors();
             audit_failure(&state, &ctx, &requested_model, &e, start);
             e
@@ -1472,7 +1525,12 @@ pub async fn run(
     ) {
         let text = SemanticCache::messages_to_text(&body["messages"]);
         if let Ok(emb) = sc
-            .get_embedding(&text, &state.http, &openai_cfg.base_url, &openai_cfg.api_key)
+            .get_embedding(
+                &text,
+                &state.http,
+                &openai_cfg.base_url,
+                &openai_cfg.api_key,
+            )
             .await
         {
             if let Some(cached) = sc.lookup(ctx.org_id.as_deref(), &emb) {
@@ -1585,7 +1643,9 @@ pub async fn run(
                 provider = provider_kind.as_str(),
                 "circuit open, skipping provider"
             );
-            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str().to_string()));
+            last_err = Some(GatewayError::CircuitOpen(
+                provider_kind.as_str().to_string(),
+            ));
             if Some(provider_kind) == primary_provider.as_ref() {
                 primary_skipped = true;
             }
@@ -2144,8 +2204,9 @@ pub async fn run_stream(
     // model so the rest of the pipeline routes to the classifier's choice.
     let smart_routed = apply_smart_routing(&state, &ctx, &mut body).await;
     let requested_model = body["model"].as_str().unwrap_or("unknown").to_string();
-    let (mut decision, _cache_key, pre_alert) =
-        pre_process(&state, &ctx, &mut body, smart_routed).await.map_err(|e| {
+    let (mut decision, _cache_key, pre_alert) = pre_process(&state, &ctx, &mut body, smart_routed)
+        .await
+        .map_err(|e| {
             state.metrics.inc_errors();
             audit_failure(&state, &ctx, &requested_model, &e, start);
             e
@@ -2180,6 +2241,25 @@ pub async fn run_stream(
     // accountable immediately; the audit row will carry the real counts.
     let estimated_tokens = estimate_prompt_tokens(&body);
 
+    // Per-minute token rate limit, streaming pre-admission. The non-streaming
+    // path checks the bucket with real usage at step 10; a stream's real usage
+    // is only known at stream end, so admission is gated on the prompt estimate
+    // here and the observer settles the remainder when the stream finishes —
+    // without this, `stream: true` bypasses the TPM bucket entirely. Key
+    // derivation mirrors the non-streaming check exactly.
+    if estimated_tokens > 0
+        && !state.rate_limiter.check_tokens_for_key(
+            &ctx.api_key,
+            estimated_tokens,
+            ctx.key_config.as_ref(),
+        )
+    {
+        warn!(key = %ctx.api_key, tokens = estimated_tokens, "token-per-minute budget exceeded (stream admission)");
+        state.metrics.inc_rate_limited();
+        state.metrics.inc_errors();
+        return Err(GatewayError::RateLimited);
+    }
+
     // Unified tool loop on the streaming path (#475, Decision A). When the tools
     // client is wired (CORE_URL) AND the request carries the tool signal, run the
     // search→describe→call loop NON-streamed over the provider, then synthesize
@@ -2202,7 +2282,9 @@ pub async fn run_stream(
 
     for provider_kind in &fallback_chain {
         if state.circuit_breaker.is_open(provider_kind.as_str()) {
-            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str().to_string()));
+            last_err = Some(GatewayError::CircuitOpen(
+                provider_kind.as_str().to_string(),
+            ));
             if Some(provider_kind) == primary_provider_stream.as_ref() {
                 primary_skipped_stream = true;
             }
@@ -2332,12 +2414,9 @@ pub async fn run_stream(
                 //     the assembled text, then emit either a single blocked SSE
                 //     error frame or the sanitized completion. This defeats
                 //     incremental streaming for those modes on purpose.
-                let firewall_body = apply_outbound_firewall_stream(
-                    stream_body,
-                    Arc::clone(&state),
-                    ctx.clone(),
-                )
-                .await;
+                let firewall_body =
+                    apply_outbound_firewall_stream(stream_body, Arc::clone(&state), ctx.clone())
+                        .await;
 
                 // 10. Stream observer: tap the outbound SSE at stream end to
                 // capture real token usage (from the terminal usage frame, when
@@ -2556,7 +2635,9 @@ pub async fn run_multimodal(
 
     for provider_kind in &fallback_chain {
         if state.circuit_breaker.is_open(provider_kind.as_str()) {
-            last_err = Some(GatewayError::CircuitOpen(provider_kind.as_str().to_string()));
+            last_err = Some(GatewayError::CircuitOpen(
+                provider_kind.as_str().to_string(),
+            ));
             if Some(provider_kind) == primary_provider_mm.as_ref() {
                 primary_skipped_mm = true;
             }
@@ -2871,8 +2952,7 @@ pub async fn submit_video_job(
         if let Some(org_id) = job_org.filter(|s| !s.is_empty()) {
             let cost = state.config.credits.media_cost_micro_usd(&Modality::Video);
             if cost > 0 {
-                let fail_closed_sticky =
-                    state.config.credits.fail_closed && ctx.managed_inference;
+                let fail_closed_sticky = state.config.credits.fail_closed && ctx.managed_inference;
                 tokio::spawn(debit_wallet_for_request(
                     state.clone(),
                     org_id,
@@ -2945,8 +3025,7 @@ pub async fn poll_video_job(
         if let Some(org_id) = job.org_id.clone().filter(|s| !s.is_empty()) {
             let cost = state.config.credits.media_cost_micro_usd(&Modality::Video);
             if cost > 0 {
-                let fail_closed_sticky =
-                    state.config.credits.fail_closed && ctx.managed_inference;
+                let fail_closed_sticky = state.config.credits.fail_closed && ctx.managed_inference;
                 tokio::spawn(debit_wallet_for_request(
                     state.clone(),
                     org_id,
@@ -3807,6 +3886,17 @@ fn attach_stream_observer(
                     // Update audit token totals (in-memory, for budget enforcement).
                     s.state.audit.add_tokens(&s.ctx.api_key, total_tokens);
                     s.state.metrics.add_tokens(input_tokens, output_tokens);
+                    // Settle the TPM bucket with the stream's real usage. The
+                    // pre-admission check consumed only the prompt estimate, so
+                    // charge the remainder here (same key derivation as the
+                    // non-streaming check). The bytes are already delivered, so
+                    // this cannot reject — it carries the overage as bucket debt
+                    // that gates subsequent admissions instead.
+                    s.state.rate_limiter.record_tokens_for_key(
+                        &s.ctx.api_key,
+                        total_tokens.saturating_sub(s.estimated_input_tokens),
+                        s.ctx.key_config.as_ref(),
+                    );
                     // Provider-side prompt-cache reads (OpenRouter cache path).
                     let cached_tokens = sse_parse_cached_tokens(&s.accumulated);
                     if cached_tokens > 0 {
@@ -3902,8 +3992,8 @@ fn attach_stream_observer(
                                 input_tokens,
                                 output_tokens,
                             );
-                            let fail_closed_sticky = s.state.config.credits.fail_closed
-                                && s.ctx.managed_inference;
+                            let fail_closed_sticky =
+                                s.state.config.credits.fail_closed && s.ctx.managed_inference;
                             debit_wallet_for_request(
                                 Arc::clone(&s.state),
                                 org_id,
@@ -4144,10 +4234,7 @@ async fn apply_outbound_firewall_stream(
                     "inline evaluator: blocked outbound response (streaming)"
                 );
                 state.metrics.inc_firewall_blocked();
-                let model = ctx
-                    .agent_id
-                    .as_deref()
-                    .unwrap_or("unknown");
+                let model = ctx.agent_id.as_deref().unwrap_or("unknown");
                 audit_inline_evaluator(&state, &ctx, model, "output", "blocked", &reason);
                 return Body::from(sse_content_frames(&format!(
                     "[Ryu firewall] Response blocked by evaluator: {reason}."
@@ -4666,12 +4753,13 @@ mod tests {
 
     /// A bare secret in a chat body does NOT reach the provider under the DEFAULT
     /// firewall config. This exercises the exact `PipelineStage::Firewall` decision
-    /// (scan_inbound → match policy → sanitize_messages) with no policy overrides,
-    /// proving the default `Sanitize` closes the inbound secret-egress leak.
+    /// (scan_inbound → match policy) with no policy overrides: the default policy
+    /// is `Block`, so the Firewall stage rejects the request outright. The opt-in
+    /// `Sanitize` path (redact-and-continue) is asserted separately below.
     #[test]
     fn bare_secret_not_forwarded_to_provider_under_default() {
         let scanner = FirewallScanner::new(FirewallConfig::default());
-        let mut body = serde_json::json!({
+        let body = serde_json::json!({
             "model": "gpt-4o",
             "messages": [
                 { "role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE now" }
@@ -4684,8 +4772,26 @@ mod tests {
             .expect("a bare secret must trip the inbound scan");
         assert_eq!(violation.kind, crate::firewall::DetectionKind::Secret);
 
-        // The default policy is Sanitize, so the Firewall stage redacts the body.
-        assert_eq!(scanner.policy(), &FirewallPolicy::Sanitize);
+        // The default policy is Block: the Firewall stage's match arm returns
+        // a FirewallBlocked error, so the body never egresses at all.
+        assert_eq!(scanner.policy(), &FirewallPolicy::Block);
+    }
+
+    /// The opt-in `Sanitize` policy redacts a detected secret from the body
+    /// instead of rejecting the request (redact-and-continue).
+    #[test]
+    fn bare_secret_redacted_from_provider_body_under_sanitize() {
+        let scanner = FirewallScanner::new(FirewallConfig {
+            policy: FirewallPolicy::Sanitize,
+            ..FirewallConfig::default()
+        });
+        let mut body = serde_json::json!({
+            "model": "gpt-4o",
+            "messages": [
+                { "role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE now" }
+            ]
+        });
+
         sanitize_messages(&mut body, &scanner);
 
         let egress = body["messages"][0]["content"].as_str().unwrap();
@@ -5107,7 +5213,9 @@ mod tests {
                 >,
             > {
                 Box::pin(async move {
-                    Err(ryu_gw_providers::ProviderError::Provider("no stream".into()))
+                    Err(ryu_gw_providers::ProviderError::Provider(
+                        "no stream".into(),
+                    ))
                 })
             }
         }
@@ -5646,11 +5754,8 @@ mod tests {
     #[test]
     fn output_inline_wants_transform_true_for_blocking_binding() {
         let reg = EvaluatorRegistry::new();
-        let block = scanner_with_bindings(vec![binding(
-            "toxicity",
-            true,
-            Some(FirewallPolicy::Block),
-        )]);
+        let block =
+            scanner_with_bindings(vec![binding("toxicity", true, Some(FirewallPolicy::Block))]);
         assert!(output_inline_wants_transform(&block, &reg));
 
         let sanitize = scanner_with_bindings(vec![binding(
@@ -5668,7 +5773,11 @@ mod tests {
         let reg = EvaluatorRegistry::new();
         // disabled
         assert!(!output_inline_wants_transform(
-            &scanner_with_bindings(vec![binding("toxicity", false, Some(FirewallPolicy::Block))]),
+            &scanner_with_bindings(vec![binding(
+                "toxicity",
+                false,
+                Some(FirewallPolicy::Block)
+            )]),
             &reg
         ));
         // warn action → no buffering
@@ -5764,7 +5873,10 @@ mod tests {
         });
         let text = response_to_text(&multi);
         assert!(text.contains("benign first choice"));
-        assert!(text.contains("piece of shit"), "second choice must be extracted");
+        assert!(
+            text.contains("piece of shit"),
+            "second choice must be extracted"
+        );
     }
 
     // ── WASM policy tier: end-to-end pipeline enforcement (gateway plugin plane) ──
@@ -5817,9 +5929,17 @@ mod tests {
             description: "e2e wasm policy".to_string(),
             category: crate::evaluators::EvaluatorCategory::Security,
             target: EvaluatorTarget::Input,
-            capabilities: crate::evaluators::Capabilities { inline: true, offline: false },
-            impl_: EvaluatorImpl::Wasm { module_base64: wasm_b64(wat), fail_open },
-            inline: Some(crate::evaluators::InlineConfig { action: FirewallPolicy::Block }),
+            capabilities: crate::evaluators::Capabilities {
+                inline: true,
+                offline: false,
+            },
+            impl_: EvaluatorImpl::Wasm {
+                module_base64: wasm_b64(wat),
+                fail_open,
+            },
+            inline: Some(crate::evaluators::InlineConfig {
+                action: FirewallPolicy::Block,
+            }),
             offline: None,
             builtin: false,
             enforced: true,
@@ -5872,7 +5992,10 @@ mod tests {
     async fn e2e_wasm_allow_passes_request() {
         let state = wasm_state(wasm_evaluator("wasm_allow", E2E_ALLOW_WAT, false));
         let res = run_input_wasm(&state, "wasm_allow", FirewallPolicy::Block).await;
-        assert!(res.is_ok(), "a wasm ALLOW verdict must let the turn proceed, got {res:?}");
+        assert!(
+            res.is_ok(),
+            "a wasm ALLOW verdict must let the turn proceed, got {res:?}"
+        );
     }
 
     /// The critical fail-direction control: a trapping guest with `fail_open = false`
@@ -5935,6 +6058,1270 @@ mod tests {
         assert!(
             matches!(res, Err(GatewayError::FirewallBlocked(_, _))),
             "an output-target wasm DENY bound to Block must block the response, got {res:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod authenticate_tests {
+    use super::*;
+    use crate::config::{ApiKeyConfig, AuthConfig, GatewayConfig};
+    use crate::state::AppState;
+
+    fn state_with_auth(auth: AuthConfig) -> AppState {
+        let config = GatewayConfig {
+            auth,
+            ..GatewayConfig::default()
+        };
+        let audit = crate::audit::AuditLogger::new(&crate::config::AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(crate::config::EvalsConfig::default());
+        AppState::new_for_test(config, audit, evals)
+    }
+
+    fn api_key(key: &str, name: &str, trusted_forwarder: bool) -> ApiKeyConfig {
+        ApiKeyConfig {
+            key: key.to_string(),
+            name: name.to_string(),
+            org_id: Some("org-acme".to_string()),
+            team_id: Some("team-1".to_string()),
+            project_id: Some("proj-1".to_string()),
+            requests_per_minute: None,
+            tokens_per_minute: None,
+            token_budget_total: None,
+            downgrade_to: None,
+            trusted_forwarder,
+        }
+    }
+
+    // ─── no-auth mode ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn no_auth_mode_makes_unknown_callers_anonymous() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: false,
+            api_keys: vec![],
+            master_key: None,
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(Some("whatever")))
+            .await
+            .expect("no-auth accepts any key");
+        assert!(!ctx.is_master_key);
+        assert_eq!(ctx.api_key, "whatever");
+        assert!(ctx.org_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn no_auth_mode_with_no_key_labels_api_key_anonymous() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: false,
+            api_keys: vec![],
+            master_key: None,
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(None))
+            .await
+            .expect("no-auth accepts missing key");
+        assert_eq!(ctx.api_key, "anonymous");
+        assert!(!ctx.is_master_key);
+    }
+
+    #[tokio::test]
+    async fn no_auth_mode_still_recognizes_provisioned_master_key() {
+        // A provisioned master key stays authoritative even with require_auth off.
+        let state = state_with_auth(AuthConfig {
+            require_auth: false,
+            api_keys: vec![],
+            master_key: Some("master-secret".to_string()),
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(Some("master-secret")))
+            .await
+            .expect("master key recognized");
+        assert!(ctx.is_master_key);
+        assert_eq!(ctx.user_name.as_deref(), Some("master"));
+    }
+
+    #[tokio::test]
+    async fn no_auth_master_key_honors_bearer_prefix() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: false,
+            api_keys: vec![],
+            master_key: Some("master-secret".to_string()),
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(Some("Bearer master-secret")))
+            .await
+            .expect("bearer-prefixed master key recognized");
+        assert!(ctx.is_master_key);
+    }
+
+    // ─── require_auth mode ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn require_auth_rejects_missing_key() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![],
+            master_key: None,
+        });
+        let err = authenticate(&state, AuthInputs::with_key(None))
+            .await
+            .expect_err("missing key must be rejected");
+        assert!(matches!(err, GatewayError::Unauthorized(_)));
+    }
+
+    #[tokio::test]
+    async fn require_auth_rejects_unknown_key() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![api_key("sk-known", "known", false)],
+            master_key: None,
+        });
+        let err = authenticate(&state, AuthInputs::with_key(Some("sk-unknown")))
+            .await
+            .expect_err("unknown key must be rejected");
+        assert!(matches!(err, GatewayError::Unauthorized(_)));
+    }
+
+    #[tokio::test]
+    async fn require_auth_matches_master_key() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![],
+            master_key: Some("master-secret".to_string()),
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(Some("Bearer master-secret")))
+            .await
+            .expect("master key accepted");
+        assert!(ctx.is_master_key);
+    }
+
+    #[tokio::test]
+    async fn static_key_match_populates_org_team_project() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![api_key("sk-acme", "acme-key", false)],
+            master_key: None,
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(Some("sk-acme")))
+            .await
+            .expect("static key accepted");
+        assert!(!ctx.is_master_key);
+        assert_eq!(ctx.org_id.as_deref(), Some("org-acme"));
+        assert_eq!(ctx.team_id.as_deref(), Some("team-1"));
+        assert_eq!(ctx.project_id.as_deref(), Some("proj-1"));
+        assert_eq!(ctx.user_name.as_deref(), Some("acme-key"));
+        assert!(ctx.key_config.is_some());
+    }
+
+    #[tokio::test]
+    async fn untrusted_key_ignores_forwarded_identity_headers() {
+        // trusted_forwarder = false => the client-supplied x-ryu-user-id /
+        // x-ryu-agent-id are ignored and budget identity binds to the key name,
+        // so a caller cannot spoof or rotate identity to evade its quota.
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![api_key("sk-acme", "acme-key", false)],
+            master_key: None,
+        });
+        let inputs = AuthInputs {
+            raw_api_key: Some("sk-acme"),
+            user_id: Some("spoofed-user".to_string()),
+            agent_id: Some("spoofed-agent".to_string()),
+            ..Default::default()
+        };
+        let ctx = authenticate(&state, inputs).await.expect("accepted");
+        assert_eq!(
+            ctx.user_id.as_deref(),
+            Some("acme-key"),
+            "budget identity must bind to the key name, not the spoofed header"
+        );
+        assert!(ctx.agent_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn trusted_forwarder_honors_forwarded_identity_headers() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![api_key("sk-core", "ryu-core", true)],
+            master_key: None,
+        });
+        let inputs = AuthInputs {
+            raw_api_key: Some("sk-core"),
+            user_id: Some("real-user".to_string()),
+            agent_id: Some("real-agent".to_string()),
+            ..Default::default()
+        };
+        let ctx = authenticate(&state, inputs).await.expect("accepted");
+        assert_eq!(ctx.user_id.as_deref(), Some("real-user"));
+        assert_eq!(ctx.agent_id.as_deref(), Some("real-agent"));
+    }
+
+    #[tokio::test]
+    async fn rgw_token_without_resolve_cache_is_hard_rejected() {
+        // An rgw_-shaped bearer only reaches the dynamic path when a resolve cache
+        // is configured; the test state has none, so it must NOT fall open into
+        // anonymous — it is a hard 401.
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![],
+            master_key: None,
+        });
+        let err = authenticate(&state, AuthInputs::with_key(Some("rgw_sometoken")))
+            .await
+            .expect_err("rgw_ token with no resolve cache must be rejected");
+        assert!(matches!(err, GatewayError::Unauthorized(_)));
+    }
+
+    #[tokio::test]
+    async fn static_key_match_strips_bearer_prefix() {
+        let state = state_with_auth(AuthConfig {
+            require_auth: true,
+            api_keys: vec![api_key("sk-acme", "acme-key", false)],
+            master_key: None,
+        });
+        let ctx = authenticate(&state, AuthInputs::with_key(Some("Bearer sk-acme")))
+            .await
+            .expect("bearer-prefixed static key accepted");
+        assert_eq!(ctx.user_name.as_deref(), Some("acme-key"));
+    }
+
+    #[test]
+    fn ct_eq_is_functionally_equivalent_to_str_eq() {
+        // Constant-time compare returns the exact same boolean as `==`: the only
+        // difference is the removed per-byte timing signal (see `ct_eq` doc comment).
+        assert!(ct_eq("sk-abc", "sk-abc"));
+        // Single trailing-byte difference (the case a naive `==` would leak).
+        assert!(!ct_eq("sk-abc", "sk-abd"));
+        // Length mismatch short-circuits to false (key length is not secret).
+        assert!(!ct_eq("sk-ab", "sk-abc"));
+        // Empty vs empty is equal.
+        assert!(ct_eq("", ""));
+    }
+}
+
+/// End-to-end fallback / cost-tier demotion tests driven through the full
+/// `run()` pipeline with scripted providers. These pin the request-path behavior
+/// the focus of the coverage sweep called out: a `ProviderRateLimited` demotes
+/// down the fallback chain WITHOUT tripping the circuit, a generic provider error
+/// trips the circuit and still fails over, an already-open circuit is skipped,
+/// and chain exhaustion surfaces the typed `AllProvidersUnavailable` error.
+#[cfg(test)]
+mod fallback_tests {
+    use super::{run, DegradedMode, RequestContext};
+    use crate::audit::AuditLogger;
+    use crate::config::{
+        AuditConfig, CircuitBreakerConfig, EvalsConfig, FirewallConfig, GatewayConfig, ProviderId,
+        RoutingConfig,
+    };
+    use crate::error::GatewayError;
+    use crate::providers::Provider;
+    use crate::state::AppState;
+    use ryu_gw_providers::ProviderError;
+    use serde_json::{json, Value};
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// What a scripted provider does on `complete()`.
+    #[derive(Clone, Copy)]
+    enum Mode {
+        /// Return a valid completion.
+        Ok,
+        /// Return a 429 → `ProviderError::RateLimited` (capacity signal, demote).
+        RateLimited,
+        /// Return a generic provider failure (fault, trip circuit + fail over).
+        Fail,
+    }
+
+    struct StubProvider {
+        id: &'static str,
+        mode: Mode,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl StubProvider {
+        fn new(id: &'static str, mode: Mode) -> (Arc<Self>, Arc<AtomicUsize>) {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let p = Arc::new(Self {
+                id,
+                mode,
+                calls: Arc::clone(&calls),
+            });
+            (p, calls)
+        }
+    }
+
+    impl Provider for StubProvider {
+        fn name(&self) -> &'static str {
+            self.id
+        }
+
+        fn complete<'a>(
+            &'a self,
+            _model: &'a str,
+            _body: &'a Value,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, ProviderError>> + Send + 'a>>
+        {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mode = self.mode;
+            let id = self.id;
+            Box::pin(async move {
+                match mode {
+                    Mode::Ok => Ok(json!({
+                        "id": "chatcmpl-stub",
+                        "object": "chat.completion",
+                        "model": "stub-1",
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "pong"},
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+                    })),
+                    Mode::RateLimited => Err(ProviderError::RateLimited {
+                        provider: id.to_string(),
+                        retry_after: Some(30),
+                        reset_at: None,
+                    }),
+                    Mode::Fail => Err(ProviderError::Provider(format!("{id} boom"))),
+                }
+            })
+        }
+
+        fn complete_stream<'a>(
+            &'a self,
+            _model: &'a str,
+            _body: &'a Value,
+        ) -> Pin<
+            Box<dyn std::future::Future<Output = Result<axum::body::Body, ProviderError>> + Send + 'a>,
+        > {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mode = self.mode;
+            let id = self.id;
+            Box::pin(async move {
+                match mode {
+                    Mode::Ok => {
+                        // A minimal but well-formed SSE stream with a terminal usage
+                        // frame + [DONE], so the stream observer has real counts.
+                        let sse = concat!(
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"pong\"}}]}\n\n",
+                            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
+                            "data: [DONE]\n\n",
+                        );
+                        Ok(axum::body::Body::from(sse))
+                    }
+                    Mode::RateLimited => Err(ProviderError::RateLimited {
+                        provider: id.to_string(),
+                        retry_after: None,
+                        reset_at: None,
+                    }),
+                    Mode::Fail => Err(ProviderError::Provider(format!("{id} stream boom"))),
+                }
+            })
+        }
+    }
+
+    /// Build a state whose routing pins `primary` first, then `secondary`, with the
+    /// firewall + circuit breaker configured for a deterministic test.
+    fn chain_state(threshold: u32) -> AppState {
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary"), ProviderId::from("secondary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: false,
+                ..FirewallConfig::default()
+            },
+            circuit_breaker: CircuitBreakerConfig {
+                enabled: true,
+                failure_threshold: threshold,
+                reset_timeout_secs: 30,
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        AppState::new_for_test(config, audit, evals)
+    }
+
+    fn plain_ctx() -> RequestContext {
+        RequestContext {
+            request_id: "fallback-req".to_string(),
+            api_key: "sk-test".to_string(),
+            is_master_key: false,
+            org_id: None,
+            team_id: None,
+            project_id: None,
+            user_name: None,
+            user_id: None,
+            agent_id: None,
+            key_config: None,
+            skill_ids: None,
+            tool_actions: None,
+            tools_header_present: false,
+            slot_provider: None,
+            slot_model: None,
+            session_id: None,
+            feature: None,
+            companion_source: false,
+            tool_search_requested: false,
+            priority: crate::concurrency::Priority::Interactive,
+            tool_profile: None,
+            raw_tools: false,
+            managed_inference: false,
+            remaining_budget_micro_usd: None,
+            resolved_policy: None,
+        }
+    }
+
+    fn ping_body() -> Value {
+        json!({ "model": "anything", "messages": [{"role": "user", "content": "ping"}] })
+    }
+
+    /// A rate-limited primary demotes to the next provider in the chain: the
+    /// secondary serves the turn, the response is flagged as a degraded fallback,
+    /// and — crucially — the primary's circuit is NOT tripped (a 429 is a capacity
+    /// signal, not a fault).
+    #[tokio::test]
+    async fn rate_limited_primary_demotes_to_secondary_without_tripping_circuit() {
+        let mut state = chain_state(1);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::RateLimited);
+        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
+        state
+            .providers
+            .register(primary as Arc<dyn Provider>);
+        state
+            .providers
+            .register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("secondary must serve after primary rate-limits");
+
+        assert_eq!(out.provider_used, "secondary");
+        assert_eq!(out.degraded, Some(DegradedMode::Fallback("secondary".into())));
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1, "primary was tried");
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1, "secondary served");
+        // The 429 must NOT open the primary's circuit even with threshold=1.
+        assert!(
+            !state.circuit_breaker.is_open("primary"),
+            "a rate-limit is a capacity signal and must not trip the circuit"
+        );
+    }
+
+    /// A generic (non-429) primary failure trips the circuit breaker AND fails over
+    /// to the secondary. With `failure_threshold == 1` a single failure opens the
+    /// primary circuit.
+    #[tokio::test]
+    async fn generic_primary_failure_trips_circuit_and_fails_over() {
+        let mut state = chain_state(1);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Fail);
+        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("secondary must serve after primary faults");
+
+        assert_eq!(out.provider_used, "secondary");
+        assert_eq!(out.degraded, Some(DegradedMode::Fallback("secondary".into())));
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
+        // A fault DOES trip the circuit (threshold 1).
+        assert!(
+            state.circuit_breaker.is_open("primary"),
+            "a generic provider fault must open the primary's circuit"
+        );
+    }
+
+    /// An already-open primary circuit is skipped entirely (its `complete()` is
+    /// never called), and the request is served by the secondary as a fallback.
+    #[tokio::test]
+    async fn open_primary_circuit_is_skipped() {
+        let mut state = chain_state(1);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
+        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        // Force the primary circuit open before any request.
+        state.circuit_breaker.record_failure("primary");
+        assert!(state.circuit_breaker.is_open("primary"));
+        let state = Arc::new(state);
+
+        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("secondary serves when primary circuit is open");
+
+        assert_eq!(out.provider_used, "secondary");
+        assert_eq!(out.degraded, Some(DegradedMode::Fallback("secondary".into())));
+        assert_eq!(
+            primary_calls.load(Ordering::SeqCst),
+            0,
+            "an open circuit must skip the provider without calling it"
+        );
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// When every provider in the chain rate-limits, the whole chain is exhausted
+    /// and the typed `ProviderRateLimited` error surfaces (never a silent success).
+    #[tokio::test]
+    async fn all_providers_rate_limited_surfaces_typed_error() {
+        let mut state = chain_state(5);
+        let (primary, _) = StubProvider::new("primary", Mode::RateLimited);
+        let (secondary, _) = StubProvider::new("secondary", Mode::RateLimited);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("an exhausted chain must error, not succeed"),
+        };
+        // The last error was a rate-limit; it is preserved as the typed variant.
+        assert!(
+            matches!(err, GatewayError::ProviderRateLimited { .. }),
+            "exhausted-by-rate-limit must surface ProviderRateLimited, got {err:?}"
+        );
+    }
+
+    /// When a generic-fault chain is exhausted, the error is wrapped into the
+    /// stable `AllProvidersUnavailable` variant so clients get a consistent code.
+    #[tokio::test]
+    async fn all_providers_fault_surfaces_all_unavailable() {
+        let mut state = chain_state(5);
+        let (primary, _) = StubProvider::new("primary", Mode::Fail);
+        let (secondary, _) = StubProvider::new("secondary", Mode::Fail);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("an exhausted fault chain must error"),
+        };
+        assert!(
+            matches!(err, GatewayError::AllProvidersUnavailable(_)),
+            "exhausted-by-fault must wrap into AllProvidersUnavailable, got {err:?}"
+        );
+    }
+
+    /// The happy path: a healthy primary serves the turn and the response is NOT
+    /// flagged degraded (no fallback occurred).
+    #[tokio::test]
+    async fn healthy_primary_serves_without_degradation() {
+        let mut state = chain_state(5);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
+        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("healthy primary serves");
+
+        assert_eq!(out.provider_used, "primary");
+        assert_eq!(out.degraded, None, "no fallback ⇒ not degraded");
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            secondary_calls.load(Ordering::SeqCst),
+            0,
+            "secondary must not be touched when the primary succeeds"
+        );
+    }
+
+    /// A second identical request is served from the exact-match cache: the
+    /// provider is invoked once (the priming call), and the cached turn reports
+    /// `cache_hit`.
+    #[tokio::test]
+    async fn identical_request_is_served_from_cache_on_second_call() {
+        let mut state = chain_state(5);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        // Prime the cache.
+        let first = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("first call");
+        assert!(!first.cache_hit, "the priming call is a miss");
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+
+        // Identical body ⇒ exact-match hit; the provider is NOT called again.
+        let second = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("second call served from cache");
+        assert!(second.cache_hit, "identical request must hit the cache");
+        assert_eq!(
+            primary_calls.load(Ordering::SeqCst),
+            1,
+            "a cache hit must not re-invoke the provider"
+        );
+    }
+
+    /// The firewall integration point: with the inbound scanner on and a `Block`
+    /// policy, a request carrying a detectable secret/PII is refused BEFORE any
+    /// provider is reached (`FirewallBlocked`, provider never called).
+    #[tokio::test]
+    async fn inbound_firewall_block_short_circuits_before_the_provider() {
+        use crate::config::FirewallPolicy;
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: true,
+                scan_inbound: true,
+                policy: FirewallPolicy::Block,
+                ..FirewallConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        // A prompt carrying an email + an OpenAI-style key — the built-in scanner's
+        // canonical detection fixture.
+        let body = json!({
+            "model": "anything",
+            "messages": [{
+                "role": "user",
+                "content": "Contact user@example.com or use key sk-abcdefghijklmnopqrstu"
+            }]
+        });
+        let err = match run(Arc::clone(&state), plain_ctx(), body).await {
+            Err(e) => e,
+            Ok(_) => panic!("a Block-policy firewall must refuse the request"),
+        };
+        assert!(
+            matches!(err, GatewayError::FirewallBlocked(..)),
+            "expected FirewallBlocked, got {err:?}"
+        );
+        assert_eq!(
+            primary_calls.load(Ordering::SeqCst),
+            0,
+            "an inbound block must short-circuit before the provider is called"
+        );
+    }
+
+    /// Streaming happy path: a healthy primary serves the SSE stream directly, the
+    /// turn is not degraded, and the body drains to the provider's frames.
+    #[tokio::test]
+    async fn run_stream_serves_primary_without_degradation() {
+        use super::run_stream;
+        let mut state = chain_state(5);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run_stream(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("primary streams");
+        assert_eq!(out.provider_used, "primary");
+        assert_eq!(out.degraded, None);
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+
+        // Draining the SSE body yields the provider's frames.
+        let bytes = axum::body::to_bytes(out.body, usize::MAX)
+            .await
+            .expect("drain sse body");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("pong"), "stream carries the provider's content");
+        assert!(text.contains("[DONE]"), "stream is terminated");
+    }
+
+    /// Streaming fallback: a rate-limited primary demotes and the secondary streams,
+    /// with the turn flagged as a degraded fallback.
+    #[tokio::test]
+    async fn run_stream_demotes_rate_limited_primary_to_secondary() {
+        use super::run_stream;
+        let mut state = chain_state(5);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::RateLimited);
+        let (secondary, secondary_calls) = StubProvider::new("secondary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run_stream(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("secondary streams after primary rate-limits");
+        assert_eq!(out.provider_used, "secondary");
+        assert_eq!(out.degraded, Some(DegradedMode::Fallback("secondary".into())));
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 1);
+        // The 429 on the stream path must not trip the primary's circuit either.
+        assert!(!state.circuit_breaker.is_open("primary"));
+
+        // Body still drains cleanly.
+        let bytes = axum::body::to_bytes(out.body, usize::MAX)
+            .await
+            .expect("drain sse body");
+        assert!(String::from_utf8_lossy(&bytes).contains("[DONE]"));
+    }
+
+    /// Streaming exhaustion: every provider faults, so `run_stream` surfaces the
+    /// wrapped `AllProvidersUnavailable` error rather than an empty stream.
+    #[tokio::test]
+    async fn run_stream_exhausted_chain_errors() {
+        use super::run_stream;
+        let mut state = chain_state(5);
+        let (primary, _) = StubProvider::new("primary", Mode::Fail);
+        let (secondary, _) = StubProvider::new("secondary", Mode::Fail);
+        state.providers.register(primary as Arc<dyn Provider>);
+        state.providers.register(secondary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let err = match run_stream(Arc::clone(&state), plain_ctx(), ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("an exhausted stream chain must error"),
+        };
+        assert!(matches!(err, GatewayError::AllProvidersUnavailable(_)));
+    }
+
+    /// The per-key request rate limiter gates the pipeline: with a 1-request/min
+    /// budget the second identical (uncached) request is refused with `RateLimited`
+    /// before the provider is reached.
+    #[tokio::test]
+    async fn per_key_request_rate_limit_rejects_the_second_call() {
+        use crate::config::RateLimitConfig;
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: false,
+                ..FirewallConfig::default()
+            },
+            rate_limit: RateLimitConfig {
+                enabled: true,
+                requests_per_minute: Some(1),
+                tokens_per_minute: None,
+                max_burst_per_second: 0,
+            },
+            // Disable the exact cache so the second call actually reaches the limiter
+            // rather than being served from cache.
+            cache: crate::config::CacheConfig {
+                enabled: false,
+                ..crate::config::CacheConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        let (primary, _) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        // First request is within budget.
+        run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("first request under the limit");
+        // Second request exceeds 1/min ⇒ RateLimited.
+        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("second request must be rate limited"),
+        };
+        assert!(matches!(err, GatewayError::RateLimited));
+    }
+
+    /// Smart routing (Keyword strategy, no network) rewrites the request's model
+    /// BEFORE provider routing: a rule whose description matches the prompt sends
+    /// the turn to the rule's target model, which then resolves to the default
+    /// provider as any hand-picked model would.
+    #[tokio::test]
+    async fn smart_routing_keyword_rewrites_the_model() {
+        use crate::config::{RouteStrategy, SmartRoutingConfig, SmartRule};
+        let mut routing = RoutingConfig {
+            default_provider: ProviderId::from("primary"),
+            fallback_chain: vec![ProviderId::from("primary")],
+            ..RoutingConfig::default()
+        };
+        routing.smart_routing = SmartRoutingConfig {
+            enabled: true,
+            strategy: RouteStrategy::Keyword,
+            rules: vec![SmartRule {
+                description: "ping".to_string(),
+                model: "claude-rewritten".to_string(),
+            }],
+            ..Default::default()
+        };
+        let config = GatewayConfig {
+            routing,
+            firewall: FirewallConfig {
+                enabled: false,
+                ..FirewallConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        let (primary, primary_calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("smart-routed request serves");
+        // The model was rewritten by the matching keyword rule.
+        assert_eq!(out.model_used, "claude-rewritten");
+        // ...and still resolved to the default provider.
+        assert_eq!(out.provider_used, "primary");
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Outbound firewall: a provider response carrying a secret is blocked on the
+    /// egress path when the policy is `Block`, so the leaked secret never reaches
+    /// the client (`FirewallBlocked`).
+    #[tokio::test]
+    async fn outbound_firewall_block_stops_a_leaked_secret_response() {
+        use crate::config::FirewallPolicy;
+
+        // A provider that leaks a secret in its completion content.
+        struct LeakyProvider;
+        impl Provider for LeakyProvider {
+            fn name(&self) -> &'static str {
+                "primary"
+            }
+            fn complete<'a>(
+                &'a self,
+                _model: &'a str,
+                _body: &'a serde_json::Value,
+            ) -> Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, ryu_gw_providers::ProviderError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move {
+                    Ok(json!({
+                        "choices": [{
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "here is a key sk-abcdefghijklmnopqrstu"},
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 5, "total_tokens": 6}
+                    }))
+                })
+            }
+            fn complete_stream<'a>(
+                &'a self,
+                _model: &'a str,
+                _body: &'a serde_json::Value,
+            ) -> Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move {
+                    Err(ryu_gw_providers::ProviderError::Provider("no stream".into()))
+                })
+            }
+        }
+
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: true,
+                scan_inbound: false,
+                scan_outbound: true,
+                policy: FirewallPolicy::Block,
+                ..FirewallConfig::default()
+            },
+            cache: crate::config::CacheConfig {
+                enabled: false,
+                ..crate::config::CacheConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        state
+            .providers
+            .register(Arc::new(LeakyProvider) as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let err = match run(Arc::clone(&state), plain_ctx(), ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("a leaked-secret response must be blocked outbound"),
+        };
+        assert!(
+            matches!(err, GatewayError::FirewallBlocked(..)),
+            "expected outbound FirewallBlocked, got {err:?}"
+        );
+    }
+
+    // ── Budget / credit enforcement (money path) ──────────────────────────────
+
+    /// Build a state whose per-user budget for `u1` is `rule`, with a healthy
+    /// `primary` provider registered. Returns `(state, primary_call_counter)`.
+    fn budget_state(rule: crate::config::BudgetRule) -> (Arc<AppState>, Arc<AtomicUsize>) {
+        use std::collections::HashMap;
+        let mut users = HashMap::new();
+        users.insert("u1".to_string(), rule);
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: false,
+                ..FirewallConfig::default()
+            },
+            budgets: crate::config::BudgetConfig {
+                users,
+                ..Default::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+        // Seed usage above the rule's limit so the very next request trips it.
+        state.with_budget(|b| b.record(Some("u1"), None, 1_000_000));
+        (state, calls)
+    }
+
+    fn u1_ctx() -> RequestContext {
+        let mut ctx = plain_ctx();
+        ctx.user_id = Some("u1".to_string());
+        ctx
+    }
+
+    /// A `Stop` budget rule at/over its limit rejects the request with a hard
+    /// `BudgetExceeded` before the provider is reached.
+    #[tokio::test]
+    async fn budget_stop_rejects_over_limit_before_dispatch() {
+        use crate::config::{BudgetAction, BudgetRule};
+        let (state, calls) = budget_state(BudgetRule {
+            limit: 1,
+            action: BudgetAction::Stop,
+            downgrade_to: None,
+            restrict_max_tokens: 256,
+            alert: crate::config::AlertTier::Silent,
+        });
+        let err = match run(Arc::clone(&state), u1_ctx(), ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("an over-limit Stop budget must reject"),
+        };
+        assert!(
+            matches!(err, GatewayError::BudgetExceeded(_)),
+            "expected BudgetExceeded, got {err:?}"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "a hard budget stop must not reach the provider"
+        );
+    }
+
+    /// A `Downgrade` rule rewrites the request's model to the cheaper target and
+    /// still serves the turn.
+    #[tokio::test]
+    async fn budget_downgrade_rewrites_model_and_serves() {
+        use crate::config::{BudgetAction, BudgetRule};
+        let (state, calls) = budget_state(BudgetRule {
+            limit: 1,
+            action: BudgetAction::Downgrade,
+            downgrade_to: Some("cheap-model".to_string()),
+            restrict_max_tokens: 256,
+            alert: crate::config::AlertTier::Silent,
+        });
+        let out = run(Arc::clone(&state), u1_ctx(), ping_body())
+            .await
+            .expect("downgrade still serves");
+        assert_eq!(out.model_used, "cheap-model", "the model was downgraded");
+        assert_eq!(out.provider_used, "primary");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A `Restrict` rule serves the turn but stamps the Restrict decision on the
+    /// output (the request path strips tools + caps max_tokens).
+    #[tokio::test]
+    async fn budget_restrict_serves_with_a_restrict_decision() {
+        use crate::config::{BudgetAction, BudgetRule};
+        let (state, _calls) = budget_state(BudgetRule {
+            limit: 1,
+            action: BudgetAction::Restrict,
+            downgrade_to: None,
+            restrict_max_tokens: 128,
+            alert: crate::config::AlertTier::Silent,
+        });
+        let out = run(Arc::clone(&state), u1_ctx(), ping_body())
+            .await
+            .expect("restrict still serves a minimal answer");
+        let budget = out.budget.expect("a budget decision is stamped");
+        assert_eq!(budget.action, BudgetAction::Restrict);
+    }
+
+    /// A `Notify` rule is non-blocking: it serves the turn and stamps the Notify
+    /// decision without altering the model.
+    #[tokio::test]
+    async fn budget_notify_is_non_blocking() {
+        use crate::config::{BudgetAction, BudgetRule};
+        let (state, calls) = budget_state(BudgetRule {
+            limit: 1,
+            action: BudgetAction::Notify,
+            downgrade_to: None,
+            restrict_max_tokens: 256,
+            alert: crate::config::AlertTier::Silent,
+        });
+        let out = run(Arc::clone(&state), u1_ctx(), ping_body())
+            .await
+            .expect("notify never blocks");
+        assert_eq!(out.budget.expect("decision").action, BudgetAction::Notify);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// The pre-flight credit gate: a managed-inference tenant whose resolved wallet
+    /// balance is already zero is rejected with a hard `InsufficientCredits` (402)
+    /// before any provider is reached.
+    #[tokio::test]
+    async fn preflight_credit_gate_rejects_exhausted_managed_tenant() {
+        let mut state = chain_state(5);
+        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let mut ctx = plain_ctx();
+        ctx.org_id = Some("org-managed".to_string());
+        ctx.managed_inference = true;
+        ctx.remaining_budget_micro_usd = Some(0);
+
+        let err = match run(Arc::clone(&state), ctx, ping_body()).await {
+            Err(e) => e,
+            Ok(_) => panic!("an exhausted managed wallet must be rejected pre-flight"),
+        };
+        assert!(
+            matches!(err, GatewayError::InsufficientCredits),
+            "expected InsufficientCredits, got {err:?}"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "the credit gate must short-circuit before dispatch"
+        );
+    }
+
+    /// The streaming outbound firewall (Block policy) buffers the upstream SSE,
+    /// scans the assembled text, and emits a blocked frame instead of the leaked
+    /// secret — so a secret never streams to the client.
+    #[tokio::test]
+    async fn run_stream_outbound_firewall_block_redacts_leaked_secret() {
+        use super::run_stream;
+        use crate::config::FirewallPolicy;
+
+        struct LeakyStream;
+        impl Provider for LeakyStream {
+            fn name(&self) -> &'static str {
+                "primary"
+            }
+            fn complete<'a>(
+                &'a self,
+                _model: &'a str,
+                _body: &'a serde_json::Value,
+            ) -> Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<serde_json::Value, ryu_gw_providers::ProviderError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                Box::pin(async move { Err(ryu_gw_providers::ProviderError::Provider("n/a".into())) })
+            }
+            fn complete_stream<'a>(
+                &'a self,
+                _model: &'a str,
+                _body: &'a serde_json::Value,
+            ) -> Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
+                        > + Send
+                        + 'a,
+                >,
+            > {
+                let sse = concat!(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"key sk-abcdefghijklmnopqrstu\"}}]}\n\n",
+                    "data: [DONE]\n\n",
+                );
+                Box::pin(async move { Ok(axum::body::Body::from(sse)) })
+            }
+        }
+
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: true,
+                scan_inbound: false,
+                scan_outbound: true,
+                policy: FirewallPolicy::Block,
+                ..FirewallConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        state
+            .providers
+            .register(Arc::new(LeakyStream) as Arc<dyn Provider>);
+        let state = Arc::new(state);
+
+        let out = run_stream(Arc::clone(&state), plain_ctx(), ping_body())
+            .await
+            .expect("stream is served (as a blocked frame)");
+        let bytes = axum::body::to_bytes(out.body, usize::MAX)
+            .await
+            .expect("drain sse body");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            !text.contains("sk-abcdefghijklmnopqrstu"),
+            "the outbound firewall must not let the secret stream through: {text}"
+        );
+    }
+
+    /// Build a state with the firewall on at `policy` (+ optional alert tier) and a
+    /// healthy `primary` provider. Exact cache disabled so each run re-scans.
+    fn firewall_state(
+        policy: crate::config::FirewallPolicy,
+        alert: crate::config::AlertTier,
+    ) -> (Arc<AppState>, Arc<AtomicUsize>) {
+        let config = GatewayConfig {
+            routing: RoutingConfig {
+                default_provider: ProviderId::from("primary"),
+                fallback_chain: vec![ProviderId::from("primary")],
+                ..RoutingConfig::default()
+            },
+            firewall: FirewallConfig {
+                enabled: true,
+                scan_inbound: true,
+                scan_outbound: false,
+                policy,
+                alert,
+                ..FirewallConfig::default()
+            },
+            cache: crate::config::CacheConfig {
+                enabled: false,
+                ..crate::config::CacheConfig::default()
+            },
+            ..GatewayConfig::default()
+        };
+        let audit = AuditLogger::new(&AuditConfig {
+            enabled: false,
+            db_path: String::new(),
+        })
+        .expect("disabled audit logger");
+        let evals = crate::evals::EvalsRunner::new(EvalsConfig::default());
+        let mut state = AppState::new_for_test(config, audit, evals);
+        let (primary, calls) = StubProvider::new("primary", Mode::Ok);
+        state.providers.register(primary as Arc<dyn Provider>);
+        (Arc::new(state), calls)
+    }
+
+    fn secret_body() -> serde_json::Value {
+        json!({
+            "model": "anything",
+            "messages": [{
+                "role": "user",
+                "content": "Contact user@example.com or use key sk-abcdefghijklmnopqrstu"
+            }]
+        })
+    }
+
+    /// A `Sanitize` inbound policy redacts the offending content in place and still
+    /// serves the turn (never blocks).
+    #[tokio::test]
+    async fn inbound_firewall_sanitize_serves_the_request() {
+        use crate::config::{AlertTier, FirewallPolicy};
+        let (state, calls) = firewall_state(FirewallPolicy::Sanitize, AlertTier::Silent);
+        let out = run(Arc::clone(&state), plain_ctx(), secret_body())
+            .await
+            .expect("sanitize never blocks");
+        assert_eq!(out.provider_used, "primary");
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the sanitized request still reaches the provider"
+        );
+    }
+
+    /// A `WarnAndContinue` inbound policy at a `Warn` alert tier serves the turn and
+    /// stamps a firewall policy alert on the response (observable, non-blocking).
+    #[tokio::test]
+    async fn inbound_firewall_warn_stamps_alert_and_serves() {
+        use crate::config::{AlertTier, FirewallPolicy};
+        let (state, calls) = firewall_state(FirewallPolicy::WarnAndContinue, AlertTier::Warn);
+        let out = run(Arc::clone(&state), plain_ctx(), secret_body())
+            .await
+            .expect("warn-and-continue never blocks");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(
+            out.policy_alert.is_some(),
+            "a warn-tier firewall match must stamp a policy alert on the response"
         );
     }
 }

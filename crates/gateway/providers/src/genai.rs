@@ -274,3 +274,96 @@ fn translate_genai_stream(
         stream::iter(output)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_text_from_string_content() {
+        assert_eq!(extract_text(&json!("hello")), "hello");
+    }
+
+    #[test]
+    fn extract_text_joins_content_part_array() {
+        let content = json!([
+            { "type": "text", "text": "foo" },
+            { "type": "image_url", "image_url": { "url": "x" } },
+            { "type": "text", "text": "bar" }
+        ]);
+        // Only text parts are concatenated; non-text parts are dropped.
+        assert_eq!(extract_text(&content), "foobar");
+    }
+
+    #[test]
+    fn extract_text_empty_for_other_shapes() {
+        assert_eq!(extract_text(&json!(42)), "");
+        assert_eq!(extract_text(&json!(null)), "");
+        assert_eq!(extract_text(&json!({ "k": "v" })), "");
+    }
+
+    #[test]
+    fn parse_messages_maps_roles_and_count() {
+        let body = json!({
+            "messages": [
+                { "role": "system", "content": "sys" },
+                { "role": "user", "content": "hi" },
+                { "role": "assistant", "content": "hey" },
+                { "role": "tool", "content": "result" }
+            ]
+        });
+        let msgs = parse_messages(&body);
+        // All four are mapped (tool folds into a user turn, never dropped).
+        assert_eq!(msgs.len(), 4);
+    }
+
+    #[test]
+    fn parse_messages_empty_when_no_messages_field() {
+        assert!(parse_messages(&json!({})).is_empty());
+        assert!(parse_messages(&json!({ "messages": "nope" })).is_empty());
+    }
+
+    #[test]
+    fn build_options_maps_sampling_params() {
+        let body = json!({
+            "temperature": 0.3,
+            "max_tokens": 256,
+            "top_p": 0.8,
+            "stop": ["END", "STOP"]
+        });
+        let opts = build_options(&body, false);
+        assert_eq!(opts.temperature, Some(0.3));
+        assert_eq!(opts.max_tokens, Some(256));
+        assert_eq!(opts.top_p, Some(0.8));
+        assert_eq!(opts.stop_sequences, vec!["END".to_string(), "STOP".to_string()]);
+        // capture_usage only set on the streaming path.
+        assert_eq!(opts.capture_usage, None);
+    }
+
+    #[test]
+    fn build_options_string_stop_becomes_single_sequence() {
+        let opts = build_options(&json!({ "stop": "HALT" }), false);
+        assert_eq!(opts.stop_sequences, vec!["HALT".to_string()]);
+    }
+
+    #[test]
+    fn build_options_capture_usage_on_stream() {
+        let opts = build_options(&json!({}), true);
+        assert_eq!(opts.capture_usage, Some(true));
+        // Nothing else set when the body is empty.
+        assert_eq!(opts.temperature, None);
+        assert!(opts.stop_sequences.is_empty());
+    }
+
+    #[test]
+    fn build_options_ignores_empty_stop_array() {
+        let opts = build_options(&json!({ "stop": [] }), false);
+        assert!(opts.stop_sequences.is_empty());
+    }
+
+    #[test]
+    fn genai_provider_name_is_genai() {
+        let p = GenAiProvider::new(std::collections::HashMap::new());
+        assert_eq!(p.name(), "genai");
+    }
+}

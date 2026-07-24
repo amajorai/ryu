@@ -81,11 +81,7 @@ pub trait DurableEngine<W, R>: Send + Sync {
     /// event-sourced backend (Temporal/Restate) that needs a distinct journal
     /// replay adds that verb when a consumer requires it — it is intentionally not
     /// pre-declared here without a caller.
-    fn resume<'a>(
-        &'a self,
-        run_id: &'a str,
-        workflow_id: &'a str,
-    ) -> BoxFuture<'a, Option<R>>;
+    fn resume<'a>(&'a self, run_id: &'a str, workflow_id: &'a str) -> BoxFuture<'a, Option<R>>;
 }
 
 // ── Checkpoint store ─────────────────────────────────────────────────────────
@@ -208,10 +204,22 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = FileCheckpointStore::new(dir.path());
         store
-            .save("run_x", &Rec { id: "run_x".into(), n: 1 })
+            .save(
+                "run_x",
+                &Rec {
+                    id: "run_x".into(),
+                    n: 1,
+                },
+            )
             .expect("save v1");
         store
-            .save("run_x", &Rec { id: "run_x".into(), n: 2 })
+            .save(
+                "run_x",
+                &Rec {
+                    id: "run_x".into(),
+                    n: 2,
+                },
+            )
             .expect("save v2");
         let loaded: Rec = store.load("run_x").expect("load ok");
         assert_eq!(loaded.n, 2);
@@ -238,7 +246,15 @@ mod tests {
         for bad in ["../escape", "a/b", "a.b", "", &"x".repeat(129)] {
             assert!(validate_id(bad).is_err(), "expected {bad:?} rejected");
             assert!(
-                store.save(bad, &Rec { id: "x".into(), n: 0 }).is_err(),
+                store
+                    .save(
+                        bad,
+                        &Rec {
+                            id: "x".into(),
+                            n: 0
+                        }
+                    )
+                    .is_err(),
                 "save must reject {bad:?}"
             );
             assert!(store.load::<Rec>(bad).is_err(), "load must reject {bad:?}");

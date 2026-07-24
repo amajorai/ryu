@@ -258,7 +258,10 @@ pub fn build_code_injection_patterns() -> Vec<(String, Regex)> {
         // Python os.system / subprocess / popen. `\s*` around the dot so the spaced
         // `os . system(` / `os . popen(` evasion is covered too.
         ("os_system", r"(?i)\bos\s*\.\s*system\s*\("),
-        ("subprocess", r"(?i)\bsubprocess\s*\.\s*(?:call|run|popen|check_output)\s*\("),
+        (
+            "subprocess",
+            r"(?i)\bsubprocess\s*\.\s*(?:call|run|popen|check_output)\s*\(",
+        ),
         ("popen", r"(?i)\bpopen\s*\("),
         // Bare `system(` (C / PHP / Perl) — require a string-literal argument so
         // ordinary prose `operating system (Linux)` / `file system (ext4)` does not
@@ -266,9 +269,15 @@ pub fn build_code_injection_patterns() -> Vec<(String, Regex)> {
         ("system_call", r#"(?i)\bsystem\s*\(\s*["'\x60]"#),
         // Destructive shell: combined `-rf`/`-fr` (any order, with siblings),
         // split flags `rm -r -f`, and long form `--recursive --force`.
-        ("rm_rf", r"(?i)\brm\s+(?:-\w+\s+)*-\w*r\w*f|(?i)\brm\s+(?:-\w+\s+)*-\w*f\w*r"),
+        (
+            "rm_rf",
+            r"(?i)\brm\s+(?:-\w+\s+)*-\w*r\w*f|(?i)\brm\s+(?:-\w+\s+)*-\w*f\w*r",
+        ),
         ("rm_rf_split", r"(?i)\brm\s+-[rf]\b.{0,12}?-[rf]\b"),
-        ("rm_rf_long", r"(?i)\brm\s+.{0,40}?--(?:recursive|force)\b.{0,40}?--(?:recursive|force)\b"),
+        (
+            "rm_rf_long",
+            r"(?i)\brm\s+.{0,40}?--(?:recursive|force)\b.{0,40}?--(?:recursive|force)\b",
+        ),
         // Command substitution. Backticks and `$()` are narrowed to a shell-command
         // token inside, since users routinely paste ordinary `code` in backticks and
         // jQuery `$(selector)` is not injection (the raw span match was a massive
@@ -400,23 +409,62 @@ fn is_default_ignorable(c: char) -> bool {
 fn fold_confusable(c: char) -> char {
     match c {
         // Cyrillic lowercase → Latin.
-        '\u{0430}' => 'a', '\u{0435}' => 'e', '\u{043E}' => 'o', '\u{0440}' => 'p',
-        '\u{0441}' => 'c', '\u{0443}' => 'y', '\u{0445}' => 'x', '\u{0456}' => 'i',
-        '\u{0455}' => 's', '\u{0458}' => 'j', '\u{043A}' => 'k', '\u{0501}' => 'd',
-        '\u{051B}' => 'q', '\u{051D}' => 'w', '\u{0432}' => 'v', '\u{04CF}' => 'l',
+        '\u{0430}' => 'a',
+        '\u{0435}' => 'e',
+        '\u{043E}' => 'o',
+        '\u{0440}' => 'p',
+        '\u{0441}' => 'c',
+        '\u{0443}' => 'y',
+        '\u{0445}' => 'x',
+        '\u{0456}' => 'i',
+        '\u{0455}' => 's',
+        '\u{0458}' => 'j',
+        '\u{043A}' => 'k',
+        '\u{0501}' => 'd',
+        '\u{051B}' => 'q',
+        '\u{051D}' => 'w',
+        '\u{0432}' => 'v',
+        '\u{04CF}' => 'l',
         // Cyrillic uppercase → Latin.
-        '\u{0410}' => 'A', '\u{0412}' => 'B', '\u{0415}' => 'E', '\u{041A}' => 'K',
-        '\u{041C}' => 'M', '\u{041D}' => 'H', '\u{041E}' => 'O', '\u{0420}' => 'P',
-        '\u{0421}' => 'C', '\u{0422}' => 'T', '\u{0423}' => 'Y', '\u{0425}' => 'X',
-        '\u{0406}' => 'I', '\u{0405}' => 'S', '\u{0408}' => 'J',
+        '\u{0410}' => 'A',
+        '\u{0412}' => 'B',
+        '\u{0415}' => 'E',
+        '\u{041A}' => 'K',
+        '\u{041C}' => 'M',
+        '\u{041D}' => 'H',
+        '\u{041E}' => 'O',
+        '\u{0420}' => 'P',
+        '\u{0421}' => 'C',
+        '\u{0422}' => 'T',
+        '\u{0423}' => 'Y',
+        '\u{0425}' => 'X',
+        '\u{0406}' => 'I',
+        '\u{0405}' => 'S',
+        '\u{0408}' => 'J',
         // Greek lowercase → Latin.
-        '\u{03BF}' => 'o', '\u{03B1}' => 'a', '\u{03C1}' => 'p', '\u{03BD}' => 'v',
-        '\u{03B5}' => 'e', '\u{03B9}' => 'i', '\u{03BA}' => 'k', '\u{03C5}' => 'y',
+        '\u{03BF}' => 'o',
+        '\u{03B1}' => 'a',
+        '\u{03C1}' => 'p',
+        '\u{03BD}' => 'v',
+        '\u{03B5}' => 'e',
+        '\u{03B9}' => 'i',
+        '\u{03BA}' => 'k',
+        '\u{03C5}' => 'y',
         // Greek uppercase → Latin.
-        '\u{0391}' => 'A', '\u{0392}' => 'B', '\u{0395}' => 'E', '\u{0397}' => 'H',
-        '\u{0399}' => 'I', '\u{039A}' => 'K', '\u{039C}' => 'M', '\u{039D}' => 'N',
-        '\u{039F}' => 'O', '\u{03A1}' => 'P', '\u{03A4}' => 'T', '\u{03A5}' => 'Y',
-        '\u{03A7}' => 'X', '\u{0396}' => 'Z',
+        '\u{0391}' => 'A',
+        '\u{0392}' => 'B',
+        '\u{0395}' => 'E',
+        '\u{0397}' => 'H',
+        '\u{0399}' => 'I',
+        '\u{039A}' => 'K',
+        '\u{039C}' => 'M',
+        '\u{039D}' => 'N',
+        '\u{039F}' => 'O',
+        '\u{03A1}' => 'P',
+        '\u{03A4}' => 'T',
+        '\u{03A5}' => 'Y',
+        '\u{03A7}' => 'X',
+        '\u{0396}' => 'Z',
         _ => c,
     }
 }
@@ -475,12 +523,12 @@ pub fn is_public_ipv4(matched: &str) -> bool {
         return false;
     };
     match a {
-        0 | 10 | 127 => false,                 // this-network, RFC1918-10, loopback
-        169 if b == 254 => false,              // link-local
+        0 | 10 | 127 => false,                  // this-network, RFC1918-10, loopback
+        169 if b == 254 => false,               // link-local
         172 if (16..=31).contains(&b) => false, // RFC1918-172
-        192 if b == 168 => false,              // RFC1918-192
-        255 => false,                          // broadcast / subnet-mask shapes
-        224..=255 => false,                    // multicast + reserved
+        192 if b == 168 => false,               // RFC1918-192
+        255 => false,                           // broadcast / subnet-mask shapes
+        224..=255 => false,                     // multicast + reserved
         _ => true,
     }
 }

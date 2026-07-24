@@ -82,8 +82,7 @@ impl TeamsClient {
         if !resp.status().is_success() {
             bail!("teams sidecar GET /{id} returned {}", resp.status());
         }
-        let body: serde_json::Value =
-            resp.json().await.context("decoding the team payload")?;
+        let body: serde_json::Value = resp.json().await.context("decoding the team payload")?;
         let team = serde_json::from_value(body["team"].clone())
             .context("parsing TeamRecord from the teams sidecar")?;
         Ok(Some(team))
@@ -110,8 +109,7 @@ impl TeamsClient {
         if !resp.status().is_success() {
             bail!("teams sidecar POST /api/teams returned {}", resp.status());
         }
-        let body: serde_json::Value =
-            resp.json().await.context("decoding the created team")?;
+        let body: serde_json::Value = resp.json().await.context("decoding the created team")?;
         serde_json::from_value(body["team"].clone())
             .context("parsing the created TeamRecord from the teams sidecar")
     }

@@ -127,7 +127,7 @@ pub async fn companion_get_proactive() -> Result<serde_json::Value, String> {
 	{
 		let client = build_shadow_client()?;
 		let url = format!("{SHADOW_BASE}/proactive");
-		match client.get(&url).send().await {
+		match crate::shadow_auth::with_auth(client.get(&url)).send().await {
 			Ok(resp) => resp
 				.json::<serde_json::Value>()
 				.await
@@ -161,7 +161,7 @@ pub async fn companion_get_context(minutes: Option<u64>) -> Result<serde_json::V
 		let mins = minutes.unwrap_or(10);
 		let client = build_shadow_client()?;
 		let url = format!("{SHADOW_BASE}/context/recent?q={mins}");
-		match client.get(&url).send().await {
+		match crate::shadow_auth::with_auth(client.get(&url)).send().await {
 			Ok(resp) => resp
 				.json::<serde_json::Value>()
 				.await
@@ -208,7 +208,12 @@ mod tests {
 			.build()
 			.unwrap();
 
-		let resp = match client.get("http://127.0.0.1:3030/proactive").send().await {
+		let resp = match crate::shadow_auth::with_auth(
+			client.get("http://127.0.0.1:3030/proactive"),
+		)
+		.send()
+		.await
+		{
 			Ok(r) => r,
 			Err(_) => {
 				eprintln!("[spike-test] Shadow not running — skipping proactive shape test");
@@ -235,10 +240,11 @@ mod tests {
 			.build()
 			.unwrap();
 
-		let resp = match client
-			.get("http://127.0.0.1:3030/context/recent?q=10")
-			.send()
-			.await
+		let resp = match crate::shadow_auth::with_auth(
+			client.get("http://127.0.0.1:3030/context/recent?q=10"),
+		)
+		.send()
+		.await
 		{
 			Ok(r) => r,
 			Err(_) => {

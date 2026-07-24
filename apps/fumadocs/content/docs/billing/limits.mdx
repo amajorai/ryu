@@ -1,0 +1,65 @@
+---
+title: "Free-Tier Limits"
+description: "Every numeric cap enforced on the free plan, and what paid plans get instead."
+---
+
+All numeric caps are soft limits enforced only on the **managed path** (signed-in users with billing auth). Self-hosters who never sign in are uncapped by design. When the plan hasn't resolved yet, limits default to `Infinity` so a paying user is never falsely blocked.
+
+<Callout type="info">
+  Source of truth: `FREE_TIER_LIMITS` and `PLANS` in `packages/auth/src/lib/plans.ts`. Enforced via `planLimit(plan, field)`.
+</Callout>
+
+## Numeric caps
+
+| Limit | Free | Pro | Max | Teams | Lifetime |
+|---|---|---|---|---|---|
+| Open tabs | **8** | ∞ | ∞ | ∞ | ∞ |
+| Agents | **10** | ∞ | ∞ | ∞ | ∞ |
+| Workflows | **10** | ∞ | ∞ | ∞ | ∞ |
+| Spaces | **5** | ∞ | ∞ | ∞ | ∞ |
+| Website monitors | **5** | ∞ | ∞ | ∞ | ∞ |
+| MCP servers | **5** | ∞ | ∞ | ∞ | ∞ |
+| Plugins / apps | **10** | ∞ | ∞ | ∞ | ∞ |
+| Skills | **10** | ∞ | ∞ | ∞ | ∞ |
+| Scheduled automations | **3** | ∞ | ∞ | ∞ | ∞ |
+| Concurrent background runs | **1** | 3 | 3 | **8** | 3 |
+| Eval runs / month | **20** | ∞ | ∞ | ∞ | ∞ |
+| Meeting retention (days) | **30** | ∞ | ∞ | ∞ | ∞ |
+| Space storage (GB) | **2** | 20 | **50** | **50** | 20 |
+| Remote nodes | **1** | ∞ | ∞ | ∞ | ∞ |
+
+### What the caps mean
+
+- **Open tabs** — simultaneously open chat tabs in the desktop app. Opening a 9th tab on the free plan prompts you to close one or upgrade.
+- **Agents** — agents you've created (not conversations — those are unlimited).
+- **Workflows** — saved automation workflows.
+- **Spaces** — collaborative workspaces with shared context.
+- **Website monitors** — pages the monitor agent watches for changes.
+- **MCP servers** — connected Model Context Protocol servers.
+- **Plugins / apps** — installed marketplace plugins.
+- **Skills** — installed agent skills.
+- **Scheduled automations** — cron-style recurring agent tasks.
+- **Concurrent background runs** — how many agents can run in the background at the same time. Teams gets 8 for org parallelism.
+- **Eval runs / month** — offline evaluation runs against your agents.
+- **Meeting retention** — how long meeting transcripts are kept. Free tier retains 30 days; paid retains indefinitely.
+- **Space storage** — blob storage per space (files, images, RAG indexes). Pro/Lifetime get 20 GB; Max/Teams get 50 GB.
+- **Remote nodes** — non-local compute nodes (cloud or remote machines).
+
+## Enforcement model
+
+Caps are enforced **only when `hasBillingAuth()` returns true** — i.e., the user is signed into the control plane. The enforcement call sites:
+
+| Cap | Enforcement location |
+|---|---|
+| `maxOpenTabs` | `apps/desktop/src/contexts/TabsContext.tsx` |
+| `maxRemoteNodes` | `apps/desktop/src/store/useNodeStore.ts` |
+| `maxAgents` | `apps/desktop/src/hooks/useAgents.ts` |
+| `maxWorkflows` | `apps/desktop/src/hooks/useWorkflows.ts` |
+| `maxSpaces` | `apps/desktop/src/hooks/useSpaces.ts` |
+| `maxMonitors` | `apps/desktop/src/contributions/host/PluginHostPanel.tsx` |
+
+The React hook `useEntityCap` (in `apps/desktop/src/lib/gating/useEntityCap.ts`) provides `guard(field, currentCount)` and `limitFor(field)` for components. The non-React singleton `planCapBridge` serves zustand stores.
+
+## Self-hosters
+
+If you never sign into the control plane, `hasBillingAuth()` is false and **all limits are Infinity**. The caps are a managed-path concern only.

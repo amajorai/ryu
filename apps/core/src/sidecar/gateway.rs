@@ -268,9 +268,7 @@ fn gateway_config_get_request(
 /// Targets [`gateway_url`] and forwards [`gateway_token`] (the master key), so it
 /// works against a remote gateway exactly like the PUT. Errs on a transport failure
 /// or a non-2xx status.
-pub(crate) async fn fetch_config(
-    client: &reqwest::Client,
-) -> anyhow::Result<serde_json::Value> {
+pub(crate) async fn fetch_config(client: &reqwest::Client) -> anyhow::Result<serde_json::Value> {
     let base = gateway_url();
     let resp = gateway_config_get_request(client, &base, gateway_token().as_deref())
         .send()
@@ -550,7 +548,10 @@ const ENV_CREDITS_COST_PER_TOOL_CALL: &str = "GATEWAY_CREDITS_COST_PER_TOOL_CALL
 /// them explicitly so an operator can pin rates on Core's env and have them flow
 /// to the managed gateway child (belt-and-suspenders, like the tool-call rate).
 const SANDBOX_RATE_ENVS: &[(&str, u64)] = &[
-    ("GATEWAY_CREDITS_COST_PER_SANDBOX_VCPU_SECOND_NANO_USD", 14_000),
+    (
+        "GATEWAY_CREDITS_COST_PER_SANDBOX_VCPU_SECOND_NANO_USD",
+        14_000,
+    ),
     (
         "GATEWAY_CREDITS_COST_PER_SANDBOX_MEM_GIB_SECOND_NANO_USD",
         4_500,
@@ -1095,25 +1096,28 @@ pub async fn check_exec_budget(backend: &str, command: &str) -> ExecBudgetOutcom
 //
 // A second, orthogonal pre-run gate alongside the budget check: the gateway
 // scans the actual command against its policy (firewall patterns, allow/deny
-// rules) and returns a verdict. Unlike the budget gate this control is OPT-IN —
-// it only calls the gateway when `RYU_EXEC_APPROVAL_MODE` is set to something
-// other than `off`, so an install that never sets it behaves exactly as before
-// (the scan short-circuits to Allow with no network call). When enabled it is
+// rules) and returns a verdict. This gate is armed BY DEFAULT — an unset
+// `RYU_EXEC_APPROVAL_MODE` scans (the gateway's own default mode governs the
+// verdict); only an explicit `off` disarms it. The default-on posture is what
+// closes the headless auto-approve hole: non-interactive runs (scheduler,
+// triggers, healing, delegation) auto-approve permission requests, so without
+// this scan they get unattended arbitrary shell/file-write. When armed it is
 // fail-closed on the same terms as the budget gate: unreachable / non-2xx /
 // parse error => Deny unless `RYU_ALLOW_GATEWAY_FALLBACK=1`.
 
-/// Env var selecting the command-approval mode. Unset or `off` (case-insensitive)
-/// disables the scan entirely (Core does not call the gateway and always allows).
-/// Any other value enables the fail-closed scan gate.
+/// Env var selecting the command-approval mode. An explicit `off`
+/// (case-insensitive) disables the scan entirely (Core does not call the gateway
+/// and always allows). Unset/empty or any other value arms the fail-closed scan
+/// gate — armed is the default.
 const ENV_EXEC_APPROVAL_MODE: &str = "RYU_EXEC_APPROVAL_MODE";
 
-/// Whether the command-approval scan gate is enabled. Off when the env var is
-/// unset or equals `off` (case-insensitive, trimmed) — preserving prior behavior
-/// for any install that does not opt in.
+/// Whether the command-approval scan gate is enabled. Armed by default (unset /
+/// empty env); only an explicit `off` (case-insensitive, trimmed) disarms —
+/// governance must be an explicit opt-OUT, never a silent default-off.
 fn exec_approval_enabled() -> bool {
     match std::env::var(ENV_EXEC_APPROVAL_MODE) {
-        Ok(v) => !matches!(v.trim().to_ascii_lowercase().as_str(), "" | "off"),
-        Err(_) => false,
+        Ok(v) => !v.trim().eq_ignore_ascii_case("off"),
+        Err(_) => true,
     }
 }
 
@@ -1153,11 +1157,10 @@ fn map_scan_decision(decision: &str, reason: &str) -> ExecScanOutcome {
 /// (`POST /v1/exec/scan`). Mirrors [`check_exec_budget`]'s base-url, auth, and
 /// fail-closed semantics.
 ///
-/// Short-circuits to `Allow` **without** any network call when the gate is
-/// disabled (`RYU_EXEC_APPROVAL_MODE` unset or `off`), so behavior is unchanged
-/// for installs that do not opt in.
+/// Armed by default: only an EXPLICIT `RYU_EXEC_APPROVAL_MODE=off` short-circuits
+/// to `Allow` without any network call (the operator's documented opt-out).
 ///
-/// Fail-closed when enabled: an unreachable gateway, a non-2xx response, or an
+/// Fail-closed when armed: an unreachable gateway, a non-2xx response, or an
 /// unparseable body all map to `Deny` unless `RYU_ALLOW_GATEWAY_FALLBACK=1` is
 /// set (then `Allow`), identical to the budget gate.
 pub async fn check_exec_scan(
@@ -1872,15 +1875,16 @@ mod tests {
     fn exec_scan_off_mode_reads_env() {
         let _lock = lock_scan_env();
         let _g = EnvGuard::capture(SCAN_ENV);
-        // Unset → disabled.
-        assert!(!exec_approval_enabled());
+        // Unset → ARMED (the default-on posture; only explicit `off` disarms).
+        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
+        assert!(exec_approval_enabled(), "unset must arm the gate");
         // "off" (any case, trimmed) → disabled.
         for v in ["off", "OFF", " Off "] {
             std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
             assert!(!exec_approval_enabled(), "{v:?} should disable the gate");
         }
         // Any other value → enabled.
-        for v in ["on", "enforce", "prompt"] {
+        for v in ["on", "enforce", "prompt", ""] {
             std::env::set_var(ENV_EXEC_APPROVAL_MODE, v);
             assert!(exec_approval_enabled(), "{v:?} should enable the gate");
         }
@@ -1890,14 +1894,31 @@ mod tests {
     async fn exec_scan_off_mode_short_circuits_without_network() {
         let _lock = lock_scan_env();
         let _g = EnvGuard::capture(SCAN_ENV);
-        // Gate disabled + a guaranteed-unreachable gateway + NO fallback. If the
-        // off-mode path touched the network it would fail-closed to Deny; an Allow
-        // proves it short-circuited before any HTTP call.
-        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
+        // Gate explicitly disarmed + a guaranteed-unreachable gateway + NO
+        // fallback. If the off-mode path touched the network it would fail-closed
+        // to Deny; an Allow proves it short-circuited before any HTTP call.
+        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
         std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
         std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
         let out = check_exec_scan("deno", "rm -rf /", Some("sess"), Some("ryu")).await;
         assert_eq!(out, ExecScanOutcome::Allow);
+    }
+
+    #[tokio::test]
+    async fn exec_scan_default_is_armed_and_fail_closed() {
+        let _lock = lock_scan_env();
+        let _g = EnvGuard::capture(SCAN_ENV);
+        // The load-bearing default: with NOTHING configured, the scan runs and an
+        // unreachable gateway fails closed — a default install's headless runs
+        // cannot execute unscanned commands.
+        std::env::remove_var(ENV_EXEC_APPROVAL_MODE);
+        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
+        std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
+        let out = check_exec_scan("deno", "echo hi", None, None).await;
+        assert!(
+            matches!(out, ExecScanOutcome::Deny(_)),
+            "default-armed gate must fail closed on an unreachable gateway, got {out:?}"
+        );
     }
 
     #[tokio::test]
@@ -2025,10 +2046,7 @@ mod tests {
                 }
             }
             let body = b"{\"firewall\":{\"enabled\":true,\"policy\":\"block\"}}";
-            let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
-                body.len()
-            );
+            let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
             let _ = sock.write_all(head.as_bytes()).await;
             let _ = sock.write_all(body).await;
             String::from_utf8_lossy(&raw).into_owned()

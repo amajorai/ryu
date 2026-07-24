@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	acceptSuggestion,
@@ -60,7 +60,7 @@ export function useQuests(): UseQuestsResult {
 
 	const onError = useCallback((error: unknown) => {
 		const message = error instanceof Error ? error.message : "request failed";
-		sileo.error({ title: "Tasks", description: message });
+		toast.error({ title: "Tasks", description: message });
 	}, []);
 
 	const createMutation = useMutation({

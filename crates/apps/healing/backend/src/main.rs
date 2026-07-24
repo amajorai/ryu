@@ -78,8 +78,7 @@ const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:7981";
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -137,9 +136,7 @@ async fn main() -> anyhow::Result<()> {
 
     // `/health` sits OUTSIDE the gated nest so the loopback health probe succeeds
     // before auth. It returns process liveness only (no heal data).
-    let app = Router::new()
-        .route("/health", get(health))
-        .merge(healing);
+    let app = Router::new().route("/health", get(health)).merge(healing);
 
     // LOOPBACK ONLY (belt) + shared-secret bearer (suspenders): Core is the auth
     // front and re-stamps the bearer on the proxied hop.
@@ -340,7 +337,9 @@ impl HealingHost for SidecarHealingHost {
     }
 
     async fn rerun_workflow(&self, _source_id: &str) {
-        tracing::error!("ryu-healing: rerun_workflow reached the sidecar host (contract violation)");
+        tracing::error!(
+            "ryu-healing: rerun_workflow reached the sidecar host (contract violation)"
+        );
     }
 
     async fn queue_heal_fix(
@@ -350,7 +349,9 @@ impl HealingHost for SidecarHealingHost {
         _diagnosis: &str,
         _corrected: String,
     ) {
-        tracing::error!("ryu-healing: queue_heal_fix reached the sidecar host (contract violation)");
+        tracing::error!(
+            "ryu-healing: queue_heal_fix reached the sidecar host (contract violation)"
+        );
     }
 
     async fn queue_heal_workflow(&self, _source_id: &str, _diagnosis: &str) {

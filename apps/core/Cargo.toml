@@ -11,7 +11,7 @@ license = "Apache-2.0"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("voice-parakeet", "voice-vad"))'] }
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
 axum = { version = "0.7", features = ["ws", "multipart"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
@@ -32,6 +32,10 @@ url = "2"
 futures-util = "0.3"
 async-stream = "0.3"
 sha2 = "0.10"
+# Argv-safe splitting of agent-supplied command strings (rtk__run): quotes are
+# honored but shell metacharacters (;, $(), backticks, pipes) are never
+# interpreted, because the command is exec'd argv-style, not through `sh -c`.
+shell-words = "1"
 regex = "1"
 tempfile = "3"
 hex = "0.4"

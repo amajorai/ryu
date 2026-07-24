@@ -430,6 +430,11 @@
 	--shimmer-dur: 2000ms;
 	--shimmer-band: 400%;
 	--shimmer-ease: linear;
+	/* Onboarding progress marquee — an always-moving highlight so the phase bar
+	   never reads as frozen while a long auto-advancing step waits. */
+	--progress-marquee-dur: 1400ms;
+	--progress-marquee-band: 45%;
+	--progress-marquee-ease: cubic-bezier(0.4, 0, 0.6, 1);
 	/* Theme-mapped color tokens (follow light/dark via the app's vars) */
 	--tabs-bar-bg: var(--muted);
 	--tabs-pill-bg: var(--background);
@@ -534,6 +539,35 @@
 	filter: blur(var(--text-swap-blur));
 	transform: translateY(var(--text-swap-translate-y));
 	transition: none;
+}
+
+/* --- Onboarding progress marquee — the phase-derived fill sets the general
+   position, but the numeric percent is hidden and this band sweeps across the
+   whole track (over both the muted rest and the primary fill) so there is always
+   visible motion, even when the fill sits still for minutes on the local
+   install. A low-alpha foreground tint reads against both surfaces. --- */
+@keyframes t-progress-marquee {
+	from {
+		transform: translateX(-120%);
+	}
+	to {
+		transform: translateX(320%);
+	}
+}
+.t-progress-marquee {
+	position: absolute;
+	inset: 0;
+	width: var(--progress-marquee-band);
+	pointer-events: none;
+	background-image: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in oklab, var(--foreground) 22%, transparent),
+		transparent
+	);
+	animation: t-progress-marquee var(--progress-marquee-dur)
+		var(--progress-marquee-ease) infinite;
+	will-change: transform;
 }
 
 /* --- Icon swap (09) --- */
@@ -708,6 +742,7 @@
 	.t-badge,
 	.t-badge-dot,
 	.t-digit-group .t-digit,
+	.t-progress-marquee,
 	.t-text-swap,
 	.t-icon-swap .t-icon,
 	.t-panel-slide,

@@ -4,6 +4,13 @@
 // the storyboard renders with mock data.
 
 import { UpdatesView } from "@ryu/blocks/desktop/updates";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@ryu/ui/components/select";
 import { useEffect, useState } from "react";
 import { sileo } from "sileo";
 import { useActiveNodeGetter } from "@/src/hooks/useActiveNode.ts";
@@ -16,9 +23,15 @@ import {
 	setAutoUpdateEnabled,
 } from "@/src/lib/api/update.ts";
 import {
+	type ReleaseChannel,
 	RELEASE_CHANNELS,
 	useReleaseChannel,
 } from "@/src/lib/release-channel.ts";
+import {
+	SettingsGroup,
+	SettingsItem,
+	SettingsSection,
+} from "./shared/settings-items.tsx";
 
 export function UpdatesSettings() {
 	const getNode = useActiveNodeGetter();
@@ -103,50 +116,46 @@ export function UpdatesSettings() {
 /** Chooses the release channel (Canary / Nightly / Beta / Stable). The choice
  *  decides which per-channel updater feed the Tauri updater checks, so switching
  *  it changes which builds this install receives. */
+const RELEASE_CHANNEL_ITEMS = RELEASE_CHANNELS.map((option) => ({
+	value: option.channel,
+	label: option.label,
+}));
+
 function ReleaseChannelPicker() {
 	const [channel, setChannel] = useReleaseChannel();
 
 	return (
-		<section className="space-y-3">
-			<div>
-				<h3 className="font-medium text-sm">Release channel</h3>
-				<p className="text-muted-foreground text-xs">
-					Which builds this install receives. More bleeding-edge channels update
-					sooner but are less tested.
-				</p>
-			</div>
-			<div className="space-y-1.5">
-				{RELEASE_CHANNELS.map((option) => {
-					const active = channel === option.channel;
-					return (
-						<button
-							className={`flex w-full items-start gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-								active
-									? "border-primary bg-primary/5"
-									: "border-border hover:bg-muted"
-							}`}
-							key={option.channel}
-							onClick={() => setChannel(option.channel)}
-							type="button"
+		<SettingsSection
+			caption="More bleeding-edge channels update sooner but are less tested."
+			title="Release channel"
+		>
+			<SettingsGroup>
+				<SettingsItem
+					actions={
+						<Select
+							items={RELEASE_CHANNEL_ITEMS}
+							onValueChange={(v) => setChannel(v as ReleaseChannel)}
+							value={channel}
 						>
-							<span
-								aria-hidden="true"
-								className={`mt-1 size-2 shrink-0 rounded-full ${
-									active ? "bg-primary" : "bg-muted-foreground/30"
-								}`}
-							/>
-							<span className="min-w-0 flex-1">
-								<span className="block font-medium text-sm">
-									{option.label}
-								</span>
-								<span className="block text-muted-foreground text-xs">
-									{option.description}
-								</span>
-							</span>
-						</button>
-					);
-				})}
-			</div>
-		</section>
+							<SelectTrigger
+								className="h-8 w-56 flex-shrink-0 text-sm"
+								id="release-channel-select"
+							>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{RELEASE_CHANNELS.map((option) => (
+									<SelectItem key={option.channel} value={option.channel}>
+										{option.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					}
+					description="Which builds this install receives. Switching changes which per-channel updater feed Ryu checks."
+					title="Channel"
+				/>
+			</SettingsGroup>
+		</SettingsSection>
 	);
 }

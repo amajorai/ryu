@@ -355,13 +355,7 @@ impl RoomRegistry {
     /// Deliver a typed named event to one connection in `room_id` (Rivet's
     /// `conn.send(event, payload)`). No-op if the room is not live or the connection
     /// has closed.
-    pub fn send_event(
-        &self,
-        room_id: &str,
-        conn: ConnId,
-        name: impl Into<String>,
-        payload: Value,
-    ) {
+    pub fn send_event(&self, room_id: &str, conn: ConnId, name: impl Into<String>, payload: Value) {
         if let Some(handle) = self.lock().get(room_id) {
             handle.send_event(conn, name, payload);
         }

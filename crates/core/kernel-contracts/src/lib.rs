@@ -28,11 +28,11 @@ pub use manifest::{
     PluginTier, Requires, Surface, TurnHookContribution, WidgetContribution, MAX_PLUGIN_ID_LEN,
 };
 pub use runnable::{RunnableKind, RunnableMeta};
-pub use tenancy::ResourceKey;
 pub use schema::{
     capabilities_from_grants, capability_label, label_impersonates_system_chrome,
     validate_runnable, validate_sidecar_spec, AgentConfig, AssetSpec, BinarySpec, ChannelConfig,
-    CompanionConfig, CompanionCsp, EngineConfig, ExternalRuntimeConfig, PolicyConfig, RunnableEntry,
-    SidecarProcess, SidecarSpec, SkillConfig, SourceArchiveSpec, ToolBackend, ToolConfig,
-    WorkflowConfig, SUPPORTED_ARCHIVE_FORMATS,
+    CompanionConfig, CompanionCsp, EngineConfig, ExternalRuntimeConfig, PolicyConfig,
+    RunnableEntry, SidecarProcess, SidecarSpec, SkillConfig, SourceArchiveSpec, ToolBackend,
+    ToolConfig, WorkflowConfig, SUPPORTED_ARCHIVE_FORMATS,
 };
+pub use tenancy::ResourceKey;

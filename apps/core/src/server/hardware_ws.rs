@@ -458,3 +458,68 @@ fn error_frame(code: &str, message: &str) -> Message {
         message: message.to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `error` frame is a `type`-tagged TEXT message carrying the code + message
+    /// verbatim — the shape the handshake rejects (`expected_hello`, `bad_json`,
+    /// `unauthorized`) rely on the device parsing.
+    #[test]
+    fn error_frame_is_tagged_and_carries_fields() {
+        let Message::Text(text) = error_frame("unauthorized", "pair first") else {
+            panic!("error_frame must produce a TEXT frame");
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["type"], "error");
+        assert_eq!(v["code"], "unauthorized");
+        assert_eq!(v["message"], "pair first");
+    }
+
+    /// `text_frame` serializes a server control message to a routable `type`-tagged
+    /// frame (Pong is the liveness reply the recv loop emits).
+    #[test]
+    fn text_frame_tags_control_messages() {
+        let Message::Text(text) = text_frame(&RhpServerMsg::Pong) else {
+            panic!("expected TEXT");
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["type"], "pong");
+    }
+
+    /// A `hello` control frame round-trips through the client-message parser the
+    /// handshake loop uses — the first accepted frame must decode to `Hello`.
+    #[test]
+    fn hello_frame_parses_as_client_hello() {
+        // A minimal valid hello; the exact cap/device_type fields are the crate's
+        // contract — we only assert the discriminant the handshake branches on.
+        let frame = serde_json::json!({
+            "type": "hello",
+            "device_id": "dev-1",
+            "device_type": "necklace",
+            "fw_version": "1.0.0",
+            "relay": false,
+            "audio": { "codec": "opus", "sample_rate": 16000, "frame_ms": 60 },
+            "caps": { "mic": true, "speaker": true, "camera": false, "display": false },
+        })
+        .to_string();
+        match serde_json::from_str::<RhpClientMsg>(&frame) {
+            Ok(RhpClientMsg::Hello { device_id, .. }) => assert_eq!(device_id, "dev-1"),
+            other => panic!("expected Hello, got {other:?}"),
+        }
+    }
+
+    /// A non-hello first frame is parseable but is NOT `Hello`, so the handshake
+    /// rejects it with `expected_hello` — pin that a `ping` decodes to a distinct
+    /// variant rather than matching the hello arm.
+    #[test]
+    fn ping_frame_is_not_hello() {
+        let frame = serde_json::json!({ "type": "ping" }).to_string();
+        let msg = serde_json::from_str::<RhpClientMsg>(&frame).expect("ping decodes");
+        assert!(
+            !matches!(msg, RhpClientMsg::Hello { .. }),
+            "a ping must not satisfy the hello handshake arm"
+        );
+    }
+}

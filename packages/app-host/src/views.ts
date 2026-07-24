@@ -204,6 +204,37 @@ export interface SourceItem {
 	raw: Record<string, unknown>;
 }
 
+/**
+ * The opaque `spec` of a manifest `sidebar_sections` contribution (the Rust
+ * `SidebarSectionContribution`). The desktop's compact sidebar renderer reads it so
+ * an app owns its sidebar section instead of the shell hardcoding it:
+ * - `source` supplies the live rows, fetched through the host's authenticated Core
+ *   seam and mapped via {@link sourceItemsFromResponse} — the same primitive a
+ *   `list-detail` view uses.
+ * - `itemTarget` is a route template opened via `openTab`, filled with the clicked
+ *   row using {@link renderTemplate} (e.g. `"/spaces/{{item.spaceId}}/canvas/{{item.id}}"`).
+ *   Client navigation is not expressible as a {@link ViewAction}, so it lives here.
+ * - `itemActions` are per-row context-menu actions (reusing {@link ViewAction}).
+ * - `create` is the "+" action; its response id (`targetFrom`) feeds `itemTarget`
+ *   to open the new row (create-and-open), else the section re-fetches its source.
+ */
+export interface SidebarSectionSpec {
+	create?: {
+		http: ViewActionHttp;
+		icon?: string;
+		label?: string;
+		/** Response key holding the created row's id; feeds `itemTarget` to open it.
+		 *  Absent = create then re-fetch (no auto-open). */
+		targetFrom?: string;
+	};
+	/** Per-row context-menu actions (delete, rename, …). */
+	itemActions?: ViewAction[];
+	/** Route template opened when a row is clicked. */
+	itemTarget?: string;
+	/** Live rows for the section (same primitive `list-detail` uses). */
+	source?: ViewSource;
+}
+
 // ── The discriminated union on `view` ─────────────────────────────────────────
 
 export interface ListDetailView {

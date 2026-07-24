@@ -15,9 +15,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Named `Fanout` (never `Notify`) so it never collides with
 /// `BudgetAction::Notify`, which is an enforcement action, not a tier.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, PartialOrd, Ord,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum AlertTier {
     /// No alert. The default, so every pre-existing config parses to Silent.

@@ -41,8 +41,8 @@
 use anyhow::{Context, Result};
 
 use super::{CredentialSource, LoginFlow, LoginKind};
-use ryu_crypto::global_cipher;
 use crate::{ConnectionStatus, SealedState, SecretState};
+use ryu_crypto::global_cipher;
 
 /// The default backend: user-provided credential state, sealed at rest.
 ///
@@ -93,8 +93,8 @@ impl CredentialSource for ManualImport {
     async fn fetch_state(&self, profile_id: &str, domain: &str) -> Result<SealedState> {
         // No live re-fetch for the manual backend: the sealed creds already
         // live in the vault, so read them back from the Unit 0 store.
-        let store = crate::global()
-            .context("identity store not initialized; cannot fetch manual state")?;
+        let store =
+            crate::global().context("identity store not initialized; cannot fetch manual state")?;
         let record = store
             .find(profile_id, domain)
             .await

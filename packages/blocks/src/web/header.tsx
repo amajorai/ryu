@@ -26,7 +26,6 @@ import {
 import { solutionCategories, solutionsByCategory } from "./data/solutions.ts";
 import { GitHubStars } from "./github-stars.tsx";
 import { ProgressiveBlur } from "./progressive-blur.tsx";
-import { iconFor } from "./solutions-sections.tsx";
 
 interface HeaderLink {
 	external?: boolean;
@@ -48,33 +47,21 @@ const GITHUB_CORE_URL = "https://github.com/amajorai/ryu";
 function ProductCategoryColumn({ category }: { category: ProductCategory }) {
 	return (
 		<div>
-			<p className="mb-1.5 px-3 font-medium text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+			<p className="mb-2 px-3 font-medium text-muted-foreground text-sm">
 				{category}
 			</p>
 			<div>
-				{productsByCategory(category).map((product) => {
-					const Icon = product.Icon;
-					return (
-						<MotionNavigationMenuLink
-							className="flex-row items-center gap-2.5 px-3"
-							key={product.slug}
-							render={<Link href={`/products/${product.slug}`} />}
-						>
-							<Icon
-								className="size-5 shrink-0 text-foreground/70"
-								strokeWidth={1.5}
-							/>
-							<div className="min-w-0">
-								<p className="font-medium text-foreground text-sm">
-									{product.navLabel}
-								</p>
-								<p className="truncate text-muted-foreground text-xs">
-									{product.tagline}
-								</p>
-							</div>
-						</MotionNavigationMenuLink>
-					);
-				})}
+				{productsByCategory(category).map((product) => (
+					<MotionNavigationMenuLink
+						className="px-3 py-1"
+						key={product.slug}
+						render={<Link href={`/products/${product.slug}`} />}
+					>
+						<span className="font-semibold text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
+							{product.navLabel}
+						</span>
+					</MotionNavigationMenuLink>
+				))}
 			</div>
 		</div>
 	);
@@ -154,7 +141,6 @@ export default function Header({
 								<MotionNavigationMenuItem value="products">
 									<MotionNavigationMenuTrigger
 										className={cn(
-											"rounded-full px-3",
 											pathname.startsWith("/products") &&
 												"text-accent-foreground"
 										)}
@@ -162,7 +148,7 @@ export default function Header({
 										Products
 									</MotionNavigationMenuTrigger>
 									<MotionNavigationMenuContent>
-										<div className="grid w-[640px] grid-cols-2 gap-x-4 gap-y-5 p-1">
+										<div className="grid w-[760px] grid-cols-2 gap-x-6 gap-y-7 p-2">
 											<ProductCategoryColumn category="Build" />
 											<ProductCategoryColumn category="Platform" />
 											<div className="flex flex-col gap-y-5">
@@ -189,42 +175,34 @@ export default function Header({
 								<MotionNavigationMenuItem value="solutions">
 									<MotionNavigationMenuTrigger
 										className={cn(
-											"rounded-full px-3",
 											pathname.startsWith("/for") && "text-accent-foreground"
 										)}
 									>
 										Solutions
 									</MotionNavigationMenuTrigger>
 									<MotionNavigationMenuContent>
-										<div className="grid w-[720px] grid-cols-3 gap-x-4 gap-y-5 p-1">
+										<div className="grid w-[820px] grid-cols-3 gap-x-6 gap-y-7 p-2">
 											{solutionCategories.map((category) => (
 												<div key={category}>
-													<p className="mb-1.5 px-3 font-medium text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+													<p className="mb-2 px-3 font-medium text-muted-foreground text-sm">
 														{category}
 													</p>
 													<div>
-														{solutionsByCategory(category).map((solution) => {
-															const Icon = iconFor(solution.icon);
-															return (
-																<MotionNavigationMenuLink
-																	className="flex-row items-center gap-2.5 px-3"
-																	key={solution.slug}
-																	render={
-																		<Link
-																			href={`/for/${solution.slug}` as Route}
-																		/>
-																	}
-																>
-																	<Icon
-																		className="size-4 shrink-0 text-foreground/60"
-																		strokeWidth={1.5}
+														{solutionsByCategory(category).map((solution) => (
+															<MotionNavigationMenuLink
+																className="px-3 py-1"
+																key={solution.slug}
+																render={
+																	<Link
+																		href={`/for/${solution.slug}` as Route}
 																	/>
-																	<span className="font-medium text-foreground text-sm">
-																		{solution.navLabel}
-																	</span>
-																</MotionNavigationMenuLink>
-															);
-														})}
+																}
+															>
+																<span className="font-semibold text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
+																	{solution.navLabel}
+																</span>
+															</MotionNavigationMenuLink>
+														))}
 													</div>
 												</div>
 											))}
@@ -262,7 +240,6 @@ export default function Header({
 								<MotionNavigationMenuItem value="resources">
 									<MotionNavigationMenuTrigger
 										className={cn(
-											"rounded-full px-3",
 											(pathname.startsWith("/docs") ||
 												pathname.startsWith("/marketplace") ||
 												pathname.startsWith("/compare") ||
@@ -278,48 +255,36 @@ export default function Header({
 										Resources
 									</MotionNavigationMenuTrigger>
 									<MotionNavigationMenuContent>
-										<div className="grid w-[720px] grid-cols-3 gap-x-4 gap-y-5 p-1">
+										<div className="grid w-[820px] grid-cols-3 gap-x-6 gap-y-7 p-2">
 											{resourceCategories.map((category) => (
 												<div key={category}>
-													<p className="mb-1.5 px-3 font-medium text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+													<p className="mb-2 px-3 font-medium text-muted-foreground text-sm">
 														{category}
 													</p>
 													<div>
-														{resourcesByCategory(category).map((resource) => {
-															const Icon = resource.Icon;
-															return (
-																<MotionNavigationMenuLink
-																	className="flex-row items-center gap-2.5 px-3"
-																	key={resource.href}
-																	render={
-																		<Link
-																			href={resource.href as Route}
-																			rel={
-																				resource.external
-																					? "noopener noreferrer"
-																					: undefined
-																			}
-																			target={
-																				resource.external ? "_blank" : undefined
-																			}
-																		/>
-																	}
-																>
-																	<Icon
-																		className="size-5 shrink-0 text-foreground/70"
-																		strokeWidth={1.5}
+														{resourcesByCategory(category).map((resource) => (
+															<MotionNavigationMenuLink
+																className="px-3 py-1"
+																key={resource.href}
+																render={
+																	<Link
+																		href={resource.href as Route}
+																		rel={
+																			resource.external
+																				? "noopener noreferrer"
+																				: undefined
+																		}
+																		target={
+																			resource.external ? "_blank" : undefined
+																		}
 																	/>
-																	<div className="min-w-0">
-																		<p className="font-medium text-foreground text-sm">
-																			{resource.label}
-																		</p>
-																		<p className="truncate text-muted-foreground text-xs">
-																			{resource.description}
-																		</p>
-																	</div>
-																</MotionNavigationMenuLink>
-															);
-														})}
+																}
+															>
+																<span className="font-semibold text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
+																	{resource.label}
+																</span>
+															</MotionNavigationMenuLink>
+														))}
 													</div>
 												</div>
 											))}

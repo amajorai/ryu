@@ -30,7 +30,9 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use ryu_tool_registry::{arg_summary, describe_from_parts, DescribedTool, ToolDescriptor, ToolKind};
+use ryu_tool_registry::{
+    arg_summary, describe_from_parts, DescribedTool, ToolDescriptor, ToolKind,
+};
 
 /// The synthetic MCP "server" segment for every CoreApi tool id.
 pub const SERVER_NAME: &str = "ryu_api";
@@ -72,8 +74,7 @@ const DENIED_EXACT: &[&str] = &[
 /// never useful as request/response tools and are excluded at generation time.
 const DENIED_STREAMING_SUBSTRINGS: &[&str] = &[
     "/ws", // websocket upgrade routes (…_ws, /ws/…)
-    "_ws",
-    "stream", // SSE stream routes (…/stream, …_stream)
+    "_ws", "stream",  // SSE stream routes (…/stream, …_stream)
     "/events", // SSE event feeds
 ];
 
@@ -90,10 +91,7 @@ pub fn is_denied(path: &str, method: &str) -> bool {
     if DENIED_PREFIXES.iter().any(|p| path.starts_with(p)) {
         return true;
     }
-    if DENIED_STREAMING_SUBSTRINGS
-        .iter()
-        .any(|s| path.contains(s))
-    {
+    if DENIED_STREAMING_SUBSTRINGS.iter().any(|s| path.contains(s)) {
         return true;
     }
     // Approvals: reads OK, mutations forbidden (self-approval bypass).
@@ -226,7 +224,9 @@ pub fn build_routes(spec: &Value) -> Vec<CoreApiRoute> {
                 // Deterministic (METHODS order + IndexMap path order) so the same
                 // one always wins.
                 debug_assert!(false, "duplicate core-api tool id: {id} ({method} {path})");
-                tracing::warn!("self_api: duplicate core-api tool id {id} ({method} {path}); keeping first");
+                tracing::warn!(
+                    "self_api: duplicate core-api tool id {id} ({method} {path}); keeping first"
+                );
                 continue;
             }
 
@@ -524,7 +524,10 @@ mod tests {
     #[test]
     fn ids_encode_method_and_slug() {
         let routes = build_routes(&sample_spec());
-        let get = routes.iter().find(|r| r.path_template == "/api/quests" && r.method == "GET").unwrap();
+        let get = routes
+            .iter()
+            .find(|r| r.path_template == "/api/quests" && r.method == "GET")
+            .unwrap();
         assert_eq!(get.id, "ryu_api__get_api_quests");
         assert_eq!(method_of(&get.id), Some("get"));
         assert!(!is_mutating(&get.id));
@@ -548,7 +551,10 @@ mod tests {
     #[test]
     fn query_param_becomes_arg_not_path() {
         let routes = build_routes(&sample_spec());
-        let mem = routes.iter().find(|r| r.path_template == "/api/memory").unwrap();
+        let mem = routes
+            .iter()
+            .find(|r| r.path_template == "/api/memory")
+            .unwrap();
         assert_eq!(mem.query_params, vec!["scope".to_string()]);
         assert!(mem.path_params.is_empty());
     }
@@ -616,7 +622,11 @@ mod tests {
         let n = ids.len();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), n, "duplicate core-api tool ids in generated catalog");
+        assert_eq!(
+            ids.len(),
+            n,
+            "duplicate core-api tool ids in generated catalog"
+        );
     }
 
     #[test]

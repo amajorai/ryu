@@ -1,0 +1,75 @@
+---
+title: "Credits & AI Pools"
+description: "How prepaid credits work, monthly included pools, deposit fees, and the wallet model."
+---
+
+Ryu Cloud runs on **prepaid credits** (USD). You spend your balance down as you go — when it runs out, Ryu pauses managed inference (or falls back to a free local model). You are **never** billed after the fact.
+
+<Callout type="info">
+  Source of truth: `packages/auth/src/lib/plans.ts` (deposit fees, pool fractions) and `packages/api/src/routers/credits.ts` (wallet operations).
+</Callout>
+
+## How credits work
+
+1. **Monthly included pool** — Pro, Max, and Teams include a credit grant each billing period. It's use-it-or-lose-it: unused pool credits do **not** roll over.
+2. **Top-up credits** — you buy additional credits any time. These **do** roll over and never expire.
+3. **Spend order** — monthly pool credits are spent first (since they expire), then your topped-up balance.
+
+## Monthly included pools
+
+| Plan | Monthly pool | Fraction of price |
+|---|---|---|
+| Free | $0 | — |
+| Lifetime | $0 | — |
+| Pro | **$20/mo** | ~51% (overridden from default 50%) |
+| Max | **$150/mo** | **75%** (deliberately generous) |
+| Teams | **$24.50/seat/mo** | 50% (derived) |
+
+- **Pro** pins its pool to a round $20 rather than the 50% derivation ($19.50).
+- **Max** overrides to 75% ($150 of $200) — the flagship perk.
+- **Teams** pool scales per seat: $24.50/seat × seat count = org-wide pool.
+
+## What credits cover
+
+Credits are spent on:
+
+- **Model inference** via OpenRouter — metered **at cost**, no per-token markup
+- **Agent tool calls** via Composio — flat **$0.50 per 1,000 calls**
+
+## Deposit fees
+
+When you top up, a one-time deposit fee applies. This is Ryu's inference margin — captured once at deposit, not per-token.
+
+| Plan | Fee rate | Minimum |
+|---|---|---|
+| Lifetime / Pro | **10%** | $1.00 |
+| Max / Teams | **5%** | $1.00 |
+
+The fee is the **greater of** the percentage and the $1.00 floor:
+
+| Top-up amount | Pro/Lifetime fee | Max/Teams fee | Effective rate (Pro) |
+|---|---|---|---|
+| $5 | $1.00 | $1.00 | 20% |
+| $10 | $1.00 | $1.00 | 10% |
+| $50 | $5.00 | $2.50 | 10% |
+| $100 | $10.00 | $5.00 | 10% |
+
+Below $10 the $1 floor dominates, nudging you to deposit more for better value.
+
+## Auto-recharge
+
+Pro, Max, and Teams users can enable **automatic top-up**: when the wallet balance drops below a configurable threshold, Ryu charges a configurable amount to your saved payment method (off-session via Polar). You can set a monthly cap to prevent runaway charges.
+
+Configured from **Settings → Billing → Spend controls** in the desktop app.
+
+## Sandbox budget
+
+Each agent run can have a **per-run budget cap** (in dollars). When the run's cumulative spend hits the cap, the agent stops making inference calls. This prevents a looping agent from burning your entire wallet.
+
+Set from **Settings → Billing → Spend controls**. Default is $0 (no cap).
+
+## Wallet model
+
+- Credits live in an **org-scooled wallet** (one wallet per organization)
+- Team wallets are **pooled** across all seats — every member draws from the same balance
+- The wallet balance is visible to all org members; only owner/admin can top up or change auto-recharge

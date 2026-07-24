@@ -23,7 +23,6 @@ import {
 	EmptyStateHeader,
 	type EmptyStateLogo,
 } from "@/components/agent-elements/empty-state-header.tsx";
-import { GettingStartedTracker } from "@/src/components/assistant/GettingStartedTracker.tsx";
 import {
 	type ActivePermission,
 	PermissionPrompt,
@@ -164,8 +163,8 @@ function BuilderEmptyState({
 }
 
 /**
- * The generic assistant's page-context chips + onboarding tracker — shown only
- * when NOT in builder mode. Extracted so the panel's render stays lean.
+ * The generic assistant's page-context chips — shown only when NOT in builder
+ * mode. Extracted so the panel's render stays lean.
  */
 function GenericAssistantExtras(props: {
 	divider: string;
@@ -176,54 +175,47 @@ function GenericAssistantExtras(props: {
 	onRestoreContext: () => void;
 }) {
 	const { divider, effectiveContext, genericContext } = props;
-	return (
-		<>
-			{effectiveContext.length > 0 ? (
-				<div
-					className={cn(
-						"flex shrink-0 flex-wrap items-center gap-1.5 px-3 py-2",
-						divider
-					)}
-				>
-					{effectiveContext.map((c) => (
-						<span
-							className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs"
-							key={c.id}
-						>
-							<span className="truncate">{c.title}</span>
-							<button
-								aria-label={`Remove ${c.title} from context`}
-								className="shrink-0 rounded-full p-0.5 hover:bg-background"
-								onClick={() =>
-									c.id.startsWith("tab:")
-										? props.onDismissContext()
-										: props.onRemovePageContext(c.id)
-								}
-								type="button"
-							>
-								<X className="size-3" />
-							</button>
-						</span>
-					))}
-				</div>
-			) : (
-				genericContext && (
-					<div
-						className={cn("flex shrink-0 items-center px-3 py-1.5", divider)}
-					>
-						<button
-							className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
-							onClick={() => props.onRestoreContext()}
-							type="button"
-						>
-							<Plus className="size-3" />
-							Add current page
-						</button>
-					</div>
-				)
+	return effectiveContext.length > 0 ? (
+		<div
+			className={cn(
+				"flex shrink-0 flex-wrap items-center gap-1.5 px-3 py-2",
+				divider
 			)}
-			<GettingStartedTracker className={cn("shrink-0 px-3 py-1.5", divider)} />
-		</>
+		>
+			{effectiveContext.map((c) => (
+				<span
+					className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs"
+					key={c.id}
+				>
+					<span className="truncate">{c.title}</span>
+					<button
+						aria-label={`Remove ${c.title} from context`}
+						className="shrink-0 rounded-full p-0.5 hover:bg-background"
+						onClick={() =>
+							c.id.startsWith("tab:")
+								? props.onDismissContext()
+								: props.onRemovePageContext(c.id)
+						}
+						type="button"
+					>
+						<X className="size-3" />
+					</button>
+				</span>
+			))}
+		</div>
+	) : (
+		genericContext && (
+			<div className={cn("flex shrink-0 items-center px-3 py-1.5", divider)}>
+				<button
+					className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+					onClick={() => props.onRestoreContext()}
+					type="button"
+				>
+					<Plus className="size-3" />
+					Add current page
+				</button>
+			</div>
+		)
 	);
 }
 
@@ -811,10 +803,10 @@ export function AssistantPanel({ bare = false }: { bare?: boolean } = {}) {
 				</Button>
 			</header>
 
-			{/* Page-context chips + onboarding tracker belong to the generic assistant
-			    only — a builder is scoped to the record it edits, not the page it
-			    happens to sit over. Floating mode also drops them: the minimal window
-			    is just the conversation + composer islands, no top chrome band. */}
+			{/* Page-context chips belong to the generic assistant only — a builder is
+			    scoped to the record it edits, not the page it happens to sit over.
+			    Floating mode also drops them: the minimal window is just the
+			    conversation + composer islands, no top chrome band. */}
 			{isBuilder || bare ? null : (
 				<GenericAssistantExtras
 					divider={divider}

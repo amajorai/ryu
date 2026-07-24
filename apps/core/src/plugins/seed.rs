@@ -477,7 +477,10 @@ async fn seed_optin_companion_ui(store: &PluginStore, manifests: &[PluginManifes
         // Deliberately NOT enabled — the app stays opt-in (no sidecar spawn on a
         // fresh install); the seeded `ui_code` makes `enable_app` mount the
         // companion whenever the user turns it on.
-        tracing::info!("opt-in companion seed: seeded ui_code for '{}' (disabled)", c.id);
+        tracing::info!(
+            "opt-in companion seed: seeded ui_code for '{}' (disabled)",
+            c.id
+        );
     }
 }
 
@@ -582,7 +585,10 @@ mod tests {
     #[test]
     fn a_cycle_is_skipped() {
         let specs = [spec("a"), spec("b")];
-        let manifests = vec![manifest("a", "1.0.0", &["b"]), manifest("b", "1.0.0", &["a"])];
+        let manifests = vec![
+            manifest("a", "1.0.0", &["b"]),
+            manifest("b", "1.0.0", &["a"]),
+        ];
 
         let (ordered, skipped) = seed_order(&specs, &manifests);
 

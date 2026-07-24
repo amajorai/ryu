@@ -347,5 +347,208 @@ mod tests {
             replicate_status(&json!({"status":"canceled"})),
             JobStatus::Failed
         );
+        // Unknown / starting → queued (keep polling).
+        assert_eq!(replicate_status(&json!({})), JobStatus::Queued);
+    }
+
+    #[test]
+    fn video_from_prediction_succeeded_normalizes_output() {
+        let pred = json!({
+            "id": "pred_1",
+            "status": "succeeded",
+            "output": "https://x/v.mp4"
+        });
+        let job = ReplicateProvider::video_from_prediction(&pred);
+        assert_eq!(job.provider_ref, "pred_1");
+        assert_eq!(job.status, JobStatus::Succeeded);
+        assert_eq!(job.output.unwrap()["data"][0]["url"], json!("https://x/v.mp4"));
+        assert!(job.error.is_none());
+    }
+
+    #[test]
+    fn video_from_prediction_failed_carries_error() {
+        let pred = json!({ "id": "p", "status": "failed", "error": "OOM" });
+        let job = ReplicateProvider::video_from_prediction(&pred);
+        assert_eq!(job.status, JobStatus::Failed);
+        assert_eq!(job.error.as_deref(), Some("OOM"));
+        assert!(job.output.is_none());
+    }
+
+    #[test]
+    fn video_from_prediction_running_has_no_output_or_error() {
+        let pred = json!({ "id": "p", "status": "processing" });
+        let job = ReplicateProvider::video_from_prediction(&pred);
+        assert_eq!(job.status, JobStatus::Running);
+        assert!(job.output.is_none());
+        assert!(job.error.is_none());
+    }
+
+    #[test]
+    fn base_trims_trailing_slash() {
+        let p = ReplicateProvider::new(
+            reqwest::Client::new(),
+            "k".into(),
+            "https://api.replicate.com/v1/".into(),
+            250,
+            60,
+        );
+        assert_eq!(p.base(), "https://api.replicate.com/v1");
+    }
+
+    #[test]
+    fn new_clamps_poll_interval_and_timeout_to_minimums() {
+        let p = ReplicateProvider::new(reqwest::Client::new(), "k".into(), "u".into(), 0, 0);
+        assert_eq!(p.poll_interval, Duration::from_millis(250));
+        assert_eq!(p.poll_timeout, Duration::from_secs(1));
+    }
+
+    // ── async prediction paths over a local mock server ───────────────────────
+    use crate::test_support::{MockResponse, MockServer};
+
+    fn provider(base_url: String) -> ReplicateProvider {
+        ReplicateProvider::new(reqwest::Client::new(), "r8-secret".into(), base_url, 250, 60)
+    }
+
+    #[tokio::test]
+    async fn submit_video_owner_name_uses_models_predictions_endpoint() {
+        let server = MockServer::always(MockResponse::json(
+            201,
+            r#"{"id":"pred_9","status":"starting"}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let job = p
+            .submit_video("stability-ai/sdxl", &json!({ "prompt": "a dog" }))
+            .await
+            .unwrap();
+        assert_eq!(job.provider_ref, "pred_9");
+        assert_eq!(job.status, JobStatus::Queued);
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/models/stability-ai/sdxl/predictions");
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Bearer r8-secret")
+        );
+        // The body is `{ input: <stripped body> }` — no `version` for official models.
+        assert_eq!(reqs[0].json()["input"]["prompt"], json!("a dog"));
+        assert!(reqs[0].json().get("version").is_none());
+    }
+
+    #[tokio::test]
+    async fn submit_video_versioned_model_uses_predictions_with_version() {
+        let server =
+            MockServer::always(MockResponse::json(201, r#"{"id":"p","status":"starting"}"#)).await;
+        let p = provider(server.base_url().to_string());
+        p.submit_video("owner/name:abc123", &json!({ "prompt": "x" }))
+            .await
+            .unwrap();
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/predictions");
+        assert_eq!(reqs[0].json()["version"], json!("abc123"));
+    }
+
+    #[tokio::test]
+    async fn submit_video_bare_hash_uses_predictions_with_version() {
+        let server =
+            MockServer::always(MockResponse::json(201, r#"{"id":"p","status":"starting"}"#)).await;
+        let p = provider(server.base_url().to_string());
+        p.submit_video("deadbeefhash", &json!({ "prompt": "x" }))
+            .await
+            .unwrap();
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/predictions");
+        assert_eq!(reqs[0].json()["version"], json!("deadbeefhash"));
+    }
+
+    #[tokio::test]
+    async fn submit_video_errors_when_no_prediction_id() {
+        let server =
+            MockServer::always(MockResponse::json(201, r#"{"status":"starting"}"#)).await;
+        let p = provider(server.base_url().to_string());
+        let err = p
+            .submit_video("owner/name", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no prediction id"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn generate_image_inline_returns_immediately_on_terminal_success() {
+        // create_prediction returns an already-succeeded prediction → run_inline
+        // breaks on the first check with no poll sleep.
+        let server = MockServer::always(MockResponse::json(
+            201,
+            r#"{"id":"p","status":"succeeded","output":["https://x/i.png"]}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let out = p
+            .generate_image("owner/name", &json!({ "prompt": "cat" }))
+            .await
+            .unwrap();
+        assert_eq!(out["data"][0]["url"], json!("https://x/i.png"));
+        // Only the create call — no polling round-trip.
+        assert_eq!(server.request_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn generate_image_inline_surfaces_failed_prediction() {
+        let server = MockServer::always(MockResponse::json(
+            201,
+            r#"{"id":"p","status":"failed","error":"nsfw filter"}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let err = p
+            .generate_image("owner/name", &json!({ "prompt": "cat" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("nsfw filter"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn poll_video_fetches_prediction_by_ref() {
+        let server = MockServer::always(MockResponse::ok_json(
+            r#"{"id":"pred_5","status":"succeeded","output":"https://x/v.mp4"}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let job = p.poll_video("pred_5").await.unwrap();
+        assert_eq!(job.status, JobStatus::Succeeded);
+        assert_eq!(server.requests()[0].path, "/predictions/pred_5");
+    }
+
+    #[tokio::test]
+    async fn create_prediction_maps_error_detail() {
+        let server = MockServer::always(MockResponse::json(
+            422,
+            r#"{"detail":"input is invalid"}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let err = p
+            .submit_video("owner/name", &json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("input is invalid"), "{err}");
+        assert!(err.to_string().contains("422"));
+    }
+
+    #[tokio::test]
+    async fn chat_is_unsupported() {
+        let p = provider("http://127.0.0.1:1".to_string());
+        assert!(p
+            .complete("m", &json!({}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("chat is not supported"));
+        assert!(p
+            .complete_stream("m", &json!({}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("chat is not supported"));
     }
 }

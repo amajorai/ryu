@@ -294,4 +294,85 @@ mod tests {
         assert!(AlertTier::Fanout > AlertTier::Warn);
         assert!(AlertTier::Warn > AlertTier::Silent);
     }
+
+    // ── extra coverage ───────────────────────────────────────────────────────
+
+    fn alert(source: &str) -> PolicyAlert {
+        // Decode a minimal stamp then override the source, so we exercise the real
+        // Deserialize defaults for every unset field.
+        let mut a = from_header(&encode(r#"{"alert_tier":"warn"}"#)).unwrap();
+        a.source = source.to_string();
+        a
+    }
+
+    #[test]
+    fn title_maps_each_known_source() {
+        assert_eq!(alert("budget").title(), "Budget limit reached");
+        assert_eq!(
+            alert("session_budget").title(),
+            "Session budget limit reached"
+        );
+        assert_eq!(alert("wallet_empty").title(), "Wallet balance depleted");
+        assert_eq!(alert("firewall").title(), "Firewall policy triggered");
+        // Empty source → generic title; unknown source → labelled fallback.
+        assert_eq!(alert("").title(), "Policy alert");
+        assert_eq!(alert("mystery").title(), "Policy alert: mystery");
+    }
+
+    #[test]
+    fn message_uses_limit_and_scope_and_enforcement() {
+        let mut a = alert("budget");
+        a.scope = "user".into();
+        a.subject_key = "u_9".into();
+        a.enforcement = "stop".into();
+        a.used = 5;
+        a.limit = 10;
+        assert_eq!(a.message(), "Used 5 of 10 (user u_9). Enforcement: stop.");
+
+        // No limit → the "Triggered for" shape; no subject_key → scope alone; no
+        // enforcement → no trailing enforcement clause.
+        let mut b = alert("firewall");
+        b.scope = "request".into();
+        b.limit = 0;
+        assert_eq!(b.message(), "Triggered for request.");
+    }
+
+    #[test]
+    fn to_fanout_derives_kind_and_carries_title_message() {
+        let carrier = alert("budget").to_fanout();
+        assert_eq!(carrier.title, "Budget limit reached");
+        assert_eq!(carrier.data["kind"], "policy_budget");
+        assert_eq!(carrier.hook_event["kind"], "policy_budget");
+        assert_eq!(carrier.hook_event["monitor_id"], "policy:budget");
+
+        // Empty source → the generic "policy_alert" kind.
+        let generic = alert("").to_fanout();
+        assert_eq!(generic.data["kind"], "policy_alert");
+    }
+
+    #[test]
+    fn from_header_defaults_numeric_and_optional_fields_to_zero() {
+        // Only alert_tier is required; used/limit/org_id default.
+        let a = from_header(&encode(r#"{"alert_tier":"fanout","source":"budget"}"#)).unwrap();
+        assert_eq!(a.used, 0);
+        assert_eq!(a.limit, 0);
+        assert_eq!(a.enforcement, "");
+        assert_eq!(a.dedupe_key, "");
+        assert_eq!(a.alert_tier, AlertTier::Fanout);
+    }
+
+    #[test]
+    fn alert_tier_snake_case_all_variants() {
+        for (raw, want) in [
+            ("silent", AlertTier::Silent),
+            ("warn", AlertTier::Warn),
+            ("fanout", AlertTier::Fanout),
+            ("email", AlertTier::Email),
+        ] {
+            let json = format!(r#"{{"alert_tier":"{raw}"}}"#);
+            assert_eq!(from_header(&encode(&json)).unwrap().alert_tier, want);
+        }
+        // An unknown tier fails the lenient decode (returns None), never panics.
+        assert!(from_header(&encode(r#"{"alert_tier":"nuclear"}"#)).is_none());
+    }
 }

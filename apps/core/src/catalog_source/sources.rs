@@ -616,6 +616,21 @@ struct MarketplacePlugin {
     keywords: Vec<String>,
     #[serde(default, rename = "iconUrl")]
     icon_url: Option<String>,
+    /// Icon-primitive glyph id for the card (Ryu ext: `icon`) — see the manifest's
+    /// `icon`. Distinct from the raster `iconUrl`.
+    #[serde(default)]
+    icon: Option<String>,
+    /// Dithered-gradient background for the card's icon square (Ryu ext:
+    /// `iconDither`). Raw JSON `{ from, to?, direction? }`, untrusted — the render
+    /// layer validates + falls back.
+    #[serde(default, rename = "iconDither")]
+    icon_dither: Option<serde_json::Value>,
+    /// True when this entry ships a Companion UI surface, so the browse client
+    /// classifies it as an "app" (not a plugin). A git marketplace card carries no
+    /// runnables, so this explicit flag is how a remote card discloses app-ness that
+    /// a local manifest derives from its `companion` runnable.
+    #[serde(default, rename = "hasCompanion")]
+    has_companion: bool,
     #[serde(default, rename = "iconBackground")]
     icon_background: Option<String>,
     #[serde(default, rename = "accentColor")]
@@ -668,6 +683,9 @@ struct MarketplaceItemMeta {
     license: Option<String>,
     keywords: Vec<String>,
     icon_url: Option<String>,
+    icon: Option<String>,
+    icon_dither: Option<serde_json::Value>,
+    has_companion: bool,
     icon_background: Option<String>,
     accent_color: Option<String>,
     banner: Option<serde_json::Value>,
@@ -695,6 +713,9 @@ impl MarketplacePlugin {
             license: self.license.clone(),
             keywords: self.keywords.clone(),
             icon_url: self.icon_url.clone(),
+            icon: self.icon.clone(),
+            icon_dither: self.icon_dither.clone(),
+            has_companion: self.has_companion,
             icon_background: self.icon_background.clone(),
             accent_color: self.accent_color.clone(),
             banner: self.banner.clone(),
@@ -878,6 +899,17 @@ impl MarketplaceSource {
                     if let Some(icon) = &item.meta.icon_url {
                         obj.insert("icon_url".to_owned(), serde_json::json!(icon));
                     }
+                    if let Some(icon) = &item.meta.icon {
+                        obj.insert("icon".to_owned(), serde_json::json!(icon));
+                    }
+                    if let Some(dither) = &item.meta.icon_dither {
+                        obj.insert("icon_dither".to_owned(), dither.clone());
+                    }
+                    // App-ness signal: emitted only when true so the browse client can
+                    // classify a Companion-shipping remote card as an "app".
+                    if item.meta.has_companion {
+                        obj.insert("has_companion".to_owned(), serde_json::json!(true));
+                    }
                     if let Some(bg) = &item.meta.icon_background {
                         obj.insert("icon_background".to_owned(), serde_json::json!(bg));
                     }
@@ -935,10 +967,7 @@ impl CatalogSource for MarketplaceSource {
     async fn detail(&self, client: &reqwest::Client, id: &str) -> Result<Value> {
         let items = self.fetch_items(client).await?;
         let item = items.iter().find(|it| it.id == id).ok_or_else(|| {
-            anyhow::anyhow!(
-                "item `{id}` not found in marketplace {}",
-                self.repo_url
-            )
+            anyhow::anyhow!("item `{id}` not found in marketplace {}", self.repo_url)
         })?;
         let leaf = item.id.rsplit('/').next().unwrap_or(&item.id);
         let mut detail = serde_json::Map::new();
@@ -979,7 +1008,10 @@ impl CatalogSource for MarketplaceSource {
             detail.insert("banner".to_owned(), banner.clone());
         }
         if !meta.screenshots.is_empty() {
-            detail.insert("screenshots".to_owned(), serde_json::json!(meta.screenshots));
+            detail.insert(
+                "screenshots".to_owned(),
+                serde_json::json!(meta.screenshots),
+            );
         }
         // Prefer an explicitly declared `developer`; fall back to the author string.
         if let Some(dev) = meta
@@ -1014,7 +1046,10 @@ impl CatalogSource for MarketplaceSource {
             detail.insert("termsOfServiceUrl".to_owned(), serde_json::json!(terms));
         }
         if !meta.capabilities.is_empty() {
-            detail.insert("capabilities".to_owned(), serde_json::json!(meta.capabilities));
+            detail.insert(
+                "capabilities".to_owned(),
+                serde_json::json!(meta.capabilities),
+            );
         }
         // The install closure this plugin pulls in, and the surfaces it runs on.
         // Same emit rule as the card: absent `requires` = no dependencies, empty
@@ -1026,7 +1061,10 @@ impl CatalogSource for MarketplaceSource {
             detail.insert("targets".to_owned(), serde_json::json!(meta.targets));
         }
         if !meta.example_prompts.is_empty() {
-            detail.insert("examplePrompts".to_owned(), serde_json::json!(meta.example_prompts));
+            detail.insert(
+                "examplePrompts".to_owned(),
+                serde_json::json!(meta.example_prompts),
+            );
         }
         if let Some(setup) = &meta.setup {
             detail.insert("setup".to_owned(), setup.clone());
@@ -1043,10 +1081,7 @@ impl CatalogSource for MarketplaceSource {
         // fetcher; carry it in `raw.install_source`. No files (directory install).
         let items = self.fetch_items(client).await?;
         let item = items.iter().find(|it| it.id == id).ok_or_else(|| {
-            anyhow::anyhow!(
-                "item `{id}` not found in marketplace {}",
-                self.repo_url
-            )
+            anyhow::anyhow!("item `{id}` not found in marketplace {}", self.repo_url)
         })?;
         Ok(InstallDescriptor {
             kind: self.kind,
@@ -1107,8 +1142,8 @@ fn marketplace_manifest_urls(repo: &str) -> Vec<String> {
     if repo.to_ascii_lowercase().ends_with(".json") {
         return vec![repo.to_string()];
     }
-    let base = github_raw_head_base(repo)
-        .unwrap_or_else(|| format!("{}/", repo.trim_end_matches('/')));
+    let base =
+        github_raw_head_base(repo).unwrap_or_else(|| format!("{}/", repo.trim_end_matches('/')));
     MANIFEST_PATHS
         .iter()
         .map(|path| format!("{base}{path}"))
@@ -1288,7 +1323,10 @@ fn is_local_subdir_source(source: &str) -> bool {
 fn resolve_marketplace_source(source: &str, repo_context: &str) -> String {
     if is_local_subdir_source(source) {
         if let Some((owner, name)) = github_owner_repo(repo_context) {
-            return format!("https://github.com/{owner}/{name}/tree/HEAD/{}", source.trim());
+            return format!(
+                "https://github.com/{owner}/{name}/tree/HEAD/{}",
+                source.trim()
+            );
         }
         // Repo context is not a github repo → degrade to the bare source string.
         return source.trim().to_string();
@@ -2080,6 +2118,18 @@ struct MarketplaceCard {
     // rating aggregate. Optional so an older server that omits them still parses.
     #[serde(default, rename = "iconUrl")]
     icon_url: Option<String>,
+    /// Icon-primitive glyph id (Ryu ext: `icon`), distinct from the raster
+    /// `iconUrl`. Optional so an older server that omits it still parses.
+    #[serde(default)]
+    icon: Option<String>,
+    /// Dithered-gradient icon-square background (Ryu ext: `iconDither`). Raw JSON
+    /// `{ from, to?, direction? }`, validated + fallback-guarded at render time.
+    #[serde(default, rename = "iconDither")]
+    icon_dither: Option<Value>,
+    /// True when the item ships a Companion UI surface — the browse client's signal
+    /// to classify it as an "app" rather than a plugin.
+    #[serde(default, rename = "hasCompanion")]
+    has_companion: bool,
     #[serde(default)]
     category: Option<String>,
     #[serde(default, rename = "ratingAverage")]
@@ -2406,6 +2456,16 @@ impl RyuMarketplaceSource {
                         .filter(|a| !a.is_empty())
                     {
                         obj.insert("targets".to_owned(), serde_json::json!(targets));
+                    }
+                    // Icon glyph + dither background + app-ness — see `MarketplaceCard`.
+                    if let Some(icon) = &card.icon {
+                        obj.insert("icon".to_owned(), serde_json::json!(icon));
+                    }
+                    if let Some(dither) = card.icon_dither.clone().filter(|v| !v.is_null()) {
+                        obj.insert("icon_dither".to_owned(), dither);
+                    }
+                    if card.has_companion {
+                        obj.insert("has_companion".to_owned(), serde_json::json!(true));
                     }
                 }
                 value
@@ -3088,10 +3148,19 @@ impl IntegrationsShSource {
         Ok(cache)
     }
 
-    fn wrap_items(&self, records: Vec<Value>, source_url: &str, note: Option<&str>) -> Value {
+    fn wrap_items(
+        &self,
+        records: Vec<Value>,
+        source_url: &str,
+        note: Option<&str>,
+        next_cursor: Option<String>,
+    ) -> Value {
         let mut obj = serde_json::Map::new();
         obj.insert("items".to_string(), Value::Array(records));
-        obj.insert("next_cursor".to_string(), Value::Null);
+        obj.insert(
+            "next_cursor".to_string(),
+            next_cursor.map_or(Value::Null, Value::String),
+        );
         obj.insert(
             "source_url".to_string(),
             Value::String(source_url.to_string()),
@@ -3120,11 +3189,19 @@ impl CatalogSource for IntegrationsShSource {
 
     async fn search(&self, _client: &reqwest::Client, q: &CatalogQuery) -> Result<Value> {
         let limit = if q.limit == 0 { 40 } else { q.limit };
+        // Real offset-cursor pagination: the cursor carries the numeric offset
+        // into the fully-filtered list, so the client can page past the first
+        // `limit` records instead of dead-ending.
+        let offset = q
+            .cursor
+            .as_deref()
+            .and_then(|c| c.trim().parse::<usize>().ok())
+            .unwrap_or(0);
         match self.records().await {
             Ok(cache) => {
                 let needle = q.query.trim().to_ascii_lowercase();
                 let kind_filter = q.extra_str("integration_kind").to_ascii_lowercase();
-                let items: Vec<Value> = cache
+                let filtered: Vec<Value> = cache
                     .records
                     .iter()
                     .filter(|record| {
@@ -3145,14 +3222,19 @@ impl CatalogSource for IntegrationsShSource {
                                     .iter()
                                     .any(|c| c.to_ascii_lowercase().contains(&needle)))
                     })
-                    .take(limit)
                     .map(integration_record_to_item)
                     .collect();
-                Ok(self.wrap_items(items, &cache.source_url, None))
+                let total = filtered.len();
+                let next_cursor = (offset + limit < total).then(|| (offset + limit).to_string());
+                let items: Vec<Value> = filtered.into_iter().skip(offset).take(limit).collect();
+                Ok(self.wrap_items(items, &cache.source_url, None, next_cursor))
             }
-            Err(e) => {
-                Ok(self.wrap_items(Vec::new(), &self.resolve_api_url(), Some(&e.to_string())))
-            }
+            Err(e) => Ok(self.wrap_items(
+                Vec::new(),
+                &self.resolve_api_url(),
+                Some(&e.to_string()),
+                None,
+            )),
         }
     }
 
@@ -3221,6 +3303,100 @@ fn integration_record_to_item(record: &IntegrationsShRecord) -> Value {
         "rating_average": 0.0,
         "rating_count": 0,
     })
+}
+
+/// A brand-level integration entry, normalized from the integrations.sh directory
+/// or a Composio toolkit, for the Integrations Store tab.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IntegrationBrand {
+    pub id: String, // normalized slug (lowercase, non-alnum stripped)
+    pub name: String,
+    pub description: Option<String>,
+    pub logo: Option<String>,
+    pub categories: Vec<String>,
+    pub sources: Vec<String>, // ["directory"] and/or ["composio"]
+    pub feeds: Vec<String>,   // integration kinds available (mcp/api/graphql/cli)
+    pub domain: Option<String>,
+    pub popularity: Option<u64>,
+}
+
+/// Normalize a display name / id into a stable brand slug for dedup+matching.
+pub fn integration_brand_slug(raw: &str) -> String {
+    raw.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// Full integrations.sh directory as brand entries (cache-backed, dedup by slug,
+/// merging feeds/categories across records that share a brand). Returns empty on
+/// fetch error rather than failing the whole endpoint.
+pub async fn integrations_sh_brands() -> Vec<IntegrationBrand> {
+    let source = IntegrationsShSource::builtin();
+    let cache = match source.records().await {
+        Ok(cache) => cache,
+        Err(_) => return Vec::new(),
+    };
+    // Fold duplicates by slug, preserving first-seen order.
+    let mut order: Vec<String> = Vec::new();
+    let mut by_slug: std::collections::HashMap<String, IntegrationBrand> =
+        std::collections::HashMap::new();
+    for record in &cache.records {
+        let slug = integration_brand_slug(&record.name);
+        if slug.is_empty() {
+            continue;
+        }
+        // Feeds are the integration kinds available: the record's own kind plus
+        // any extra feed tags it carries.
+        let mut feeds: Vec<String> = Vec::new();
+        feeds.push(record.kind.clone());
+        feeds.extend(record.feeds.iter().cloned());
+        match by_slug.get_mut(&slug) {
+            Some(brand) => {
+                for cat in &record.categories {
+                    if !brand.categories.contains(cat) {
+                        brand.categories.push(cat.clone());
+                    }
+                }
+                for feed in feeds {
+                    if !brand.feeds.contains(&feed) {
+                        brand.feeds.push(feed);
+                    }
+                }
+                if brand.description.is_none() {
+                    brand.description = record.description.clone();
+                }
+                if brand.logo.is_none() {
+                    brand.logo = record.icon.clone();
+                }
+                if brand.domain.is_none() {
+                    brand.domain = record.domain.clone();
+                }
+                brand.popularity = brand.popularity.max(record.popularity);
+            }
+            None => {
+                order.push(slug.clone());
+                by_slug.insert(
+                    slug.clone(),
+                    IntegrationBrand {
+                        id: slug,
+                        name: record.name.clone(),
+                        description: record.description.clone(),
+                        logo: record.icon.clone(),
+                        categories: record.categories.clone(),
+                        sources: vec!["directory".into()],
+                        feeds,
+                        domain: record.domain.clone(),
+                        popularity: record.popularity,
+                    },
+                );
+            }
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|slug| by_slug.remove(&slug))
+        .collect()
 }
 
 fn raw_openapi_to_record(spec: &IntegrationsShRawOpenApiSpec) -> IntegrationsShRecord {
@@ -4650,5 +4826,170 @@ mod tests {
         if std::env::var(RYU_HOSTED_MCP_INDEX_ENV).is_err() {
             assert!(src.resolve_index_url().is_none());
         }
+    }
+
+    // ── pure helper coverage ─────────────────────────────────────────────────
+
+    #[test]
+    fn interpolate_env_substitutes_and_fails_closed() {
+        // Uniquely-named vars avoid colliding with any other test in the binary.
+        let key = format!("RYU_TEST_INTERP_{}", std::process::id());
+        std::env::set_var(&key, "s3cr3t");
+        let out = interpolate_env(&format!("Bearer ${{{key}}}")).unwrap();
+        assert_eq!(out, "Bearer s3cr3t");
+        std::env::remove_var(&key);
+
+        // Fail-closed on a referenced-but-unset variable.
+        assert!(interpolate_env(&format!("${{{key}}}")).is_err());
+        // Fail-closed on an unterminated placeholder and an empty placeholder.
+        assert!(interpolate_env("prefix ${OOPS").is_err());
+        assert!(interpolate_env("${ }").is_err());
+        // A template with no placeholders is passed through verbatim.
+        assert_eq!(interpolate_env("plain value").unwrap(), "plain value");
+    }
+
+    #[test]
+    fn author_developer_string_handles_string_object_and_junk() {
+        assert_eq!(
+            author_developer_string(&serde_json::json!("  Ada  ")),
+            Some("Ada".to_string())
+        );
+        assert_eq!(
+            author_developer_string(&serde_json::json!({"name": " Grace "})),
+            Some("Grace".to_string())
+        );
+        // Empty string / whitespace object name / non-string-object → None.
+        assert_eq!(author_developer_string(&serde_json::json!("   ")), None);
+        assert_eq!(author_developer_string(&serde_json::json!({"name": ""})), None);
+        assert_eq!(author_developer_string(&serde_json::json!(42)), None);
+        assert_eq!(author_developer_string(&serde_json::json!(null)), None);
+    }
+
+    #[test]
+    fn http_url_allowlists_http_and_https_only() {
+        assert_eq!(http_url("  https://x.io/a  "), Some("https://x.io/a"));
+        assert_eq!(http_url("HTTP://x.io"), Some("HTTP://x.io"));
+        assert_eq!(http_url("ftp://x.io"), None);
+        assert_eq!(http_url("javascript:alert(1)"), None);
+        assert_eq!(http_url("owner/repo"), None);
+    }
+
+    #[test]
+    fn github_raw_head_base_from_shorthand_and_url() {
+        assert_eq!(
+            github_raw_head_base("owner/repo").as_deref(),
+            Some("https://raw.githubusercontent.com/owner/repo/HEAD/")
+        );
+        assert_eq!(
+            github_raw_head_base("https://github.com/owner/repo.git").as_deref(),
+            Some("https://raw.githubusercontent.com/owner/repo/HEAD/")
+        );
+        // A single bare segment has no repo name → None.
+        assert_eq!(github_raw_head_base("owner"), None);
+    }
+
+    #[test]
+    fn marketplace_manifest_urls_direct_json_vs_expanded_paths() {
+        // A direct .json URL is the sole candidate.
+        let direct = marketplace_manifest_urls("https://host/x/marketplace.JSON");
+        assert_eq!(direct, vec!["https://host/x/marketplace.JSON".to_string()]);
+
+        // A shorthand expands to one candidate per manifest path, Ryu-native first.
+        let expanded = marketplace_manifest_urls("owner/repo");
+        assert_eq!(expanded.len(), MANIFEST_PATHS.len());
+        assert!(expanded[0].ends_with(".ryu-plugin/marketplace.json"));
+        assert!(expanded
+            .iter()
+            .all(|u| u.starts_with("https://raw.githubusercontent.com/owner/repo/HEAD/")));
+    }
+
+    #[test]
+    fn github_owner_repo_extracts_or_rejects() {
+        assert_eq!(
+            github_owner_repo("owner/repo"),
+            Some(("owner".into(), "repo".into()))
+        );
+        assert_eq!(
+            github_owner_repo("https://github.com/owner/repo/tree/HEAD/x"),
+            Some(("owner".into(), "repo".into()))
+        );
+        // Trailing .git stripped.
+        assert_eq!(
+            github_owner_repo("owner/repo.git"),
+            Some(("owner".into(), "repo".into()))
+        );
+        // A dotted first segment is a bare host, not owner/repo.
+        assert_eq!(github_owner_repo("example.com/x"), None);
+        // A non-github URL scheme is rejected.
+        assert_eq!(github_owner_repo("https://gitlab.com/o/r"), None);
+        // A single segment can't be split.
+        assert_eq!(github_owner_repo("solo"), None);
+    }
+
+    #[test]
+    fn is_local_subdir_source_discriminates() {
+        assert!(is_local_subdir_source("teaching"));
+        // owner/repo, URLs, dotted hosts, builtin, spaces, empty → not local.
+        assert!(!is_local_subdir_source("owner/repo"));
+        assert!(!is_local_subdir_source("https://x.io/y"));
+        assert!(!is_local_subdir_source("example.com"));
+        assert!(!is_local_subdir_source("builtin"));
+        assert!(!is_local_subdir_source("BUILTIN"));
+        assert!(!is_local_subdir_source("has space"));
+        assert!(!is_local_subdir_source("   "));
+    }
+
+    #[test]
+    fn resolve_marketplace_source_maps_local_subdir_against_repo() {
+        // A local subfolder resolves to a github tree URL of the marketplace repo.
+        assert_eq!(
+            resolve_marketplace_source("teaching", "owner/repo"),
+            "https://github.com/owner/repo/tree/HEAD/teaching"
+        );
+        // When the repo context is not a github repo, degrade to the bare source.
+        assert_eq!(
+            resolve_marketplace_source("teaching", "https://host/x/marketplace.json"),
+            "teaching"
+        );
+        // An owner/repo or URL source is returned unchanged.
+        assert_eq!(
+            resolve_marketplace_source("acme/tool", "owner/repo"),
+            "acme/tool"
+        );
+    }
+
+    #[test]
+    fn scoped_and_subdir_source_build_tree_urls() {
+        assert_eq!(
+            scoped_source("owner/repo", "skills/a"),
+            "https://github.com/owner/repo/tree/HEAD/skills/a"
+        );
+        assert_eq!(
+            scoped_source("https://github.com/owner/repo.git", "s"),
+            "https://github.com/owner/repo/tree/HEAD/s"
+        );
+        // A non-repo string is returned unchanged by scoped_source.
+        assert_eq!(scoped_source("not a repo here", "s"), "not a repo here");
+
+        // subdir_source nests under an already-resolved tree URL...
+        assert_eq!(
+            subdir_source("https://github.com/o/r/tree/HEAD/plugin", "leaf"),
+            "https://github.com/o/r/tree/HEAD/plugin/leaf"
+        );
+        // ...otherwise it delegates to scoped_source.
+        assert_eq!(
+            subdir_source("owner/repo", "leaf"),
+            "https://github.com/owner/repo/tree/HEAD/leaf"
+        );
+    }
+
+    #[test]
+    fn urlencode_component_and_path_escape_correctly() {
+        // Component encoding escapes slashes and spaces.
+        assert_eq!(urlencode_component("a b/c@d"), "a%20b%2Fc%40d");
+        // Unreserved chars pass through untouched.
+        assert_eq!(urlencode_component("A-z0.9_~"), "A-z0.9_~");
+        // Path encoding PRESERVES `/` and `@` (qualified names), escapes the space.
+        assert_eq!(urlencode_path("@scope/name x"), "@scope/name%20x");
     }
 }

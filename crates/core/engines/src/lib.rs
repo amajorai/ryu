@@ -619,9 +619,7 @@ impl LaunchConfig {
     pub fn apply_llamacpp_batching_defaults(&mut self) {
         if self.parallel.is_none() {
             let device = ryu_model_catalog::device::DeviceInfo::detect();
-            self.parallel = Some(ryu_model_catalog::device::default_parallel_slots(
-                &device,
-            ));
+            self.parallel = Some(ryu_model_catalog::device::default_parallel_slots(&device));
         }
         if self.parallel.unwrap_or(1) > 1 && self.kv_unified.is_none() {
             self.kv_unified = Some(true);

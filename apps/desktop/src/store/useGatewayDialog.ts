@@ -4,6 +4,13 @@ import { create } from "zustand";
 // GatewayDialog.tsx) so external openers — the command palette, deep links, the
 // Settings page — can request a specific section without importing the dialog
 // component (which would pull the whole gateway UI into those entry points).
+// Node/gateway-level sections. Beyond the gateway-policy sections this dialog has
+// always owned, it also hosts the node-level CORE-INFRA tabs that used to live in
+// the App Settings dialog (they configure the whole node, not the per-user desktop
+// client, and are not apps): connections, email/alerts, privacy, storage, updates,
+// health, and the Danger Zone. App settings (meetings, memory, quests, predict, …)
+// are NOT static sections — apps register them via the manifest and they render
+// dynamically under the Apps/Plugins headers (`app:<id>` / `plugin:<id>` values).
 export type GatewaySection =
 	| "overview"
 	| "workspace"
@@ -17,15 +24,27 @@ export type GatewaySection =
 	| "integrations"
 	| "usage"
 	| "audit"
-	| "evals";
+	| "evals"
+	// Moved from the App Settings dialog (node-level Core infra, not apps):
+	| "connections"
+	| "email-alerts"
+	| "privacy"
+	| "storage"
+	| "updates"
+	| "health"
+	| "danger";
 
 interface GatewayDialogState {
 	/** Whether the Gateway dialog is open. */
 	open: boolean;
-	/** Open the dialog at a section (defaults to the overview). */
-	openGateway: (section?: GatewaySection) => void;
+	/**
+	 * Open the dialog at a section. A known {@link GatewaySection}, or a dynamic
+	 * app/plugin entity value (`app:<id>` / `plugin:<id>`) so a deep link can open a
+	 * specific app's settings. Defaults to the overview.
+	 */
+	openGateway: (section?: GatewaySection | (string & {})) => void;
 	/** The section to show when it opens. */
-	section: GatewaySection;
+	section: string;
 	/** Controlled open/close passthrough for the dialog's onOpenChange. */
 	setOpen: (open: boolean) => void;
 }

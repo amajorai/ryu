@@ -205,13 +205,11 @@ impl Provider for OpenRouterProvider {
                     other => return other,
                 }
             }
-            Err(
-                last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                    provider: "openrouter".to_string(),
-                    retry_after: None,
-                    reset_at: None,
-                }),
-            )
+            Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
+                provider: "openrouter".to_string(),
+                retry_after: None,
+                reset_at: None,
+            }))
         })
     }
 
@@ -242,9 +240,7 @@ impl Provider for OpenRouterProvider {
                     .send()
                     .await
                     .map_err(|e| {
-                        ProviderError::Provider(format!(
-                            "openrouter stream request failed: {e}"
-                        ))
+                        ProviderError::Provider(format!("openrouter stream request failed: {e}"))
                     })?;
 
                 match check_stream_status(resp, "openrouter", Some(&self.quota)).await {
@@ -256,13 +252,11 @@ impl Provider for OpenRouterProvider {
                     Ok(resp) => return Ok(Body::from_stream(resp.bytes_stream())),
                 }
             }
-            Err(
-                last_err.unwrap_or_else(|| ProviderError::RateLimited {
-                    provider: "openrouter".to_string(),
-                    retry_after: None,
-                    reset_at: None,
-                }),
-            )
+            Err(last_err.unwrap_or_else(|| ProviderError::RateLimited {
+                provider: "openrouter".to_string(),
+                retry_after: None,
+                reset_at: None,
+            }))
         })
     }
 
@@ -405,5 +399,133 @@ mod tests {
         assert!(payload.get("provider").is_none());
         assert!(payload.get("plugins").is_none());
         assert!(payload.get("usage").is_none());
+    }
+
+    #[test]
+    fn apply_leaves_non_object_payload_untouched() {
+        let opts = OpenRouterOptions {
+            data_collection: Some("deny".into()),
+            ..Default::default()
+        };
+        let mut payload = json!("not an object");
+        opts.apply(&mut payload);
+        assert_eq!(payload, json!("not an object"));
+    }
+
+    #[test]
+    fn extract_chat_images_reads_image_url_and_bare_url() {
+        let resp = json!({
+            "choices": [{
+                "message": {
+                    "images": [
+                        { "image_url": { "url": "data:image/png;base64,AAA" } },
+                        { "url": "https://x/b.png" }
+                    ]
+                }
+            }]
+        });
+        let out = extract_chat_images(&resp);
+        let data = out["data"].as_array().unwrap();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0]["url"], json!("data:image/png;base64,AAA"));
+        assert_eq!(data[1]["url"], json!("https://x/b.png"));
+        // Full response preserved under `raw`.
+        assert!(out["raw"]["choices"].is_array());
+    }
+
+    #[test]
+    fn extract_chat_images_empty_when_no_images() {
+        let out = extract_chat_images(&json!({ "choices": [{ "message": { "content": "hi" } }] }));
+        assert_eq!(out["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn next_key_rotates_and_primary_is_first() {
+        let p = provider_with("http://x".into(), vec!["a", "b"], OpenRouterOptions::default());
+        assert_eq!(p.primary_key(), "a");
+        assert_eq!(p.next_key(), "a");
+        assert_eq!(p.next_key(), "b");
+    }
+
+    // ── async request-shaping tests over a local mock server ──────────────────
+    use crate::test_support::{MockResponse, MockServer};
+
+    fn provider_with(
+        base_url: String,
+        keys: Vec<&str>,
+        options: OpenRouterOptions,
+    ) -> OpenRouterProvider {
+        OpenRouterProvider::new(
+            reqwest::Client::new(),
+            keys.into_iter().map(String::from).collect(),
+            base_url,
+            "https://ryu.example".to_string(),
+            "Ryu".to_string(),
+            options,
+            Arc::new(ProviderQuotas::new()),
+        )
+    }
+
+    #[tokio::test]
+    async fn complete_sends_attribution_headers_and_applies_options() {
+        let server = MockServer::always(MockResponse::ok_json(r#"{"id":"or"}"#)).await;
+        let opts = OpenRouterOptions {
+            data_collection: Some("deny".into()),
+            ..Default::default()
+        };
+        let p = provider_with(server.base_url().to_string(), vec!["sk-or"], opts);
+        let out = p
+            .complete("anthropic/claude-3", &json!({ "messages": [] }))
+            .await
+            .unwrap();
+        assert_eq!(out["id"], json!("or"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].header("http-referer").as_deref(), Some("https://ryu.example"));
+        assert_eq!(reqs[0].header("x-title").as_deref(), Some("Ryu"));
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Bearer sk-or")
+        );
+        // Managed privacy posture is injected into the outgoing body.
+        assert_eq!(reqs[0].json()["provider"]["data_collection"], json!("deny"));
+        assert_eq!(reqs[0].json()["model"], json!("anthropic/claude-3"));
+    }
+
+    #[tokio::test]
+    async fn complete_error_does_not_leak_key() {
+        const SECRET: &str = "sk-or-SECRET-abcdef";
+        let server =
+            MockServer::always(MockResponse::json(402, r#"{"error":{"message":"no credits"}}"#))
+                .await;
+        let p = provider_with(server.base_url().to_string(), vec![SECRET], Default::default());
+        let err = p
+            .complete("m", &json!({ "messages": [] }))
+            .await
+            .unwrap_err();
+        let rendered = format!("{err}{err:?}");
+        assert!(!rendered.contains(SECRET), "leaked: {rendered}");
+        assert!(rendered.contains("no credits"));
+    }
+
+    #[tokio::test]
+    async fn generate_image_builds_chat_call_and_extracts_images() {
+        let server = MockServer::always(MockResponse::ok_json(
+            r#"{"choices":[{"message":{"images":[{"image_url":{"url":"data:image/png;base64,ZZ"}}]}}]}"#,
+        ))
+        .await;
+        let p = provider_with(server.base_url().to_string(), vec!["k"], Default::default());
+        let out = p
+            .generate_image("google/gemini-2.5-flash-image", &json!({ "prompt": "a fox" }))
+            .await
+            .unwrap();
+        assert_eq!(out["data"][0]["url"], json!("data:image/png;base64,ZZ"));
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/chat/completions");
+        let sent = reqs[0].json();
+        // prompt became a user message and image modality was requested.
+        assert_eq!(sent["messages"][0]["content"], json!("a fox"));
+        assert_eq!(sent["modalities"], json!(["image", "text"]));
     }
 }

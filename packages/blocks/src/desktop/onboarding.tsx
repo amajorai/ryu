@@ -16,8 +16,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import { Logo as GhostOrb } from "@ryu/ui/components/logo";
-import { Progress, ProgressValue } from "@ryu/ui/components/progress";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
+import { TextSwap } from "@ryu/ui/components/text-swap";
 import type { ReactNode } from "react";
 
 /** A detectable CLI agent as the picker needs it. Mirrors the container's
@@ -129,36 +129,61 @@ function OnboardingShell({
 		// covers the wrapper's region and the onboarding window can't be dragged on
 		// macOS. Interactive children (buttons) override it, so only the empty
 		// surround drags the window.
-		<div
-			className="flex h-full w-full flex-col items-center justify-center gap-8 p-8"
-			data-tauri-drag-region="true"
-		>
-			<StaggerReveal>
-				<div className="shrink-0">
-					<GhostOrb size="50px" variant="outline" />
-				</div>
-				<div className="space-y-1 text-left">
-					<p className="max-w-md text-left font-medium text-muted-foreground text-xl">
-						{statusMessage}
-					</p>
-				</div>
-				{children}
-			</StaggerReveal>
+		//
+		// Outer wrapper owns the scroll; the inner column uses `min-h-full` (not
+		// `h-full`) so it stays vertically centered when the content fits and grows
+		// past the viewport when it doesn't — the parent PageWrapper is
+		// `h-screen overflow-hidden`, so without this a long step (e.g. the agent
+		// picker with many rows) pushed its Continue button off the bottom edge with
+		// no way to scroll to it.
+		<div className="h-full w-full overflow-y-auto">
+			<div
+				className="flex min-h-full w-full flex-col items-center justify-center gap-8 p-8"
+				data-tauri-drag-region="true"
+			>
+				<StaggerReveal>
+					<div className="shrink-0">
+						<GhostOrb size="50px" variant="outline" />
+					</div>
+					<div className="space-y-1 text-left">
+						<p className="max-w-md text-left font-medium text-muted-foreground text-xl">
+							{/* Swap the status/phase line in place (blur-rise) whenever it
+							    changes, so the rotating loading copy animates instead of
+							    hard-cutting. */}
+							<TextSwap>{statusMessage}</TextSwap>
+						</p>
+					</div>
+					{children}
+				</StaggerReveal>
+			</div>
 		</div>
 	);
 }
 
-/** Progress bar shown on the auto-advancing steps. Uses the shared shadcn/base-ui
- *  Progress with a real percentage the container derives from the onboarding
- *  phase, so it fills as setup actually advances instead of showing a generic
- *  animation. `done` pins it to 100%. */
+/** Progress bar shown on the auto-advancing steps. The phase-derived percentage
+ *  drives the primary fill's general position, but the numeric percent is
+ *  deliberately hidden and a continuously-sweeping marquee (`t-progress-marquee`)
+ *  rides on top so the bar is never visually frozen — the auto-advancing phases
+ *  can sit for minutes waiting on the local install, and a static fill reads as
+ *  "stuck". `done` pins it to 100% and drops the motion. Styling mirrors the
+ *  shared Progress track/indicator (`h-3`, `rounded-full`, `bg-muted`/`bg-primary`). */
 function ProgressBar({ value, done }: { value?: number; done?: boolean }) {
 	const pct = done ? 100 : Math.max(0, Math.min(100, value ?? 0));
 	return (
 		<div className="flex w-60 flex-col gap-1.5">
-			<Progress value={pct}>
-				<ProgressValue />
-			</Progress>
+			<div
+				aria-label="Setting up"
+				className="t-progress-track relative h-3 w-full overflow-hidden rounded-full bg-muted"
+				role="progressbar"
+			>
+				<div
+					className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out"
+					style={{ width: `${pct}%` }}
+				/>
+				{done ? null : (
+					<span aria-hidden="true" className="t-progress-marquee" />
+				)}
+			</div>
 		</div>
 	);
 }

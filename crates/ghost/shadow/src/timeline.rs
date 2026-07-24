@@ -1445,15 +1445,14 @@ impl TimelineIndex {
         let start = start_ts_us as i64;
         let end = end_ts_us as i64;
 
-        let map_row =
-            |row: &rusqlite::Row| -> rusqlite::Result<crate::retention::KeyframeRecord> {
-                Ok(crate::retention::KeyframeRecord {
-                    display_id: row.get::<_, i64>(0)? as u32,
-                    ts: row.get::<_, i64>(1)? as u64,
-                    file_path: row.get::<_, String>(2)?,
-                    size_bytes: row.get::<_, Option<i64>>(3)?.unwrap_or(0) as u64,
-                })
-            };
+        let map_row = |row: &rusqlite::Row| -> rusqlite::Result<crate::retention::KeyframeRecord> {
+            Ok(crate::retention::KeyframeRecord {
+                display_id: row.get::<_, i64>(0)? as u32,
+                ts: row.get::<_, i64>(1)? as u64,
+                file_path: row.get::<_, String>(2)?,
+                size_bytes: row.get::<_, Option<i64>>(3)?.unwrap_or(0) as u64,
+            })
+        };
 
         match display_id {
             Some(d) => {
@@ -1462,8 +1461,9 @@ impl TimelineIndex {
                      WHERE display_id = ?1 AND ts >= ?2 AND ts <= ?3
                      ORDER BY ts ASC",
                 )?;
-                let rows: Vec<crate::retention::KeyframeRecord> =
-                    stmt.query_map(params![d, start, end], map_row)?.collect::<Result<_, _>>()?;
+                let rows: Vec<crate::retention::KeyframeRecord> = stmt
+                    .query_map(params![d, start, end], map_row)?
+                    .collect::<Result<_, _>>()?;
                 Ok(rows)
             }
             None => {
@@ -1472,8 +1472,9 @@ impl TimelineIndex {
                      WHERE ts >= ?1 AND ts <= ?2
                      ORDER BY ts ASC",
                 )?;
-                let rows: Vec<crate::retention::KeyframeRecord> =
-                    stmt.query_map(params![start, end], map_row)?.collect::<Result<_, _>>()?;
+                let rows: Vec<crate::retention::KeyframeRecord> = stmt
+                    .query_map(params![start, end], map_row)?
+                    .collect::<Result<_, _>>()?;
                 Ok(rows)
             }
         }

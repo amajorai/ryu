@@ -104,8 +104,13 @@ fn source_from_spec(spec: CustomSourceSpec) -> Source {
             // it degrades to a labelled stub.
             match spec.base_url.filter(|u| !u.trim().is_empty()) {
                 Some(repo_url) => Source::Marketplace(
-                    MarketplaceSource::new(spec.id, spec.display_name, repo_url, CatalogKind::Skill)
-                        .with_auth(spec.auth),
+                    MarketplaceSource::new(
+                        spec.id,
+                        spec.display_name,
+                        repo_url,
+                        CatalogKind::Skill,
+                    )
+                    .with_auth(spec.auth),
                 ),
                 None => Source::Stub(StubSource {
                     id: spec.id,
@@ -124,8 +129,13 @@ fn source_from_spec(spec: CustomSourceSpec) -> Source {
             // [`builtin_sources`], not here.
             match spec.base_url.filter(|u| !u.trim().is_empty()) {
                 Some(repo_url) => Source::Marketplace(
-                    MarketplaceSource::new(spec.id, spec.display_name, repo_url, CatalogKind::Plugin)
-                        .with_auth(spec.auth),
+                    MarketplaceSource::new(
+                        spec.id,
+                        spec.display_name,
+                        repo_url,
+                        CatalogKind::Plugin,
+                    )
+                    .with_auth(spec.auth),
                 ),
                 None => Source::Stub(StubSource {
                     id: spec.id,
@@ -547,6 +557,108 @@ mod tests {
             );
         }
         assert!(CatalogKind::from_str("nope").is_err());
+    }
+
+    #[test]
+    fn is_model_index_url_discriminates_json_documents() {
+        // Plain .json path → model-index.
+        assert!(is_model_index_url("https://x.io/models.json"));
+        // Trailing slash is stripped before the .json check.
+        assert!(is_model_index_url("https://x.io/models.json/"));
+        // Query and fragment are ignored (path component only).
+        assert!(is_model_index_url("https://x.io/models.json?ref=main"));
+        assert!(is_model_index_url("https://x.io/models.json#frag"));
+        // Case-insensitive suffix.
+        assert!(is_model_index_url("https://x.io/MODELS.JSON"));
+        // An HF-style API base is NOT a model index.
+        assert!(!is_model_index_url("https://huggingface.co/api"));
+        assert!(!is_model_index_url("https://mirror.example/api/"));
+    }
+
+    #[test]
+    fn preference_key_is_dotted_by_kind() {
+        assert_eq!(preference_key(CatalogKind::Model), "catalog.active_source.model");
+        assert_eq!(preference_key(CatalogKind::Skill), "catalog.active_source.skill");
+    }
+
+    fn spec(kind: CatalogKind, id: &str, base_url: Option<&str>) -> CustomSourceSpec {
+        CustomSourceSpec {
+            kind,
+            id: id.to_owned(),
+            display_name: format!("{id} name"),
+            base_url: base_url.map(str::to_owned),
+            auth: None,
+        }
+    }
+
+    #[test]
+    fn source_from_spec_model_json_is_index_else_hf() {
+        // .json base_url → ModelIndex carrier.
+        let s = source_from_spec(spec(CatalogKind::Model, "idx", Some("https://x.io/m.json")));
+        assert!(matches!(s, Source::ModelIndex(_)));
+        assert_eq!(s.id(), "idx");
+        // Non-.json base_url → HF carrier.
+        let s = source_from_spec(spec(CatalogKind::Model, "hf", Some("https://mirror/api")));
+        assert!(matches!(s, Source::Hf(_)));
+        // No base_url → HF default host.
+        let s = source_from_spec(spec(CatalogKind::Model, "def", None));
+        assert!(matches!(s, Source::Hf(_)));
+    }
+
+    #[test]
+    fn source_from_spec_marketplace_kinds_need_a_base_url() {
+        // Skill + base_url → Marketplace; without → Stub.
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Skill, "s1", Some("https://repo/x"))),
+            Source::Marketplace(_)
+        ));
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Skill, "s2", None)),
+            Source::Stub(_)
+        ));
+        // A whitespace-only base_url is treated as absent → Stub.
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Skill, "s3", Some("   "))),
+            Source::Stub(_)
+        ));
+        // Plugin behaves the same way.
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Plugin, "p1", Some("https://repo/y"))),
+            Source::Marketplace(_)
+        ));
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Plugin, "p2", None)),
+            Source::Stub(_)
+        ));
+    }
+
+    #[test]
+    fn source_from_spec_mcp_and_knowledge_carriers() {
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Mcp, "m1", Some("https://registry/mirror"))),
+            Source::OfficialMcp(_)
+        ));
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Mcp, "m2", None)),
+            Source::Stub(_)
+        ));
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Knowledge, "k1", Some("https://git/repo"))),
+            Source::OkfBundle(_)
+        ));
+        assert!(matches!(
+            source_from_spec(spec(CatalogKind::Knowledge, "k2", None)),
+            Source::Stub(_)
+        ));
+    }
+
+    #[test]
+    fn source_by_id_finds_builtin_and_missing() {
+        let reg = CatalogSourceRegistry::with_file(temp_path("by-id"));
+        // The built-in HF model source resolves by id.
+        assert!(reg.source_by_id(CatalogKind::Model, "huggingface").is_some());
+        // An unknown id resolves to None.
+        assert!(reg.source_by_id(CatalogKind::Model, "does-not-exist").is_none());
     }
 
     #[test]

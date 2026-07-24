@@ -67,12 +67,32 @@ impl Priority {
     }
 }
 
+/// Ownership of one occupied slot in a [`ProviderGate`]. Releasing a slot is
+/// implemented entirely via this type's `Drop`, which is what makes the
+/// hand-off in [`ProviderGate::release`] cancellation-safe: whether a
+/// `SlotGuard` ends up owned by a live waiter (via the hand-off channel) or is
+/// dropped before that happens (waiter cancelled, ordinary end of request),
+/// the slot is accounted for exactly once, by whichever code ends up running
+/// this `Drop`. There is never a window where a slot is "in transit" and
+/// unowned.
+struct SlotGuard {
+    gate: Option<Arc<ProviderGate>>,
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        if let Some(gate) = self.gate.take() {
+            ProviderGate::release(&gate);
+        }
+    }
+}
+
 /// A held admission slot. The occupied slot is released when this is dropped
 /// (end of the request for non-streaming, end of the SSE stream for streaming —
 /// the caller is responsible for keeping it alive that long). An *ungated*
 /// permit (remote provider, or gating disabled) does nothing on drop.
 pub struct AdmissionPermit {
-    gate: Option<Arc<ProviderGate>>,
+    slot: Option<SlotGuard>,
 }
 
 impl AdmissionPermit {
@@ -81,19 +101,28 @@ impl AdmissionPermit {
     /// re-entrant tool-loop path, which must not hold a slot while a child
     /// request needs one).
     pub fn none() -> Self {
-        Self { gate: None }
+        Self { slot: None }
     }
 
     fn held(gate: Arc<ProviderGate>) -> Self {
-        Self { gate: Some(gate) }
+        Self {
+            slot: Some(SlotGuard { gate: Some(gate) }),
+        }
+    }
+
+    /// Wrap a `SlotGuard` received over the hand-off channel: ownership of the
+    /// slot moved atomically from the releasing request to this permit.
+    fn from_guard(guard: SlotGuard) -> Self {
+        Self { slot: Some(guard) }
     }
 }
 
 impl Drop for AdmissionPermit {
     fn drop(&mut self) {
-        if let Some(gate) = self.gate.take() {
-            gate.release();
-        }
+        // `SlotGuard::drop` does the actual release; this impl exists only so
+        // the field is read (not just drop-glued), which is what the
+        // dead-code lint checks for.
+        drop(self.slot.take());
     }
 }
 
@@ -113,15 +142,17 @@ pub struct QueueFull {
 struct GateState {
     in_flight: u32,
     /// FIFO of interactive waiters, served first.
-    interactive: VecDeque<oneshot::Sender<()>>,
+    interactive: VecDeque<oneshot::Sender<SlotGuard>>,
     /// FIFO of background waiters, served only when no interactive waiter waits.
-    background: VecDeque<oneshot::Sender<()>>,
+    background: VecDeque<oneshot::Sender<SlotGuard>>,
 }
 
 /// Per-provider admission gate: a priority-aware async semaphore. A slot is
-/// "handed off" directly from a finishing request to the next waiter (in_flight
-/// stays constant on hand-off), so the in-flight count never exceeds
-/// `max_in_flight` and there is no thundering herd.
+/// "handed off" directly from a finishing request to the next waiter by
+/// sending a [`SlotGuard`] that owns it — see [`ProviderGate::release`] for why
+/// that hand-off, and not a bare signal, is what makes cancellation safe. The
+/// in-flight count never exceeds `max_in_flight` and there is no thundering
+/// herd.
 struct ProviderGate {
     name: String,
     max_in_flight: u32,
@@ -151,7 +182,7 @@ impl ProviderGate {
     fn try_acquire_or_enqueue(
         &self,
         prio: Priority,
-    ) -> Result<Option<oneshot::Receiver<()>>, QueueFull> {
+    ) -> Result<Option<oneshot::Receiver<SlotGuard>>, QueueFull> {
         let mut g = self.state.lock().expect("admission gate lock poisoned");
         if g.in_flight < self.max_in_flight {
             g.in_flight += 1;
@@ -176,35 +207,61 @@ impl ProviderGate {
         Ok(Some(rx))
     }
 
-    /// Release a held slot: hand it to the highest-priority live waiter, or
-    /// decrement in_flight if none are waiting. Skips waiters whose receiver was
-    /// dropped (request cancelled while queued).
-    fn release(&self) {
-        let mut g = self.state.lock().expect("admission gate lock poisoned");
-        loop {
+    /// Release a held slot: hand it to the highest-priority live waiter by
+    /// sending a [`SlotGuard`] that owns it, or decrement `in_flight` if none
+    /// are waiting.
+    ///
+    /// Takes `gate: &Arc<Self>` (rather than `&self`) because a hand-off needs
+    /// to construct a fresh guard holding its own `Arc` clone of the gate —
+    /// the guard must be able to outlive this call and independently trigger
+    /// another `release` on drop.
+    ///
+    /// Cancellation-safety: this is the fix for the slot leak. The queued
+    /// `oneshot::Receiver` side of a waiter can be dropped (client
+    /// disconnected, handler future cancelled) at any point, including in the
+    /// window between `send` succeeding here and the waiter's `acquire` future
+    /// being polled again. Previously the hand-off sent a bare `()`, so a
+    /// receiver dropped in that window silently discarded the "ownership
+    /// signal" and the slot was never reclaimed. Now the thing sent IS the
+    /// slot's ownership (a `SlotGuard`): if the receiver is gone, `send`
+    /// returns the guard back to us as `Err`, and letting it drop right here
+    /// re-enters `release` (via `SlotGuard::drop`) to keep searching for a
+    /// live waiter or decrement `in_flight`. A slot is always owned by
+    /// exactly one of {the finishing request, a `SlotGuard` in flight, a live
+    /// waiter, `in_flight`'s count}, never by none of them.
+    ///
+    /// Lock ordering: the state lock is dropped *before* `send` (and before
+    /// any resulting guard `Drop`/recursive `release`). `SlotGuard::drop`
+    /// calls back into `release`, which re-locks `state` — sending while still
+    /// holding the lock would self-deadlock on that reentry.
+    fn release(gate: &Arc<Self>) {
+        let next = {
+            let mut g = gate.state.lock().expect("admission gate lock poisoned");
             let next = g
                 .interactive
                 .pop_front()
                 .or_else(|| g.background.pop_front());
-            match next {
-                Some(tx) => {
-                    // Successful hand-off keeps in_flight constant (one left, one
-                    // entered). A dead receiver (cancelled) frees nothing — keep
-                    // looking for a live waiter.
-                    if tx.send(()).is_ok() {
-                        self.queued_total.store(
-                            (g.interactive.len() + g.background.len()) as u32,
-                            Ordering::Relaxed,
-                        );
-                        return;
-                    }
+            match &next {
+                Some(_) => {
+                    gate.queued_total.store(
+                        (g.interactive.len() + g.background.len()) as u32,
+                        Ordering::Relaxed,
+                    );
                 }
                 None => {
                     g.in_flight = g.in_flight.saturating_sub(1);
-                    self.queued_total.store(0, Ordering::Relaxed);
-                    return;
+                    gate.queued_total.store(0, Ordering::Relaxed);
                 }
             }
+            next
+        };
+        if let Some(tx) = next {
+            let guard = SlotGuard {
+                gate: Some(Arc::clone(gate)),
+            };
+            // Dead receiver → `send` hands the guard back as `Err`; dropping
+            // it here re-enters `release` with the lock already released.
+            let _ = tx.send(guard);
         }
     }
 
@@ -306,16 +363,23 @@ impl ConcurrencyLimiter {
         match gate.try_acquire_or_enqueue(prio)? {
             None => Ok(AdmissionPermit::held(gate)),
             Some(rx) => {
-                // Wait for a finishing request to hand us a slot. A send error
-                // would mean the gate was torn down (never happens while a
-                // request is live); treat it as acquired to avoid a deadlock.
-                let _ = rx.await;
+                // Wait for a finishing request to hand us a slot, as a
+                // SlotGuard whose ownership transfers to us. A recv error
+                // would mean the sender was dropped without ever sending a
+                // guard — the gate torn down mid-request, never happens while
+                // a request is live; fall back to a self-contained held()
+                // guard so drop still behaves correctly either way.
+                let provider_name = gate.name.clone();
+                let permit = match rx.await {
+                    Ok(guard) => AdmissionPermit::from_guard(guard),
+                    Err(_) => AdmissionPermit::held(gate),
+                };
                 tracing::debug!(
-                    provider = %gate.name,
+                    provider = %provider_name,
                     priority = prio.as_str(),
                     "admission: slot acquired after wait"
                 );
-                Ok(AdmissionPermit::held(gate))
+                Ok(permit)
             }
         }
     }
@@ -465,5 +529,116 @@ mod tests {
         assert_eq!(snap[0].in_flight, 1);
         assert_eq!(snap[0].max_in_flight, 1);
         assert_eq!(snap[0].queued, 0);
+    }
+
+    /// Regression test for the slot-leak this plan fixes: a waiter cancelled
+    /// in the window *after* `release()` has successfully handed it a slot
+    /// but *before* its `acquire` future is polled to completion must not
+    /// permanently shrink gate capacity.
+    ///
+    /// The `#[tokio::test]` default flavor is `current_thread` (single
+    /// worker), which is what makes the interleaving below deterministic:
+    /// nothing else can run on this thread between the `drop(p1)` that
+    /// performs the hand-off send and the `waiter.abort()` that cancels the
+    /// receiver, because neither line contains an `.await` — the executor
+    /// only gets a chance to run the spawned waiter task at an await point.
+    #[tokio::test]
+    async fn cancel_after_handoff_does_not_leak_slot() {
+        let lim = Arc::new(ConcurrencyLimiter::new(&cfg(1, 4)));
+
+        // A holds the only slot.
+        let p1 = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
+
+        // B queues behind A. The sleep yields to the runtime long enough for
+        // B's task to run up to (and suspend at) its `rx.await`, registering
+        // it as a live waiter — but not to complete.
+        let lim2 = Arc::clone(&lim);
+        let waiter =
+            tokio::spawn(async move { lim2.acquire(LOCAL_PROVIDER, Priority::Interactive).await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(!waiter.is_finished(), "B must be queued, not finished");
+
+        // Drop A's permit: this runs release() synchronously (no await
+        // points in Drop), which pops B's sender and successfully sends it a
+        // SlotGuard — buffered in the channel, not yet observed by B.
+        drop(p1);
+
+        // Cancel B *before* it ever gets scheduled to consume that buffered
+        // guard. No `.await` has happened since `drop(p1)`, so B cannot have
+        // run in between: this genuinely exercises the leak window, not a
+        // cancel-before-handoff no-op.
+        waiter.abort();
+        match waiter.await {
+            Err(e) => assert!(
+                e.is_cancelled(),
+                "B must have been cancelled, not have failed some other way"
+            ),
+            Ok(_) => panic!("B must have been cancelled, not completed normally"),
+        }
+
+        // If the slot leaked (pre-fix behavior), this hangs forever because
+        // in_flight never returns below max_in_flight; the timeout catches
+        // that instead of hanging the test suite.
+        let p3 = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            lim.acquire(LOCAL_PROVIDER, Priority::Interactive),
+        )
+        .await
+        .expect("gate must recover: a fresh acquire must not hang")
+        .unwrap();
+
+        assert_eq!(lim.snapshots()[0].in_flight, 1, "C now holds the slot");
+        drop(p3);
+        assert_eq!(
+            lim.snapshots()[0].in_flight,
+            0,
+            "in_flight must return to 0 once C's permit drops"
+        );
+    }
+
+    /// A waiter cancelled while still sitting in the queue (never reached by
+    /// a hand-off) is only removed from the live queue depth on the *next*
+    /// `release()` pass that walks over it — matching the pre-existing
+    /// "skip dead waiters" behavior, now also exercised for the queued (not
+    /// yet popped) case.
+    #[tokio::test]
+    async fn cancelled_while_queued_waiter_is_reaped_on_next_release() {
+        let lim = Arc::new(ConcurrencyLimiter::new(&cfg(1, 4)));
+
+        let p1 = lim
+            .acquire(LOCAL_PROVIDER, Priority::Interactive)
+            .await
+            .unwrap();
+
+        let lim2 = Arc::clone(&lim);
+        let waiter =
+            tokio::spawn(async move { lim2.acquire(LOCAL_PROVIDER, Priority::Background).await });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(lim.snapshots()[0].queued, 1, "waiter must be queued");
+
+        // Cancel while still queued (no release has run yet, so nothing has
+        // popped it out of the deque).
+        waiter.abort();
+        let _ = waiter.await;
+
+        // Release only pops on the next `release()` call — so the dead
+        // waiter still occupies the deque immediately after cancellation.
+        assert_eq!(
+            lim.snapshots()[0].queued,
+            1,
+            "dead waiter isn't reaped until the next release pass"
+        );
+
+        // Now release the slot: release() pops the dead sender, the send
+        // fails, and (with no other waiter behind it) in_flight decrements.
+        // The deque itself already shrank on pop.
+        drop(p1);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let snap = lim.snapshots();
+        assert_eq!(snap[0].queued, 0, "dead waiter reaped on release pass");
+        assert_eq!(snap[0].in_flight, 0, "no live waiter took the slot");
     }
 }

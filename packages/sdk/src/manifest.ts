@@ -24,11 +24,11 @@ import { z } from "zod";
 // must therefore never hard-require the addon at module load. We load it lazily
 // on first use of a helper that needs it, cache it, and throw a descriptive
 // error only if a caller actually invokes those helpers without the addon.
-type NativeAddon = {
-	validatePluginId(id: string): void;
+interface NativeAddon {
 	parseAndValidateManifest(manifestJson: string): string;
 	pluginManifestJsonSchema(): string;
-};
+	validatePluginId(id: string): void;
+}
 
 let cachedNative: NativeAddon | null = null;
 let nativeLoadError: Error | null = null;
@@ -168,6 +168,25 @@ export const TurnHookContributionSchema = z.object({
 	on: z.string().min(1).default("post_assistant_turn"),
 	/** The JS hook body executed in the sandbox (returns a directive). */
 	code: z.string().min(1),
+	/**
+	 * Cheap pre-gate mirroring Core's `HookMatch` (serde name `match` on
+	 * `TurnHookContribution.run_when`). MUST round-trip through this schema:
+	 * `ryu pack`/`publish` persist `safeParse(...).data`, so a field missing here
+	 * is silently STRIPPED before signing — a tool-gated `pre_tool_use` hook
+	 * (e.g. `tools: ["bash*"]`) would lose its gate and run on EVERY tool call.
+	 */
+	match: z
+		.object({
+			/** Run only if the request set this composer flag true. */
+			flag: z.string().optional(),
+			/** Run if the last user message starts with any of these prefixes. */
+			commands: z.array(z.string()).default([]),
+			/** Run if the plugin has stored state for this conversation. */
+			stateful: z.boolean().default(false),
+			/** Run if `ctx.tool_name` matches any of these `*`-wildcard patterns. */
+			tools: z.array(z.string()).default([]),
+		})
+		.optional(),
 });
 
 export type TurnHookContribution = z.infer<typeof TurnHookContributionSchema>;
@@ -251,6 +270,12 @@ export const ContributesSchema = z.object({
 	 *  `Contributes.widgets` field, without which the CLI's zod parse would strip
 	 *  every widget an app authored here declares. */
 	widgets: z.array(WidgetContributionSchema).default([]),
+	/** App-registered sidebar sections (header + live list) and buttons (single nav
+	 *  rows). Loosely typed here — the shell owns the spec vocabulary — matching how
+	 *  `composer_controls`/`settings_tabs` are declared. Mirrors the Rust-side
+	 *  `Contributes.sidebar_sections` / `Contributes.sidebar_buttons`. */
+	sidebar_sections: z.array(z.record(z.string(), z.unknown())).default([]),
+	sidebar_buttons: z.array(z.record(z.string(), z.unknown())).default([]),
 });
 
 export type Contributes = z.infer<typeof ContributesSchema>;
@@ -530,6 +555,27 @@ export const PluginManifestSchema = z.object({
 	license: z.string().optional(),
 	/** Square logo/icon URL for the listing card + detail header. */
 	iconUrl: z.string().optional(),
+	/**
+	 * Icon-primitive id for the listing card (Ryu extension): an Iconify/icons0
+	 * `prefix:name`, a bare Hugeicons name, or a URL, resolved by the shared `Icon`
+	 * primitive. A monochrome GLYPH masked with the current text colour — distinct
+	 * from `iconUrl` (a raster logo). Falls back to `iconUrl` when omitted.
+	 */
+	icon: z.string().optional(),
+	/**
+	 * Dithered-gradient background for the card's icon square (Ryu extension),
+	 * mirroring dither-kit's `DitherGradient` props. `from`/`to` are a palette-colour
+	 * name (`green`, `blue`, `purple`, `pink`, `orange`, `red`, `grey`) or a hue
+	 * number (0–360); `direction` is where `to` ends up. Renders behind the glyph in
+	 * place of a flat `iconBackground`; the render layer validates + falls back.
+	 */
+	iconDither: z
+		.object({
+			from: z.union([z.string(), z.number()]),
+			to: z.union([z.string(), z.number()]).optional(),
+			direction: z.enum(["up", "down", "left", "right"]).optional(),
+		})
+		.optional(),
 	/** Ordered App-Store-style screenshot gallery URLs (Ryu extension). */
 	screenshots: z.array(z.string()).optional(),
 	/** Privacy policy URL surfaced on detail (Ryu extension). */

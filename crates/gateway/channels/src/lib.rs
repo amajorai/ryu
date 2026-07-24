@@ -7,6 +7,12 @@
 //! inbound path: [`handle_message`] builds a request body, runs it through the
 //! gateway pipeline (via the [`ChannelHost`] seam), and hands the reply text
 //! back to the channel for delivery.
+//!
+//! Inbound is gated by a chat allowlist (`RYU_CHANNEL_ALLOWED_USERS[_<PLATFORM>]`)
+//! and is CLOSED by default: with no allowlist configured every sender is
+//! refused unless the operator explicitly opts into open mode with
+//! `RYU_CHANNEL_ALLOW_ALL=1` — anyone who can message the bot would otherwise
+//! get completions billed to the operator.
 
 pub mod discord;
 pub mod slack;
@@ -180,10 +186,11 @@ pub fn extract_reply(response: &Value) -> Option<String> {
 ///
 /// Env: `RYU_CHANNEL_ALLOWED_USERS` (global, all platforms) and
 /// `RYU_CHANNEL_ALLOWED_USERS_<PLATFORM>` (e.g. `_TELEGRAM`). Comma-separated
-/// chat ids. When BOTH are unset for a platform the channel is OPEN (current
-/// behavior preserved) — the open warning is emitted once at spawn time, not
-/// per-message. NOTE: `InboundMessage` carries only `chat_id`, so this gates on
-/// the originating chat/conversation, not an individual sender user id.
+/// chat ids. When BOTH are unset for a platform the channel is CLOSED — every
+/// inbound chat is refused unless the operator explicitly opts into open mode
+/// with [`ENV_CHANNEL_ALLOW_ALL`]. NOTE: `InboundMessage` carries only
+/// `chat_id`, so this gates on the originating chat/conversation, not an
+/// individual sender user id.
 fn channel_allowlist(platform: &str) -> Option<Vec<String>> {
     let per_platform_key = format!(
         "RYU_CHANNEL_ALLOWED_USERS_{}",
@@ -205,12 +212,45 @@ fn channel_allowlist(platform: &str) -> Option<Vec<String>> {
     }
 }
 
-/// Whether a chat is permitted for this platform. Open (true) when unset.
-fn channel_chat_allowed(platform: &str, chat_id: &str) -> bool {
-    match channel_allowlist(platform) {
+/// Env var opting a deployment into accepting ALL inbound chats when no
+/// allowlist is configured. A bot token grants LLM completions billed to the
+/// operator, so no-allowlist is CLOSED by default; this is the explicit escape
+/// hatch (`1`/`true`/`yes`/`on`, case-insensitive).
+const ENV_CHANNEL_ALLOW_ALL: &str = "RYU_CHANNEL_ALLOW_ALL";
+
+/// Pure: does this env value opt into open mode? Only an explicit enable token
+/// counts — absent or anything else stays closed. Unit-testable without env.
+fn channel_allow_all_from(val: Option<&str>) -> bool {
+    matches!(
+        val.map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Runtime wrapper: read [`ENV_CHANNEL_ALLOW_ALL`] and classify.
+fn channel_allow_all() -> bool {
+    channel_allow_all_from(std::env::var(ENV_CHANNEL_ALLOW_ALL).ok().as_deref())
+}
+
+/// Pure decision core for [`channel_chat_allowed`]: with an allowlist the chat
+/// must be listed; with none the channel is closed unless `allow_all` opted in.
+fn chat_allowed_with(allowlist: Option<&[String]>, allow_all: bool, chat_id: &str) -> bool {
+    match allowlist {
         Some(list) => list.iter().any(|allowed| allowed == chat_id),
-        None => true,
+        None => allow_all,
     }
+}
+
+/// Whether a chat is permitted for this platform. Closed when no allowlist is
+/// configured, unless [`ENV_CHANNEL_ALLOW_ALL`] explicitly opts into open mode.
+fn channel_chat_allowed(platform: &str, chat_id: &str) -> bool {
+    chat_allowed_with(
+        channel_allowlist(platform).as_deref(),
+        channel_allow_all(),
+        chat_id,
+    )
 }
 
 /// Shared inbound path for every channel: turn a message into a gateway request,
@@ -224,13 +264,22 @@ pub async fn handle_message<C: Channel + ?Sized>(
     message: InboundMessage,
 ) {
     // Channel allowlist gate: reject inbound from a chat not on the platform's
-    // (or global) allowlist. Unset ⇒ open (warned once at spawn, not here).
+    // (or global) allowlist. Unset ⇒ CLOSED unless RYU_CHANNEL_ALLOW_ALL opts in.
     if !channel_chat_allowed(channel.name(), &message.chat_id) {
-        warn!(
-            channel = channel.name(),
-            chat_id = %message.chat_id,
-            "channel inbound rejected: chat not in allowlist"
-        );
+        if channel_allowlist(channel.name()).is_none() {
+            warn!(
+                channel = channel.name(),
+                chat_id = %message.chat_id,
+                "channel inbound refused: no allowlist configured — set RYU_CHANNEL_ALLOWED_USERS[_{}] to admit specific chats, or RYU_CHANNEL_ALLOW_ALL=1 to accept all",
+                channel.name().to_uppercase()
+            );
+        } else {
+            warn!(
+                channel = channel.name(),
+                chat_id = %message.chat_id,
+                "channel inbound rejected: chat not in allowlist"
+            );
+        }
         return;
     }
 
@@ -243,9 +292,7 @@ pub async fn handle_message<C: Channel + ?Sized>(
     );
 
     let reply = match host.run_pipeline(channel.name(), body).await {
-        Ok(response) => {
-            extract_reply(&response).unwrap_or_else(|| "(no response)".to_string())
-        }
+        Ok(response) => extract_reply(&response).unwrap_or_else(|| "(no response)".to_string()),
         Err(err) => {
             warn!(
                 channel = channel.name(),
@@ -278,11 +325,18 @@ pub fn spawn_channel<C: Channel + 'static>(
             let channel = Arc::new(channel);
             let name = channel.name();
             if channel_allowlist(name).is_none() {
-                warn!(
-                    channel = name,
-                    "channel registered with NO allowlist (RYU_CHANNEL_ALLOWED_USERS[_{}] unset) — all chats accepted",
-                    name.to_uppercase()
-                );
+                if channel_allow_all() {
+                    warn!(
+                        channel = name,
+                        "channel registered with NO allowlist and RYU_CHANNEL_ALLOW_ALL set — all chats accepted"
+                    );
+                } else {
+                    warn!(
+                        channel = name,
+                        "channel registered with NO allowlist (RYU_CHANNEL_ALLOWED_USERS[_{}] unset) — ALL inbound will be refused; set an allowlist or RYU_CHANNEL_ALLOW_ALL=1",
+                        name.to_uppercase()
+                    );
+                }
             }
             info!(channel = name, "registering channel");
             let host = Arc::clone(host);
@@ -339,27 +393,62 @@ mod tests {
         assert!(extract_reply(&response).is_none());
     }
 
+    /// No allowlist and no opt-in ⇒ CLOSED. Pure helpers, no env mutation.
+    #[test]
+    fn no_allowlist_is_default_closed() {
+        assert!(!chat_allowed_with(None, false, "123"));
+        // Absent env or a non-enable token never opts in.
+        assert!(!channel_allow_all_from(None));
+        for v in ["0", "false", "off", "no", ""] {
+            assert!(
+                !channel_allow_all_from(Some(v)),
+                "{v:?} must not open the channel"
+            );
+        }
+    }
+
+    /// Explicit `RYU_CHANNEL_ALLOW_ALL` opt-in reopens a no-allowlist channel.
+    #[test]
+    fn allow_all_opt_in_opens_channel() {
+        assert!(chat_allowed_with(None, true, "123"));
+        for v in ["1", "true", "yes", "on", " 1 ", "TRUE"] {
+            assert!(
+                channel_allow_all_from(Some(v)),
+                "{v:?} should opt into open mode"
+            );
+        }
+        // The opt-in never widens a CONFIGURED allowlist.
+        let list = vec!["123".to_string()];
+        assert!(chat_allowed_with(Some(list.as_slice()), true, "123"));
+        assert!(!chat_allowed_with(Some(list.as_slice()), true, "999"));
+    }
+
     /// Channel allowlist behavior. Run as ONE sequential test because it mutates
-    /// process-global env (`RYU_CHANNEL_ALLOWED_USERS[_*]`); parallel sub-tests
-    /// would race. Each phase sets/removes only what it needs and cleans up.
+    /// process-global env (`RYU_CHANNEL_ALLOWED_USERS[_*]`, `RYU_CHANNEL_ALLOW_ALL`);
+    /// parallel sub-tests would race. Each phase sets/removes only what it needs
+    /// and cleans up.
     #[test]
     fn channel_allowlist_gating() {
         // Clean slate.
         std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS");
         std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM");
         std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_SLACK");
+        std::env::remove_var("RYU_CHANNEL_ALLOW_ALL");
 
-        // 1. Fully unset ⇒ open (current behavior preserved).
+        // 1. Fully unset ⇒ CLOSED (default), until the explicit opt-in.
         assert!(channel_allowlist("telegram").is_none());
+        assert!(!channel_chat_allowed("telegram", "123"));
+        std::env::set_var("RYU_CHANNEL_ALLOW_ALL", "1");
         assert!(channel_chat_allowed("telegram", "123"));
+        std::env::remove_var("RYU_CHANNEL_ALLOW_ALL");
 
         // 2. Per-platform set ⇒ listed id allowed, others rejected.
         std::env::set_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM", "123, 456");
         assert!(channel_chat_allowed("telegram", "123"));
         assert!(channel_chat_allowed("telegram", "456"));
         assert!(!channel_chat_allowed("telegram", "999"));
-        // A different platform with no list of its own stays open.
-        assert!(channel_chat_allowed("slack", "999"));
+        // A different platform with no list of its own stays closed.
+        assert!(!channel_chat_allowed("slack", "999"));
 
         // 3. Global applies when per-platform is unset.
         std::env::remove_var("RYU_CHANNEL_ALLOWED_USERS_TELEGRAM");

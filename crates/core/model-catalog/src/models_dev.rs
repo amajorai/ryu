@@ -256,4 +256,61 @@ mod tests {
         assert!(is_fresh(1000, 1000 + TTL_SECS - 1));
         assert!(!is_fresh(1000, 1000 + TTL_SECS));
     }
+
+    #[test]
+    fn parse_windows_keeps_largest_bare_window_on_collision() {
+        // Same bare model id under two providers with different windows: the bare
+        // key must keep the LARGER context, while each qualified key is exact.
+        let catalog = serde_json::json!({
+            "provider-a": { "models": { "shared": { "limit": { "context": 8000 } } } },
+            "provider-b": { "models": { "shared": { "limit": { "context": 32000 } } } }
+        });
+        let w = parse_windows(&catalog);
+        assert_eq!(w.get("shared"), Some(&32_000));
+        assert_eq!(w.get("provider-a/shared"), Some(&8_000));
+        assert_eq!(w.get("provider-b/shared"), Some(&32_000));
+    }
+
+    #[test]
+    fn parse_windows_ignores_non_object_and_missing_models() {
+        assert!(parse_windows(&serde_json::json!("not an object")).is_empty());
+        assert!(parse_windows(&serde_json::json!({ "p": { "no_models": {} } })).is_empty());
+    }
+
+    #[tokio::test]
+    async fn context_window_uses_in_process_then_disk_cache() {
+        crate::ensure_test_host();
+
+        // In-process fresh cache hit — no network.
+        {
+            let mut c = CACHE.lock().await;
+            let mut w = HashMap::new();
+            w.insert("gpt-4o".to_string(), 128_000u32);
+            w.insert("openai/gpt-4o".to_string(), 128_000u32);
+            *c = Some(CachedWindows {
+                fetched_at: now_unix(),
+                windows: w,
+            });
+        }
+        assert_eq!(context_window("gpt-4o").await, Some(128_000));
+        // Unknown provider prefix falls back to the bare tail.
+        assert_eq!(context_window("openrouter/gpt-4o").await, Some(128_000));
+        assert_eq!(context_window("nonexistent-local-xyz").await, None);
+
+        // Disk-hit path: drop the in-process cache, write a fresh disk cache, and
+        // confirm load_windows adopts it (still no network).
+        {
+            let mut c = CACHE.lock().await;
+            *c = None;
+        }
+        let mut w2 = HashMap::new();
+        w2.insert("claude-disk-xyz".to_string(), 200_000u32);
+        let entry = CachedWindows {
+            fetched_at: now_unix(),
+            windows: w2,
+        };
+        write_disk_cache(&entry);
+        assert!(read_disk_cache().is_some(), "disk cache round-trips");
+        assert_eq!(context_window("claude-disk-xyz").await, Some(200_000));
+    }
 }

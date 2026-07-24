@@ -214,3 +214,83 @@ pub async fn list_triggers(client: &Client, toolkit: &str) -> Result<Value> {
         .collect();
     Ok(json!({ "object": "list", "toolkit": toolkit, "data": data }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_url_defaults_and_trims_override() {
+        // Serialize + restore: COMPOSIO_BASE_URL is process-global and read by
+        // sibling modules (connect/execute/triggers) in this same binary.
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var("COMPOSIO_BASE_URL").ok();
+
+        std::env::remove_var("COMPOSIO_BASE_URL");
+        assert_eq!(base_url(), DEFAULT_BASE_URL);
+
+        // An override wins and has any trailing slashes stripped.
+        std::env::set_var("COMPOSIO_BASE_URL", "https://api.composio.dev/api/v3//");
+        assert_eq!(base_url(), "https://api.composio.dev/api/v3");
+
+        // An empty override is ignored (falls back to the default).
+        std::env::set_var("COMPOSIO_BASE_URL", "");
+        assert_eq!(base_url(), DEFAULT_BASE_URL);
+
+        match prev {
+            Some(v) => std::env::set_var("COMPOSIO_BASE_URL", v),
+            None => std::env::remove_var("COMPOSIO_BASE_URL"),
+        }
+    }
+
+    #[test]
+    fn validate_base_url_accepts_both_allowlisted_hosts() {
+        assert!(validate_base_url("https://backend.composio.dev/api/v3.1").is_ok());
+        assert!(validate_base_url("https://api.composio.dev").is_ok());
+        // Case-insensitive host match.
+        assert!(validate_base_url("https://BACKEND.Composio.Dev/api").is_ok());
+    }
+
+    #[test]
+    fn validate_base_url_rejects_off_policy() {
+        // Plain http is rejected before the key is ever attached.
+        assert!(validate_base_url("http://backend.composio.dev").is_err());
+        // A non-allowlisted host is rejected even over https.
+        assert!(validate_base_url("https://evil.example.com/api").is_err());
+        // A look-alike subdomain is not on the allowlist.
+        assert!(validate_base_url("https://backend.composio.dev.evil.com").is_err());
+        // Unparseable / schemeless input is an error, not a panic.
+        assert!(validate_base_url("not a url").is_err());
+    }
+
+    #[test]
+    fn items_of_reads_every_shape() {
+        // `items` wins first.
+        let v = json!({ "items": [{"a":1}], "data": [{"b":2}] });
+        assert_eq!(items_of(&v).len(), 1);
+        assert_eq!(items_of(&v)[0]["a"], 1);
+        // `data` when no `items`.
+        let v = json!({ "data": [{"b":2},{"b":3}] });
+        assert_eq!(items_of(&v).len(), 2);
+        // A bare top-level array.
+        let v = json!([{"c":1}]);
+        assert_eq!(items_of(&v).len(), 1);
+        // Anything else → empty.
+        assert!(items_of(&json!({ "nope": true })).is_empty());
+        assert!(items_of(&json!(42)).is_empty());
+    }
+
+    #[test]
+    fn str_field_first_nonempty_and_meta_fallback() {
+        let item = json!({ "slug": "", "name": "GitHub", "meta": { "logo": "x.png" } });
+        // Empty candidate is skipped in favour of the next key.
+        assert_eq!(str_field(&item, &["slug", "name"]).as_deref(), Some("GitHub"));
+        // A field only present under `meta` is found.
+        assert_eq!(str_field(&item, &["logo"]).as_deref(), Some("x.png"));
+        // No match anywhere → None.
+        assert!(str_field(&item, &["absent"]).is_none());
+        // A non-string value is not treated as a match.
+        let item = json!({ "count": 3 });
+        assert!(str_field(&item, &["count"]).is_none());
+    }
+}

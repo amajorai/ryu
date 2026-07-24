@@ -5,9 +5,9 @@
 // through it. The live percent is computed at the call site (via the desktop
 // `useInstallProgress` hook) and passed in.
 
-import { Button, type ButtonProps } from "@ryu/ui/components/button";
-import { Spinner } from "@ryu/ui/components/spinner";
-import { cn } from "@ryu/ui/lib/utils";
+import { Button, type ButtonProps } from "@ryu/ui/components/button.tsx";
+import { Spinner } from "@ryu/ui/components/spinner.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
 type InstallProgressButtonProps = Omit<

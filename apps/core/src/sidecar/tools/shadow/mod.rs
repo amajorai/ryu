@@ -15,6 +15,87 @@ use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 /// How often the background liveness probe re-checks Shadow's HTTP port.
 const LIVENESS_PROBE_INTERVAL: Duration = Duration::from_secs(5);
 
+// ── Shadow API token ───────────────────────────────────────────────────────────
+//
+// Shadow's HTTP surface is bearer-gated (apps/shadow/src/server.rs): everything
+// except `/health` requires a shared secret so a hostile local process or web
+// page cannot read screen history or flip capture consent. The secret is a
+// persisted file under the Shadow data dir; Core reads-or-creates it at spawn
+// and presents it from every Shadow client (`sidecar/mcp/shadow`, the external
+// `/stop` below).
+
+/// Path of the persisted Shadow API token: `<ryu_dir>/shadow/api-token` — the
+/// same file Shadow itself resolves, because [`ShadowProcess::start`] points
+/// `SHADOW_DATA_DIR` at `<ryu_dir>/shadow`.
+fn api_token_path() -> std::path::PathBuf {
+    crate::paths::ryu_dir().join("shadow").join("api-token")
+}
+
+/// Read-or-create the shared-secret Shadow API token (owner-only permissions),
+/// mirroring Shadow's own first-run minting so whichever side starts first wins
+/// and the other reads the same value.
+pub(crate) fn ensure_api_token() -> anyhow::Result<String> {
+    let path = api_token_path();
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_owned());
+        }
+    }
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let dir = path.parent().expect("token path has a parent");
+    std::fs::create_dir_all(dir).context("creating shadow data dir")?;
+    std::fs::write(&path, &token).context("persisting shadow api token")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(token)
+}
+
+/// Resolve the token Core's Shadow clients present: `SHADOW_API_TOKEN` env
+/// (operator override — the spawn env in [`ShadowProcess::start`] honours the
+/// same export), else the profile-aware token file, else the standalone default
+/// `~/.shadow/api-token` (a dev-started `shadow start` with no `SHADOW_DATA_DIR`
+/// mints its token there, and Core adopts such servers). `None` = no token
+/// found; Shadow will reject the call (fail closed).
+pub fn api_token() -> Option<String> {
+    if let Ok(env_token) = std::env::var("SHADOW_API_TOKEN") {
+        let trimmed = env_token.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+    for path in [
+        api_token_path(),
+        dirs::home_dir()?.join(".shadow").join("api-token"),
+    ] {
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            let trimmed = existing.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the Shadow base URL: `RYU_SHADOW_URL` if set, else the profile-aware
+/// default (`127.0.0.1:3030` on release, `:4030` on dev, …) matching the port the
+/// [`ShadowProcess`] spawns on. `profile::apply_env_defaults` also seeds
+/// `RYU_SHADOW_URL` under a non-release profile, so this fallback and the env
+/// resolve to the same port either way. Used by the `/api/shadow/*` proxy (the
+/// bridge the declarative `shadow` plugin tools reach Shadow through).
+pub fn base_url() -> String {
+    std::env::var("RYU_SHADOW_URL")
+        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", crate::profile::port(3030)))
+}
+
 /// Lifecycle manager for the Shadow sidecar process.
 ///
 /// Shadow's liveness is reported from **reachability of its HTTP port**, not
@@ -219,8 +300,13 @@ impl Sidecar for ShadowManager {
                 // We don't own the process (adopted, dev-started, or orphaned),
                 // but it is answering on the port. Ask it to exit over HTTP via
                 // Shadow's `/stop` endpoint rather than killing a stranger PID.
+                // `/stop` is bearer-gated like every non-health route.
                 let url = format!("http://127.0.0.1:{port}/stop");
-                if let Err(e) = client.get(&url).send().await {
+                let mut request = client.get(&url);
+                if let Some(token) = api_token() {
+                    request = request.bearer_auth(token);
+                }
+                if let Err(e) = request.send().await {
                     tracing::warn!("shadow external stop request failed: {e}");
                 }
             }
@@ -287,5 +373,74 @@ impl Sidecar for ShadowManager {
             tracing::info!("shadow uninstalled");
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Serializes SHADOW_API_TOKEN mutation so the get/restore never races a parallel
+    // test that reads the same global (poison-tolerant).
+    static SHADOW_TOKEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn lock_token() -> std::sync::MutexGuard<'static, ()> {
+        SHADOW_TOKEN_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn api_token_prefers_env_and_trims() {
+        // The env branch returns BEFORE any file read, so it is deterministic regardless
+        // of whatever token files happen to exist on the host.
+        let _lock = lock_token();
+        let prev = std::env::var("SHADOW_API_TOKEN").ok();
+        std::env::set_var("SHADOW_API_TOKEN", "  secret-bearer  ");
+        assert_eq!(api_token().as_deref(), Some("secret-bearer"));
+        match prev {
+            Some(v) => std::env::set_var("SHADOW_API_TOKEN", v),
+            None => std::env::remove_var("SHADOW_API_TOKEN"),
+        }
+    }
+
+    #[test]
+    fn api_token_path_lives_under_ryu_shadow() {
+        let p = api_token_path();
+        assert!(p.ends_with("api-token"));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "shadow");
+    }
+
+    #[test]
+    fn health_url_and_port_are_loopback() {
+        // Construct with an explicit port (no liveness probe in a sync test → no-op).
+        let mgr = ShadowManager::new().with_port(4030);
+        assert_eq!(mgr.health_url(), "http://127.0.0.1:4030/health");
+        assert_eq!(mgr.name(), "shadow");
+        assert!(!mgr.is_required());
+    }
+
+    #[tokio::test]
+    async fn server_reachable_reflects_a_live_health_endpoint() {
+        use axum::routing::get;
+        use axum::Router;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = Router::new().route("/health", get(|| async { "OK" }));
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                })
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        assert!(ShadowManager::server_reachable(&client, port).await);
+
+        // Kill it → the same port is no longer reachable.
+        let _ = tx.send(());
+        let _ = server.await;
+        assert!(!ShadowManager::server_reachable(&client, port).await);
     }
 }

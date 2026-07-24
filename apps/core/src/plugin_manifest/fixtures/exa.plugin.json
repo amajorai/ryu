@@ -2,13 +2,55 @@
   "id": "exa",
   "name": "Exa Search",
   "version": "1.0.0",
+  "description": "Neural and keyword web search via the Exa API (https://exa.ai), exposed as two declarative HTTP tools: search and find-similar. Requires a BYOK Exa API key.",
+  "tagline": "Neural web search for agents",
+  "category": "Search",
+  "engines": {
+    "ryu": ">=0.0.1"
+  },
   "runnables": [
     {
       "id": "tool-exa-search",
       "name": "Exa Neural Search",
       "kind": "tool",
       "config": {
-        "slug": "exa__search"
+        "slug": "exa__search",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://api.exa.ai/search",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_EXA_API_KEY"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "body_defaults": {
+          "num_results": 10,
+          "use_autoprompt": true,
+          "contents": {
+            "text": true
+          }
+        },
+        "description": "Neural and keyword web search via the Exa API. Returns relevant web pages with titles, URLs, published dates, and full page text. Requires RYU_EXA_API_KEY.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The search query. Supports natural-language and keyword queries."
+            },
+            "num_results": {
+              "type": "integer",
+              "description": "Number of results to return (default 10).",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "use_autoprompt": {
+              "type": "boolean",
+              "description": "Let Exa rephrase the query for better neural search results (default true)."
+            }
+          },
+          "required": ["query"]
+        }
       }
     },
     {
@@ -16,9 +58,37 @@
       "name": "Exa Find Similar",
       "kind": "tool",
       "config": {
-        "slug": "exa__find_similar"
+        "slug": "exa__find_similar",
+        "backend": "http",
+        "method": "POST",
+        "url": "https://api.exa.ai/findSimilar",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_EXA_API_KEY"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "body_defaults": {
+          "num_results": 10
+        },
+        "description": "Find pages similar to a given URL using Exa's neural search. Requires RYU_EXA_API_KEY.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "URL to find similar pages for."
+            },
+            "num_results": {
+              "type": "integer",
+              "description": "Number of similar results to return (default 10).",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": ["url"]
+        }
       }
     }
   ],
-  "permission_grants": ["mcp:exa"]
+  "permission_grants": ["tool:http-egress:api.exa.ai"]
 }

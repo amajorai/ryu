@@ -114,11 +114,9 @@ impl NotifyStore {
         // `alert_delivery` is a single JSON row (id = 1). The type is byte-identical
         // across the extraction, so the raw JSON round-trips.
         if let Some(json) = old
-            .query_row(
-                "SELECT json FROM alert_delivery WHERE id = 1",
-                [],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row("SELECT json FROM alert_delivery WHERE id = 1", [], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()
             .context("reading legacy alert_delivery")?
         {
@@ -145,7 +143,8 @@ impl NotifyStore {
             .context("reading legacy push_tokens")?;
         let mut copied = 0usize;
         for row in rows {
-            let (token, platform, user_id, created_at) = row.context("row from legacy push_tokens")?;
+            let (token, platform, user_id, created_at) =
+                row.context("row from legacy push_tokens")?;
             conn.execute(
                 "INSERT OR IGNORE INTO push_tokens (token, platform, user_id, created_at)
                  VALUES (?1, ?2, ?3, ?4)",
@@ -154,9 +153,7 @@ impl NotifyStore {
             .context("seeding push_token")?;
             copied += 1;
         }
-        tracing::info!(
-            "notify: migrated delivery state from monitors.db ({copied} push tokens)"
-        );
+        tracing::info!("notify: migrated delivery state from monitors.db ({copied} push tokens)");
         Ok(())
     }
 
@@ -239,11 +236,9 @@ impl NotifyStore {
     pub async fn get_alert_delivery(&self) -> Result<AlertDeliveryTargets> {
         let conn = self.conn.lock().await;
         let json: Option<String> = conn
-            .query_row(
-                "SELECT json FROM alert_delivery WHERE id = 1",
-                [],
-                |row| row.get::<_, String>(0),
-            )
+            .query_row("SELECT json FROM alert_delivery WHERE id = 1", [], |row| {
+                row.get::<_, String>(0)
+            })
             .optional()
             .context("reading alert delivery targets")?;
         match json {
@@ -460,10 +455,8 @@ mod tests {
     /// one-time migration reads a `monitors.db` sibling of the store path, so an
     /// isolated dir guarantees no stray legacy db leaks into these tests.
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "ryu-notify-test-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ryu-notify-test-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }
@@ -567,7 +560,10 @@ mod tests {
             .unwrap();
         }
         let store2 = NotifyStore::open(dir.join("notify.db")).unwrap();
-        assert_eq!(store2.push_tokens().await.unwrap(), vec!["tok1".to_string()]);
+        assert_eq!(
+            store2.push_tokens().await.unwrap(),
+            vec!["tok1".to_string()]
+        );
     }
 
     #[tokio::test]

@@ -36,6 +36,7 @@ mod wasm_policy;
 
 use std::{sync::Arc, time::Duration};
 
+use axum::http::HeaderValue;
 use tower_http::{
     cors::{Any, CorsLayer},
     timeout::TimeoutLayer,
@@ -137,10 +138,8 @@ async fn main() -> anyhow::Result<()> {
     // Build the shared state, applying the config-selected active backend for
     // every inverted stage. An unknown backend id refuses startup (fail-closed)
     // rather than silently falling back to the built-in.
-    let state = Arc::new(
-        AppState::new(config)
-            .map_err(|e| anyhow::anyhow!("refusing to start: {e}"))?,
-    );
+    let state =
+        Arc::new(AppState::new(config).map_err(|e| anyhow::anyhow!("refusing to start: {e}"))?);
 
     // Channels: register configured messaging surfaces (Telegram, etc.). Each
     // runs its own inbound loop and routes messages through the gateway pipeline.
@@ -232,10 +231,43 @@ async fn main() -> anyhow::Result<()> {
     // Background: push eval/budget/audit aggregates up to the control plane
     reporter::spawn(Arc::clone(&state));
 
+    // CORS (F3): clamp off the permissive `allow_origin(Any)`. The gateway can bind
+    // `0.0.0.0` and several privileged routes authorize on loopback posture alone,
+    // so a bare `Any` origin let any web page the user visits `fetch()` a state
+    // change cross-origin. Mirror Core's proven allowlist (apps/core/src/server:
+    // desktop/webapp vite dev + tauri prod + hosted web app) plus a comma-split
+    // `RYU_CORS_ORIGINS` escape hatch. `allow_private_network(true)` matches Core's
+    // tauri-origin→loopback hop (Chrome's Private Network Access preflight). No
+    // credentials are set, so a specific-origin list with `allow_headers(Any)` is
+    // legal in tower-http and preserves the editor-AI `Authorization` header.
+    let mut cors_origins: Vec<HeaderValue> = [
+        "http://localhost:5173",   // desktop vite dev
+        "http://localhost:5174",   // webapp vite dev
+        "http://127.0.0.1:5173",   // desktop vite dev (127 variant)
+        "http://127.0.0.1:5174",   // webapp vite dev (127 variant)
+        "http://localhost:1420",   // tauri dev
+        "tauri://localhost",       // tauri prod (macOS/Linux)
+        "https://tauri.localhost", // tauri prod (Windows)
+        "http://tauri.localhost",  // tauri prod (Windows alt)
+        "https://app.ryuhq.com",   // hosted web app → local gateway
+    ]
+    .into_iter()
+    .filter_map(|origin| origin.parse::<HeaderValue>().ok())
+    .collect();
+    if let Ok(extra) = std::env::var("RYU_CORS_ORIGINS") {
+        cors_origins.extend(
+            extra
+                .split(',')
+                .map(str::trim)
+                .filter(|origin| !origin.is_empty())
+                .filter_map(|origin| origin.parse::<HeaderValue>().ok()),
+        );
+    }
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(cors_origins)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .allow_private_network(true);
 
     let app = api::router(Arc::clone(&state))
         .layer(TraceLayer::new_for_http())

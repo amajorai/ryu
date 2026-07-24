@@ -49,8 +49,8 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use super::{ExecOutput, ExecSpec, Sandbox, SandboxCapabilities, WorkspaceId};
-use crate::BoxFuture;
 use crate::win_process::NoWindow;
+use crate::BoxFuture;
 
 // ── Configuration knobs (all swappable, nothing hardcoded) ───────────────────
 

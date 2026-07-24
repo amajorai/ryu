@@ -1,4 +1,5 @@
 import { cn } from "@ryu/ui/lib/utils";
+import { useState } from "react";
 import {
 	AgentLogo,
 	engineForAgent,
@@ -27,6 +28,7 @@ const REGISTRY_SVGL: Record<string, SvglSpec> = {
 	"github-copilot-cli": { light: "copilot", dark: "copilot_dark" },
 	"grok-build": { light: "grok-light", dark: "grok-dark" },
 	junie: "jetbrains",
+	kilo: { light: "kilocode-light", dark: "kilocode-dark" },
 	kimi: { light: "kimi-icon", dark: "kimi-icon-dark" },
 	"mistral-vibe": { light: "mistral-ai_logo", dark: "mistral-ai_logo_dark" },
 	opencode: { light: "opencode", dark: "opencode-dark" },
@@ -111,9 +113,57 @@ export function AgentCatalogLogo({
 		);
 	}
 
-	// Uncurated registry agents (no bundled brand mark) fall back to the Ryu logo
-	// rather than a remote icon fetch — Ryu is the car around any engine, so its
-	// mark is the sensible offline default. (Backend `entry.iconUrl` / the ACP
-	// icon CDN are intentionally not rendered: no logo image is fetched remotely.)
+	// Uncurated registry agents fall back to their bundled ACP brand mark
+	// (downloaded from the ACP registry CDN into `/assets/logos/acp/`, never
+	// fetched at runtime). These marks are monochrome `currentColor` glyphs, so
+	// `dark:invert` flips the rendered-black mark to white on dark surfaces. Any
+	// id without a bundled file degrades to the Ryu ghost via `onError`.
+	if (entry.registryId) {
+		return (
+			<AcpBrandLogo
+				alt={entry.name}
+				className={className}
+				engine={engine}
+				registryId={entry.registryId}
+				size={size}
+			/>
+		);
+	}
+
+	// No engine brand, no registry id — the Ryu ghost is the sensible default.
 	return <AgentLogo className={className} engine={engine} size={size} />;
+}
+
+/**
+ * Bundled ACP registry brand mark for `registryId`, tinted for the theme. Falls
+ * back to the Ryu ghost when no local `/assets/logos/acp/<id>.svg` was bundled.
+ */
+function AcpBrandLogo({
+	registryId,
+	engine,
+	alt,
+	className,
+	size,
+}: {
+	registryId: string;
+	engine: string | null;
+	alt: string;
+	className?: string;
+	size: string;
+}) {
+	const [failed, setFailed] = useState(false);
+	if (failed) {
+		return <AgentLogo className={className} engine={engine} size={size} />;
+	}
+	return (
+		// biome-ignore lint/performance/noImgElement lint/correctness/useImageSize: bundled logo asset
+		<img
+			alt={alt}
+			className={cn(className, "shrink-0 object-contain dark:invert")}
+			draggable={false}
+			onError={() => setFailed(true)}
+			src={`/assets/logos/acp/${registryId}.svg`}
+			style={{ width: size, height: size }}
+		/>
+	);
 }

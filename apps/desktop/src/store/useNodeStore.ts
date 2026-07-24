@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { DEFAULT_CORE_URL } from "@/lib/core-url.ts";
 import { fetchManagedNodes } from "@/src/lib/api/managed-nodes.ts";
 import { enforcePlanCap } from "@/src/lib/gating/planCapBridge.ts";
 
@@ -91,6 +92,16 @@ interface NodeState {
 	 */
 	probeAutoSelect: () => Promise<void>;
 	refresh: () => Promise<void>;
+	/**
+	 * Refresh ONLY the auth token on already-added cloud nodes. The control-plane
+	 * mints a short-lived (~15 min) user JWT per `/nodes` fetch, so a token grabbed
+	 * once at init expires mid-session and every authed call to the node then 401s.
+	 * This re-fetches and swaps the token in place — it never adds/removes nodes,
+	 * never touches selection, and on a transient empty/failed fetch keeps the
+	 * existing tokens (so a network blip can't wipe the picker). Driven by a timer
+	 * under the TTL plus window-focus (to cover laptop sleep/wake).
+	 */
+	refreshCloudTokens: () => Promise<void>;
 	removeNode: (name: string) => Promise<void>;
 	setAutoSelect: (enabled: boolean) => void;
 	setDefault: (name: string) => Promise<void>;
@@ -105,9 +116,13 @@ interface NodeState {
 	tabOverrides: Record<string, string>;
 }
 
+// The local Core node URL is profile-aware via VITE_CORE_URL (DEFAULT_CORE_URL):
+// release → :7980 (~/.ryu), the `dev` profile → :8980 (~/.ryu-dev) through
+// `.env.development`. Hardcoding :7980 here made a `bun dev` webview dial the
+// INSTALLED prod Core, so dev and prod shared one node — the profile collision.
 export const LOCAL_FALLBACK: Node = {
 	name: "local",
-	url: "http://127.0.0.1:7980",
+	url: DEFAULT_CORE_URL,
 	token: null,
 };
 
@@ -251,6 +266,56 @@ export function stopAutoSelectProbe(): void {
 	if (probeTimer !== null) {
 		clearInterval(probeTimer);
 		probeTimer = null;
+	}
+}
+
+/**
+ * How often the cloud-node auth token is proactively refreshed. Must stay under
+ * the control plane's ~15 min user-JWT TTL so the token is swapped BEFORE it
+ * expires — otherwise authed calls to a managed node 401 for the rest of the
+ * session. 10 min leaves a comfortable margin.
+ */
+const CLOUD_TOKEN_REFRESH_INTERVAL_MS = 10 * 60_000;
+
+/** The single cloud-token refresh timer. Module-scoped, one lifecycle. */
+let cloudTokenTimer: ReturnType<typeof setInterval> | null = null;
+/** The window-focus refresh handler, kept so it can be removed on teardown. */
+let cloudTokenFocusHandler: (() => void) | null = null;
+
+/**
+ * Start proactively refreshing cloud-node tokens (a timer under the JWT TTL plus
+ * a window-focus refresh for the sleep/wake case). Idempotent: a second call
+ * while live is a no-op, never a second timer/listener.
+ */
+export function startCloudTokenRefresh(): void {
+	if (cloudTokenTimer === null) {
+		cloudTokenTimer = setInterval(() => {
+			useNodeStore
+				.getState()
+				.refreshCloudTokens()
+				.catch(() => undefined);
+		}, CLOUD_TOKEN_REFRESH_INTERVAL_MS);
+	}
+	if (cloudTokenFocusHandler === null && typeof window !== "undefined") {
+		cloudTokenFocusHandler = () => {
+			useNodeStore
+				.getState()
+				.refreshCloudTokens()
+				.catch(() => undefined);
+		};
+		window.addEventListener("focus", cloudTokenFocusHandler);
+	}
+}
+
+/** Stop the cloud-token refresh timer + focus listener. Idempotent. */
+export function stopCloudTokenRefresh(): void {
+	if (cloudTokenTimer !== null) {
+		clearInterval(cloudTokenTimer);
+		cloudTokenTimer = null;
+	}
+	if (cloudTokenFocusHandler !== null && typeof window !== "undefined") {
+		window.removeEventListener("focus", cloudTokenFocusHandler);
+		cloudTokenFocusHandler = null;
 	}
 }
 
@@ -441,11 +506,46 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 				s.dismissedCloudUrls
 			),
 		}));
+		// Keep the short-lived node JWT fresh for as long as a cloud node is present
+		// (and only then). Idempotent, so re-hydrating never stacks timers; stopping
+		// when the set empties avoids a pointless /nodes poll.
+		if (cloud.length > 0) {
+			startCloudTokenRefresh();
+		} else {
+			stopCloudTokenRefresh();
+		}
+	},
+
+	refreshCloudTokens: async () => {
+		if (get().cloudNodes.length === 0) {
+			return;
+		}
+		const managed = await fetchManagedNodes();
+		// A transient failure / offline server returns []; do NOT wipe the added
+		// cloud nodes on that — keep the existing tokens and try again next tick.
+		if (managed.length === 0) {
+			return;
+		}
+		const freshByName = new Map(
+			managed.map((m) => [`cloud-${m.name}`, m.token ?? null])
+		);
+		set((s) => {
+			// Swap the token in place only for nodes still present; never add/remove
+			// nodes or recompute suggestions (discovery stays with hydrateCloudNodes).
+			const cloud = s.cloudNodes.map((n) =>
+				freshByName.has(n.name)
+					? { ...n, token: freshByName.get(n.name) ?? null }
+					: n
+			);
+			return { cloudNodes: cloud, nodes: decorateLocal(s.localNodes, cloud) };
+		});
 	},
 
 	init: async () => {
 		await get().refresh();
 		// Best-effort: a signed-out user / no org / offline server all no-op.
+		// hydrateCloudNodes itself starts the short-lived-JWT refresh timer when it
+		// finds at least one cloud node, so the token never expires mid-session.
 		try {
 			await get().hydrateCloudNodes();
 		} catch {
@@ -471,9 +571,10 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 				.catch(() => undefined);
 		});
 		// Composite teardown: the caller (App.tsx) already invokes this on unmount,
-		// so the probe timer dies with the listener rather than outliving the app.
+		// so the timers die with the listener rather than outliving the app.
 		return () => {
 			stopAutoSelectProbe();
+			stopCloudTokenRefresh();
 			(unlisten as () => void)();
 		};
 	},

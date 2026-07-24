@@ -13,6 +13,11 @@ import { useCallback, useRef, useState } from "react";
 import { chatHeaders, chatStreamUrl } from "@/src/lib/api/chat.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import type { ShadowContext } from "@/src/lib/api/shadow.ts";
+import {
+	neutralize,
+	stripTemplateTokens,
+	UNTRUSTED_NOTICE,
+} from "@/src/lib/untrusted.ts";
 
 export type AskIntent = "explain" | "summarize" | "translate";
 
@@ -29,41 +34,55 @@ export interface AskScreenState {
 // Prompt templates (module-level — not inside the hook or callbacks)
 // ---------------------------------------------------------------------------
 
+/**
+ * The captured selection/screen text (and even the reported app name) come
+ * from whatever is on screen — attacker-controlled when that is a web page or
+ * document. Each captured blob is neutralized (template tokens + forged
+ * boundary markers stripped, then wrapped in `<untrusted-screen-content>`
+ * markers) and the prompt carries the notice so the model treats it as data,
+ * never as instructions.
+ */
+function untrustedCtx(ctx: ShadowContext | null): {
+	app: string;
+	selection: string | undefined;
+	screenText: string | undefined;
+} {
+	return {
+		app: stripTemplateTokens(ctx?.active_app ?? "the current window"),
+		selection: ctx?.selected_text?.trim() || undefined,
+		screenText: ctx?.screen_text?.trim() || undefined,
+	};
+}
+
 function explainPrompt(ctx: ShadowContext | null): string {
-	const selection = ctx?.selected_text?.trim();
-	const screenText = ctx?.screen_text?.trim();
-	const app = ctx?.active_app ?? "the current window";
+	const { app, selection, screenText } = untrustedCtx(ctx);
 	if (selection) {
-		return `Explain the following text from ${app} in plain language:\n\n${selection}`;
+		return `Explain the following text from ${app} in plain language. ${UNTRUSTED_NOTICE}\n\n${neutralize(selection)}`;
 	}
 	if (screenText) {
-		return `Explain what is shown on screen in ${app} in plain language:\n\n${screenText}`;
+		return `Explain what is shown on screen in ${app} in plain language. ${UNTRUSTED_NOTICE}\n\n${neutralize(screenText)}`;
 	}
 	return `Explain the current context in ${app} in plain language.`;
 }
 
 function summarizePrompt(ctx: ShadowContext | null): string {
-	const selection = ctx?.selected_text?.trim();
-	const screenText = ctx?.screen_text?.trim();
-	const app = ctx?.active_app ?? "the current window";
+	const { app, selection, screenText } = untrustedCtx(ctx);
 	if (selection) {
-		return `Summarize the following text from ${app} concisely:\n\n${selection}`;
+		return `Summarize the following text from ${app} concisely. ${UNTRUSTED_NOTICE}\n\n${neutralize(selection)}`;
 	}
 	if (screenText) {
-		return `Summarize what is visible on screen in ${app} in a few sentences:\n\n${screenText}`;
+		return `Summarize what is visible on screen in ${app} in a few sentences. ${UNTRUSTED_NOTICE}\n\n${neutralize(screenText)}`;
 	}
 	return `Summarize the current context in ${app} in a few sentences.`;
 }
 
 function translatePrompt(ctx: ShadowContext | null): string {
-	const selection = ctx?.selected_text?.trim();
-	const screenText = ctx?.screen_text?.trim();
-	const app = ctx?.active_app ?? "the current window";
+	const { app, selection, screenText } = untrustedCtx(ctx);
 	if (selection) {
-		return `Translate the following text from ${app} to English:\n\n${selection}`;
+		return `Translate the following text from ${app} to English. ${UNTRUSTED_NOTICE}\n\n${neutralize(selection)}`;
 	}
 	if (screenText) {
-		return `Translate the visible text on screen in ${app} to English:\n\n${screenText}`;
+		return `Translate the visible text on screen in ${app} to English. ${UNTRUSTED_NOTICE}\n\n${neutralize(screenText)}`;
 	}
 	return `Translate the current content in ${app} to English.`;
 }

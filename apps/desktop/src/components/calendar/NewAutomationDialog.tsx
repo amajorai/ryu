@@ -239,7 +239,7 @@ export function NewAutomationDialog({
 					<Button
 						disabled={saving}
 						onClick={() => onOpenChange(false)}
-						variant="outline"
+						variant="ghost"
 					>
 						Cancel
 					</Button>

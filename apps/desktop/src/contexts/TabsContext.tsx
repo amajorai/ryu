@@ -16,7 +16,32 @@ import { readTabOpenBehavior } from "@/src/hooks/useTabOpenBehavior.ts";
 import { hasBillingAuth } from "@/src/lib/api/billing.ts";
 import { effectivePlan } from "@/src/lib/gating/planCapBridge.ts";
 import { stampRecentFromPath } from "@/src/lib/library.ts";
+import {
+	appendLeaves,
+	containsLeaf,
+	directionOrientation,
+	insertLeaf,
+	leafOrder,
+	makeBranch,
+	makeLeaf,
+	normalizeNode,
+	pruneToMembers,
+	removeLeaf,
+	type SplitBranch,
+	type SplitDirection,
+	type SplitNode,
+	type SplitOrientation,
+	setSizesAt,
+	swapLeaves,
+} from "@/src/lib/splitTree.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
+
+export type {
+	SplitBranch,
+	SplitDirection,
+	SplitNode,
+	SplitOrientation,
+} from "@/src/lib/splitTree.ts";
 
 export interface Tab {
 	conversationId?: string;
@@ -68,20 +93,18 @@ export interface TabGroup {
 	name: string;
 }
 
-/** Orientation of a split view: side-by-side columns or stacked rows. */
-export type SplitOrientation = "columns" | "rows";
-
-/** A Zen-browser-style split view: two or more tabs shown side by side in the
-    main content area. Membership lives on the tabs (`tab.splitId`), so this
-    record only carries presentation. `sizes` holds one fraction (summing to ~1)
-    per member pane in TAB ORDER; its length always tracks the member count. The
-    split is shown whenever the focused tab (`activeTabId`) is one of its
-    members; its other members render alongside, all kept live. Supports any
-    number of panes ≥ 2. */
+/** A Warp-style split view: two or more tabs tiled in the main content area.
+    Membership lives on the tabs (`tab.splitId`) — that is what `normalize`
+    and the strip brackets read — while `root` carries the visual arrangement:
+    a tree of branches (columns = side-by-side, rows = stacked) whose leaves
+    are the member tabs, supporting arbitrary nesting (e.g. one tall pane
+    beside two stacked ones). The split is shown whenever the focused tab
+    (`activeTabId`) is one of its members; its other members render alongside,
+    all kept live. The tree's leaves and the members are kept in lockstep by
+    `reconcileSplits`. */
 export interface Split {
 	id: string;
-	orientation: SplitOrientation;
-	sizes: number[];
+	root: SplitBranch;
 }
 
 /** The split the given tab belongs to (resolved via `tab.splitId`), or
@@ -102,9 +125,48 @@ export function findSplit(
 	return splits.find((s) => s.id === splitId);
 }
 
-/** Members of a split, in tab order (the order panes are rendered + sized). */
+/** Members of a split, in strip (tab) order. */
 export function splitMembers(tabs: Tab[], splitId: string): Tab[] {
 	return tabs.filter((t) => t.splitId === splitId);
+}
+
+/** Members of a split in PANE order (the tree's depth-first leaf order) —
+    the order the content area tiles them. */
+export function splitPaneTabs(tabs: Tab[], split: Split): Tab[] {
+	const byId = new Map(tabs.map((t) => [t.id, t]));
+	return leafOrder(split.root)
+		.map((id) => byId.get(id))
+		.filter((t): t is Tab => !!t);
+}
+
+/** Reconcile the split trees against current tab membership: drop splits with
+    fewer than two members, prune leaves whose tab left, and (as a safety net)
+    re-attach members missing from the tree so a pane can never silently
+    disappear. Pure — used inside setSplits updaters. */
+function reconcileSplits(splits: Split[], tabs: Tab[]): Split[] {
+	const out: Split[] = [];
+	for (const s of splits) {
+		const members = tabs.filter((t) => t.splitId === s.id).map((t) => t.id);
+		if (members.length < 2) {
+			continue;
+		}
+		const pruned = pruneToMembers(s.root, new Set(members));
+		if (!pruned || pruned.type === "leaf") {
+			// The tree degenerated but ≥2 members remain — rebuild flat.
+			out.push({
+				id: s.id,
+				root: makeBranch("columns", members.map(makeLeaf)),
+			});
+			continue;
+		}
+		const present = new Set(leafOrder(pruned));
+		const missing = members.filter((id) => !present.has(id));
+		out.push({
+			id: s.id,
+			root: missing.length > 0 ? appendLeaves(pruned, missing) : pruned,
+		});
+	}
+	return out;
 }
 
 export const TAB_GROUP_COLORS = [
@@ -134,6 +196,9 @@ interface TabsContextValue {
 	activateTab: (id: string) => void;
 	activeTabId: string;
 	addTabToGroup: (tabId: string, groupId: string) => void;
+	/** Join `tabId` to an existing split as a new pane at the end of its root
+	    run (drag a tab onto a split bracket, or the "Add … to split" menu). */
+	addTabToSplit: (splitId: string, tabId: string) => void;
 	canGoBack: boolean;
 	canGoForward: boolean;
 	closeGroup: (groupId: string) => void;
@@ -169,12 +234,24 @@ interface TabsContextValue {
 	restoreTab: () => void;
 	setGroupColor: (groupId: string, color: TabGroupColor) => void;
 	setSplitOrientation: (splitId: string, orientation: SplitOrientation) => void;
-	setSplitSizes: (splitId: string, sizes: number[]) => void;
+	/** Replace the size fractions of the branch at `path` (child indexes from
+	    the root; [] targets the root itself). */
+	setSplitSizes: (splitId: string, path: number[], sizes: number[]) => void;
+	/** Tile `sourceTabId` next to `targetTabId` on the given side, nesting the
+	    layout as needed (the drag-a-tab-onto-a-pane-edge gesture). Creates a
+	    split when the target isn't in one; moves the source pane when it is. */
+	splitPane: (
+		sourceTabId: string,
+		targetTabId: string,
+		direction: SplitDirection
+	) => void;
 	splits: Split[];
 	// Split view
-	/** Put `tabIds` (deduped, ≥2) into a new split, replacing any prior split
-	    membership of those tabs; focuses the first. */
+	/** Put `tabIds` (deduped, ≥2) into a new flat split, replacing any prior
+	    split membership of those tabs; focuses the first. */
 	splitTabs: (tabIds: string[], orientation?: SplitOrientation) => void;
+	/** Swap the pane positions of two members of the same split. */
+	swapSplitPanes: (aTabId: string, bTabId: string) => void;
 	tabs: Tab[];
 	toggleGroupCollapsed: (groupId: string) => void;
 	// Pinning
@@ -279,12 +356,6 @@ function makeSplitId(): string {
 	return `split-${crypto.randomUUID()}`;
 }
 
-// Even fractions for `n` panes, used whenever a split's membership changes so a
-// removed pane's space is redistributed equally to the survivors.
-function equalSizes(n: number): number[] {
-	return Array.from({ length: n }, () => 1 / n);
-}
-
 const AGENT_EDIT_TITLE_RE = /^\/agents\/.+\/edit$/;
 
 function defaultTitle(path: string): string {
@@ -368,9 +439,9 @@ export interface InitialTab {
 const SESSION_TABS_KEY = "ryu_session_tabs";
 
 /** The serializable subset of a Tab persisted for session restore. Runtime-only
-    fields (ids, one-shot composer seeds, unload flags, group/split membership)
-    are intentionally dropped — restored tabs come back as fresh standalone
-    tabs. */
+    fields (ids, one-shot composer seeds, unload flags, group membership) are
+    intentionally dropped; split layouts ARE persisted (see
+    `PersistedSession.splits`) so a tiled workspace survives a relaunch. */
 interface PersistedTab {
 	conversationId?: string;
 	initialAgent?: string;
@@ -380,13 +451,81 @@ interface PersistedTab {
 	title: string;
 }
 
+/** A split tree serialized over tab INDEXES (ids are regenerated on restore):
+    a leaf is `{ i }`, a branch is `{ o, s, c }`. */
+type PersistedSplitNode =
+	| { i: number }
+	| { c: PersistedSplitNode[]; o: SplitOrientation; s: number[] };
+
 interface PersistedSession {
 	/** Index into `tabs` of the tab that was active, so restore can refocus it. */
 	activeIndex: number;
+	/** Root branch of each split, over tab indexes. */
+	splits?: PersistedSplitNode[];
 	tabs: PersistedTab[];
 }
 
-function persistSession(tabs: Tab[], activeTabId: string) {
+function persistSplitNode(
+	node: SplitNode,
+	indexOf: Map<string, number>
+): PersistedSplitNode | null {
+	if (node.type === "leaf") {
+		const i = indexOf.get(node.tabId);
+		return i === undefined ? null : { i };
+	}
+	const c: PersistedSplitNode[] = [];
+	const s: number[] = [];
+	node.children.forEach((child, j) => {
+		const kept = persistSplitNode(child, indexOf);
+		if (kept) {
+			c.push(kept);
+			s.push(node.sizes[j] ?? 0);
+		}
+	});
+	if (c.length === 0) {
+		return null;
+	}
+	if (c.length === 1) {
+		return c[0];
+	}
+	return { o: node.orientation, s, c };
+}
+
+function reviveSplitNode(
+	node: PersistedSplitNode,
+	idAt: (i: number) => string | undefined
+): SplitNode | null {
+	if ("i" in node) {
+		const id = idAt(node.i);
+		return id ? makeLeaf(id) : null;
+	}
+	if (!(Array.isArray(node.c) && node.c.length > 0)) {
+		return null;
+	}
+	const orientation: SplitOrientation = node.o === "rows" ? "rows" : "columns";
+	const children: SplitNode[] = [];
+	const sizes: number[] = [];
+	node.c.forEach((child, j) => {
+		const revived = reviveSplitNode(child, idAt);
+		if (revived) {
+			children.push(revived);
+			sizes.push(
+				typeof node.s?.[j] === "number" && node.s[j] > 0 ? node.s[j] : 0
+			);
+		}
+	});
+	if (children.length === 0) {
+		return null;
+	}
+	const branch = makeBranch(
+		orientation,
+		children,
+		sizes.every((v) => v > 0) ? sizes : undefined
+	);
+	return normalizeNode(branch);
+}
+
+function persistSession(tabs: Tab[], activeTabId: string, splits: Split[]) {
 	try {
 		if (tabs.length === 0) {
 			localStorage.removeItem(SESSION_TABS_KEY);
@@ -404,14 +543,28 @@ function persistSession(tabs: Tab[], activeTabId: string) {
 			0,
 			tabs.findIndex((t) => t.id === activeTabId)
 		);
-		const payload: PersistedSession = { tabs: persisted, activeIndex };
+		const indexOf = new Map(tabs.map((t, i) => [t.id, i]));
+		const persistedSplits = splits
+			.map((s) => persistSplitNode(s.root, indexOf))
+			.filter((n): n is PersistedSplitNode => !!n && "c" in n);
+		const payload: PersistedSession = {
+			tabs: persisted,
+			activeIndex,
+			splits: persistedSplits.length > 0 ? persistedSplits : undefined,
+		};
 		localStorage.setItem(SESSION_TABS_KEY, JSON.stringify(payload));
 	} catch {
 		// Persisting the session is best-effort; ignore storage/serialize failures.
 	}
 }
 
-function restoreSession(): { activeId: string; tabs: Tab[] } | null {
+interface StartupState {
+	activeId: string;
+	splits: Split[];
+	tabs: Tab[];
+}
+
+function restoreSession(): StartupState | null {
 	try {
 		const raw = localStorage.getItem(SESSION_TABS_KEY);
 		if (!raw) {
@@ -430,6 +583,31 @@ function restoreSession(): { activeId: string; tabs: Tab[] } | null {
 			initialProject: t.initialProject,
 			pinned: t.pinned,
 		}));
+		// Revive split layouts over the fresh ids, then stamp membership onto the
+		// member tabs (membership drives normalize + the strip brackets).
+		const splits: Split[] = [];
+		for (const node of parsed.splits ?? []) {
+			const revived = reviveSplitNode(node, (i) => mapped[i]?.id);
+			if (!revived || revived.type === "leaf") {
+				continue;
+			}
+			const id = makeSplitId();
+			const memberIds = new Set(leafOrder(revived));
+			for (const t of mapped) {
+				// A tab can only be in one split; pinned tabs never split.
+				if (memberIds.has(t.id) && !(t.splitId || t.pinned)) {
+					t.splitId = id;
+				}
+			}
+			splits.push({ id, root: revived });
+		}
+		const reconciled = reconcileSplits(splits, mapped);
+		const liveIds = new Set(reconciled.map((s) => s.id));
+		for (const t of mapped) {
+			if (t.splitId && !liveIds.has(t.splitId)) {
+				t.splitId = undefined;
+			}
+		}
 		const idx = Math.min(
 			Math.max(0, parsed.activeIndex ?? 0),
 			mapped.length - 1
@@ -437,7 +615,7 @@ function restoreSession(): { activeId: string; tabs: Tab[] } | null {
 		// Focus id is resolved before normalize reorders (pinned-lead), so it
 		// tracks the tab the user last viewed rather than a shifted position.
 		const activeId = mapped[idx].id;
-		return { tabs: normalize(mapped), activeId };
+		return { tabs: normalize(mapped), activeId, splits: reconciled };
 	} catch {
 		return null;
 	}
@@ -446,21 +624,29 @@ function restoreSession(): { activeId: string; tabs: Tab[] } | null {
 /** The tabs + focused tab a fresh main window opens with, per the user's
     "On startup" preference (see `useStartupBehavior`). Tear-off windows bypass
     this — they seed from their `InitialTab` instead. */
-function computeStartupState(): { activeId: string; tabs: Tab[] } {
+function computeStartupState(): StartupState {
 	const behavior = readStartupBehavior();
 	if (behavior === "restore") {
-		return restoreSession() ?? { tabs: [], activeId: "" };
+		return restoreSession() ?? { tabs: [], activeId: "", splits: [] };
 	}
 	if (behavior === "home") {
 		const id = makeTabId();
-		return { tabs: [{ id, path: "/home", title: "Home" }], activeId: id };
+		return {
+			tabs: [{ id, path: "/home", title: "Home" }],
+			activeId: id,
+			splits: [],
+		};
 	}
 	if (behavior === "chat") {
 		const id = makeTabId();
-		return { tabs: [{ id, path: "/chat", title: "New chat" }], activeId: id };
+		return {
+			tabs: [{ id, path: "/chat", title: "New chat" }],
+			activeId: id,
+			splits: [],
+		};
 	}
 	// "empty" (the default): open with no tabs — the launchpad home.
-	return { tabs: [], activeId: "" };
+	return { tabs: [], activeId: "", splits: [] };
 }
 
 export function TabsProvider({
@@ -472,7 +658,7 @@ export function TabsProvider({
 }) {
 	// The main window opens per the "On startup" preference; a tear-off window
 	// (spawned with an `initialTab`) always seeds from that one conversation.
-	const [initialState] = useState<{ activeId: string; tabs: Tab[] }>(() => {
+	const [initialState] = useState<StartupState>(() => {
 		if (initialTab) {
 			const id = makeTabId();
 			return {
@@ -485,6 +671,7 @@ export function TabsProvider({
 					},
 				],
 				activeId: id,
+				splits: [],
 			};
 		}
 		return computeStartupState();
@@ -500,7 +687,7 @@ export function TabsProvider({
 		}
 	}, [seededNode, initialState.activeId]);
 	const [groups, setGroups] = useState<TabGroup[]>([]);
-	const [splits, setSplits] = useState<Split[]>([]);
+	const [splits, setSplits] = useState<Split[]>(initialState.splits);
 	const [activeTabId, setActiveTabId] = useState<string>(initialState.activeId);
 	const [closedTabs, setClosedTabs] = useState<ClosedTab[]>([]);
 
@@ -824,7 +1011,8 @@ export function TabsProvider({
 			}
 			// The closed tab's split membership vanishes with it. If that leaves the
 			// split with a single member, dissolve it (clear the lone member's
-			// splitId); otherwise keep it and resize its remaining panes evenly.
+			// splitId); otherwise reconcile the tree — the closed pane's leaf is
+			// pruned and its space flows back to its siblings.
 			if (closingSplitId) {
 				const remaining = next.filter((t) => t.splitId === closingSplitId);
 				if (remaining.length < 2) {
@@ -832,20 +1020,7 @@ export function TabsProvider({
 						t.splitId === closingSplitId ? { ...t, splitId: undefined } : t
 					);
 				}
-				setSplits((prevSplits) =>
-					prevSplits
-						.filter((s) => next.some((t) => t.splitId === s.id))
-						.map((s) =>
-							s.id === closingSplitId
-								? {
-										...s,
-										sizes: equalSizes(
-											next.filter((t) => t.splitId === s.id).length
-										),
-									}
-								: s
-						)
-				);
+				setSplits((prevSplits) => reconcileSplits(prevSplits, next));
 			}
 			tabsRef.current = next;
 			setTabs(next);
@@ -968,25 +1143,11 @@ export function TabsProvider({
 		[]
 	);
 
-	// Reconcile the splits array against current tab membership: drop splits with
-	// fewer than two members and re-equalize sizes only for splits whose member
-	// count changed (so an unrelated mutation never resets a user-resized split).
-	// Reads tabsRef, so call it after the setTabs that changed membership.
+	// Reconcile the split trees against current tab membership (drop dissolved
+	// splits, prune departed leaves). Reads tabsRef, so call it after the
+	// setTabs that changed membership.
 	const pruneSplits = useCallback(() => {
-		setSplits((prev) =>
-			prev
-				.filter(
-					(s) => tabsRef.current.filter((t) => t.splitId === s.id).length >= 2
-				)
-				.map((s) => {
-					const count = tabsRef.current.filter(
-						(t) => t.splitId === s.id
-					).length;
-					return s.sizes.length === count
-						? s
-						: { ...s, sizes: equalSizes(count) };
-				})
-		);
+		setSplits((prev) => reconcileSplits(prev, tabsRef.current));
 	}, []);
 
 	// --- Pinning ---------------------------------------------------------------
@@ -1195,7 +1356,7 @@ export function TabsProvider({
 			// Add the new split, then prune any prior split a member was pulled out of.
 			setSplits((prev) => [
 				...prev,
-				{ id, orientation, sizes: equalSizes(unique.length) },
+				{ id, root: makeBranch(orientation, unique.map(makeLeaf)) },
 			]);
 			pruneSplits();
 			markActive(unique[0]);
@@ -1248,20 +1409,210 @@ export function TabsProvider({
 		[pruneSplits]
 	);
 
+	// Flips the ROOT branch's axis. For a flat (unnested) split this is the
+	// whole layout; for a nested one it re-tilts the outermost run while inner
+	// branches keep their own axes — then normalize merges any child branch
+	// that now matches the new root orientation.
 	const setSplitOrientation = useCallback(
 		(splitId: string, orientation: SplitOrientation) => {
 			setSplits((prev) =>
-				prev.map((s) => (s.id === splitId ? { ...s, orientation } : s))
+				prev.map((s) => {
+					if (s.id !== splitId || s.root.orientation === orientation) {
+						return s;
+					}
+					const flipped = normalizeNode({ ...s.root, orientation });
+					return flipped && flipped.type === "branch"
+						? { ...s, root: flipped }
+						: s;
+				})
 			);
 		},
 		[]
 	);
 
-	const setSplitSizes = useCallback((splitId: string, sizes: number[]) => {
+	const setSplitSizes = useCallback(
+		(splitId: string, path: number[], sizes: number[]) => {
+			setSplits((prev) =>
+				prev.map((s) =>
+					s.id === splitId
+						? { ...s, root: setSizesAt(s.root, path, sizes) as SplitBranch }
+						: s
+				)
+			);
+		},
+		[]
+	);
+
+	// Tile `sourceTabId` beside `targetTabId` on the given side — the engine
+	// behind every drag-to-split gesture. The source joins the target's split
+	// (creating one when the target is standalone), nesting or sibling-inserting
+	// per Warp semantics; when the source is already a member it MOVES to the
+	// new position instead.
+	const splitPane = useCallback(
+		(sourceTabId: string, targetTabId: string, direction: SplitDirection) => {
+			if (sourceTabId === targetTabId) {
+				return;
+			}
+			const current = tabsRef.current;
+			const source = current.find((t) => t.id === sourceTabId);
+			const target = current.find((t) => t.id === targetTabId);
+			if (!(source && target)) {
+				return;
+			}
+			const targetSplitId = target.splitId;
+			const splitId = targetSplitId ?? makeSplitId();
+			const oldSplitId = source.splitId;
+			// Membership first: both endpoints join `splitId` (detached from
+			// pin/group — a tab is never both), and every member is woken here since
+			// markActive below reads a splitsRef this tick hasn't refreshed.
+			setTabs((prev) => {
+				let mapped = prev.map((t) => {
+					if (t.id === sourceTabId || t.id === targetTabId) {
+						return {
+							...t,
+							splitId,
+							pinned: false,
+							groupId: undefined,
+							unloaded: false,
+						};
+					}
+					return t.splitId === splitId ? { ...t, unloaded: false } : t;
+				});
+				// If pulling the source out of a different split left it with a single
+				// member, dissolve that split (clear the lone survivor's splitId).
+				if (
+					oldSplitId &&
+					oldSplitId !== splitId &&
+					mapped.filter((t) => t.splitId === oldSplitId).length < 2
+				) {
+					mapped = mapped.map((t) =>
+						t.splitId === oldSplitId ? { ...t, splitId: undefined } : t
+					);
+				}
+				const next = normalize(mapped);
+				tabsRef.current = next;
+				return next;
+			});
+			setGroups((prev) =>
+				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
+			);
+			setSplits((prev) => {
+				let list: Split[];
+				if (targetSplitId) {
+					list = prev.map((s) => {
+						if (s.id !== targetSplitId) {
+							return s;
+						}
+						// Moving within the same split: pull the source leaf out first so
+						// the insert can't duplicate it.
+						let root: SplitNode | null = containsLeaf(s.root, sourceTabId)
+							? removeLeaf(s.root, sourceTabId)
+							: s.root;
+						if (!(root && containsLeaf(root, targetTabId))) {
+							root = makeLeaf(targetTabId);
+						}
+						const inserted = insertLeaf(
+							root,
+							targetTabId,
+							sourceTabId,
+							direction
+						);
+						const branch =
+							inserted.type === "branch"
+								? inserted
+								: makeBranch(directionOrientation(direction), [inserted]);
+						return { ...s, root: branch };
+					});
+				} else {
+					const root = insertLeaf(
+						makeLeaf(targetTabId),
+						targetTabId,
+						sourceTabId,
+						direction
+					);
+					if (root.type !== "branch") {
+						return prev;
+					}
+					list = [...prev, { id: splitId, root }];
+				}
+				return reconcileSplits(list, tabsRef.current);
+			});
+			markActive(sourceTabId);
+		},
+		[markActive]
+	);
+
+	// Swap the pane positions of two members of the same split (center-drop on
+	// a pane). Membership and sizes stay put — only the leaves trade places.
+	const swapSplitPanes = useCallback((aTabId: string, bTabId: string) => {
+		if (aTabId === bTabId) {
+			return;
+		}
+		const a = tabsRef.current.find((t) => t.id === aTabId);
+		const b = tabsRef.current.find((t) => t.id === bTabId);
+		if (!(a?.splitId && a.splitId === b?.splitId)) {
+			return;
+		}
+		const splitId = a.splitId;
 		setSplits((prev) =>
-			prev.map((s) => (s.id === splitId ? { ...s, sizes } : s))
+			prev.map((s) =>
+				s.id === splitId
+					? { ...s, root: swapLeaves(s.root, aTabId, bTabId) as SplitBranch }
+					: s
+			)
 		);
 	}, []);
+
+	// Join `tabId` to an existing split as a new pane at the end of its root
+	// run (equal share of space).
+	const addTabToSplit = useCallback(
+		(splitId: string, tabId: string) => {
+			const tab = tabsRef.current.find((t) => t.id === tabId);
+			const split = splitsRef.current.find((s) => s.id === splitId);
+			if (!(tab && split) || tab.splitId === splitId) {
+				return;
+			}
+			const oldSplitId = tab.splitId;
+			setTabs((prev) => {
+				let mapped = prev.map((t) => {
+					if (t.id === tabId) {
+						return {
+							...t,
+							splitId,
+							pinned: false,
+							groupId: undefined,
+							unloaded: false,
+						};
+					}
+					return t.splitId === splitId ? { ...t, unloaded: false } : t;
+				});
+				if (
+					oldSplitId &&
+					mapped.filter((t) => t.splitId === oldSplitId).length < 2
+				) {
+					mapped = mapped.map((t) =>
+						t.splitId === oldSplitId ? { ...t, splitId: undefined } : t
+					);
+				}
+				const next = normalize(mapped);
+				tabsRef.current = next;
+				return next;
+			});
+			setGroups((prev) =>
+				prev.filter((g) => tabsRef.current.some((t) => t.groupId === g.id))
+			);
+			setSplits((prev) =>
+				reconcileSplits(
+					prev.map((s) =>
+						s.id === splitId ? { ...s, root: appendLeaves(s.root, [tabId]) } : s
+					),
+					tabsRef.current
+				)
+			);
+			markActive(tabId);
+		},
+		[markActive]
+	);
 
 	// --- Auto-unload timer -----------------------------------------------------
 	// Periodically unloads inactive tabs once they pass the user-configured
@@ -1324,8 +1675,8 @@ export function TabsProvider({
 		if (initialTab) {
 			return;
 		}
-		persistSession(tabs, activeTabId);
-	}, [tabs, activeTabId, initialTab]);
+		persistSession(tabs, activeTabId, splits);
+	}, [tabs, activeTabId, splits, initialTab]);
 
 	return (
 		<TabsContext.Provider
@@ -1357,6 +1708,9 @@ export function TabsProvider({
 				ungroup,
 				closeGroup,
 				splitTabs,
+				splitPane,
+				swapSplitPanes,
+				addTabToSplit,
 				removeFromSplit,
 				unsplit,
 				setSplitOrientation,

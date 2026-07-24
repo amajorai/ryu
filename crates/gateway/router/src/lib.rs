@@ -254,8 +254,7 @@ impl RoutingTables {
             let period = (1.0 / explore_ratio).round().max(1.0) as u64;
             if n % period == 0 {
                 // Exploration slot: round-robin over the non-leader candidates.
-                let others: Vec<&String> =
-                    candidates.iter().filter(|c| **c != leader).collect();
+                let others: Vec<&String> = candidates.iter().filter(|c| **c != leader).collect();
                 if others.is_empty() {
                     leader.clone()
                 } else {
@@ -452,14 +451,20 @@ mod tests {
     #[test]
     fn openrouter_prefix_routes_any_slug() {
         let t = bare("openai");
-        assert_eq!(t.route("openrouter/mistralai/mistral-7b-instruct").0, "openrouter");
+        assert_eq!(
+            t.route("openrouter/mistralai/mistral-7b-instruct").0,
+            "openrouter"
+        );
         assert_eq!(t.route("gemini-2.5-pro").0, "genai");
     }
 
     #[test]
     fn exact_map_and_longest_prefix_win_over_builtin() {
         let mut model_map = HashMap::new();
-        model_map.insert("gpt-4o".to_string(), ("local".to_string(), Some("gemma".to_string())));
+        model_map.insert(
+            "gpt-4o".to_string(),
+            ("local".to_string(), Some("gemma".to_string())),
+        );
         model_map.insert("gpt-".to_string(), ("openrouter".to_string(), None));
         let t = tables(
             model_map,
@@ -471,21 +476,33 @@ mod tests {
             "openai",
         );
         // Exact hit rewrites the model and wins over the builtin gpt-→openai.
-        assert_eq!(t.route("gpt-4o"), ("local".to_string(), "gemma".to_string()));
+        assert_eq!(
+            t.route("gpt-4o"),
+            ("local".to_string(), "gemma".to_string())
+        );
         // Longest user prefix ("gpt-") wins over builtin for a non-exact model.
-        assert_eq!(t.route("gpt-4-turbo"), ("openrouter".to_string(), "gpt-4-turbo".to_string()));
+        assert_eq!(
+            t.route("gpt-4-turbo"),
+            ("openrouter".to_string(), "gpt-4-turbo".to_string())
+        );
     }
 
     #[test]
     fn default_provider_when_nothing_matches() {
         let t = bare("local");
-        assert_eq!(t.route("some-unknown-model"), ("local".to_string(), "some-unknown-model".to_string()));
+        assert_eq!(
+            t.route("some-unknown-model"),
+            ("local".to_string(), "some-unknown-model".to_string())
+        );
     }
 
     #[test]
     fn route_modality_slot_then_map_then_fallback() {
         let mut modality_map = HashMap::new();
-        modality_map.insert("image".to_string(), ("openai".to_string(), Some("dall-e-3".to_string())));
+        modality_map.insert(
+            "image".to_string(),
+            ("openai".to_string(), Some("dall-e-3".to_string())),
+        );
         let t = tables(
             HashMap::new(),
             modality_map,
@@ -518,7 +535,11 @@ mod tests {
         let t = tables(
             HashMap::new(),
             HashMap::new(),
-            vec!["openrouter".to_string(), "local".to_string(), "openai".to_string()],
+            vec![
+                "openrouter".to_string(),
+                "local".to_string(),
+                "openai".to_string(),
+            ],
             tiers,
             Vec::new(),
             0.0,
@@ -527,7 +548,11 @@ mod tests {
         // Primary stays first even though it is the most expensive tier.
         assert_eq!(
             t.fallback_chain("openrouter"),
-            vec!["openrouter".to_string(), "openai".to_string(), "local".to_string()]
+            vec![
+                "openrouter".to_string(),
+                "openai".to_string(),
+                "local".to_string()
+            ]
         );
     }
 
@@ -544,7 +569,11 @@ mod tests {
         );
         assert_eq!(
             t.fallback_chain("anthropic"),
-            vec!["anthropic".to_string(), "local".to_string(), "openai".to_string()]
+            vec![
+                "anthropic".to_string(),
+                "local".to_string(),
+                "openai".to_string()
+            ]
         );
     }
 
@@ -570,7 +599,11 @@ mod tests {
     fn eval_route_explores_unscored_candidate_first() {
         let t = ab_tables(0.0);
         let provider = t
-            .eval_route("gpt-4o", &|p| if p == "openai" { Some(0.9) } else { None }, &|| 0)
+            .eval_route(
+                "gpt-4o",
+                &|p| if p == "openai" { Some(0.9) } else { None },
+                &|| 0,
+            )
             .expect("eval routing active");
         assert_eq!(provider, "anthropic");
     }
@@ -654,8 +687,14 @@ mod tests {
 
     #[test]
     fn keyword_match_finds_significant_word() {
-        assert_eq!(keyword_match(&descriptions(), "help me with coding please"), Some(0));
-        assert_eq!(keyword_match(&descriptions(), "nothing relevant here"), None);
+        assert_eq!(
+            keyword_match(&descriptions(), "help me with coding please"),
+            Some(0)
+        );
+        assert_eq!(
+            keyword_match(&descriptions(), "nothing relevant here"),
+            None
+        );
     }
 
     #[test]

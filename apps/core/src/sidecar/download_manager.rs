@@ -356,9 +356,14 @@ pub(crate) fn extract_zip_to_dir(
         let entry_name = file.name().to_string();
         if entry_name.ends_with('/') {
             let rel = std::path::Path::new(&entry_name);
+            // Reject traversal AND absolute paths: an absolute directory entry
+            // (`/abs/…/`) would make `dest_dir.join(rel)` replace the base and
+            // `create_dir_all` outside the sandbox (`PathBuf::join` semantics).
+            // Mirror the file branch below, which already guards both.
             if rel
                 .components()
                 .any(|c| matches!(c, std::path::Component::ParentDir))
+                || rel.is_absolute()
             {
                 continue;
             }
@@ -787,31 +792,6 @@ impl SidecarManifest for ScreenpipeManifest {
 
     fn target_version(&self) -> &str {
         "v0.1.0"
-    }
-}
-
-pub struct SpiderManifest;
-
-impl SidecarManifest for SpiderManifest {
-    fn name(&self) -> &str {
-        "spider"
-    }
-
-    fn release_url(&self) -> String {
-        // Spider is installed via cargo, not downloaded as a binary
-        String::new()
-    }
-
-    fn binary_name(&self) -> &str {
-        if cfg!(target_os = "windows") {
-            "spider.exe"
-        } else {
-            "spider"
-        }
-    }
-
-    fn target_version(&self) -> &str {
-        "2.30.4"
     }
 }
 
@@ -1247,7 +1227,6 @@ impl DownloadManager {
                 Arc::new(ZeroClawManifest),
                 Arc::new(LlamaCppManifest),
                 Arc::new(ScreenpipeManifest),
-                Arc::new(SpiderManifest),
             ],
             build_deps: vec![Arc::new(GitDep), Arc::new(RustDep)],
             on_progress: None,
@@ -1552,4 +1531,613 @@ async fn run_download(
         target_version
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    // ── Archive builders (in-memory, hermetic) ──────────────────────────────
+
+    /// Append one file entry, writing the name field directly so the write-side
+    /// `..`/absolute-path rejection is bypassed — this reproduces a *malicious*
+    /// archive exactly as it would arrive over the wire, which is the input the
+    /// extractor's traversal guards must defend against.
+    fn append_entry<W: Write>(builder: &mut tar::Builder<W>, name: &str, data: &[u8]) {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        if let Some(gnu) = header.as_gnu_mut() {
+            let bytes = name.as_bytes();
+            let n = bytes.len().min(gnu.name.len());
+            gnu.name[..n].copy_from_slice(&bytes[..n]);
+        }
+        header.set_cksum();
+        builder.append(&header, data).expect("append tar entry");
+    }
+
+    /// Build a `.tar.gz` from `(path, bytes)` file entries.
+    fn make_tar_gz(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let gz = GzEncoder::new(Vec::new(), Compression::fast());
+        let mut builder = tar::Builder::new(gz);
+        for (name, data) in entries {
+            append_entry(&mut builder, name, data);
+        }
+        let gz = builder.into_inner().expect("finish tar");
+        gz.finish().expect("finish gz")
+    }
+
+    /// Build a `.tar.bz2` from `(path, bytes)` file entries.
+    fn make_tar_bz2(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use bzip2::write::BzEncoder;
+        use bzip2::Compression as BzCompression;
+        let bz = BzEncoder::new(Vec::new(), BzCompression::fast());
+        let mut builder = tar::Builder::new(bz);
+        for (name, data) in entries {
+            append_entry(&mut builder, name, data);
+        }
+        let bz = builder.into_inner().expect("finish tar");
+        bz.finish().expect("finish bz2")
+    }
+
+    /// Build a `.zip`. `dir_entries` become directory records (name ends `/`),
+    /// `file_entries` become file records. Names are written verbatim so tests
+    /// can inject unsafe paths.
+    fn make_zip(dir_entries: &[&str], file_entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Cursor;
+        use zip::write::FileOptions;
+        use zip::ZipWriter;
+        let mut zw = ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = FileOptions::default();
+        for name in dir_entries {
+            // `start_file` with a trailing-slash name writes a directory-shaped
+            // record while preserving the raw name (unlike `add_directory`,
+            // which normalizes). This lets us inject absolute/`..` dir entries.
+            zw.start_file(*name, opts).expect("start dir entry");
+        }
+        for (name, data) in file_entries {
+            zw.start_file(*name, opts).expect("start file entry");
+            zw.write_all(data).expect("write file bytes");
+        }
+        zw.finish().expect("finish zip").into_inner()
+    }
+
+    // ── extract_from_tar_gz / extract_from_zip (single binary) ──────────────
+
+    #[test]
+    fn extract_from_tar_gz_finds_named_binary() {
+        let data = make_tar_gz(&[("junk", b"x"), ("mybin", b"ELF-payload")]);
+        let out = extract_from_tar_gz(&data, "mybin").unwrap();
+        assert_eq!(out, b"ELF-payload");
+    }
+
+    #[test]
+    fn extract_from_tar_gz_missing_binary_errors() {
+        let data = make_tar_gz(&[("other", b"x")]);
+        let err = extract_from_tar_gz(&data, "mybin").unwrap_err();
+        assert!(err.to_string().contains("mybin"));
+    }
+
+    #[test]
+    fn extract_from_zip_matches_exe_suffix() {
+        // The zip extractor accepts either the bare name or `<name>.exe`.
+        let data = make_zip(&[], &[("dir/mybin.exe", b"win-payload")]);
+        let out = extract_from_zip(&data, "mybin").unwrap();
+        assert_eq!(out, b"win-payload");
+    }
+
+    #[test]
+    fn extract_from_zip_missing_binary_errors() {
+        let data = make_zip(&[], &[("readme.txt", b"hi")]);
+        let err = extract_from_zip(&data, "mybin").unwrap_err();
+        assert!(err.to_string().contains("mybin"));
+    }
+
+    // ── extract_tar_gz_to_dir ───────────────────────────────────────────────
+
+    #[test]
+    fn tar_gz_to_dir_preserves_structure() {
+        let data = make_tar_gz(&[("a.txt", b"aaa"), ("sub/b.txt", b"bbb")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let written = extract_tar_gz_to_dir(&data, tmp.path(), None).unwrap();
+        assert_eq!(written.len(), 2);
+        assert_eq!(std::fs::read(tmp.path().join("a.txt")).unwrap(), b"aaa");
+        assert_eq!(
+            std::fs::read(tmp.path().join("sub").join("b.txt")).unwrap(),
+            b"bbb"
+        );
+    }
+
+    #[test]
+    fn tar_gz_to_dir_rejects_parent_traversal() {
+        let data = make_tar_gz(&[("../evil.txt", b"pwn"), ("safe.txt", b"ok")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let written = extract_tar_gz_to_dir(&data, tmp.path(), None).unwrap();
+        // The `..` entry is skipped; only the safe file lands.
+        assert_eq!(written, vec!["safe.txt".to_string()]);
+        // Nothing escaped into the tempdir's parent.
+        let escaped = tmp.path().parent().unwrap().join("evil.txt");
+        assert!(!escaped.exists(), "traversal entry escaped the sandbox");
+    }
+
+    #[test]
+    fn tar_gz_to_dir_enforces_decompression_cap() {
+        // Two 100-byte files with a 150-byte cap → the second trips the guard.
+        let data = make_tar_gz(&[("a.bin", &[0u8; 100]), ("b.bin", &[0u8; 100])]);
+        let tmp = tempfile::tempdir().unwrap();
+        let err = extract_tar_gz_to_dir(&data, tmp.path(), Some(150)).unwrap_err();
+        assert!(err.to_string().contains("cap"));
+    }
+
+    // ── extract_tar_bz2_to_dir ──────────────────────────────────────────────
+
+    #[test]
+    fn tar_bz2_to_dir_extracts_and_guards() {
+        let data = make_tar_bz2(&[("f.txt", b"payload"), ("../nope.txt", b"pwn")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let written = extract_tar_bz2_to_dir(&data, tmp.path(), None).unwrap();
+        assert_eq!(written, vec!["f.txt".to_string()]);
+        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), b"payload");
+    }
+
+    #[test]
+    fn tar_bz2_to_dir_enforces_cap() {
+        let data = make_tar_bz2(&[("big.bin", &[7u8; 400])]);
+        let tmp = tempfile::tempdir().unwrap();
+        let err = extract_tar_bz2_to_dir(&data, tmp.path(), Some(100)).unwrap_err();
+        assert!(err.to_string().contains("cap"));
+    }
+
+    // ── extract_zip_to_dir ──────────────────────────────────────────────────
+
+    #[test]
+    fn zip_to_dir_extracts_files_and_dirs() {
+        let data = make_zip(&["sub/"], &[("sub/x.txt", b"hello"), ("root.txt", b"r")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let written = extract_zip_to_dir(&data, tmp.path(), None).unwrap();
+        assert!(written.iter().any(|w| w == "sub/x.txt"));
+        assert_eq!(
+            std::fs::read(tmp.path().join("sub").join("x.txt")).unwrap(),
+            b"hello"
+        );
+    }
+
+    #[test]
+    fn zip_to_dir_rejects_parent_traversal_file() {
+        let data = make_zip(&[], &[("../evil.txt", b"pwn"), ("ok.txt", b"ok")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let written = extract_zip_to_dir(&data, tmp.path(), None).unwrap();
+        assert_eq!(written, vec!["ok.txt".to_string()]);
+        assert!(!tmp.path().parent().unwrap().join("evil.txt").exists());
+    }
+
+    #[test]
+    fn zip_to_dir_enforces_cap() {
+        let data = make_zip(&[], &[("a", &[0u8; 100]), ("b", &[0u8; 100])]);
+        let tmp = tempfile::tempdir().unwrap();
+        let err = extract_zip_to_dir(&data, tmp.path(), Some(150)).unwrap_err();
+        assert!(err.to_string().contains("cap"));
+    }
+
+    /// Regression for the zip directory-entry sandbox escape: an **absolute**
+    /// directory record (`/…/escape/`) must be rejected, not `create_dir_all`'d
+    /// outside `dest_dir`. `PathBuf::join` replaces the base on an absolute
+    /// component, so without an `is_absolute()` guard the dir is created outside
+    /// the sandbox. The file branch already guarded this; the dir branch did not.
+    #[cfg(unix)]
+    #[test]
+    fn zip_to_dir_rejects_absolute_directory_entry() {
+        let escape_root = tempfile::tempdir().unwrap();
+        let escape_dir = escape_root.path().join("escape");
+        // A trailing-slash absolute name → treated as a directory entry.
+        let entry = format!("{}/", escape_dir.display());
+        let data = make_zip(&[&entry], &[("safe.txt", b"ok")]);
+
+        let dest = tempfile::tempdir().unwrap();
+        let written = extract_zip_to_dir(&data, dest.path(), None).unwrap();
+
+        assert!(
+            !escape_dir.exists(),
+            "absolute zip directory entry escaped the sandbox and was created at {}",
+            escape_dir.display()
+        );
+        assert!(written.iter().any(|w| w == "safe.txt"));
+    }
+
+    // ── extract_all_to_dir (flatten) ────────────────────────────────────────
+
+    #[test]
+    fn extract_all_flattens_and_skips_dirs() {
+        let data = make_zip(
+            &["Release/"],
+            &[
+                ("Release/whisper-server.exe", b"bin"),
+                ("Release/ggml.dll", b"lib"),
+            ],
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let mut written = extract_all_to_dir(&data, tmp.path()).unwrap();
+        written.sort();
+        assert_eq!(written, vec!["ggml.dll", "whisper-server.exe"]);
+        // Flattened: the `Release/` prefix is gone.
+        assert!(tmp.path().join("whisper-server.exe").exists());
+        assert!(!tmp.path().join("Release").exists());
+    }
+
+    // ── extract_binary_with_libs (tar.gz path) ──────────────────────────────
+
+    #[test]
+    fn binary_with_libs_colocates_shared_libs() {
+        let data = make_tar_gz(&[
+            ("build/bin/llama-server", b"server"),
+            ("build/bin/libggml.dylib", b"lib1"),
+            ("build/bin/libllama.so", b"lib2"),
+            ("build/bin/other-tool", b"ignored"),
+        ]);
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = extract_binary_with_libs(&data, "llama-server", tmp.path(), false).unwrap();
+        assert_eq!(bin, tmp.path().join("llama-server"));
+        assert!(tmp.path().join("libggml.dylib").exists());
+        assert!(tmp.path().join("libllama.so").exists());
+        // Non-lib sibling tools are not co-located.
+        assert!(!tmp.path().join("other-tool").exists());
+    }
+
+    #[test]
+    fn binary_with_libs_missing_binary_errors() {
+        let data = make_tar_gz(&[("build/libggml.dylib", b"lib")]);
+        let tmp = tempfile::tempdir().unwrap();
+        let err =
+            extract_binary_with_libs(&data, "llama-server", tmp.path(), false).unwrap_err();
+        assert!(err.to_string().contains("llama-server"));
+    }
+
+    #[test]
+    fn binary_with_libs_zip_path() {
+        let data = make_zip(
+            &[],
+            &[
+                ("bin/llama-server.exe", b"server"),
+                ("bin/ggml.dll", b"lib"),
+            ],
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = extract_binary_with_libs(&data, "llama-server", tmp.path(), true).unwrap();
+        assert_eq!(bin, tmp.path().join("llama-server.exe"));
+        assert!(tmp.path().join("ggml.dll").exists());
+    }
+
+    /// A symlink alias entry (`libfoo.dylib` -> `libfoo.1.dylib`) must be
+    /// recreated as a link, not written as a 0-byte file that shadows the real
+    /// versioned lib and breaks `@rpath` resolution at launch.
+    #[cfg(unix)]
+    #[test]
+    fn binary_with_libs_recreates_symlink_alias() {
+        // Build a tar with the real versioned lib, a symlink alias, and the bin.
+        let gz = GzEncoder::new(Vec::new(), Compression::fast());
+        let mut builder = tar::Builder::new(gz);
+
+        let bin = b"server";
+        let mut h = tar::Header::new_gnu();
+        h.set_size(bin.len() as u64);
+        h.set_mode(0o755);
+        h.set_cksum();
+        builder
+            .append_data(&mut h, "bin/llama-server", &bin[..])
+            .unwrap();
+
+        let lib = b"real-lib-bytes";
+        let mut h = tar::Header::new_gnu();
+        h.set_size(lib.len() as u64);
+        h.set_mode(0o644);
+        h.set_cksum();
+        builder
+            .append_data(&mut h, "bin/libggml.1.dylib", &lib[..])
+            .unwrap();
+
+        // Symlink entry: libggml.dylib -> libggml.1.dylib (no data body).
+        let mut h = tar::Header::new_gnu();
+        h.set_entry_type(tar::EntryType::Symlink);
+        h.set_size(0);
+        h.set_link_name("libggml.1.dylib").unwrap();
+        h.set_mode(0o777);
+        h.set_cksum();
+        builder
+            .append_link(&mut h, "bin/libggml.dylib", "libggml.1.dylib")
+            .unwrap();
+
+        let data = builder.into_inner().unwrap().finish().unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        extract_binary_with_libs(&data, "llama-server", tmp.path(), false).unwrap();
+
+        let alias = tmp.path().join("libggml.dylib");
+        let meta = std::fs::symlink_metadata(&alias).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "alias must be a symlink, not a clobbered 0-byte file"
+        );
+        // The real versioned lib is present and non-empty.
+        assert_eq!(
+            std::fs::read(tmp.path().join("libggml.1.dylib")).unwrap(),
+            lib
+        );
+    }
+
+    // ── Pure helpers ────────────────────────────────────────────────────────
+
+    #[test]
+    fn archive_basename_handles_both_separators() {
+        assert_eq!(archive_basename("a/b/c.txt"), "c.txt");
+        assert_eq!(archive_basename("a\\b\\c.txt"), "c.txt");
+        assert_eq!(archive_basename("bare"), "bare");
+    }
+
+    #[test]
+    fn is_wanted_binary_matches_bare_and_exe() {
+        assert!(is_wanted_binary("llama-server", "llama-server"));
+        assert!(is_wanted_binary("llama-server.exe", "llama-server"));
+        assert!(!is_wanted_binary("llama-serverX", "llama-server"));
+        assert!(!is_wanted_binary("libllama.so", "llama-server"));
+    }
+
+    #[test]
+    fn is_shared_library_recognizes_all_forms() {
+        assert!(is_shared_library("libfoo.dylib"));
+        assert!(is_shared_library("foo.DLL")); // case-insensitive
+        assert!(is_shared_library("libbar.so"));
+        assert!(is_shared_library("libbar.so.3")); // versioned soname
+        assert!(!is_shared_library("llama-server"));
+        assert!(!is_shared_library("notes.txt"));
+    }
+
+    #[test]
+    fn write_flattened_writes_via_temp_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = write_flattened(tmp.path(), "out.bin", b"data").unwrap();
+        assert_eq!(dest, tmp.path().join("out.bin"));
+        assert_eq!(std::fs::read(&dest).unwrap(), b"data");
+        // The temp sidecar file is cleaned up by the atomic rename.
+        assert!(!tmp.path().join("out.download-tmp").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_symlink_flattened_creates_link_to_basename() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Target given with a path prefix — must be flattened to a bare basename.
+        let dest = write_symlink_flattened(tmp.path(), "libfoo.dylib", "sub/libfoo.1.dylib").unwrap();
+        let meta = std::fs::symlink_metadata(&dest).unwrap();
+        assert!(meta.file_type().is_symlink());
+        assert_eq!(
+            std::fs::read_link(&dest).unwrap(),
+            std::path::PathBuf::from("libfoo.1.dylib")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_symlink_flattened_replaces_stale_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A pre-existing broken 0-byte file at the alias name.
+        std::fs::write(tmp.path().join("libfoo.dylib"), b"").unwrap();
+        let dest = write_symlink_flattened(tmp.path(), "libfoo.dylib", "libfoo.1.dylib").unwrap();
+        assert!(std::fs::symlink_metadata(&dest)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn platform_tag_is_known() {
+        let t = platform_tag();
+        assert!(
+            ["macos-arm64", "macos-x86_64", "linux-x86_64", "windows-x86_64"].contains(&t),
+            "unexpected platform tag: {t}"
+        );
+    }
+
+    // ── SidecarManifest metadata ────────────────────────────────────────────
+
+    #[test]
+    fn zeroclaw_manifest_url_embeds_version_and_platform() {
+        let m = ZeroClawManifest;
+        assert_eq!(m.name(), "zeroclaw");
+        assert_eq!(m.target_version(), "v0.1.0");
+        let url = m.release_url();
+        assert!(url.contains("v0.1.0"));
+        assert!(url.contains(platform_tag()));
+        assert!(url.ends_with(".tar.gz"));
+    }
+
+    #[test]
+    fn llamacpp_manifest_metadata() {
+        let m = LlamaCppManifest;
+        assert_eq!(m.name(), "llamacpp");
+        assert_eq!(m.target_version(), "b9670");
+        let url = m.release_url();
+        assert!(url.contains("b9670"));
+        assert!(url.ends_with(".zip"));
+        // binary_name is OS-conditional; both accepted forms end in the stem.
+        assert!(m.binary_name().starts_with("llama-server"));
+    }
+
+    #[test]
+    fn manifest_binary_path_joins_install_dir() {
+        let m = ScreenpipeManifest;
+        let p = m.binary_path();
+        assert!(p.ends_with(m.binary_name()));
+        // Default install dir is `<ryu>/bin`.
+        assert!(p.parent().unwrap().ends_with("bin"));
+    }
+
+    #[test]
+    fn expected_checksum_defaults_to_none() {
+        assert!(ZeroClawManifest.expected_checksum().is_none());
+    }
+
+    // ── VersionStore (in-memory, no fs) ─────────────────────────────────────
+
+    #[test]
+    fn version_store_serde_round_trips() {
+        let mut store = VersionStore::default();
+        store.record("llamacpp", "b9670", "deadbeef");
+        let json = serde_json::to_string(&store).unwrap();
+        let back: VersionStore = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.versions.get("llamacpp"), Some(&"b9670".to_string()));
+        assert_eq!(back.installed_checksum("llamacpp"), Some("deadbeef"));
+    }
+
+    #[test]
+    fn installed_version_parses_semver_only() {
+        let mut store = VersionStore::default();
+        store.record("ollama", "0.5.1", "x");
+        store.record("llamacpp", "b9670", "y"); // not semver
+        assert_eq!(
+            store.installed_version("ollama"),
+            Some(semver::Version::new(0, 5, 1))
+        );
+        // Non-semver engine version strings yield None (still "installed" by key).
+        assert!(store.installed_version("llamacpp").is_none());
+        assert!(store.installed_version("absent").is_none());
+    }
+
+    #[test]
+    fn record_overwrites_existing_entry() {
+        let mut store = VersionStore::default();
+        store.record("ollama", "0.5.0", "old");
+        store.record("ollama", "0.6.0", "new");
+        assert_eq!(store.versions.get("ollama"), Some(&"0.6.0".to_string()));
+        assert_eq!(store.installed_checksum("ollama"), Some("new"));
+    }
+
+    #[test]
+    fn version_store_load_defaults_on_bad_json() {
+        // `from_str` failure path: garbage deserializes to the default store.
+        let parsed: Option<VersionStore> = serde_json::from_str("{ not json").ok();
+        assert!(parsed.is_none());
+        assert!(VersionStore::default().versions.is_empty());
+    }
+
+    // ── compute_sha256 ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn compute_sha256_matches_known_vector() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("f");
+        // SHA-256 of "abc".
+        std::fs::write(&path, b"abc").unwrap();
+        let got = compute_sha256(&path).await.unwrap();
+        assert_eq!(
+            got,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[tokio::test]
+    async fn compute_sha256_missing_file_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(compute_sha256(&tmp.path().join("nope")).await.is_err());
+    }
+
+    // ── retry_download ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn retry_download_succeeds_first_try() {
+        let calls = std::sync::atomic::AtomicU32::new(0);
+        let out: i32 = retry_download("t", 3, || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok(42) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(out, 42);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_download_single_attempt_no_retry() {
+        let calls = std::sync::atomic::AtomicU32::new(0);
+        let res: anyhow::Result<i32> = retry_download("t", 1, || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { anyhow::bail!("boom") }
+        })
+        .await;
+        assert!(res.is_err());
+        // max_attempts=1 → exactly one call, no backoff sleep.
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_download_retries_then_succeeds() {
+        // One transient failure then success. `max_attempts=2` means a single
+        // 1s backoff between the two calls (test-util virtual time is not enabled
+        // in this crate, so this is a real — but bounded to one — 1s wait).
+        let calls = std::sync::atomic::AtomicU32::new(0);
+        let out: i32 = retry_download("t", 2, || {
+            let n = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                if n < 1 {
+                    anyhow::bail!("transient")
+                } else {
+                    Ok(7)
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(out, 7);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    // ── DownloadState / status serialization ────────────────────────────────
+
+    #[test]
+    fn download_state_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_value(DownloadState::NotInstalled).unwrap(),
+            serde_json::json!("not_installed")
+        );
+        assert_eq!(
+            serde_json::to_value(DownloadState::Installed).unwrap(),
+            serde_json::json!("installed")
+        );
+        // The Failed variant carries its message as a single-field object.
+        assert_eq!(
+            serde_json::to_value(DownloadState::Failed("nope".into())).unwrap(),
+            serde_json::json!({ "failed": "nope" })
+        );
+    }
+
+    #[test]
+    fn sidecar_download_status_serializes() {
+        let s = SidecarDownloadStatus {
+            name: "llamacpp".into(),
+            state: DownloadState::Installed,
+            installed_version: Some("b9670".into()),
+            target_version: "b9670".into(),
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["name"], "llamacpp");
+        assert_eq!(v["state"], "installed");
+        assert_eq!(v["installed_version"], "b9670");
+    }
+
+    #[test]
+    fn default_extract_cap_is_500mb() {
+        assert_eq!(DEFAULT_EXTRACT_CAP_BYTES, 500 * 1024 * 1024);
+    }
+
+    // ── BuildDependency (pure surface only — never call install()) ───────────
+
+    #[test]
+    fn build_dependency_names_and_guides() {
+        assert_eq!(GitDep.name(), "git");
+        assert_eq!(RustDep.name(), "rust");
+        assert!(!GitDep.install_guide().is_empty());
+        assert!(RustDep.install_guide().to_lowercase().contains("rustup"));
+    }
 }

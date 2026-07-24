@@ -27,6 +27,11 @@ export interface DirectoryEntry {
 export interface DirectoryListing {
 	entries: DirectoryEntry[];
 	home: string;
+	/** A friendly name for a VIRTUAL location (e.g. "This PC", the Windows drive
+	    list) whose `path` is an internal sentinel, not a real folder. Present only
+	    for such roots; when set, the location is a container to browse, not a
+	    folder that can itself be selected. */
+	label?: string;
 	parent: string | null;
 	path: string;
 }

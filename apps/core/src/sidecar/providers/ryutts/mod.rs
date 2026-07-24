@@ -54,6 +54,19 @@ pub fn tts_base_url() -> String {
     format!("http://{TTS_ADDR}")
 }
 
+/// The shared-secret bearer the TTS sidecar authenticates. Voice is a Core-internal
+/// provider (not an ext-proxy manifest sidecar), so Core mints the SAME per-plugin
+/// token the ext-proxy scheme uses — deterministic from the node token + the voice
+/// plugin id — injects it as `RYU_EXT_TOKEN` at spawn, and presents it on every
+/// non-`/health` request. This closes the sidecar's `/generate` + model-install
+/// endpoints to arbitrary local processes and cross-origin browser POSTs.
+pub fn bearer() -> String {
+    crate::sidecar::ext_proxy::ext_token(
+        crate::sidecar::ext_proxy::node_token().as_deref(),
+        crate::plugins::builtins::VOICE_PLUGIN_ID,
+    )
+}
+
 /// Core-managed Hugging Face cache the sidecar's engines download models into.
 /// We point the sidecar's `HF_HOME` here so every model's bytes live under
 /// `~/.ryu` (Core-owned) instead of the user's default `~/.cache/huggingface`,
@@ -230,6 +243,12 @@ impl Sidecar for RyuTtsManager {
                 ("PYTHONPATH".into(), dir.to_string_lossy().to_string()),
                 ("RYU_TTS_HOST".into(), "127.0.0.1".into()),
                 ("RYU_TTS_PORT".into(), TTS_PORT.to_string()),
+                // Shared-secret the sidecar fail-closed-checks on every non-/health
+                // route; Core presents the same value via `bearer()`.
+                (
+                    crate::sidecar::ext_proxy::ENV_EXT_TOKEN.into(),
+                    bearer(),
+                ),
                 ("HF_HOME".into(), hf_home.to_string_lossy().to_string()),
                 // Point the default `kokoro` backend at the model artifacts Core
                 // downloads during onboarding (the engine only serves them).
@@ -333,6 +352,7 @@ pub async fn list_engines(client: &reqwest::Client) -> anyhow::Result<Value> {
     let url = format!("{}/engines", tts_base_url());
     let resp = client
         .get(&url)
+        .bearer_auth(bearer())
         .send()
         .await
         .with_context(|| format!("ryu-tts not reachable at {url}"))?;
@@ -348,6 +368,7 @@ pub async fn list_models(client: &reqwest::Client) -> anyhow::Result<Value> {
     let url = format!("{}/models", tts_base_url());
     let resp = client
         .get(&url)
+        .bearer_auth(bearer())
         .send()
         .await
         .with_context(|| format!("ryu-tts not reachable at {url}"))?;
@@ -368,6 +389,7 @@ pub async fn install_model(
     let url = format!("{}/models/install", tts_base_url());
     let resp = client
         .post(&url)
+        .bearer_auth(bearer())
         .json(&serde_json::json!({ "engine": engine, "model_name": model_name }))
         .send()
         .await

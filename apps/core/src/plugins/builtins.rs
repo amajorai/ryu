@@ -58,17 +58,14 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
         windows_first: true,
         local_only: true,
     },
-    // Spider is the default web-crawl tool: a cross-platform Rust sidecar
-    // (`spider-rs/spider`), so not Windows-first. Local-only (runs the crawler
-    // process on the node).
-    SystemPlugin {
-        manifest_id: "spider",
-        sidecar_name: "spider",
-        windows_first: false,
-        local_only: true,
-    },
+    // (Spider is NO LONGER a system plugin: it became a declarative `command`
+    // tool — fixtures/spider.plugin.json — that shells out to a user-installed
+    // `spider` CLI via the command-tool allowlist, with no Core-managed sidecar
+    // lifecycle. It stays Core-tier + default-on via CORE_PLUGINS / CORE_DEFAULT_ON
+    // so its record seeds enabled and the tool is available out of the box.)
     // Agent Browser is the default web-browsing tool: an npx-launched MCP server
-    // (npm `agentbrowser`), registered in `sidecar/mcp/mod.rs::builtin_servers`.
+    // (npm `agentbrowser`), declared under `mcp_servers` in its plugin manifest
+    // (fixtures/agentbrowser.plugin.json) and registered on activation.
     // Cross-platform (Node) and reaches the web, so neither Windows-first nor
     // local-only.
     SystemPlugin {
@@ -77,7 +74,22 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
         windows_first: false,
         local_only: false,
     },
+    // Browser is the workspace's real-Chromium sidecar (an Electron GUI app,
+    // `browser` sidecar on :7993) that backs the workspace "Browser" tab. A core
+    // built-in: installed-by-default and uninstall-protected (see CORE_DEFAULT_ON).
+    // Cross-platform Electron, runs locally on the node.
+    SystemPlugin {
+        manifest_id: BROWSER_PLUGIN_ID,
+        sidecar_name: "browser",
+        windows_first: false,
+        local_only: true,
+    },
 ];
+
+/// The Browser app's plugin id — the workspace's real-Chromium sidecar that backs
+/// the "Browser" workspace tab. A core built-in (see [`SYSTEM_PLUGINS`] /
+/// [`CORE_DEFAULT_ON`]): seeded enabled on a fresh install and non-uninstallable.
+pub const BROWSER_PLUGIN_ID: &str = "com.ryu.browser";
 
 /// The Spaces app's plugin id — the document store + RAG index other apps write
 /// into. It is a **dependency target**: an app that owns Space documents declares
@@ -345,6 +357,8 @@ pub const CORE_PLUGINS: &[&str] = &[
     "shadow",
     "spider",
     "agentbrowser",
+    // Workspace real-Chromium browser sidecar — core built-in, default-on.
+    BROWSER_PLUGIN_ID,
     "firewall",
     "routing",
     "sandbox",
@@ -365,17 +379,6 @@ pub const CORE_PLUGINS: &[&str] = &[
     // Pre-turn prompt-improver: rewrites the outgoing message via a configurable
     // model before it is sent. Reverse-DNS id (matches its manifest + composer flag).
     "com.ryuhq.auto-expand",
-    // Ryu Apps (widget-rendering in-process apps). All ship default-on so their
-    // widgets render on install; widget-initiated writes are call-time
-    // Gateway-gated (governed round-trip), so default-on is safe.
-    "checklist",
-    "smart-intake-form",
-    "data-grid-explorer",
-    "chart-studio",
-    "decision-wizard",
-    "quest-board",
-    "worktree-diff-review",
-    "gateway-budget-dial",
     // The Whiteboard app — a full-page Companion (`ui_format:"html"`) that owns its
     // Space documents via `spaces:docs`. Default-on; `plugins::seed` gives it its
     // approved grants + `ui_code` HTML blob. Replaces the built-in whiteboard editor.
@@ -488,12 +491,22 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     // The default tool apps — auto-installed (record seeded enabled) on a fresh
     // install so they show up like the auto-downloaded default models. The actual
     // process runs through its own sidecar/MCP lifecycle; enabling the record just
-    // makes it a first-class, governed, disable-able App. Their fixtures declare no
-    // runnables, so seeding never double-lists their tools.
+    // makes it a first-class, governed, disable-able App. The pure sidecar-backed
+    // ones (ghost/agentbrowser) declare no runnables, so seeding never double-lists
+    // their tools. `spider` and `shadow` are the declarative exceptions: their
+    // native `sidecar/mcp` providers were deleted, so their fixtures now CARRY the
+    // tool runnables as the sole owner (spider a `command` crawl tool; shadow four
+    // `http` tools reaching the Shadow sidecar through Core's `/api/shadow/*`
+    // proxy). Seeding the record enabled is exactly what surfaces those tools — no
+    // double-listing, since nothing else owns them.
     "ghost",
     "shadow",
     "spider",
     "agentbrowser",
+    // Workspace browser sidecar — default-on so the "Browser" workspace tab uses
+    // the real-Chromium sidecar out of the box (not the fallback iframe). Being
+    // default-on also makes it uninstall-protected (`is_uninstall_protected`).
+    BROWSER_PLUGIN_ID,
     // NOTE: com.ryu.mail is intentionally NOT default-on. It is sidecar-only now
     // (the in-process path was deleted, Track C). The release now builds + ships the
     // `ryu-mail` binary alongside the other 10 sidecar bins (see
@@ -509,15 +522,6 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     // available with zero setup; the flag/command `match` gate makes it free when
     // the toggle is off and no `/expand` is used (no sandbox spawn on idle turns).
     "com.ryuhq.auto-expand",
-    // Ryu Apps — default-on so widgets render on install (see CORE_PLUGINS).
-    "checklist",
-    "smart-intake-form",
-    "data-grid-explorer",
-    "chart-studio",
-    "decision-wizard",
-    "quest-board",
-    "worktree-diff-review",
-    "gateway-budget-dial",
     // NOTE (default-off apps): whiteboard / canvas / finetune / meetings / quests /
     // approvals / learning / healing / monitors / workflows / activity / timeline /
     // skill-editor are intentionally NOT default-on — they stay installable +
@@ -547,8 +551,14 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     // `workflows` is default-OFF (see the note above). `agents` stays default-on and
     // is LOAD-BEARING (see `LOAD_BEARING_PLUGINS`) — chat depends on the agent list.
     AGENTS_PLUGIN_ID,
-    // The W0 three data-path shells, default-on so their always-on routes stay
+    // The W0 data-path shells that stay default-on so their always-on routes stay
     // reachable after gating (see CORE_PLUGINS). Neither has a `requires` edge.
+    //
+    // NOTE: `memory` is deliberately absent — it is in CORE_PLUGINS (installable,
+    // Core-tier) but ships OPT-IN (NOT default-on). Its `/api/memory/*` routes gate
+    // on the app being enabled, matching canvas/whiteboard/meetings/workflows; the
+    // in-process chat auto-recall path is kernel (ungated), so it keeps working on a
+    // fresh install — only the explicit Memory surface waits until the user enables it.
     //
     // NOTE: `predict` is deliberately absent — it is in CORE_PLUGINS but stays OPT-IN
     // (NOT default-on). Enabling the Predict plugin flips the system-wide predictive-
@@ -560,7 +570,6 @@ pub const CORE_DEFAULT_ON: &[&str] = &[
     // record enabled → the gate passes. Default-on would be a privacy regression.
     VOICE_PLUGIN_ID,
     MEDIA_PLUGIN_ID,
-    MEMORY_PLUGIN_ID,
     // W7: the webhooks companion, default-on so it is present on every fresh install
     // (the page it replaced was always-on). No `requires` edge; not a route gate.
     WEBHOOKS_PLUGIN_ID,
@@ -665,20 +674,27 @@ mod tests {
 
     #[test]
     fn system_apps_contains_default_tool_apps() {
-        for id in ["ghost", "shadow", "spider", "agentbrowser"] {
+        // Spider is deliberately absent — it is a declarative `command` plugin now,
+        // not a sidecar-backed system plugin.
+        for id in ["ghost", "shadow", "agentbrowser"] {
             assert!(
                 SYSTEM_PLUGINS.iter().any(|s| s.manifest_id == id),
                 "{id} must be in SYSTEM_PLUGINS"
             );
         }
+        assert!(
+            !SYSTEM_PLUGINS.iter().any(|s| s.manifest_id == "spider"),
+            "spider is a declarative command plugin, not a system plugin"
+        );
     }
 
     #[test]
     fn is_builtin_returns_true_for_known_ids() {
         assert!(is_builtin("ghost"));
         assert!(is_builtin("shadow"));
-        assert!(is_builtin("spider"));
         assert!(is_builtin("agentbrowser"));
+        // spider is Core-tier + default-on but NOT a system plugin (no sidecar).
+        assert!(!is_builtin("spider"));
     }
 
     #[test]
@@ -702,9 +718,8 @@ mod tests {
 
     #[test]
     fn find_system_plugin_returns_metadata_for_default_tool_apps() {
-        let spider = find_system_plugin("spider").expect("spider must be found");
-        assert_eq!(spider.sidecar_name, "spider");
-        assert!(!spider.windows_first, "spider is cross-platform");
+        // spider is no longer a system plugin (declarative command tool).
+        assert!(find_system_plugin("spider").is_none());
 
         let ab = find_system_plugin("agentbrowser").expect("agentbrowser must be found");
         assert_eq!(ab.sidecar_name, "agentbrowser");
@@ -739,11 +754,17 @@ mod tests {
     #[test]
     fn default_tool_apps_are_core_and_default_on_and_system() {
         use crate::plugin_manifest::PluginTier;
-        for id in ["ghost", "shadow", "spider", "agentbrowser"] {
+        for id in ["ghost", "shadow", "agentbrowser"] {
             assert_eq!(tier_for(id), PluginTier::Core, "{id} must be Core-tier");
             assert!(is_default_on(id), "{id} must be default-on (auto-seeded)");
             assert!(is_builtin(id), "{id} must be a system plugin");
         }
+        // Spider is Core-tier + default-on (record seeded enabled so its
+        // declarative tool works out of the box) but is NOT a system plugin — it
+        // has no sidecar lifecycle.
+        assert_eq!(tier_for("spider"), PluginTier::Core, "spider must be Core-tier");
+        assert!(is_default_on("spider"), "spider must be default-on");
+        assert!(!is_builtin("spider"), "spider is not a system plugin");
     }
 
     #[test]
@@ -855,7 +876,14 @@ mod tests {
 
         // A refused disable changes NOTHING (it is not a partial disable).
         assert!(store.get(SPACES_PLUGIN_ID).await.unwrap().unwrap().enabled);
-        assert!(store.get(MEETINGS_PLUGIN_ID).await.unwrap().unwrap().enabled);
+        assert!(
+            store
+                .get(MEETINGS_PLUGIN_ID)
+                .await
+                .unwrap()
+                .unwrap()
+                .enabled
+        );
 
         // 2. Disable the dependent first, and Spaces disables cleanly.
         disable_app(&store, MEETINGS_PLUGIN_ID, &manifests, false, false)
@@ -866,7 +894,14 @@ mod tests {
             .expect("with Meetings off, nothing blocks Spaces");
 
         assert!(!store.get(SPACES_PLUGIN_ID).await.unwrap().unwrap().enabled);
-        assert!(!store.get(MEETINGS_PLUGIN_ID).await.unwrap().unwrap().enabled);
+        assert!(
+            !store
+                .get(MEETINGS_PLUGIN_ID)
+                .await
+                .unwrap()
+                .unwrap()
+                .enabled
+        );
     }
 
     /// The opt-in escape hatch: one cascade disables the dependent *and* the
@@ -895,7 +930,14 @@ mod tests {
             "the dependent must be disabled BEFORE its dependency"
         );
         assert!(!store.get(SPACES_PLUGIN_ID).await.unwrap().unwrap().enabled);
-        assert!(!store.get(MEETINGS_PLUGIN_ID).await.unwrap().unwrap().enabled);
+        assert!(
+            !store
+                .get(MEETINGS_PLUGIN_ID)
+                .await
+                .unwrap()
+                .unwrap()
+                .enabled
+        );
     }
 
     /// The real default-on set must be fully satisfiable — every default-on plugin's
@@ -1153,5 +1195,80 @@ mod tests {
         // Predictive typing is Core-tier but opt-in (sends text to a model).
         assert!(CORE_PLUGINS.contains(&"predict"));
         assert!(!is_default_on("predict"));
+    }
+
+    // ── Registration integrity: every id in a membership list must exist ──────
+    //
+    // `plugins::seed::seed_order` SILENTLY DROPS a default-on spec whose manifest is
+    // not loaded ("no loaded manifest ⇒ nothing to seed"), so a typo in
+    // `CORE_DEFAULT_ON` or a missing `include_str!` in `BUILTIN_MANIFESTS` never
+    // fails a test — the plugin just quietly never seeds. These guards close that
+    // gap by asserting every membership id resolves to a real, loaded built-in.
+
+    #[test]
+    fn every_core_default_on_id_resolves_to_a_loaded_builtin_manifest() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        for id in CORE_DEFAULT_ON {
+            assert!(
+                manifests.iter().any(|m| &m.id == id),
+                "default-on plugin '{id}' has no loaded built-in manifest — seed_order \
+                 would drop it silently (typo in CORE_DEFAULT_ON or missing fixture in \
+                 BUILTIN_MANIFESTS)"
+            );
+        }
+    }
+
+    #[test]
+    fn every_core_plugin_id_resolves_to_a_loaded_builtin_manifest() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        for id in CORE_PLUGINS {
+            assert!(
+                manifests.iter().any(|m| &m.id == id),
+                "Core-tier plugin '{id}' has no loaded built-in manifest — tier_for('{id}') \
+                 claims Core but nothing backs it"
+            );
+        }
+    }
+
+    #[test]
+    fn every_system_plugin_id_resolves_to_a_loaded_builtin_manifest() {
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        for sys in SYSTEM_PLUGINS {
+            assert!(
+                manifests.iter().any(|m| m.id == sys.manifest_id),
+                "SYSTEM_PLUGINS entry '{}' has no loaded built-in manifest",
+                sys.manifest_id
+            );
+        }
+    }
+
+    #[test]
+    fn membership_lists_contain_no_duplicate_ids() {
+        for (label, list) in [
+            ("CORE_PLUGINS", CORE_PLUGINS),
+            ("CORE_DEFAULT_ON", CORE_DEFAULT_ON),
+        ] {
+            let mut seen = std::collections::HashSet::new();
+            for id in list {
+                assert!(seen.insert(*id), "'{id}' appears more than once in {label}");
+            }
+        }
+    }
+
+    #[test]
+    fn default_on_is_uninstall_protected_and_never_community() {
+        use crate::plugin_manifest::PluginTier;
+        for id in CORE_DEFAULT_ON {
+            assert!(
+                is_uninstall_protected(id),
+                "default-on '{id}' must be uninstall-protected (else the seed resurrects a \
+                 record the user removed)"
+            );
+            assert_ne!(
+                tier_for(id),
+                PluginTier::Community,
+                "default-on '{id}' must not be Community-tier"
+            );
+        }
     }
 }

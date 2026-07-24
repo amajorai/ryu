@@ -34,6 +34,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { SvglIcon } from "@ryu/blocks/web/svgl-icon.tsx";
 import { Button } from "@ryu/ui/components/button";
 import {
 	DropdownMenuItem,
@@ -59,10 +60,12 @@ import { createModelMenuRenderer } from "@/components/agent-elements/input/model
 import { useComposerAcpSections } from "@/components/agent-elements/input/use-composer-acp-sections.ts";
 import type { ModelOption } from "@/components/agent-elements/types.ts";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { AgentCatalogLogo } from "@/src/lib/agent-catalog-logo.tsx";
 import { AgentLogo } from "@/src/lib/agent-logos.tsx";
 import type { AgentCatalogEntry, AgentSummary } from "@/src/lib/api/agents.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { discoverModels } from "@/src/lib/api/pi-config.ts";
+import { svglForProvider } from "@/src/lib/provider-brand.tsx";
 
 /** A Pi provider row for the Providers section (built by `useUniversalPicker`). */
 export interface ProviderEntry {
@@ -119,6 +122,13 @@ export interface UniversalPickerData {
 	agents: AgentSummary[];
 	/** Not-installed external agents (catalog entries with `added === false`). */
 	availableExternal: AgentCatalogEntry[];
+	/**
+	 * Suppress the "Auto" (Plane B) row. The composer always offers Auto so a turn
+	 * can be routed per-rule; a controlled settings *field* (which persists one
+	 * concrete model/agent id) has nowhere to store the sentinel, so it hides it.
+	 * Defaults to false — the composer is unaffected.
+	 */
+	hideAuto?: boolean;
 	/** Installed external ACP agents (transport `acp`, excluding the flagship). */
 	installedExternal: AgentSummary[];
 	/** Id of the external agent whose install is in flight, or null. */
@@ -628,6 +638,7 @@ function ProviderSubBody({
 function TargetSub({
 	label,
 	engineKey,
+	providerId,
 	avatarUrl,
 	isActive,
 	children,
@@ -635,9 +646,14 @@ function TargetSub({
 	avatarUrl?: string | null;
 	children: ReactNode;
 	engineKey: string | null;
+	/** Pi provider id — routes the row through the svgl brand mark when set. */
+	providerId?: string;
 	isActive: boolean;
 	label: string;
 }) {
+	// Provider rows carry a Pi id (groq, cerebras, nvidia, …) whose bundled brand
+	// mark lives in `/logos/`. Agents (no providerId) keep the engine logo.
+	const providerSpec = providerId ? svglForProvider(providerId) : null;
 	return (
 		<DropdownMenuSub>
 			<DropdownMenuSubTrigger className={cn(isActive && "bg-foreground/10")}>
@@ -649,6 +665,12 @@ function TargetSub({
 							alt=""
 							className="size-4 shrink-0 rounded-full object-cover"
 							src={avatarUrl}
+						/>
+					) : providerSpec ? (
+						<SvglIcon
+							className="size-4 shrink-0"
+							size={16}
+							spec={providerSpec}
 						/>
 					) : (
 						<AgentLogo
@@ -687,9 +709,9 @@ function AvailableAgentRow({
 }) {
 	return (
 		<div className="flex items-center gap-2 rounded-md px-2 py-1.5">
-			<AgentLogo
+			<AgentCatalogLogo
 				className="size-4 shrink-0 opacity-50"
-				engine={entry.engine ?? entry.id}
+				entry={entry}
 				size="16px"
 			/>
 			<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
@@ -845,8 +867,10 @@ export function UniversalPickerBody({
 	const ryuVisible = ryuAgent
 		? matches(q, ryuAgent.name, "ryu portal ryu")
 		: false;
-	// The "Auto" row is always offered (empty query) and stays findable by search.
-	const autoVisible = matches(q, "auto routes best agent by your rules");
+	// The "Auto" row is always offered (empty query) and stays findable by search —
+	// unless a settings field suppresses it (`hideAuto`).
+	const autoVisible =
+		!data.hideAuto && matches(q, "auto routes best agent by your rules");
 	const autoActive = data.activeAgentId === AUTO_AGENT_ID;
 
 	// The active agent's LIVE model/approval/thinking sections (wired to the host's
@@ -944,6 +968,7 @@ export function UniversalPickerBody({
 								isActive={provider.isActive}
 								key={provider.id}
 								label={provider.label}
+								providerId={provider.id}
 							>
 								<ProviderSubBody
 									close={close}

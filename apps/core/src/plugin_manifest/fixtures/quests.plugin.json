@@ -53,6 +53,14 @@
 		"icon": "target"
 	},
 	"contributes": {
+		"settings_tabs": [
+			{
+				"id": "quests.settings",
+				"title": "Tasks",
+				"scope": "node",
+				"view": "quests"
+			}
+		],
 		"views": [
 			{
 				"id": "quest-board",

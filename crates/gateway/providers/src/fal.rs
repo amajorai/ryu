@@ -65,7 +65,11 @@ impl FalProvider {
 
     /// Submit a request and return `(response_url, status)`. `response_url` is the
     /// job's `provider_ref`; append `/status` for the status endpoint.
-    async fn submit(&self, model: &str, body: &Value) -> Result<(String, JobStatus), ProviderError> {
+    async fn submit(
+        &self,
+        model: &str,
+        body: &Value,
+    ) -> Result<(String, JobStatus), ProviderError> {
         let input = build_input(body);
         let url = self.submit_url(model);
         debug!(provider = "fal", model, %url, "submitting request");
@@ -130,9 +134,7 @@ impl FalProvider {
             status = self.status(&response_url).await?;
         }
         if status == JobStatus::Failed {
-            return Err(ProviderError::Provider(
-                "fal request failed".to_string(),
-            ));
+            return Err(ProviderError::Provider("fal request failed".to_string()));
         }
         self.result(&response_url).await
     }
@@ -332,6 +334,147 @@ mod tests {
             fal_status(&json!({"status":"COMPLETED"})),
             JobStatus::Succeeded
         );
+        assert_eq!(fal_status(&json!({"status":"OK"})), JobStatus::Succeeded);
         assert_eq!(fal_status(&json!({"status":"ERROR"})), JobStatus::Failed);
+        assert_eq!(fal_status(&json!({"status":"FAILED"})), JobStatus::Failed);
+        // Unknown / missing → queued (keep polling).
+        assert_eq!(fal_status(&json!({})), JobStatus::Queued);
+    }
+
+    #[test]
+    fn submit_url_normalizes_slashes() {
+        let p = FalProvider::new(
+            reqwest::Client::new(),
+            "k".into(),
+            "https://queue.fal.run/".into(),
+            250,
+            60,
+        );
+        // Trailing base slash + leading model slash collapse to one.
+        assert_eq!(p.submit_url("/fal-ai/x"), "https://queue.fal.run/fal-ai/x");
+    }
+
+    #[test]
+    fn new_clamps_poll_bounds() {
+        let p = FalProvider::new(reqwest::Client::new(), "k".into(), "u".into(), 0, 0);
+        assert_eq!(p.poll_interval, Duration::from_millis(250));
+        assert_eq!(p.poll_timeout, Duration::from_secs(1));
+    }
+
+    // ── async submit / poll paths over a local mock server ────────────────────
+    use crate::test_support::{MockResponse, MockServer};
+
+    fn provider(base_url: String) -> FalProvider {
+        FalProvider::new(reqwest::Client::new(), "fal-secret".into(), base_url, 250, 60)
+    }
+
+    #[tokio::test]
+    async fn submit_video_sends_key_header_and_returns_response_url() {
+        // Submit reports IN_QUEUE; provider_ref is the returned response_url.
+        let server = MockServer::always(MockResponse::ok_json(
+            r#"{"request_id":"r1","status":"IN_QUEUE","response_url":"{{BASE}}/req/r1"}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let job = p
+            .submit_video("fal-ai/kling-video", &json!({ "prompt": "a wave" }))
+            .await
+            .unwrap();
+        assert_eq!(job.status, JobStatus::Queued);
+        assert_eq!(job.provider_ref, format!("{}/req/r1", server.base_url()));
+
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/fal-ai/kling-video");
+        // Fal auth is `Authorization: Key <token>`, not Bearer.
+        assert_eq!(
+            reqs[0].header("authorization").as_deref(),
+            Some("Key fal-secret")
+        );
+        // Control fields stripped; input posted directly (no wrapper).
+        assert_eq!(reqs[0].json()["prompt"], json!("a wave"));
+    }
+
+    #[tokio::test]
+    async fn submit_errors_when_no_response_url() {
+        let server =
+            MockServer::always(MockResponse::ok_json(r#"{"status":"IN_QUEUE"}"#)).await;
+        let p = provider(server.base_url().to_string());
+        let err = p.submit_video("fal-ai/x", &json!({})).await.unwrap_err();
+        assert!(err.to_string().contains("no response_url"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn generate_image_inline_completes_without_polling() {
+        // First reply: submit already COMPLETED. Second reply: the result fetch.
+        let server = MockServer::start(vec![
+            MockResponse::ok_json(
+                r#"{"status":"COMPLETED","response_url":"{{BASE}}/req/r2"}"#,
+            ),
+            MockResponse::ok_json(r#"{"images":[{"url":"https://x/i.png"}]}"#),
+        ])
+        .await;
+        let p = provider(server.base_url().to_string());
+        let out = p
+            .generate_image("fal-ai/flux", &json!({ "prompt": "cat" }))
+            .await
+            .unwrap();
+        assert_eq!(out["data"][0]["url"], json!("https://x/i.png"));
+        // submit + result only; the terminal status skips the poll loop.
+        assert_eq!(server.request_count(), 2);
+        assert_eq!(server.requests()[1].path, "/req/r2");
+    }
+
+    #[tokio::test]
+    async fn poll_video_succeeded_fetches_and_normalizes_result() {
+        // status → COMPLETED, then result fetch.
+        let server = MockServer::start(vec![
+            MockResponse::ok_json(r#"{"status":"COMPLETED"}"#),
+            MockResponse::ok_json(r#"{"video":{"url":"https://x/v.mp4"}}"#),
+        ])
+        .await;
+        let p = provider(server.base_url().to_string());
+        let ref_url = format!("{}/req/r3", server.base_url());
+        let job = p.poll_video(&ref_url).await.unwrap();
+        assert_eq!(job.status, JobStatus::Succeeded);
+        assert_eq!(job.output.unwrap()["data"][0]["url"], json!("https://x/v.mp4"));
+
+        let reqs = server.requests();
+        // Status is polled at `{response_url}/status`.
+        assert_eq!(reqs[0].path, "/req/r3/status");
+    }
+
+    #[tokio::test]
+    async fn poll_video_failed_reports_error_without_result_fetch() {
+        let server = MockServer::always(MockResponse::ok_json(r#"{"status":"FAILED"}"#)).await;
+        let p = provider(server.base_url().to_string());
+        let ref_url = format!("{}/req/x", server.base_url());
+        // status() hits the mock; FAILED → error, no result fetch.
+        let job = p.poll_video(&ref_url).await.unwrap();
+        assert_eq!(job.status, JobStatus::Failed);
+        assert_eq!(job.error.as_deref(), Some("fal request failed"));
+    }
+
+    #[tokio::test]
+    async fn parse_json_maps_fastapi_detail_array() {
+        // Fal (FastAPI) validation errors: `detail` is an array of {loc,msg,type}.
+        let server = MockServer::always(MockResponse::json(
+            422,
+            r#"{"detail":[{"loc":["body","prompt"],"msg":"field required","type":"missing"}]}"#,
+        ))
+        .await;
+        let p = provider(server.base_url().to_string());
+        let err = p.submit_video("fal-ai/x", &json!({})).await.unwrap_err();
+        assert!(err.to_string().contains("field required"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn chat_is_unsupported() {
+        let p = provider("http://127.0.0.1:1".to_string());
+        assert!(p
+            .complete("m", &json!({}))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("chat is not supported"));
     }
 }

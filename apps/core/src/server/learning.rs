@@ -101,15 +101,19 @@ pub async fn score(State(state): State<ServerState>) -> Response {
     }
 }
 
-/// `POST /api/learn/synthesize` — distill + activate a skill from a conversation.
-/// Body: `{ "conversation_id": "...", "force": false }`. `force` is set only by a
-/// deliberate per-conversation user action; without it the call is a no-op when
-/// the global learning opt-in is off (consent gate).
+/// `POST /api/learn/synthesize` — distill a skill from a conversation and propose
+/// it in the approval inbox (direct activation only when the approval gate is
+/// off). Body: `{ "conversation_id": "...", "force": false }`. `force` is set
+/// only by a deliberate per-conversation user action; without it the call is a
+/// no-op when the global learning opt-in is off (consent gate). `force` never
+/// bypasses the approval inbox: this route is reachable with only the
+/// per-conversation READ ACL, and an approved skill becomes node-global active
+/// context for every user and agent (H13).
 #[utoipa::path(
     post,
     path = "/api/learn/synthesize",
     tag = "Learning",
-    summary = "distill + activate a skill from a conversation.",
+    summary = "distill a skill from a conversation and propose it for approval.",
     request_body = serde_json::Value,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
@@ -130,7 +134,11 @@ pub async fn synthesize(
         return resp;
     }
     let force = body.get("force").and_then(Value::as_bool).unwrap_or(false);
-    match ryu_learning::synthesize_skill(&learning_ctx(&state), cid, force).await {
+    // Provenance (M17): stamp the verified caller into the skill's front-matter so
+    // the approver sees who requested this node-global skill. `None` on an unbound
+    // personal node (no identity layer).
+    let requested_by = caller.as_ref().map(|c| c.user_id.as_str());
+    match ryu_learning::synthesize_skill(&learning_ctx(&state), cid, force, requested_by).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(e) => err(e),
     }

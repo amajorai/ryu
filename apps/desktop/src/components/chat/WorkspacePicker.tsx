@@ -118,7 +118,6 @@ export function WorkspacePicker({
 }: WorkspacePickerProps) {
 	const folder = useWorkspaceStore((s) => s.folder);
 	const setFolder = useWorkspaceStore((s) => s.setFolder);
-	const clearFolder = useWorkspaceStore((s) => s.clearFolder);
 	const worktreeMode = useWorkspaceStore((s) => s.worktreeMode);
 	const worktreeBranch = useWorkspaceStore((s) => s.worktreeBranch);
 	const setWorktreeMode = useWorkspaceStore((s) => s.setWorktreeMode);
@@ -135,11 +134,13 @@ export function WorkspacePicker({
 
 	const handleSelectBrowsed = useCallback(
 		(selected: string) => {
+			// Browsed paths come from Core's own listing; on a transient activation
+			// failure keep the current folder rather than clearing it.
 			setFolder(selected).catch(() => {
-				clearFolder();
+				// no-op
 			});
 		},
-		[setFolder, clearFolder]
+		[setFolder]
 	);
 
 	// Branch state.
@@ -680,7 +681,7 @@ function CreateBranchDialog({
 				/>
 				{error && <p className="text-[12px] text-destructive">{error}</p>}
 				<DialogFooter>
-					<DialogClose render={<Button variant="outline" />}>
+					<DialogClose render={<Button variant="ghost" />}>
 						Cancel
 					</DialogClose>
 					<Button

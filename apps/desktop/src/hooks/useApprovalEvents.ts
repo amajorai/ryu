@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { sileo } from "sileo";
 import {
 	type ApprovalEvent,
 	streamApprovalEvents,
@@ -57,7 +57,7 @@ export function useApprovalEvents(): void {
 
 		const onEvent = (event: ApprovalEvent) => {
 			if (event.type === "created") {
-				sileo.info({
+				toast.info({
 					title: "Approval needed",
 					description: event.request.title,
 				});

@@ -1,5 +1,5 @@
-import { stat } from "@tauri-apps/plugin-fs";
 import { create } from "zustand";
+import { listDirectory } from "@/src/lib/api/workspace.ts";
 import { isLocalNode, useNodeStore } from "./useNodeStore.ts";
 
 const STORAGE_KEY = "ryu_workspace_folder";
@@ -198,16 +198,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 	worktreeBranch: loadWorktreeBranch(),
 
 	setFolder: async (path) => {
-		// Validate against the desktop's own disk ONLY for the local node. A remote
-		// node's paths don't exist on this machine, so a local `stat` would falsely
-		// reject them; the node-side list endpoint already validated existence when
-		// the browser surfaced the path.
+		// Validate existence via Core (which OWNS the filesystem), not Tauri's fs
+		// plugin. The desktop's fs scope is intentionally narrow, so `stat` on an
+		// arbitrary project folder is DENIED and throws — which made every caller's
+		// `.catch()` fire and wrongly drop the folder. `listDirectory` 404s on a
+		// missing/non-directory path; we probe only and never adopt its returned
+		// path (old Core hands back a verbatim `\\?\` form we don't want stored).
+		// Only for the local node: a remote node's paths don't exist on this
+		// machine and the node-side list already validated them when the browser
+		// surfaced the path.
 		const activeNode = useNodeStore.getState().getActiveNode();
 		if (isLocalNode(activeNode)) {
-			const info = await stat(path).catch(() => null);
-			if (!info?.isDirectory) {
-				throw new Error(`Not a valid directory: ${path}`);
-			}
+			await listDirectory(
+				{ url: activeNode.url, token: activeNode.token ?? null },
+				path
+			);
 		}
 		localStorage.setItem(STORAGE_KEY, path);
 		set((state) => {

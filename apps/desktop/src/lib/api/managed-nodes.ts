@@ -27,9 +27,12 @@ export interface ManagedNode {
 	orgId: string;
 	orgName: string | null;
 	/**
-	 * Per-org gateway data-plane token this managed node authenticates to the
-	 * hosted fleet with (WS4). Null until the control plane (WS3/WS5) mints and
-	 * returns it, so hydration degrades gracefully on an older server.
+	 * Bearer the desktop presents to this node's remote Core. It is a short-lived
+	 * per-request Better-Auth user JWT the control plane mints and returns ONCE at
+	 * the list level (a single `token` on the response envelope, not per node) —
+	 * every node authorizes it offline via the control-plane JWKS + the user's org
+	 * claim. Null on an older server that does not return one, so a token-protected
+	 * node degrades to unauthenticated (and simply won't be auto-selected).
 	 */
 	token: string | null;
 	/** Publicly-reachable Core base URL the node advertised on registration. */
@@ -61,8 +64,15 @@ export async function fetchManagedNodes(): Promise<ManagedNode[]> {
 		if (!resp.ok) {
 			return [];
 		}
-		const json = (await resp.json()) as { nodes?: ManagedNode[] };
-		return Array.isArray(json.nodes) ? json.nodes : [];
+		const json = (await resp.json()) as {
+			nodes?: ManagedNode[];
+			token?: string | null;
+		};
+		const list = Array.isArray(json.nodes) ? json.nodes : [];
+		// The auth token is delivered once at the envelope level; attach it to every
+		// node so hydrateCloudNodes forwards a non-null bearer to probe/MCP/realtime.
+		const shared = typeof json.token === "string" ? json.token : null;
+		return list.map((n) => ({ ...n, token: n.token ?? shared }));
 	} catch {
 		// Server unreachable / offline — degrade to no managed nodes.
 		return [];

@@ -1,0 +1,57 @@
+{
+	"id": "com.ryu.simulator",
+	"name": "Simulators",
+	"version": "1.0.0",
+	"description": "Drive iOS Simulators (macOS + Xcode) and Android Emulators from a workspace tab. Ryu runs the device-control toolchain (`simctl`, `adb`) as a local sidecar and exposes the grant-gated `simulator.control` capability: list/boot devices, install & launch apps, open deep links, screenshot, and (Android) tap/swipe/type. The desktop Simulator panel shows whichever platform the connected node supports.",
+	"tagline": "iOS Simulator & Android Emulator control for agents",
+	"category": "Automation",
+	"engines": {
+		"ryu": ">=0.0.1"
+	},
+	"runnables": [],
+	"sidecars": [
+		{
+			"name": "simulator",
+			"process": {
+				"kind": "local",
+				"command": "ryu-simulator",
+				"command_env": "RYU_SIMULATOR_BIN",
+				"port_env": "RYU_SIMULATOR_PORT"
+			},
+			"port": 7994,
+			"health_path": "/health",
+			"lazy": true,
+			"idle_stop_secs": 300,
+			"http": {
+				"mount": "/api/simulator",
+				"public_mount": "/api/simulator",
+				"routes": [
+					{ "path": "/" },
+					{ "path": "/health" },
+					{ "path": "/capabilities" },
+					{ "path": "/devices" },
+					{ "path": "/devices/:id/boot" },
+					{ "path": "/devices/:id/shutdown" },
+					{ "path": "/devices/:id/install" },
+					{ "path": "/devices/:id/launch" },
+					{ "path": "/devices/:id/openurl" },
+					{ "path": "/devices/:id/screenshot" },
+					{ "path": "/devices/:id/tap" },
+					{ "path": "/devices/:id/swipe" },
+					{ "path": "/devices/:id/text" },
+					{ "path": "/devices/:id/key" }
+				]
+			}
+		}
+	],
+	"provides": [
+		{
+			"capability": "simulator.control",
+			"version": "1.0.0",
+			"sidecar": "simulator",
+			"route": "/",
+			"grant": "simulator:control"
+		}
+	],
+	"permission_grants": ["simulator:control"]
+}

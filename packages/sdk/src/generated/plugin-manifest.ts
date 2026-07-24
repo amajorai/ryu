@@ -37,6 +37,10 @@ export type Surface = "gateway" | "core" | "desktop" | "island" | "mobile" | "ex
  */
 export interface PluginManifest {
 	/**
+	 * Primary brand accent color, hex (Ryu extension: `accentColor`).
+	 */
+	accentColor?: string | null;
+	/**
 	 * Activation events that lazily wake the plugin — VS-Code `activationEvents`.
 	 * Recognised tokens: `"*"` (always active / eager), `"onStartup"`, `"onChat"`,
 	 * `"onCommand:<id>"`, `"onRoute"` (fired the first time a lazy sidecar is woken
@@ -83,6 +87,12 @@ export interface PluginManifest {
 	 */
 	backend_sha256?: string | null;
 	/**
+	 * Detail-page hero banner spec ({colors,style,seed}); opaque passthrough (Ryu ext).
+	 */
+	banner?: {
+		[k: string]: unknown;
+	};
+	/**
 	 * Human-readable capability strings (Ryu extension). When absent the detail
 	 * builder DERIVES these from `permission_grants` via
 	 * [`crate::schema::capabilities_from_grants`]; declared values are used verbatim.
@@ -126,6 +136,29 @@ export interface PluginManifest {
 	 */
 	homepage?: string | null;
 	/**
+	 * Icon-primitive id for the listing card (Ryu extension: `icon`). An
+	 * Iconify/icons0 `prefix:name`, a bare Hugeicons name, or a URL — resolved by
+	 * the shared `Icon` primitive. Distinct from `icon_url`: this is a GLYPH id the
+	 * card masks with `currentColor`, `icon_url` is a raster logo. When absent the
+	 * card falls back to `icon_url`, then a default glyph.
+	 */
+	icon?: string | null;
+	/**
+	 * CSS background for the icon square (Ryu extension: `iconBackground`).
+	 */
+	iconBackground?: string | null;
+	/**
+	 * Dithered-gradient background for the card's icon square (Ryu extension:
+	 * `iconDither`). Opaque passthrough `{ from, to?, direction? }` mirroring
+	 * dither-kit's `DitherGradient` props (`from`/`to` are a palette-colour name or
+	 * a hue number, `direction` is up|down|left|right). Kept as raw JSON like
+	 * `banner` so an untrusted/typo'd value never fails the manifest parse — the
+	 * render layer validates and falls back before painting.
+	 */
+	iconDither?: {
+		[k: string]: unknown;
+	};
+	/**
 	 * Logo URL (contract key `iconUrl`; Ryu extension).
 	 */
 	iconUrl?: string | null;
@@ -141,6 +174,20 @@ export interface PluginManifest {
 	 * SPDX license identifier (Claude `license`).
 	 */
 	license?: string | null;
+	/**
+	 * Declarative **stdio MCP servers** this plugin registers into Core's MCP
+	 * registry on enable and deregisters on disable/uninstall. Each entry is a
+	 * [`McpServerDecl`] keyed by the server name the registry uses (the same key a
+	 * user's `mcp.json` would use). This is the manifest-owned successor to Core's
+	 * hardcoded built-in MCP servers: a plugin declares its server here instead of
+	 * Core baking a `com.ryu.<app>` server into `builtin_servers()`. Empty for the
+	 * common case (a plugin that ships no MCP server). A user `mcp.json` entry with
+	 * the same name still wins (user-overrides-builtin precedence is preserved by
+	 * the registry).
+	 */
+	mcp_servers?: {
+		[k: string]: McpServerDecl;
+	};
 	/**
 	 * Human-readable display name shown in the app store / launcher.
 	 */
@@ -238,6 +285,15 @@ export interface PluginManifest {
 	 * common case (no bundled process).
 	 */
 	sidecars?: SidecarSpec[];
+	/**
+	 * Provenance hint for the marketplace index: `"builtin"`, an `owner/repo`
+	 * slug, or a git/raw URL an external plugin ships from. Absent ⇒ `"builtin"`.
+	 * This is an index HINT only — Core derives the real trust tier from
+	 * `plugins::builtins` membership at runtime, NOT from this field. Consumed by
+	 * the marketplace generator (`tools/mirror-plugins.sh`) to populate each
+	 * entry's `source`/`builtin` pair.
+	 */
+	source?: string | null;
 	/**
 	 * Per-surface support + UI declaration — the richer successor to [`targets`].
 	 *
@@ -350,6 +406,21 @@ export interface Contributes {
 	 */
 	settings_tabs?: unknown[];
 	/**
+	 * App-registered sidebar **buttons** — a single nav row (e.g. Memory →
+	 * `/library/memory`). The button-shaped sibling of [`Contributes::sidebar_sections`]
+	 * (no live list, just a label/icon + a client route). See [`SidebarButtonContribution`].
+	 */
+	sidebar_buttons?: SidebarButtonContribution[];
+	/**
+	 * App-registered sidebar **sections** — a header plus a live list of rows the
+	 * shell fetches from a declared Core `/api/` path. Lets an app own its sidebar
+	 * section (Canvas/Whiteboard/Meetings recent-doc lists) instead of the shell
+	 * hardcoding it. Self-contained + opaque `spec` (see [`SidebarSectionContribution`]),
+	 * so a new section capability needs no Core change; served + tagged with the
+	 * owning `plugin` id at `GET /api/plugins/contributions`.
+	 */
+	sidebar_sections?: SidebarSectionContribution[];
+	/**
 	 * Slash commands the plugin contributes (e.g. `/goal`). The desktop maps the
 	 * command to a `plugin_flags`/message action; the plugin's turn hook reads
 	 * the resulting message. Served + rendered the same way.
@@ -409,6 +480,70 @@ export interface ContributionId {
 	 * Optional display title (e.g. the palette label for a command).
 	 */
 	title?: string | null;
+}
+/**
+ * One app-registered **sidebar button** — a single nav row (the button-shaped
+ * sibling of [`SidebarSectionContribution`]). No live list: just a label/icon and a
+ * client route the shell opens with `openTab`. Migrates hardcoded header-chrome
+ * buttons (e.g. Memory) to the owning app.
+ */
+export interface SidebarButtonContribution {
+	/**
+	 * Optional glyph id resolved by the shell's Icon primitive.
+	 */
+	icon?: string | null;
+	/**
+	 * Stable id for this button within the plugin.
+	 */
+	id: string;
+	/**
+	 * Optional placement hint among the sidebar buttons.
+	 */
+	order?: number | null;
+	/**
+	 * The client route this button opens (e.g. `"/library/memory"`).
+	 */
+	target: string;
+	/**
+	 * Button label.
+	 */
+	title: string;
+}
+/**
+ * One app-registered **sidebar section** — a header plus a live list of rows the
+ * desktop's compact sidebar renderer draws (the app-owned replacement for the
+ * hardcoded Canvas/Whiteboard/Meetings sections). A typed envelope around an opaque
+ * `spec` (the `SidebarSectionSpec` in `@ryu/app-host/views`: a `ViewSource` for the
+ * rows, an `itemTarget` route template for `openTab`, optional `itemActions` and a
+ * `create` action). Core stores it verbatim and tags it with the owning `plugin` id;
+ * the `spec` stays opaque so a new section capability is a renderer change, not a
+ * Core change.
+ */
+export interface SidebarSectionContribution {
+	/**
+	 * Optional glyph id resolved by the shell's Icon primitive (Iconify/Hugeicons).
+	 */
+	icon?: string | null;
+	/**
+	 * Stable id for this section within the plugin (namespaced into the shell's
+	 * section key as `plugin:<pluginId>:<id>`).
+	 */
+	id: string;
+	/**
+	 * Optional placement hint among the sidebar sections (lower = higher up).
+	 */
+	order?: number | null;
+	/**
+	 * The opaque section spec (source/itemTarget/itemActions/create). Interpreted by
+	 * the desktop renderer, never by Core. Absent = a header with no rows.
+	 */
+	spec?: {
+		[k: string]: unknown;
+	};
+	/**
+	 * Header label shown in the sidebar and the Customize dialog.
+	 */
+	title: string;
 }
 /**
  * A server-side chat turn hook contributed by a plugin. The `code` is a JS body
@@ -545,6 +680,51 @@ export interface EnginesReq {
 	 * unsatisfied requirement causes the loader to reject the manifest.
 	 */
 	ryu: string;
+}
+/**
+ * One declarative **stdio MCP server** a plugin registers (see
+ * [`PluginManifest::mcp_servers`]).
+ *
+ * This is the manifest-side, dependency-free mirror of Core's runtime
+ * `McpServerConfig`: pure data (schemars/serde only) so it can live in
+ * kernel-contracts, with Core lowering it into its registry type on enable. A
+ * server is spawned per request as `command args…` (stdio); `command_env` lets
+ * the manifest name an env var Core resolves to an absolute binary path
+ * (e.g. `RYU_GHOST_BIN`) so a downloaded `~/.ryu/bin` binary can override the
+ * bare `command`.
+ */
+export interface McpServerDecl {
+	/**
+	 * Arguments passed to the command.
+	 */
+	args?: string[];
+	/**
+	 * Executable to spawn (e.g. `npx`, an absolute path, or a `~/.ryu/bin` name).
+	 */
+	command: string;
+	/**
+	 * Optional env var whose value, when set, OVERRIDES [`command`] with an
+	 * absolute binary path. Lets a plugin ship a bare `command` that Core repoints
+	 * at a profile-specific downloaded binary. Absent ⇒ use `command` verbatim.
+	 *
+	 * [`command`]: McpServerDecl::command
+	 */
+	command_env?: string | null;
+	/**
+	 * Optional human description for the MCP listing endpoint.
+	 */
+	description?: string | null;
+	/**
+	 * When false, the server is registered but skipped by list/call. Defaults to
+	 * true so a bare `{ command }` entry just works.
+	 */
+	enabled?: boolean;
+	/**
+	 * Extra environment variables for the server process.
+	 */
+	env?: {
+		[k: string]: string;
+	};
 }
 /**
  * The single, typed, **deny-by-default** permission set a plugin manifest
@@ -945,6 +1125,20 @@ export interface SidecarSpec {
 	 * How Core obtains and runs the process.
 	 */
 	process: BinarySpec | ExternalRuntimeConfig1 | LocalProcessSpec | NodeProcessSpec;
+	/**
+	 * Optional **model-provider** declaration: when present, this sidecar serves an
+	 * OpenAI-compatible endpoint and Core registers it as a selectable provider once
+	 * the process reports healthy, then deregisters it when the plugin is disabled or
+	 * uninstalled. This is what makes a third-party *auth bridge* possible without a
+	 * Core change: the plugin performs its own login/refresh, serves `/v1`, and
+	 * declares that fact here. Absent = the sidecar is not a model provider.
+	 *
+	 * A sidecar cannot self-register: it holds only `RYU_EXT_TOKEN` (scoped to the
+	 * ext-proxy hop and `/api/host/*`), and the host-RPC vocabulary has no
+	 * provider-registration method. Registration is therefore Core-side, driven by
+	 * this declaration.
+	 */
+	provides_provider?: ProviderRegistrationSpec | null;
 }
 /**
  * Declares the host-API grant subset a sidecar *process* may exercise via the
@@ -1068,6 +1262,47 @@ export interface LocalProcessSpec {
  */
 export interface NodeProcessSpec {
 	kind: "node";
+}
+/**
+ * Declares that a [`SidecarSpec`] serves an OpenAI-compatible model endpoint Core
+ * should register as a provider while the sidecar is healthy.
+ *
+ * Security posture: the declared [`id`] is validated against the built-in provider
+ * table at registration and a collision is REFUSED, never merged. Without that guard
+ * a plugin could claim a built-in id (`openai-codex`, `anthropic`) and silently
+ * redirect the user's subscription traffic — and their live bearer token — to an
+ * attacker-controlled `baseUrl`. Core also stamps [`OWNER_FIELD`] into the written
+ * entry so deregistration can only ever remove an entry this plugin created.
+ *
+ * [`id`]: ProviderRegistrationSpec::id
+ * [`OWNER_FIELD`]: crate::schema::PROVIDER_OWNER_FIELD
+ */
+export interface ProviderRegistrationSpec {
+	/**
+	 * Pi `api` type the endpoint speaks. Defaults to `"openai-completions"`.
+	 */
+	api?: string | null;
+	/**
+	 * Path prefix appended to `http://127.0.0.1:<port>` to form the provider's
+	 * `baseUrl`. Defaults to `"/v1"`.
+	 */
+	base_path?: string | null;
+	/**
+	 * Provider id as it appears in the model picker. Must not collide with a built-in
+	 * provider id, and must be a safe single token (lowercase alphanumerics, `-`, `_`).
+	 */
+	id: string;
+	/**
+	 * Human-readable label for the picker. Defaults to [`id`] when absent.
+	 *
+	 * [`id`]: ProviderRegistrationSpec::id
+	 */
+	label?: string | null;
+	/**
+	 * Optional model ids to seed the entry with, for an endpoint whose `GET /models`
+	 * discovery is unavailable or slow. Absent = rely on discovery.
+	 */
+	models?: string[];
 }
 /**
  * One [`PluginManifest::surfaces`] entry: the support level plus an optional UI

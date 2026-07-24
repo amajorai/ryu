@@ -19,7 +19,6 @@ import {
 	CheckmarkCircle02Icon,
 	Download01Icon,
 	Link01Icon,
-	WorkflowSquare01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { InstallProgressButton } from "@ryu/blocks/desktop/install-button";
@@ -28,6 +27,7 @@ import StoreCatalogLayout, {
 	StoreCardGrid,
 } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import StoreItemAction from "@ryu/marketplace/catalog/chrome/store-item-action";
+import { REALM_ICONS } from "@ryu/marketplace/catalog/realm-icons";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -39,14 +39,20 @@ import {
 } from "@ryu/ui/components/empty";
 import { toast } from "@ryu/ui/components/sileo";
 import { Spinner } from "@ryu/ui/components/spinner";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { useDebouncedValue } from "@/src/hooks/use-debounced-value.ts";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useWorkflowTemplatesCatalog } from "@/src/hooks/useWorkflowTemplatesCatalog.ts";
-import type {
-	WorkflowTemplateCategory,
-	WorkflowTemplateMeta,
+import {
+	fetchWorkflowTemplate,
+	type WorkflowEdge,
+	type WorkflowNode,
+	type WorkflowTemplateCategory,
+	type WorkflowTemplateMeta,
 } from "@/src/lib/api/workflows.ts";
+import WorkflowGraphPreview from "./WorkflowGraphPreview.tsx";
 
 const SEARCH_DEBOUNCE_MS = 200;
 
@@ -74,7 +80,7 @@ function TemplateBadges({ template }: { template: WorkflowTemplateMeta }) {
 		<>
 			<Badge variant="secondary">{humanizePattern(template.pattern)}</Badge>
 			<Badge variant="outline">
-				<HugeiconsIcon className="size-3" icon={WorkflowSquare01Icon} />
+				<HugeiconsIcon className="size-3" icon={REALM_ICONS.workflows} />
 				{template.nodeCount} {template.nodeCount === 1 ? "node" : "nodes"}
 			</Badge>
 			{template.tags.slice(0, 3).map((tag) => (
@@ -185,7 +191,7 @@ function TemplateList({
 			<Empty className="h-full p-6">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={WorkflowSquare01Icon} />
+						<HugeiconsIcon icon={REALM_ICONS.workflows} />
 					</EmptyMedia>
 					<EmptyTitle>No templates found</EmptyTitle>
 					<EmptyDescription>Try a different search.</EmptyDescription>
@@ -215,7 +221,7 @@ function TemplateList({
 								icon={
 									<HugeiconsIcon
 										className="size-5"
-										icon={WorkflowSquare01Icon}
+										icon={REALM_ICONS.workflows}
 									/>
 								}
 								key={template.id}
@@ -237,19 +243,23 @@ function TemplateDetailPanel({
 	installed,
 	error,
 	onInstall,
+	nodes,
+	edges,
 }: {
 	template: WorkflowTemplateMeta | null;
 	busy: boolean;
 	installed: boolean;
 	error: string | null;
 	onInstall: () => void;
+	nodes: WorkflowNode[];
+	edges: WorkflowEdge[];
 }) {
 	if (!template) {
 		return (
 			<Empty className="h-full">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={WorkflowSquare01Icon} />
+						<HugeiconsIcon icon={REALM_ICONS.workflows} />
 					</EmptyMedia>
 					<EmptyTitle>No template selected</EmptyTitle>
 					<EmptyDescription>
@@ -267,7 +277,7 @@ function TemplateDetailPanel({
 					<div className="flex min-w-0 items-center gap-3">
 						<HugeiconsIcon
 							className="size-8 shrink-0 text-muted-foreground"
-							icon={WorkflowSquare01Icon}
+							icon={REALM_ICONS.workflows}
 						/>
 						<h2 className="truncate font-semibold text-xl">{template.name}</h2>
 					</div>
@@ -301,6 +311,15 @@ function TemplateDetailPanel({
 					</p>
 				)}
 			</header>
+
+			{nodes.length > 0 ? (
+				<section className="flex flex-col gap-2">
+					<h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+						Workflow
+					</h3>
+					<WorkflowGraphPreview edges={edges} nodes={nodes} />
+				</section>
+			) : null}
 		</div>
 	);
 }
@@ -347,6 +366,19 @@ export default function WorkflowTemplatesSection({
 		return null;
 	}, [grouped, selectedId]);
 
+	// The list only carries meta (no graph); fetch the selected template's detail
+	// so the preview pane can draw its node/edge graph on a read-only canvas.
+	const activeNode = useActiveNode();
+	const detailQuery = useQuery({
+		queryKey: ["workflow-template-detail", selectedId, activeNode.url],
+		queryFn: () =>
+			fetchWorkflowTemplate(
+				{ url: activeNode.url, token: activeNode.token ?? null },
+				selectedId as string
+			),
+		enabled: selectedId !== null,
+	});
+
 	const handleInstall = async (template: WorkflowTemplateMeta) => {
 		setErrorId(null);
 		try {
@@ -366,8 +398,10 @@ export default function WorkflowTemplatesSection({
 			detail={
 				<TemplateDetailPanel
 					busy={pendingId === selectedId}
+					edges={detailQuery.data?.edges ?? []}
 					error={errorId === selectedId ? error : null}
 					installed={selectedId !== null && installedIds.has(selectedId)}
+					nodes={detailQuery.data?.nodes ?? []}
 					onInstall={() => {
 						if (selectedTemplate) {
 							handleInstall(selectedTemplate);

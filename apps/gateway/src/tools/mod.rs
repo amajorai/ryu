@@ -224,7 +224,13 @@ pub async fn run_tool_loop(
                     // conversation (ctx has only agent_id/user_id), so the principal
                     // stays fail-closed on a bound node — unchanged. The exec plane
                     // (`/v1/exec/tool`) is where the host conversation is threaded.
-                    .call_tool(name, input, ctx.agent_id.as_deref(), ctx.user_id.as_deref(), None)
+                    .call_tool(
+                        name,
+                        input,
+                        ctx.agent_id.as_deref(),
+                        ctx.user_id.as_deref(),
+                        None,
+                    )
                     .await
                 {
                     Ok(out) => {
@@ -483,7 +489,9 @@ mod tests {
             >,
         > {
             Box::pin(async move {
-                Err(ryu_gw_providers::ProviderError::Provider("no stream".into()))
+                Err(ryu_gw_providers::ProviderError::Provider(
+                    "no stream".into(),
+                ))
             })
         }
     }

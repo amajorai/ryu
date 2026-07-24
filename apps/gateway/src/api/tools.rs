@@ -41,3 +41,20 @@ pub async fn list_composio_tools(State(state): State<SharedState>) -> (StatusCod
 
     (StatusCode::OK, Json(body))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn empty_list_when_composio_disabled_not_a_404() {
+        let state = Arc::new(AppState::new_for_test_default());
+        let (status, Json(body)) = list_composio_tools(State(state)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["object"], "list");
+        assert_eq!(body["composio_enabled"], false);
+        assert_eq!(body["data"].as_array().unwrap().len(), 0);
+    }
+}

@@ -194,6 +194,8 @@ export function defineApp(options: DefineAppOptions): PluginManifest {
 		composer_controls: [],
 		settings_tabs: [],
 		slash_commands: [],
+		sidebar_sections: [],
+		sidebar_buttons: [],
 		widgets,
 	};
 

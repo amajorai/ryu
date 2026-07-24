@@ -19,3 +19,8 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 # rt + macros only: `spawn_blocking` needs the runtime, `#[tokio::test]` the macro.
 tokio = { version = "1", features = ["rt", "macros"] }
+
+[dev-dependencies]
+# Hermetic temp dirs for credential/auth-file tests (matches the workspace-wide
+# `tempfile = "3"` used by sibling core crates).
+tempfile = "3"

@@ -435,7 +435,8 @@ impl MemoryStore {
         )
         .context("creating memory_meta")?;
         let done: Option<String> = {
-            let mut stmt = conn.prepare("SELECT value FROM memory_meta WHERE key = 'owner_backfill_v1'")?;
+            let mut stmt =
+                conn.prepare("SELECT value FROM memory_meta WHERE key = 'owner_backfill_v1'")?;
             let mut rows = stmt.query([])?;
             match rows.next()? {
                 Some(r) => Some(r.get(0)?),
@@ -971,7 +972,10 @@ mod tests {
         let key = ResourceKey::owned(Some("u1"), Some("acme"));
         let unbound = MemoryVisibility::from_resource_key(&key, false);
         assert!(!unbound.node_bound);
-        assert_eq!(unbound.node_bound, MemoryVisibility::unrestricted().node_bound);
+        assert_eq!(
+            unbound.node_bound,
+            MemoryVisibility::unrestricted().node_bound
+        );
     }
 
     #[tokio::test]
@@ -1193,9 +1197,15 @@ mod tests {
             .await
             .unwrap();
         let bob_contents: Vec<&str> = bob.iter().map(|e| e.content.as_str()).collect();
-        assert!(!bob_contents.contains(&"alice private secret"), "Bob must not read Alice's user memory");
+        assert!(
+            !bob_contents.contains(&"alice private secret"),
+            "Bob must not read Alice's user memory"
+        );
         assert!(bob_contents.contains(&"bob private secret"));
-        assert!(bob_contents.contains(&"shared org policy"), "node-scope memory is shared");
+        assert!(
+            bob_contents.contains(&"shared org policy"),
+            "node-scope memory is shared"
+        );
 
         // Alice (bound node): her own + shared, not Bob's — no lockout on her data.
         let alice = store
@@ -1212,7 +1222,11 @@ mod tests {
             .list_visible(&filter, MemoryVisibility::unrestricted())
             .await
             .unwrap();
-        assert_eq!(unbound.len(), 3, "unbound node sees all facts (no filtering)");
+        assert_eq!(
+            unbound.len(),
+            3,
+            "unbound node sees all facts (no filtering)"
+        );
     }
 
     /// The bind-time `'local' → owner` backfill (the memory twin of the conversation
@@ -1235,7 +1249,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(before.is_empty(), "pre-backfill 'local' user row is invisible to a real caller (fail closed)");
+        assert!(
+            before.is_empty(),
+            "pre-backfill 'local' user row is invisible to a real caller (fail closed)"
+        );
 
         // Simulate the backfill's UPDATE ('local' → the local owner) directly.
         {
@@ -1254,7 +1271,11 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(after.len(), 1, "after backfill the owner reaches their legacy fact");
+        assert_eq!(
+            after.len(),
+            1,
+            "after backfill the owner reaches their legacy fact"
+        );
         assert_eq!(after[0].id, id);
         assert_eq!(after[0].owner_user_id.as_deref(), Some("alice"));
     }

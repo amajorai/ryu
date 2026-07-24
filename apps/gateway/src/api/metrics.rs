@@ -60,3 +60,42 @@ pub async fn get_concurrency(State(state): State<SharedState>) -> Json<Value> {
         "gates": gates,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn get_metrics_includes_provider_quota_snapshot() {
+        let state = Arc::new(AppState::new_for_test_default());
+        let Json(body) = get_metrics(State(state)).await;
+        // The quota map is always spliced in (empty until a provider reports).
+        assert!(body.get("provider_quota").is_some());
+    }
+
+    #[tokio::test]
+    async fn community_savings_exposes_only_safe_totals() {
+        let state = Arc::new(AppState::new_for_test_default());
+        let Json(body) = community_savings(State(state)).await;
+        // Fresh state: zero requests, zero cache traffic ⇒ rate defaults to 0.0.
+        assert_eq!(body["requests"], 0);
+        assert_eq!(body["cache_hit_rate"], 0.0);
+        // Must NOT leak per-provider maps / quota / keys.
+        assert!(body.get("provider_quota").is_none());
+        assert!(body.get("api_keys").is_none());
+    }
+
+    #[tokio::test]
+    async fn get_concurrency_reports_configured_limits() {
+        let state = Arc::new(AppState::new_for_test_default());
+        let Json(body) = get_concurrency(State(Arc::clone(&state))).await;
+        assert_eq!(body["enabled"], state.config.concurrency.enabled);
+        assert_eq!(
+            body["local_max_in_flight"],
+            state.config.concurrency.local_max_in_flight
+        );
+        assert!(body["gates"].is_object() || body["gates"].is_array());
+    }
+}

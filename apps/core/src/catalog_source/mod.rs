@@ -18,9 +18,10 @@ mod sources;
 
 pub use registry::{CatalogSourceRegistry, CustomSourceSpec, SourceMeta};
 pub use sources::{
-    with_buyer_token, HfSource, IntegrationsShSource, MarketplaceSource, ModelIndexSource,
-    OfficialMcpSource, OkfBundleSource, RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource,
-    SmitherySource, Source, SourceAuth, StubSource, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
+    integration_brand_slug, integrations_sh_brands, with_buyer_token, HfSource, IntegrationBrand,
+    IntegrationsShSource, MarketplaceSource, ModelIndexSource, OfficialMcpSource, OkfBundleSource,
+    RyuHostedMcpSource, RyuMarketplaceSource, SkillsShSource, SmitherySource, Source, SourceAuth,
+    StubSource, RYU_MARKETPLACE_API_ENV, SMITHERY_API_KEY_PREF,
 };
 
 use anyhow::{bail, Result};
@@ -151,4 +152,55 @@ pub trait CatalogSource {
         client: &reqwest::Client,
         id: &str,
     ) -> Result<InstallDescriptor>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_kind_as_str_and_display_agree_and_cover_all() {
+        for k in CatalogKind::ALL {
+            // Display delegates to as_str, so the two must be byte-identical.
+            assert_eq!(k.to_string(), k.as_str());
+            // Every wire form round-trips back through FromStr.
+            assert_eq!(k.as_str().parse::<CatalogKind>().unwrap(), k);
+        }
+        assert_eq!(CatalogKind::ALL.len(), 5);
+    }
+
+    #[test]
+    fn catalog_kind_from_str_is_trimmed_case_insensitive() {
+        assert_eq!("  MODEL ".parse::<CatalogKind>().unwrap(), CatalogKind::Model);
+        assert_eq!("Skill".parse::<CatalogKind>().unwrap(), CatalogKind::Skill);
+        assert_eq!(
+            "knowledge".parse::<CatalogKind>().unwrap(),
+            CatalogKind::Knowledge
+        );
+        // An unknown kind errors (not a silent default) and names the offender.
+        let err = "wat".parse::<CatalogKind>().unwrap_err().to_string();
+        assert!(err.contains("wat"), "error should name the bad kind: {err}");
+    }
+
+    #[test]
+    fn catalog_kind_serde_is_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&CatalogKind::Mcp).unwrap(),
+            "\"mcp\""
+        );
+        let k: CatalogKind = serde_json::from_str("\"plugin\"").unwrap();
+        assert_eq!(k, CatalogKind::Plugin);
+    }
+
+    #[test]
+    fn catalog_query_extra_str_reads_or_defaults_empty() {
+        let mut q = CatalogQuery::default();
+        assert_eq!(q.extra_str("task"), "", "absent key defaults to empty");
+        q.extra
+            .insert("task".into(), serde_json::json!("text-generation"));
+        assert_eq!(q.extra_str("task"), "text-generation");
+        // A non-string value is treated as absent (empty), never panics.
+        q.extra.insert("n".into(), serde_json::json!(42));
+        assert_eq!(q.extra_str("n"), "");
+    }
 }

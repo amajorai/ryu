@@ -53,8 +53,8 @@ use tokio::sync::Mutex;
 // Space's markdown pages get the same real semantic embeddings (the local
 // `llamacpp-embed` nomic server by default) the retrieval store uses, and a
 // single swap changes the model everywhere.
-use ryu_rag::{Embedder, Reranker};
 use ryu_kernel_contracts::ResourceKey;
+use ryu_rag::{Embedder, Reranker};
 
 /// Default embedding dimensionality for the in-memory/test store when the caller
 /// does not resolve a model registry. Production stores are opened through the
@@ -1013,7 +1013,8 @@ impl SpaceStore {
         let dims = DEFAULT_EMBED_DIMS;
         let conn = open_vec_connection(std::path::Path::new(":memory:"))?;
         Self::init_schema(&conn, dims)?;
-        let blob_root = std::env::temp_dir().join(format!("ryu-spaces-mem-{}", uuid::Uuid::new_v4()));
+        let blob_root =
+            std::env::temp_dir().join(format!("ryu-spaces-mem-{}", uuid::Uuid::new_v4()));
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             embedder: Arc::new(Mutex::new(Embedder::Local { dims })),
@@ -1418,18 +1419,19 @@ impl SpaceStore {
                 ":org": filter.org_id,
             },
             |row| {
-            let mode_str: String = row.get(6)?;
-            Ok(Space {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                document_count: row.get(5)?,
-                retrieval_mode: RetrievalMode::from_str(&mode_str),
-                system: row.get(7)?,
-            })
-        })?;
+                let mode_str: String = row.get(6)?;
+                Ok(Space {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    document_count: row.get(5)?,
+                    retrieval_mode: RetrievalMode::from_str(&mode_str),
+                    system: row.get(7)?,
+                })
+            },
+        )?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -1465,18 +1467,19 @@ impl SpaceStore {
                 ":org": filter.org_id,
             },
             |row| {
-            Ok(Document {
-                id: row.get(0)?,
-                space_id: row.get(1)?,
-                title: row.get(2)?,
-                created_at: row.get(3)?,
-                chunk_count: row.get(4)?,
-                kind: row.get(5)?,
-                parent_id: row.get(6)?,
-                mime: row.get(7)?,
-                byte_size: row.get(8)?,
-            })
-        })?;
+                Ok(Document {
+                    id: row.get(0)?,
+                    space_id: row.get(1)?,
+                    title: row.get(2)?,
+                    created_at: row.get(3)?,
+                    chunk_count: row.get(4)?,
+                    kind: row.get(5)?,
+                    parent_id: row.get(6)?,
+                    mime: row.get(7)?,
+                    byte_size: row.get(8)?,
+                })
+            },
+        )?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -1522,7 +1525,17 @@ impl SpaceStore {
         let mode = RetrievalMode::from_str(&mode_str);
 
         upsert_document_row(
-            &tx, &document_id, space_id, title, now, content, "page", None, None, None, None,
+            &tx,
+            &document_id,
+            space_id,
+            title,
+            now,
+            content,
+            "page",
+            None,
+            None,
+            None,
+            None,
             tenancy,
         )?;
 
@@ -1756,7 +1769,17 @@ impl SpaceStore {
             anyhow::bail!("space '{space_id}' not found");
         }
         upsert_document_row(
-            &conn, &document_id, space_id, title, now, "", kind, parent_id, None, None, None,
+            &conn,
+            &document_id,
+            space_id,
+            title,
+            now,
+            "",
+            kind,
+            parent_id,
+            None,
+            None,
+            None,
             tenancy,
         )?;
         conn.execute(
@@ -1774,7 +1797,11 @@ impl SpaceStore {
     /// deleted individually and are skipped by the danger-zone bulk clear. Called
     /// idempotently at startup, so a matching row is reused and its `system` flag
     /// is (re-)asserted. Returns the space id.
-    pub async fn ensure_system_space(&self, name: &str, description: Option<&str>) -> Result<String> {
+    pub async fn ensure_system_space(
+        &self,
+        name: &str,
+        description: Option<&str>,
+    ) -> Result<String> {
         let conn = self.conn.lock().await;
         let existing: Option<String> = conn
             .query_row(
@@ -3488,9 +3515,17 @@ mod tests {
     async fn documents_are_filtered_per_owner_on_bound_node() {
         let store = SpaceStore::open_in_memory().unwrap();
         // Alice owns the space + one document; Bob owns another document in it.
-        let space = store.create_space("Team", None, &owned("alice")).await.unwrap();
+        let space = store
+            .create_space("Team", None, &owned("alice"))
+            .await
+            .unwrap();
         let alice_doc = store
-            .ingest_document(&space, "Alice secret", "the launch code is 42", &owned("alice"))
+            .ingest_document(
+                &space,
+                "Alice secret",
+                "the launch code is 42",
+                &owned("alice"),
+            )
             .await
             .unwrap();
         let bob_doc = store
@@ -3500,24 +3535,42 @@ mod tests {
 
         // list_documents: Bob sees only his own doc; Alice only hers.
         let bob_view = store
-            .list_documents(&space, DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .list_documents(
+                &space,
+                DocFilter::for_caller(Some("bob"), Some("org1"), true),
+            )
             .await
             .unwrap();
         let bob_ids: Vec<&str> = bob_view.iter().map(|d| d.id.as_str()).collect();
         assert!(bob_ids.contains(&bob_doc.as_str()));
-        assert!(!bob_ids.contains(&alice_doc.as_str()), "Bob must not see Alice's private document");
+        assert!(
+            !bob_ids.contains(&alice_doc.as_str()),
+            "Bob must not see Alice's private document"
+        );
 
         let alice_view = store
-            .list_documents(&space, DocFilter::for_caller(Some("alice"), Some("org1"), true))
+            .list_documents(
+                &space,
+                DocFilter::for_caller(Some("alice"), Some("org1"), true),
+            )
             .await
             .unwrap();
         let alice_ids: Vec<&str> = alice_view.iter().map(|d| d.id.as_str()).collect();
-        assert!(alice_ids.contains(&alice_doc.as_str()), "no lockout: Alice reaches her own document");
+        assert!(
+            alice_ids.contains(&alice_doc.as_str()),
+            "no lockout: Alice reaches her own document"
+        );
         assert!(!alice_ids.contains(&bob_doc.as_str()));
 
         // Spaces RAG search: a chunk from Alice's doc never surfaces for Bob.
         let bob_hits = store
-            .search_ext(&space, "launch code", 10, Some(false), DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .search_ext(
+                &space,
+                "launch code",
+                10,
+                Some(false),
+                DocFilter::for_caller(Some("bob"), Some("org1"), true),
+            )
             .await
             .unwrap();
         assert!(
@@ -3529,7 +3582,11 @@ mod tests {
             .list_documents(&space, DocFilter::unrestricted())
             .await
             .unwrap();
-        assert_eq!(all.len(), 2, "unbound/in-process listing sees every document");
+        assert_eq!(
+            all.len(),
+            2,
+            "unbound/in-process listing sees every document"
+        );
     }
 
     /// By-id ACL link: the document choke point STAMPS the owner, and
@@ -3541,7 +3598,10 @@ mod tests {
     #[tokio::test]
     async fn create_stamps_owner_for_the_by_id_acl() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("S", None, &owned("alice")).await.unwrap();
+        let space = store
+            .create_space("S", None, &owned("alice"))
+            .await
+            .unwrap();
 
         let alice_doc = store
             .create_page(&space, "Owned", &owned("alice"))
@@ -3569,8 +3629,14 @@ mod tests {
     #[tokio::test]
     async fn list_spaces_filters_owner_but_keeps_system_shared() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let alice_space = store.create_space("Alice", None, &owned("alice")).await.unwrap();
-        let _bob_space = store.create_space("Bob", None, &owned("bob")).await.unwrap();
+        let alice_space = store
+            .create_space("Alice", None, &owned("alice"))
+            .await
+            .unwrap();
+        let _bob_space = store
+            .create_space("Bob", None, &owned("bob"))
+            .await
+            .unwrap();
         let sys = store.ensure_system_space("Artifacts", None).await.unwrap();
 
         let bob_view = store
@@ -3578,8 +3644,14 @@ mod tests {
             .await
             .unwrap();
         let ids: Vec<&str> = bob_view.iter().map(|s| s.id.as_str()).collect();
-        assert!(!ids.contains(&alice_space.as_str()), "Bob must not see Alice's private space");
-        assert!(ids.contains(&sys.as_str()), "system space stays shared to every member");
+        assert!(
+            !ids.contains(&alice_space.as_str()),
+            "Bob must not see Alice's private space"
+        );
+        assert!(
+            ids.contains(&sys.as_str()),
+            "system space stays shared to every member"
+        );
     }
 
     /// The link graph must not leak another member's private document node, title,
@@ -3589,10 +3661,19 @@ mod tests {
     #[tokio::test]
     async fn graph_filters_private_nodes_and_edges_on_bound_node() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Shared", None, &owned("alice")).await.unwrap();
+        let space = store
+            .create_space("Shared", None, &owned("alice"))
+            .await
+            .unwrap();
         // Alice's private page links to Bob's private page.
-        let alice_doc = store.create_page(&space, "AlicePriv", &owned("alice")).await.unwrap();
-        let bob_doc = store.create_page(&space, "BobPriv", &owned("bob")).await.unwrap();
+        let alice_doc = store
+            .create_page(&space, "AlicePriv", &owned("alice"))
+            .await
+            .unwrap();
+        let bob_doc = store
+            .create_page(&space, "BobPriv", &owned("bob"))
+            .await
+            .unwrap();
         store
             .update_document(&alice_doc, "AlicePriv", "Secret note about [[BobPriv]].")
             .await
@@ -3601,7 +3682,10 @@ mod tests {
         // Bound node, viewed as Bob: Alice's node/title and the edge originating
         // from Alice's body must be absent.
         let bob_graph = store
-            .space_graph(&space, DocFilter::for_caller(Some("bob"), Some("org1"), true))
+            .space_graph(
+                &space,
+                DocFilter::for_caller(Some("bob"), Some("org1"), true),
+            )
             .await
             .unwrap();
         assert!(
@@ -3629,7 +3713,9 @@ mod tests {
         assert!(full.nodes.iter().any(|n| n.id == alice_doc));
         assert!(full.nodes.iter().any(|n| n.id == bob_doc));
         assert!(
-            full.edges.iter().any(|e| e.src == alice_doc && e.dst == bob_doc),
+            full.edges
+                .iter()
+                .any(|e| e.src == alice_doc && e.dst == bob_doc),
             "unrestricted graph keeps the cross-owner edge"
         );
     }
@@ -3639,17 +3725,27 @@ mod tests {
     #[tokio::test]
     async fn space_access_meta_reads_owner_and_system_flag() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let alice_space = store.create_space("Alice", None, &owned("alice")).await.unwrap();
+        let alice_space = store
+            .create_space("Alice", None, &owned("alice"))
+            .await
+            .unwrap();
         let sys = store.ensure_system_space("Artifacts", None).await.unwrap();
 
-        let meta = store.space_access_meta(&alice_space).await.unwrap().unwrap();
+        let meta = store
+            .space_access_meta(&alice_space)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(meta.owner_user_id.as_deref(), Some("alice"));
         assert_eq!(meta.org_id.as_deref(), Some("org1"));
         assert!(!meta.system);
 
         let sys_meta = store.space_access_meta(&sys).await.unwrap().unwrap();
         assert!(sys_meta.system, "system space is flagged");
-        assert!(sys_meta.owner_user_id.is_none(), "system space has no owner");
+        assert!(
+            sys_meta.owner_user_id.is_none(),
+            "system space has no owner"
+        );
 
         assert!(store.space_access_meta("nope").await.unwrap().is_none());
     }
@@ -3686,9 +3782,18 @@ mod tests {
     #[tokio::test]
     async fn clear_all_spaces_preserves_meetings_space() {
         let store = SpaceStore::open_in_memory().unwrap();
-        store.create_space("Notes", None, &DocOwner::unattributed()).await.unwrap();
-        store.create_space("Research", None, &DocOwner::unattributed()).await.unwrap();
-        store.create_space(MEETINGS_SPACE_NAME, None, &DocOwner::unattributed()).await.unwrap();
+        store
+            .create_space("Notes", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        store
+            .create_space("Research", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        store
+            .create_space(MEETINGS_SPACE_NAME, None, &DocOwner::unattributed())
+            .await
+            .unwrap();
 
         // The hidden Meetings space is excluded from the count.
         assert_eq!(store.count_spaces().await.unwrap(), 2);
@@ -3714,9 +3819,7 @@ mod tests {
         let read = read_blob(&root, &sha1).unwrap();
         assert_eq!(read.as_deref(), Some(&bytes[..]));
         // Unknown sha reads as absent, not error.
-        assert!(read_blob(&root, "0".repeat(64).as_str())
-            .unwrap()
-            .is_none());
+        assert!(read_blob(&root, "0".repeat(64).as_str()).unwrap().is_none());
     }
 
     #[tokio::test]
@@ -3731,13 +3834,26 @@ mod tests {
         // ensure_* is idempotent: same name reuses the row.
         let again = store.ensure_system_space("Artifacts", None).await.unwrap();
         assert_eq!(artifacts, again);
-        store.create_space("Notes", None, &DocOwner::unattributed()).await.unwrap();
-        assert_eq!(store.count_spaces().await.unwrap(), 1, "system space uncounted");
+        store
+            .create_space("Notes", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.count_spaces().await.unwrap(),
+            1,
+            "system space uncounted"
+        );
 
         // A file document stores its bytes in the blob store and stays retrievable.
         let png = b"\x89PNG\r\n\x1a\n binary artifact bytes";
         let doc = store
-            .create_file(&artifacts, "chart.png", png, "image/png", &DocOwner::unattributed())
+            .create_file(
+                &artifacts,
+                "chart.png",
+                png,
+                "image/png",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         let meta = store.get_file_meta(&doc).await.unwrap().unwrap();
@@ -3759,10 +3875,16 @@ mod tests {
     #[tokio::test]
     async fn page_create_edit_search_delete() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Notes", None, &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("Notes", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
 
         // New empty page.
-        let doc = store.create_page(&space, "Untitled", &DocOwner::unattributed()).await.unwrap();
+        let doc = store
+            .create_page(&space, "Untitled", &DocOwner::unattributed())
+            .await
+            .unwrap();
         let got = store.get_document(&doc).await.unwrap().unwrap();
         assert_eq!(got.title, "Untitled");
         assert_eq!(got.source, "");
@@ -3836,9 +3958,18 @@ mod tests {
     #[tokio::test]
     async fn wiki_links_resolve_and_backlinks_round_trip() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None, &DocOwner::unattributed()).await.unwrap();
-        let a = store.create_page(&space, "Alpha", &DocOwner::unattributed()).await.unwrap();
-        let b = store.create_page(&space, "Bravo", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("Wiki", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let a = store
+            .create_page(&space, "Alpha", &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let b = store
+            .create_page(&space, "Bravo", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&a, "Alpha", "Alpha links to [[Bravo]] here.")
             .await
@@ -3861,8 +3992,14 @@ mod tests {
     #[tokio::test]
     async fn pending_link_resolves_when_target_created() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None, &DocOwner::unattributed()).await.unwrap();
-        let a = store.create_page(&space, "Alpha", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("Wiki", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let a = store
+            .create_page(&space, "Alpha", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&a, "Alpha", "Refers to [[Ghost]] which is missing.")
             .await
@@ -3872,23 +4009,41 @@ mod tests {
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out.len(), 1);
         assert!(out[0].dst_doc_id.is_none());
-        let graph = store.space_graph(&space, DocFilter::unrestricted()).await.unwrap();
+        let graph = store
+            .space_graph(&space, DocFilter::unrestricted())
+            .await
+            .unwrap();
         assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Ghost"));
 
         // Creating the target page back-fills the pending link.
-        let ghost = store.create_page(&space, "Ghost", &DocOwner::unattributed()).await.unwrap();
+        let ghost = store
+            .create_page(&space, "Ghost", &DocOwner::unattributed())
+            .await
+            .unwrap();
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out[0].dst_doc_id.as_deref(), Some(ghost.as_str()));
-        let graph = store.space_graph(&space, DocFilter::unrestricted()).await.unwrap();
+        let graph = store
+            .space_graph(&space, DocFilter::unrestricted())
+            .await
+            .unwrap();
         assert!(!graph.nodes.iter().any(|n| n.pending));
     }
 
     #[tokio::test]
     async fn rename_target_unresolves_then_reresolves() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None, &DocOwner::unattributed()).await.unwrap();
-        let a = store.create_page(&space, "Alpha", &DocOwner::unattributed()).await.unwrap();
-        let b = store.create_page(&space, "Bravo", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("Wiki", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let a = store
+            .create_page(&space, "Alpha", &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let b = store
+            .create_page(&space, "Bravo", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&a, "Alpha", "Points at [[Bravo]].")
             .await
@@ -3913,9 +4068,18 @@ mod tests {
     #[tokio::test]
     async fn expand_by_links_reaches_linked_document_chunks() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None, &DocOwner::unattributed()).await.unwrap();
-        let a = store.create_page(&space, "Alpha", &DocOwner::unattributed()).await.unwrap();
-        let b = store.create_page(&space, "Bravo", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("Wiki", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let a = store
+            .create_page(&space, "Alpha", &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let b = store
+            .create_page(&space, "Bravo", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&a, "Alpha", "Alpha content links [[Bravo]].")
             .await
@@ -3940,9 +4104,18 @@ mod tests {
     #[tokio::test]
     async fn delete_document_turns_inbound_links_pending() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("Wiki", None, &DocOwner::unattributed()).await.unwrap();
-        let a = store.create_page(&space, "Alpha", &DocOwner::unattributed()).await.unwrap();
-        let b = store.create_page(&space, "Bravo", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("Wiki", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let a = store
+            .create_page(&space, "Alpha", &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let b = store
+            .create_page(&space, "Bravo", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&a, "Alpha", "See [[Bravo]].")
             .await
@@ -3953,15 +4126,24 @@ mod tests {
         let out = store.get_outgoing_links(&a).await.unwrap();
         assert_eq!(out.len(), 1);
         assert!(out[0].dst_doc_id.is_none());
-        let graph = store.space_graph(&space, DocFilter::unrestricted()).await.unwrap();
+        let graph = store
+            .space_graph(&space, DocFilter::unrestricted())
+            .await
+            .unwrap();
         assert!(graph.nodes.iter().any(|n| n.pending && n.title == "Bravo"));
     }
 
     #[tokio::test]
     async fn reindex_clears_pending_and_restamps_model() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("R", None, &DocOwner::unattributed()).await.unwrap();
-        let doc = store.create_page(&space, "T", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("R", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let doc = store
+            .create_page(&space, "T", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&doc, "T", "hello world content here")
             .await
@@ -3997,8 +4179,14 @@ mod tests {
     #[tokio::test]
     async fn reindex_recreates_vectors_on_dims_change() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("D", None, &DocOwner::unattributed()).await.unwrap();
-        let doc = store.create_page(&space, "T", &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("D", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
+        let doc = store
+            .create_page(&space, "T", &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
             .update_document(&doc, "T", "vectors of a different width")
             .await
@@ -4034,15 +4222,28 @@ mod tests {
         assert_eq!(spaces[0].document_count, 0);
 
         store
-            .ingest_document(&space_id, "Cats", "Cats are small carnivorous mammals.", &DocOwner::unattributed())
+            .ingest_document(
+                &space_id,
+                "Cats",
+                "Cats are small carnivorous mammals.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         store
-            .ingest_document(&space_id, "Rust", "Rust is a systems programming language.", &DocOwner::unattributed())
+            .ingest_document(
+                &space_id,
+                "Rust",
+                "Rust is a systems programming language.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
 
-        let docs = store.list_documents(&space_id, DocFilter::unrestricted()).await.unwrap();
+        let docs = store
+            .list_documents(&space_id, DocFilter::unrestricted())
+            .await
+            .unwrap();
         assert_eq!(docs.len(), 2);
         assert!(docs.iter().all(|d| d.chunk_count >= 1));
 
@@ -4070,13 +4271,25 @@ mod tests {
     #[tokio::test]
     async fn delete_space_removes_documents() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space_id = store.create_space("Temp", None, &DocOwner::unattributed()).await.unwrap();
+        let space_id = store
+            .create_space("Temp", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
         store
-            .ingest_document(&space_id, "Doc", "some content here", &DocOwner::unattributed())
+            .ingest_document(
+                &space_id,
+                "Doc",
+                "some content here",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         assert!(store.delete_space(&space_id).await.unwrap());
-        assert!(store.list_spaces(DocFilter::unrestricted()).await.unwrap().is_empty());
+        assert!(store
+            .list_spaces(DocFilter::unrestricted())
+            .await
+            .unwrap()
+            .is_empty());
         assert!(!store.delete_space(&space_id).await.unwrap());
     }
 
@@ -4097,7 +4310,10 @@ mod tests {
         }"#;
         let flat = flatten_app_source(src);
         for want in ["hello", "world", "one", "two", "three"] {
-            assert!(flat.contains(want), "flattened text missing {want:?}: {flat:?}");
+            assert!(
+                flat.contains(want),
+                "flattened text missing {want:?}: {flat:?}"
+            );
         }
         // Non-string scalars (numbers/booleans/null) are not searchable text.
         assert!(!flat.contains("42"));
@@ -4118,7 +4334,10 @@ mod tests {
     #[tokio::test]
     async fn app_docs_are_kind_isolated_and_embed() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space = store.create_space("AppSpace", None, &DocOwner::unattributed()).await.unwrap();
+        let space = store
+            .create_space("AppSpace", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
 
         // App A creates and can read its own doc.
         let doc = store
@@ -4133,7 +4352,10 @@ mod tests {
         assert!(store.app_get_doc("app.b", &doc).await.unwrap().is_none());
 
         // A built-in page is invisible to any app.
-        let page = store.create_page(&space, "Builtin Page", &DocOwner::unattributed()).await.unwrap();
+        let page = store
+            .create_page(&space, "Builtin Page", &DocOwner::unattributed())
+            .await
+            .unwrap();
         assert!(store.app_get_doc("app.a", &page).await.unwrap().is_none());
 
         // App B cannot mutate app A's doc (kind-checked FIRST → error).
@@ -4160,15 +4382,28 @@ mod tests {
         assert_eq!(list_a.len(), 1);
         assert_eq!(list_a[0].id, doc);
         assert_eq!(list_a[0].title, "Renamed");
-        assert!(store.app_list_docs("app.b", &space).await.unwrap().is_empty());
+        assert!(store
+            .app_list_docs("app.b", &space)
+            .await
+            .unwrap()
+            .is_empty());
 
         // The flattened app content is embedded and retrievable.
-        let hits = store.search(&space, "searchable app content", 5).await.unwrap();
-        assert!(hits.iter().any(|c| c.content.contains("searchable app content")));
+        let hits = store
+            .search(&space, "searchable app content", 5)
+            .await
+            .unwrap();
+        assert!(hits
+            .iter()
+            .any(|c| c.content.contains("searchable app content")));
 
         // App A can delete its own doc; afterwards its list is empty.
         store.app_delete_doc("app.a", &doc).await.unwrap();
-        assert!(store.app_list_docs("app.a", &space).await.unwrap().is_empty());
+        assert!(store
+            .app_list_docs("app.a", &space)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     // ── AC1: existing vector-mode Spaces are unchanged ─────────────────────────
@@ -4176,12 +4411,20 @@ mod tests {
     #[tokio::test]
     async fn default_space_uses_vector_mode() {
         let store = SpaceStore::open_in_memory().unwrap();
-        let space_id = store.create_space("VectorSpace", None, &DocOwner::unattributed()).await.unwrap();
+        let space_id = store
+            .create_space("VectorSpace", None, &DocOwner::unattributed())
+            .await
+            .unwrap();
         let spaces = store.list_spaces(DocFilter::unrestricted()).await.unwrap();
         assert_eq!(spaces[0].retrieval_mode, RetrievalMode::Vector);
         // Confirm vector search works normally.
         store
-            .ingest_document(&space_id, "Doc", "Cats are small carnivorous mammals.", &DocOwner::unattributed())
+            .ingest_document(
+                &space_id,
+                "Doc",
+                "Cats are small carnivorous mammals.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         let results = store.search(&space_id, "small mammals", 5).await.unwrap();
@@ -4216,21 +4459,41 @@ mod tests {
 
         // Create a GRAPH-mode Space.
         let graph_space = store
-            .create_space_with_mode("GraphSpace", None, RetrievalMode::Graph, &DocOwner::unattributed())
+            .create_space_with_mode(
+                "GraphSpace",
+                None,
+                RetrievalMode::Graph,
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
 
         // Ingest three-chunk fixture.
         store
-            .ingest_document(&graph_space, "ChunkA", "Alice works at Acme.", &DocOwner::unattributed())
+            .ingest_document(
+                &graph_space,
+                "ChunkA",
+                "Alice works at Acme.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         store
-            .ingest_document(&graph_space, "ChunkB", "Acme is based in Paris.", &DocOwner::unattributed())
+            .ingest_document(
+                &graph_space,
+                "ChunkB",
+                "Acme is based in Paris.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         store
-            .ingest_document(&graph_space, "ChunkC", "Paris has the Eiffel Tower.", &DocOwner::unattributed())
+            .ingest_document(
+                &graph_space,
+                "ChunkC",
+                "Paris has the Eiffel Tower.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
 
@@ -4248,19 +4511,39 @@ mod tests {
         // not the nearest neighbor, proving graph traversal found something pure
         // nearest-neighbor search does not return when constrained to 1 result.
         let vector_space = store
-            .create_space_with_mode("VectorSpace", None, RetrievalMode::Vector, &DocOwner::unattributed())
+            .create_space_with_mode(
+                "VectorSpace",
+                None,
+                RetrievalMode::Vector,
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         store
-            .ingest_document(&vector_space, "ChunkA", "Alice works at Acme.", &DocOwner::unattributed())
+            .ingest_document(
+                &vector_space,
+                "ChunkA",
+                "Alice works at Acme.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         store
-            .ingest_document(&vector_space, "ChunkB", "Acme is based in Paris.", &DocOwner::unattributed())
+            .ingest_document(
+                &vector_space,
+                "ChunkB",
+                "Acme is based in Paris.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
         store
-            .ingest_document(&vector_space, "ChunkC", "Paris has the Eiffel Tower.", &DocOwner::unattributed())
+            .ingest_document(
+                &vector_space,
+                "ChunkC",
+                "Paris has the Eiffel Tower.",
+                &DocOwner::unattributed(),
+            )
             .await
             .unwrap();
 

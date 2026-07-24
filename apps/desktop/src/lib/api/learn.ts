@@ -61,9 +61,10 @@ export function listExperience(target: ApiTarget): Promise<ExperienceList> {
 
 /**
  * Distill a skill from a specific conversation right now. `force: true` is a
- * deliberate user action ("make a skill from this chat"), so it bypasses both the
- * skills opt-in and the inbox-approval gate — the skill is written and activated
- * immediately.
+ * deliberate user action ("make a skill from this chat"), so it bypasses the
+ * skills opt-in — but never the inbox-approval gate: an activated skill is
+ * node-global context, so the proposal lands in the approval inbox (the outcome's
+ * `reason` says so) unless the user disabled `learning.require-approval`.
  */
 export function synthesizeSkill(
 	target: ApiTarget,

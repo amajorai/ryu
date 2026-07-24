@@ -64,7 +64,11 @@ pub async fn run_agent(agent_id: &str, prompt: &str) -> Result<String> {
     let run_id = format!("agentrun_{}", uuid::Uuid::new_v4().simple());
     if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
         runner
-            .run(Some(agent_id.to_string()), run_id.clone(), prompt.to_string())
+            .run(
+                Some(agent_id.to_string()),
+                run_id.clone(),
+                prompt.to_string(),
+            )
             .await
             .map_err(|e| anyhow!(e))?;
         return Ok(run_id);

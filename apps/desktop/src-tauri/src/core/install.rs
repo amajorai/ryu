@@ -13,38 +13,75 @@
 //!                      `DEFAULT_GATEWAY_BIN = "ryu-gateway"`, resolved on PATH). Nothing
 //!                      installed it before this module — that was the real gap.
 //!
-//! **Optional (opt-in apps, silent on failure — [`OPTIONAL_SIDECARS`]):** every
-//! feature backend that waves 1-4 converted from an in-Core module into a standalone
-//! out-of-process spawnable bin. Core resolves each via `RYU_<X>_BIN` else the bare
-//! `ryu-<x>` on PATH, so a download into `~/.ryu/bin/` is picked up on the next spawn:
-//!   - `ryu-mail` — the wave-1 single-file sidecar (Agent Inboxes). Its wave-1
-//!     partner `ryu-browser` is deliberately NOT here: it ships as an Electron
-//!     bundle (`ryu-browser-<os>-<arch>{.zip,.dmg,-portable.exe,.AppImage}`, with a
-//!     nested `.app` exec on macOS), which the single-file download-chmod-rename path
-//!     below cannot install. Its packaged-artifact install path is a separate,
-//!     deferred pipeline; until it lands, `ryu-browser` is resolved only when already
-//!     on PATH (`RYU_BROWSER_BIN` else `ryu-browser`).
-//!   - `ryu-teams`, `ryu-research`, `ryu-clips`, `ryu-finetune`, `ryu-quests`,
-//!     `ryu-healing`, `ryu-meetings`, `ryu-recipes`, `ryu-dashboards`, `ryu-monitors`
-//!     — the wave-2..4 app bins. These 404 harmlessly until the release ships them.
-//!
-//! **Fetch policy (v1): up-front, best-effort per binary.** The clean signal for
-//! "is this app enabled" lives behind Core's HTTP API, which isn't up at first
-//! launch and isn't queried from the Tauri layer, so on-demand fetching would mean
-//! standing up a poll-Core-for-enabled-apps loop for no v1 benefit. Instead we fetch
-//! everything up-front (the task explicitly blesses this fallback), but keep failure
-//! non-fatal per binary: a missing optional sidecar (e.g. mail) is silent, a
-//! missing gateway warns loudly (Core needs it) — neither blocks the app opening.
-//! Moving these to on-demand once an enabled-apps signal is wired is the right
-//! follow-up. Today that waste is theoretical anyway — `release-local.sh` builds only
-//! core+gateway, so the optional-app assets 404 and their downloads no-op cleanly
-//! until the release publishes them.
+//! **App sidecars (opt-in feature backends) are NOT installed here.** This desktop
+//! layer only fetches the two required bins above. Each apps-store app's `ryu-<app>`
+//! binary (mail/teams/research/clips/finetune/quests/healing/meetings/recipes/
+//! dashboards/monitors) is downloaded by **Core on-demand the first time the app is
+//! enabled**, and removed on uninstall — tying the binary to the app lifecycle
+//! instead of a blanket boot-prefetch. See
+//! `apps/core/src/sidecar/manifest_sidecar.rs` (`ensure_local_sidecar_present` /
+//! `remove_local_sidecar_binaries`) and `plans/019-sidecar-binary-lifecycle.md`.
+//! (`ryu-browser` is an Electron bundle, never a single-file spawnable, and still
+//! resolves only when already on PATH via `RYU_BROWSER_BIN`.)
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 const RELEASE_BASE: &str = "https://github.com/amajorai/ryu/releases/latest/download";
+
+/// The running desktop app's version (e.g. `"0.0.8"`), used to stamp downloaded
+/// sidecars and to decide whether an already-installed one is stale. The release
+/// hub publishes core/gateway/etc under `/releases/latest/download`, so their
+/// contents track this same train — a mismatch means the app self-updated (via
+/// the Tauri updater) while a sidecar from the old version lingered in
+/// `~/.ryu/bin/`, and must be re-fetched.
+fn app_version(app: &AppHandle) -> String {
+	app.package_info().version.to_string()
+}
+
+/// Path to the version marker written next to an installed binary:
+/// `~/.ryu/bin/<bin_name>.version`. Records which app version installed it so a
+/// later launch can detect and replace a stale binary.
+fn version_marker_path(bin_name: &str) -> Option<PathBuf> {
+	install_path(bin_name).map(|p| p.with_extension("version"))
+}
+
+/// Whether the managed `~/.ryu/bin/<bin>` was installed by the currently-running
+/// app version. A missing marker (legacy binary predating this scheme) counts as
+/// a mismatch, so it is re-downloaded once and gains a marker.
+fn installed_version_matches(bin_name: &str, expected: &str) -> bool {
+	version_marker_path(bin_name)
+		.and_then(|p| std::fs::read_to_string(p).ok())
+		.map(|v| v.trim() == expected)
+		.unwrap_or(false)
+}
+
+/// Whether the managed `~/.ryu/bin/<bin>` exists but was installed by a *different*
+/// app version — i.e. it should be re-downloaded. An explicit `RYU_<X>_BIN`
+/// override is user-managed, so it is never treated as stale. A binary that isn't
+/// in `~/.ryu/bin/` at all returns `false` here (that's an "install", not an
+/// "upgrade" — handled by [`is_installed`] / the `None` path in `lib.rs`).
+fn is_managed_stale(spec: &SidecarBinary, expected: &str) -> bool {
+	if std::env::var(spec.env_var)
+		.ok()
+		.map(PathBuf::from)
+		.is_some_and(|p| p.exists())
+	{
+		return false;
+	}
+	match install_path(spec.bin_name) {
+		Some(p) if p.exists() => !installed_version_matches(spec.bin_name, expected),
+		_ => false,
+	}
+}
+
+/// Whether a stale managed `ryu-core` is sitting in `~/.ryu/bin/` (installed by an
+/// older app version). Called from `lib.rs`'s core-start path to trigger a
+/// re-download after the app self-updates. Kept public since `CORE` is private.
+pub fn is_managed_core_stale(app: &AppHandle) -> bool {
+	is_managed_stale(&CORE, &app_version(app))
+}
 
 /// A binary this module can install: the release-asset base name (before the
 /// `-<os>-<arch>` platform suffix), the file name to write under `~/.ryu/bin/`, and
@@ -75,84 +112,17 @@ const GATEWAY: SidecarBinary = SidecarBinary {
 	bin_name: "ryu-gateway",
 	env_var: "RYU_GATEWAY_BIN",
 };
-const MAIL: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-mail",
-	bin_name: "ryu-mail",
-	env_var: "RYU_MAIL_BIN",
-};
-// NOTE: `ryu-browser` intentionally has NO entry here. It ships as an Electron
-// bundle (per-platform `.zip`/`.dmg`/`-portable.exe`/`.AppImage`, `arm64` naming, a
-// nested `.app/Contents/MacOS` exec on macOS), which the single-file
-// download-chmod-rename installer below cannot handle. Its packaged-artifact install
-// path is a separate, deferred pipeline; until then it resolves only when already on
-// PATH via `RYU_BROWSER_BIN` else `ryu-browser`.
-const TEAMS: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-teams",
-	bin_name: "ryu-teams",
-	env_var: "RYU_TEAMS_BIN",
-};
-const RESEARCH: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-research",
-	bin_name: "ryu-research",
-	env_var: "RYU_RESEARCH_BIN",
-};
-const CLIPS: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-clips",
-	bin_name: "ryu-clips",
-	env_var: "RYU_CLIPS_BIN",
-};
-const FINETUNE: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-finetune",
-	bin_name: "ryu-finetune",
-	env_var: "RYU_FINETUNE_BIN",
-};
-const QUESTS: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-quests",
-	bin_name: "ryu-quests",
-	env_var: "RYU_QUESTS_BIN",
-};
-const HEALING: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-healing",
-	bin_name: "ryu-healing",
-	env_var: "RYU_HEALING_BIN",
-};
-const MEETINGS: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-meetings",
-	bin_name: "ryu-meetings",
-	env_var: "RYU_MEETINGS_BIN",
-};
-const RECIPES: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-recipes",
-	bin_name: "ryu-recipes",
-	env_var: "RYU_RECIPES_BIN",
-};
-const DASHBOARDS: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-dashboards",
-	bin_name: "ryu-dashboards",
-	env_var: "RYU_DASHBOARDS_BIN",
-};
-const MONITORS: SidecarBinary = SidecarBinary {
-	asset_base: "ryu-monitors",
-	bin_name: "ryu-monitors",
-	env_var: "RYU_MONITORS_BIN",
-};
-
-/// Every opt-in app sidecar auto-installed *detached, after Core start* and *silent
-/// on failure*: the wave-1 `ryu-mail` plus the wave-2..4 app bins. Each is skipped
-/// when already resolved and 404s harmlessly until its release asset ships, so the
-/// whole set can be fetched unconditionally without an "is this app enabled" signal
-/// (which lives behind Core's HTTP API, not queried from this Tauri layer).
-///
-/// **Format assumption:** every asset is a *portable single-file spawnable* (portable
-/// `.exe` on Windows, a plain binary elsewhere), so each installs the same way —
-/// download, chmod +x, rename into place — with no archive extraction. This is why
-/// `ryu-browser` is excluded (Electron bundle, needs extraction + a nested exec). A
-/// future `.zip` asset would carry that extension and need an extract step; deferred
-/// until such an asset exists.
-static OPTIONAL_SIDECARS: &[SidecarBinary] = &[
-	MAIL, TEAMS, RESEARCH, CLIPS, FINETUNE, QUESTS, HEALING, MEETINGS, RECIPES, DASHBOARDS,
-	MONITORS,
-];
+// NOTE: the per-app opt-in sidecar consts (MAIL/TEAMS/RESEARCH/… ) and the
+// `OPTIONAL_SIDECARS` boot-prefetch that used to live here have been REMOVED. The
+// desktop no longer downloads app bins up-front; Core now fetches each app's
+// `ryu-<app>` binary on-demand the first time the app is *enabled* (and removes it
+// on uninstall) — see `apps/core/src/sidecar/manifest_sidecar.rs`
+// (`ensure_local_sidecar_present` / `remove_local_sidecar_binaries`) and
+// `plans/019-sidecar-binary-lifecycle.md`. Only the REQUIRED core+gateway bins below
+// are installed by this desktop layer.
+//
+// `ryu-browser` was likewise never prefetched (Electron bundle, not a single-file
+// spawnable) and still resolves only when already on PATH via `RYU_BROWSER_BIN`.
 
 /// The `<os>-<arch>` fragment shared by every asset name, or `None` on an
 /// unsupported platform. Matches the published release assets: `linux-x86_64`,
@@ -176,24 +146,26 @@ fn platform_asset(base: &str) -> Option<String> {
 	Some(format!("{base}-{slug}{ext}"))
 }
 
-/// Destination for an installed binary: `~/.ryu/bin/<bin_name>[.exe]`. This is the
-/// second path Core's resolvers probe (after the env override), so a download here
-/// is picked up on the next spawn.
+/// Destination for an installed binary: `~/.ryu{profile}/bin/<bin_name>[.exe]`. This
+/// is the second path Core's resolvers probe (after the env override), so a download
+/// here is picked up on the next spawn. Profile-aware so a dev app installs its OWN
+/// binaries under `~/.ryu-dev/bin` instead of overwriting the release app's `~/.ryu/bin`.
 fn install_path(bin_name: &str) -> Option<PathBuf> {
 	let file = if cfg!(windows) {
 		format!("{bin_name}.exe")
 	} else {
 		bin_name.to_string()
 	};
-	dirs::home_dir().map(|h| h.join(".ryu").join("bin").join(file))
+	Some(crate::profile::ryu_home_dir().join("bin").join(file))
 }
 
 /// Whether `spec` already resolves to a real file — mirroring how Core resolves it
 /// (env override → `~/.ryu/bin/<bin>` → bare name on PATH). Used to skip a redundant
 /// download on every launch. `~/.ryu/bin` is on the PATH Core builds, so the
 /// `~/.ryu/bin` and PATH checks usually coincide; both are kept for env-less setups.
-fn is_installed(spec: &SidecarBinary) -> bool {
-	// 1. Explicit env override pointing at an existing file.
+fn is_installed(spec: &SidecarBinary, expected_version: &str) -> bool {
+	// 1. Explicit env override pointing at an existing file — user-managed, so we
+	//    respect it regardless of version.
 	if std::env::var(spec.env_var)
 		.ok()
 		.map(PathBuf::from)
@@ -201,11 +173,16 @@ fn is_installed(spec: &SidecarBinary) -> bool {
 	{
 		return true;
 	}
-	// 2. Our install target under ~/.ryu/bin.
-	if install_path(spec.bin_name).is_some_and(|p| p.exists()) {
-		return true;
+	// 2. Our install target under ~/.ryu/bin. Only "installed" when its version
+	//    marker matches the running app: a binary left over from an older app
+	//    version is treated as absent so it is re-downloaded (and NOT rescued by
+	//    the PATH check below, since ~/.ryu/bin is on PATH — this branch returns).
+	if let Some(p) = install_path(spec.bin_name) {
+		if p.exists() {
+			return installed_version_matches(spec.bin_name, expected_version);
+		}
 	}
-	// 3. Anywhere on PATH.
+	// 3. Anywhere else on PATH — an external install we don't manage; respect it.
 	which::which(spec.bin_name).is_ok()
 }
 
@@ -289,7 +266,14 @@ async fn install_sidecar(
 		)
 	})?;
 	let dest = install_path(spec.bin_name).ok_or("could not resolve home directory")?;
-	download_release_binary(app, &asset, dest, event).await
+	let path = download_release_binary(app, &asset, dest, event).await?;
+	// Stamp the version so a future launch can tell whether this binary is stale
+	// after the app self-updates. Best-effort: a missing marker just forces one
+	// redundant re-download next time, never a broken install.
+	if let Some(marker) = version_marker_path(spec.bin_name) {
+		let _ = std::fs::write(marker, app_version(app));
+	}
+	Ok(path)
 }
 
 /// Download the platform `ryu-core` binary into `~/.ryu/bin/` and return its path.
@@ -314,50 +298,238 @@ pub async fn download_gateway_binary(app: &AppHandle) -> Result<PathBuf, String>
 /// starting Core (Core spawns the gateway at boot) and logs a loud warning on
 /// failure, but the app still opens (degraded chat beats no app).
 pub async fn ensure_gateway_installed(app: &AppHandle) -> Result<PathBuf, String> {
-	if is_installed(&GATEWAY) {
+	if is_installed(&GATEWAY, &app_version(app)) {
 		return install_path(GATEWAY.bin_name).ok_or("could not resolve home directory".to_string());
 	}
 	download_gateway_binary(app).await
 }
 
-/// Progress-event name for `spec`, matching the wave-1 naming: the asset base with
-/// its `ryu-` prefix stripped, plus `-install-progress` (e.g. `ryu-mail` →
-/// `mail-install-progress`, `ryu-teams` → `teams-install-progress`). Returned owned
-/// so callers can pass `&event`.
-fn progress_event(spec: &SidecarBinary) -> String {
-	let short = spec.asset_base.strip_prefix("ryu-").unwrap_or(spec.asset_base);
-	format!("{short}-install-progress")
+// The opt-in app-sidecar prefetch (`progress_event`, `ensure_optional_installed`,
+// `spawn_optional_sidecar_installs`) was REMOVED — Core now downloads each app's
+// `ryu-<app>` binary on-demand at enable-time (see the note by the const block above
+// and `plans/019-sidecar-binary-lifecycle.md`). Only core + gateway are installed by
+// this desktop layer; `install_sidecar` / `is_installed` / `install_path` remain,
+// shared by the required-bin installers above.
+
+// ---------------------------------------------------------------------------
+// Island (the Electron companion overlay)
+// ---------------------------------------------------------------------------
+//
+// Island is NOT a `SidecarBinary`: its release assets follow electron-builder's
+// naming, not the `<base>-<slug>[.exe]` scheme every single-file sidecar shares,
+// and it installs into its OWN directory (`~/.ryu/island/`, kept apart from the
+// `~/.ryu/bin/` sidecars so the bundle — a whole `.app` on macOS — never mingles
+// with the flat command binaries). So it gets a dedicated resolver + installer +
+// launcher below rather than an entry in the sidecar tables.
+//
+// The tray already drives an *already-running* island through its loopback
+// control server (`tray::island_control`); this module supplies the missing
+// "download it and start it in the first place" half. Island self-guards with an
+// Electron single-instance lock (`app.requestSingleInstanceLock()` in
+// `apps/island/src/main/index.ts`), so a redundant `launch_island` on a restart
+// where island is already up self-exits — the launch path can stay unconditional.
+
+/// The Island release-asset name for the running platform, or `None` on an
+/// unsupported one. These names come straight from `apps/island/electron-builder.yml`
+/// (`ryu-island-${os}-${arch}[-portable].${ext}`, with electron-builder's `os`/`arch`
+/// spellings — `win`/`mac`, `x64`/`arm64`/`x86_64`), which differ from the sidecar
+/// slug (`windows-x86_64`, `macos-aarch64`, bare `.exe`), so [`platform_asset`] would
+/// resolve a URL that 404s. Windows uses the *portable* single-exe target (it
+/// self-extracts on launch, no installer step); Linux the AppImage; macOS the `.zip`
+/// carrying `Ryu Island.app` (electron-updater needs the zip, not just the dmg).
+fn island_asset() -> Option<&'static str> {
+	match (std::env::consts::OS, std::env::consts::ARCH) {
+		("windows", "x86_64") => Some("ryu-island-win-x64-portable.exe"),
+		("linux", "x86_64") => Some("ryu-island-linux-x86_64.AppImage"),
+		("macos", "aarch64") => Some("ryu-island-mac-arm64.zip"),
+		_ => None,
+	}
 }
 
-/// Ensure one optional opt-in app sidecar is installed, downloading it if absent and
-/// skipping when it already resolves (env override → `~/.ryu/bin/<bin>` → PATH). Used
-/// for every [`OPTIONAL_SIDECARS`] entry; the caller runs it detached after Core start
-/// and swallows failures silently (opt-in apps whose release asset may not exist yet).
-async fn ensure_optional_installed(app: &AppHandle, spec: &SidecarBinary) -> Result<PathBuf, String> {
-	if is_installed(spec) {
-		return install_path(spec.bin_name).ok_or("could not resolve home directory".to_string());
-	}
-	install_sidecar(app, spec, &progress_event(spec)).await
+/// The dedicated install directory for Island: `~/.ryu/island/`. Separate from the
+/// `~/.ryu/bin/` sidecars because the Electron bundle is more than one file (a whole
+/// `.app` tree on macOS) and should not clutter the flat command-binary dir.
+fn island_dir() -> Option<PathBuf> {
+	Some(crate::profile::ryu_home_dir().join("island"))
 }
 
-/// Fetch every optional opt-in app sidecar ([`OPTIONAL_SIDECARS`]) into `~/.ryu/bin/`,
-/// each in its own detached task so none delays the UI or Core start. Failures are
-/// logged at debug and swallowed — an opt-in app whose release asset isn't published
-/// yet 404s harmlessly, and one that already resolves is skipped. Call once, after
-/// Core has been started; gate the call on `not(debug_assertions)` (in dev these bins
-/// are owned by turbo).
-pub fn spawn_optional_sidecar_installs(app: &AppHandle) {
-	for spec in OPTIONAL_SIDECARS {
-		let app = app.clone();
-		let spec = *spec;
-		tauri::async_runtime::spawn(async move {
-			if let Err(e) = ensure_optional_installed(&app, &spec).await {
-				tracing::debug!(
-					"{} sidecar not installed (opt-in app): {}",
-					spec.asset_base,
-					e
-				);
-			}
-		});
+/// The installed Island launch target under `~/.ryu/island/`:
+///   - Windows: `ryu-island.exe` (the renamed portable single-exe)
+///   - Linux:   `ryu-island.AppImage`
+///   - macOS:   `Ryu Island.app` (a bundle *directory*, launched via `open`)
+fn island_install_path() -> Option<PathBuf> {
+	let dir = island_dir()?;
+	let file = if cfg!(target_os = "windows") {
+		"ryu-island.exe"
+	} else if cfg!(target_os = "macos") {
+		"Ryu Island.app"
+	} else {
+		"ryu-island.AppImage"
+	};
+	Some(dir.join(file))
+}
+
+/// Version marker for the installed Island bundle: `~/.ryu/island/.version`. Mirrors
+/// the sidecar markers — records which app version installed it so a later launch can
+/// re-download after the app self-updates and leaves a stale bundle behind.
+fn island_version_marker() -> Option<PathBuf> {
+	island_dir().map(|d| d.join(".version"))
+}
+
+/// Whether the installed Island bundle was placed by the currently-running app
+/// version. A missing/mismatched marker counts as stale (re-download once).
+fn island_version_matches(expected: &str) -> bool {
+	island_version_marker()
+		.and_then(|p| std::fs::read_to_string(p).ok())
+		.map(|v| v.trim() == expected)
+		.unwrap_or(false)
+}
+
+/// Whether Island is installed AND matches the running app version. A bundle left by
+/// an older app version is treated as absent so [`ensure_island_installed`] re-fetches
+/// it. Unlike the sidecars there is no env override — Island has no `RYU_*_BIN` hook.
+fn is_island_installed(expected: &str) -> bool {
+	match island_install_path() {
+		Some(p) if p.exists() => island_version_matches(expected),
+		_ => false,
 	}
+}
+
+/// Download the macOS Island `.zip` into `~/.ryu/island/`, extract it, and return the
+/// extracted `.app` bundle path. `ditto -x -k` is the macOS-native unarchiver (it
+/// preserves the bundle's resource-fork / code-signing metadata better than `unzip`);
+/// `unzip -o` is the fallback. Only compiled on macOS — the single-file Win/Linux
+/// artifacts never take this path.
+#[cfg(target_os = "macos")]
+async fn install_island_macos(
+	app: &AppHandle,
+	asset: &str,
+	dir: &std::path::Path,
+	event: &str,
+) -> Result<PathBuf, String> {
+	// Download the archive itself (NOT the final launch target) via the shared
+	// helper: its temp-then-rename keeps a partial download from ever looking
+	// complete, and the `0o755` it stamps on the `.zip` is harmless.
+	let zip = dir.join("ryu-island.zip");
+	download_release_binary(app, asset, zip.clone(), event).await?;
+
+	let _ = app.emit(event, serde_json::json!({ "phase": "installing" }));
+	let extracted_ok = std::process::Command::new("ditto")
+		.arg("-x")
+		.arg("-k")
+		.arg(&zip)
+		.arg(dir)
+		.status()
+		.map(|s| s.success())
+		.unwrap_or(false)
+		|| std::process::Command::new("unzip")
+			.arg("-o")
+			.arg(&zip)
+			.arg("-d")
+			.arg(dir)
+			.status()
+			.map(|s| s.success())
+			.unwrap_or(false);
+	if !extracted_ok {
+		let err = "failed to extract Ryu Island .zip".to_string();
+		let _ = app.emit(event, serde_json::json!({ "phase": "error", "error": err }));
+		return Err(err);
+	}
+	// The archive is only a staging artifact; drop it once extracted.
+	let _ = std::fs::remove_file(&zip);
+
+	// Locate the extracted `.app`: prefer the canonical `Ryu Island.app`, else the
+	// first `*.app` in the dir (in case the archive's top-level name ever drifts).
+	let bundle = island_install_path()
+		.filter(|p| p.exists())
+		.or_else(|| {
+			std::fs::read_dir(dir).ok().and_then(|entries| {
+				entries
+					.filter_map(|e| e.ok())
+					.map(|e| e.path())
+					.find(|p| p.extension().and_then(|x| x.to_str()) == Some("app"))
+			})
+		})
+		.ok_or("no .app found in extracted Ryu Island archive")?;
+	let _ = app.emit(
+		event,
+		serde_json::json!({ "phase": "done", "path": bundle.to_string_lossy() }),
+	);
+	Ok(bundle)
+}
+
+/// Ensure the Island companion is installed under `~/.ryu/island/`, downloading (and,
+/// on macOS, extracting) it if absent or stale. Skips when the version marker already
+/// matches the running app. Emits `island-install-progress` events (same `phase`
+/// vocabulary as the sidecars). Errors on an unsupported platform or a failed
+/// download/extract so the caller can decide the miss is non-fatal.
+pub async fn ensure_island_installed(app: &AppHandle) -> Result<PathBuf, String> {
+	let expected = app_version(app);
+	if is_island_installed(&expected) {
+		return island_install_path().ok_or("could not resolve home directory".to_string());
+	}
+
+	let asset = island_asset().ok_or_else(|| {
+		format!(
+			"no prebuilt Ryu Island for {}-{}",
+			std::env::consts::OS,
+			std::env::consts::ARCH
+		)
+	})?;
+	let dir = island_dir().ok_or("could not resolve home directory")?;
+	std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+
+	let event = "island-install-progress";
+	// macOS ships a `.zip` (extract + locate the `.app`); Windows/Linux are single-file
+	// spawnables that download straight to the launch target (`download_release_binary`
+	// chmod +x's the AppImage on unix), exactly like `ryu-core`. cfg on the `let`
+	// statement (not on a tail block expr, which is unstable) so only the platform's
+	// branch compiles.
+	#[cfg(target_os = "macos")]
+	let installed = install_island_macos(app, asset, &dir, event).await?;
+	#[cfg(not(target_os = "macos"))]
+	let installed = {
+		let dest = island_install_path().ok_or("could not resolve home directory")?;
+		download_release_binary(app, asset, dest, event).await?
+	};
+
+	// Stamp the version so a later launch can detect a stale bundle after the app
+	// self-updates. Best-effort, like the sidecar markers.
+	if let Some(marker) = island_version_marker() {
+		let _ = std::fs::write(marker, &expected);
+	}
+	Ok(installed)
+}
+
+/// Launch the installed Island companion DETACHED, so it runs as an independent
+/// process that outlives this call. Returns `Err` (loudly) when Island isn't
+/// installed. Island self-guards with an Electron single-instance lock, so calling
+/// this while an island is already running self-exits — safe to call unconditionally
+/// on startup.
+pub fn launch_island() -> Result<(), String> {
+	let target = island_install_path().ok_or("could not resolve home directory")?;
+	if !target.exists() {
+		return Err(format!("Ryu Island not installed at {}", target.display()));
+	}
+
+	#[cfg(target_os = "macos")]
+	{
+		// `open` launches the `.app` bundle detached and returns immediately.
+		std::process::Command::new("open")
+			.arg(&target)
+			.spawn()
+			.map_err(|e| format!("launch Ryu Island: {e}"))?;
+	}
+	#[cfg(not(target_os = "macos"))]
+	{
+		use crate::win_process::NoWindow;
+		// Windows portable `.exe` self-extracts on launch; the Linux AppImage runs
+		// directly. Spawn and drop the child handle — it runs detached. `no_window()`
+		// suppresses a stray console window on Windows (no-op elsewhere).
+		std::process::Command::new(&target)
+			.no_window()
+			.spawn()
+			.map_err(|e| format!("launch Ryu Island: {e}"))?;
+	}
+	Ok(())
 }

@@ -19,27 +19,57 @@ export interface CatalogBanner {
 	style?: "gradient" | "dither";
 }
 
+/** A dithered-gradient background spec for a card's icon square, mirroring
+ *  dither-kit's `DitherGradient` props. Carried verbatim from an untrusted catalog
+ *  card, so every field is loose (`from`/`to` are a palette-colour NAME or a hue
+ *  number, `direction` a loose string) — the render layer validates + falls back. */
+export interface CardDither {
+	direction?: string | null;
+	from?: string | number | null;
+	to?: string | number | null;
+}
+
 /** One catalog entry as the Apps section reads it. */
 export interface CatalogEntry {
 	accent_color?: string | null;
 	banner?: CatalogBanner | null;
 	built_in?: boolean;
-	/** Ids of separate plugins this app ships as a logical bundle (install/uninstall together). */
-	bundles?: string[] | null;
 	category?: string | null;
 	description: string;
 	descriptor_only?: boolean;
 	developer?: string | null;
+	/** Icon-primitive glyph id (Iconify `prefix:name`, bare Hugeicons name, or URL),
+	 *  masked with the current text colour. Distinct from `icon_url` (a raster logo);
+	 *  wins over it on the card when both are present. */
+	icon?: string | null;
 	icon_background?: string | null;
+	/** Dithered-gradient background for the icon square, in place of a flat
+	 *  `icon_background`. Validated at render; an invalid spec falls back. */
+	icon_dither?: CardDither | null;
 	icon_url?: string | null;
 	id: string;
 	integration_kind?: string | null;
 	integration_url?: string | null;
 	kinds: string[];
 	name: string;
+	/** Plugin-to-plugin dependencies this app needs enabled first (the manifest's
+	 *  `requires`). Emitted by Core's catalog source when non-empty; absent = none.
+	 *  Powers the "Requires these apps" section so the dependency chain is clear
+	 *  before install (enabling this app auto-enables `apps`; uninstalling a
+	 *  depended-on app prompts the cascade). */
+	requires?: {
+		apps?: { id: string; min_version?: string | null }[];
+		grants?: string[];
+	} | null;
+	/** The bundled sub-items this item ships (agents/workflows/tools/skills/
+	 *  companions/mcp) — the manifest runnables. Powers "What's included". */
+	runnables?: { id: string; kind: string; name?: string }[];
 	source?: string;
 	tagline?: string | null;
 	tags: string[];
+	/** Explicit app-vs-plugin discriminator from the catalog. Preferred over the
+	 *  legacy `kinds.includes("companion")` derivation when present. */
+	type?: "app" | "plugin";
 	version?: string;
 }
 
@@ -55,7 +85,6 @@ export interface AppCatalogItem {
 export interface PluginCatalogDetail {
 	accentColor?: string | null;
 	banner?: CatalogBanner | null;
-	bundles?: string[] | null;
 	capabilities?: string[];
 	category?: string | null;
 	descriptor?: { url?: string | null } | null;

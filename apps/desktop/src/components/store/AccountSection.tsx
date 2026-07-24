@@ -18,20 +18,24 @@ export default function AccountSection() {
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
-			<MarketplaceHeader
-				activeTab={tab}
-				onSelectTab={(value) => setTab(value as AccountTab)}
-				tabs={[
-					{ value: "licenses", label: "My licenses" },
-					{ value: "sell", label: "Sell" },
-					{ value: "connections", label: "Connections" },
-				]}
-			/>
+			<div className="mx-auto w-full max-w-4xl shrink-0">
+				<MarketplaceHeader
+					activeTab={tab}
+					onSelectTab={(value) => setTab(value as AccountTab)}
+					tabs={[
+						{ value: "licenses", label: "My licenses" },
+						{ value: "sell", label: "Sell" },
+						{ value: "connections", label: "Connections" },
+					]}
+				/>
+			</div>
 
 			<div className="scroll-fade-effect-y min-h-0 flex-1 overflow-auto">
-				{tab === "licenses" && <LicensesTab />}
-				{tab === "sell" && <SellTab />}
-				{tab === "connections" && <ConnectionsTab />}
+				<div className="mx-auto w-full max-w-4xl px-4 pb-8">
+					{tab === "licenses" && <LicensesTab />}
+					{tab === "sell" && <SellTab />}
+					{tab === "connections" && <ConnectionsTab />}
+				</div>
 			</div>
 		</div>
 	);

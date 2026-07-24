@@ -66,6 +66,7 @@ import {
 import { formatMicroUsd } from "@/src/lib/api/credits.ts";
 import { fetchActiveEngine } from "@/src/lib/api/engines.ts";
 import { fetchGatewayStatus } from "@/src/lib/api/gateway.ts";
+import { installAndLaunchIsland } from "@/src/lib/api/island.ts";
 import type {
 	MeshPeerEntry,
 	MeshPeersResult,
@@ -1015,6 +1016,7 @@ function ServiceRow({
 	version,
 	updateAvailable = false,
 	onUpdate,
+	onLaunch,
 }: {
 	label: string;
 	running: boolean | null;
@@ -1035,9 +1037,16 @@ function ServiceRow({
 	/** Run the update for this component. When set + `updateAvailable`, renders an
 	 *  "Update" button that awaits this before reconciling. */
 	onUpdate?: () => Promise<void>;
+	/** Install-then-launch action for a component the shell can start but Core can't
+	 *  (Island: a device-local Electron companion, not a Core sidecar). When set +
+	 *  `running === false`, renders an "Install / Launch" button that awaits this
+	 *  then re-probes. Independent of the start/stop toggle, so it coexists with
+	 *  `readOnly`. */
+	onLaunch?: () => Promise<void>;
 }) {
 	const [pending, setPending] = useState<"start" | "stop" | null>(null);
 	const [updating, setUpdating] = useState(false);
+	const [launching, setLaunching] = useState(false);
 
 	const handleUpdate = async (e: React.MouseEvent) => {
 		e.stopPropagation();
@@ -1052,6 +1061,25 @@ function ServiceRow({
 			// Status reconciles on the next poll tick; nothing to surface inline here.
 		} finally {
 			setUpdating(false);
+		}
+	};
+
+	const handleLaunch = async (e: React.MouseEvent) => {
+		e.stopPropagation();
+		if (!onLaunch) {
+			return;
+		}
+		setLaunching(true);
+		try {
+			await onLaunch();
+			// Electron cold start + binding :7989 takes a few seconds, so give it a
+			// beat before re-probing; the 5s status poll flips the dot regardless.
+			await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+			await onChanged();
+		} catch {
+			// Status reconciles on the next poll tick; nothing to surface inline here.
+		} finally {
+			setLaunching(false);
 		}
 	};
 
@@ -1121,6 +1149,16 @@ function ServiceRow({
 					type="button"
 				>
 					{updating ? "Updating…" : "Update"}
+				</button>
+			)}
+			{onLaunch && running === false && (
+				<button
+					className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+					disabled={launching}
+					onClick={handleLaunch}
+					type="button"
+				>
+					{launching ? "Launching…" : "Install / Launch"}
 				</button>
 			)}
 			{running !== null && !readOnly && (
@@ -1925,6 +1963,13 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 		token: activeNode?.token ?? null,
 	};
 
+	// Island is a device-local Electron companion the shell installs + launches
+	// (Core can't — it's not a Core sidecar). The Island row surfaces this only when
+	// the local island isn't reachable; the status dot goes green on the next probe.
+	const handleIslandLaunch = async () => {
+		await installAndLaunchIsland();
+	};
+
 	// Live specs for the active node, surfaced in the compact dropdown header.
 	const { data: activeInfo } = useNodeSystemInfo(
 		target,
@@ -2097,7 +2142,7 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 						size={12}
 					/>
 				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start" className="w-52 bg-popover/70">
+				<DropdownMenuContent align="start" className="w-72 bg-popover/70">
 					{nodes.map((node) => (
 						<DropdownMenuItem
 							key={node.name}
@@ -2198,6 +2243,7 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 							<ServiceRow
 								label="Island"
 								onChanged={refresh}
+								onLaunch={handleIslandLaunch}
 								readOnly
 								running={islandReachable}
 								sidecarKey="island"

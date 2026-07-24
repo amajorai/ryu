@@ -27,7 +27,7 @@ use super::ServerState;
 // + the cross-surface default resolver + the Core-wired data-path entrypoints
 // (`stt_host`) so the route handlers below and external callers keep referring to
 // `crate::server::voice::{...}` unchanged.
-pub use ryu_stt::{default_stt_engine, Transcription, TranscriptSegment};
+pub use ryu_stt::{default_stt_engine, TranscriptSegment, Transcription};
 
 pub use crate::stt_host::{transcribe_wav, transcribe_wav_detailed};
 
@@ -170,6 +170,7 @@ async fn synth_via_sidecar(
     let resp = state
         .client
         .post(&url)
+        .bearer_auth(crate::sidecar::providers::ryutts::bearer())
         .json(&body)
         .send()
         .await

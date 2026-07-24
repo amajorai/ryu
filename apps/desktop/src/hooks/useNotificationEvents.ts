@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { sileo } from "sileo";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -14,10 +14,7 @@ const RECONNECT_DELAY_MS = 2000;
 
 /** Raise a native OS notification (best-effort; requests permission once). When
  *  the ping carries a notification id, tapping it deep-links to the Inbox. */
-function osNotify(
-	event: UserNotificationEvent,
-	onOpen: () => void
-): void {
+function osNotify(event: UserNotificationEvent, onOpen: () => void): void {
 	if (typeof Notification === "undefined") {
 		return;
 	}
@@ -82,11 +79,11 @@ export function useNotificationEvents(): void {
 		const target: ApiTarget = { url, token };
 
 		const onEvent = (event: UserNotificationEvent) => {
-			const toast =
+			const notify =
 				event.level === "error" || event.level === "warning"
-					? sileo.error
-					: sileo.info;
-			toast({ title: event.title, description: event.body ?? undefined });
+					? toast.error
+					: toast.info;
+			notify({ title: event.title, description: event.body ?? undefined });
 			osNotify(event, () => openTab("/inbox"));
 			Promise.resolve(
 				qc.invalidateQueries({ queryKey: ["notifications"] })

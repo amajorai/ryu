@@ -302,7 +302,7 @@ export function ImportThreadsDialog({
 					<Button
 						disabled={importing}
 						onClick={() => onOpenChange(false)}
-						variant="outline"
+						variant="ghost"
 					>
 						Cancel
 					</Button>

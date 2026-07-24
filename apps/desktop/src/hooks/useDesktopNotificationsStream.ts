@@ -1,5 +1,5 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useEffect } from "react";
-import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type DesktopNotification,
@@ -55,11 +55,11 @@ export function useDesktopNotificationsStream(): void {
 		const target: ApiTarget = { url, token };
 
 		const onNotification = (n: DesktopNotification) => {
-			const toast =
+			const notify =
 				n.level === "error" || n.level === "warning"
-					? sileo.error
-					: sileo.success;
-			toast({ title: n.title, description: n.body ?? undefined });
+					? toast.error
+					: toast.success;
+			notify({ title: n.title, description: n.body ?? undefined });
 			osNotify(n);
 		};
 

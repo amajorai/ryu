@@ -157,7 +157,10 @@ mod tests {
 
     #[test]
     fn detection_kind_maps_regex_detectors() {
-        assert_eq!(inline_detection_kind("pii_leakage"), Some(DetectionKind::Pii));
+        assert_eq!(
+            inline_detection_kind("pii_leakage"),
+            Some(DetectionKind::Pii)
+        );
         assert_eq!(
             inline_detection_kind("code_injection"),
             Some(DetectionKind::CodeInjection)

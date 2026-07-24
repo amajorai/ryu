@@ -305,7 +305,10 @@ pub async fn debit_final(
                 .json::<serde_json::Value>()
                 .await
                 .ok()
-                .and_then(|v| v.get("accrued_micro_usd").and_then(serde_json::Value::as_u64))
+                .and_then(|v| {
+                    v.get("accrued_micro_usd")
+                        .and_then(serde_json::Value::as_u64)
+                })
                 .unwrap_or(0);
             tracing::info!(
                 run_id = %run_id,
@@ -465,7 +468,12 @@ async fn send_tick(job: TickJob) {
         }
     };
 
-    let verdict = parse_verdict(value.get("verdict").and_then(|v| v.as_str()).unwrap_or("continue"));
+    let verdict = parse_verdict(
+        value
+            .get("verdict")
+            .and_then(|v| v.as_str())
+            .unwrap_or("continue"),
+    );
     let accrued = value
         .get("accrued_micro_usd")
         .and_then(serde_json::Value::as_u64)
@@ -509,9 +517,7 @@ async fn enforce_kill(job: &TickJob, reason: KillReason, accrued: u64) {
     // Remove from the live set first so no further ticks fire for it.
     lock_runs().remove(&job.run_id);
 
-    match SandboxBackend::from_name(&job.backend)
-        .and_then(|b| super::build_command_backend(&b))
-    {
+    match SandboxBackend::from_name(&job.backend).and_then(|b| super::build_command_backend(&b)) {
         Ok(backend) => {
             if let Err(e) = backend.destroy_workspace(&job.workspace).await {
                 tracing::error!(
@@ -609,7 +615,10 @@ mod tests {
             sample_spec(),
             0,
         );
-        assert!(kill_record(&run_id).is_none(), "re-register must clear stale kill");
+        assert!(
+            kill_record(&run_id).is_none(),
+            "re-register must clear stale kill"
+        );
         unregister(&run_id);
     }
 }

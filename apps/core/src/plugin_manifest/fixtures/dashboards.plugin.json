@@ -34,5 +34,15 @@
 			}
 		}
 	],
-	"permission_grants": []
+	"permission_grants": [],
+	"contributes": {
+		"sidebar_buttons": [
+			{
+				"id": "home",
+				"title": "Home",
+				"icon": "lucide:house",
+				"target": "/home"
+			}
+		]
+	}
 }

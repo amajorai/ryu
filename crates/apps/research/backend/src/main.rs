@@ -177,8 +177,7 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -228,6 +227,21 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
 
+    /// Serializes tests in the BIN test binary that mutate the process-global
+    /// `RYU_PROFILE` / `RYU_DIR` / `RESEARCH_DIR` vars. Poison-resilient so one
+    /// panicking test can't cascade the rest into failure.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn clear_dir_env() {
+        std::env::remove_var("RYU_PROFILE");
+        std::env::remove_var("RYU_DIR");
+        std::env::remove_var("RESEARCH_DIR");
+    }
+
     #[test]
     fn ct_eq_matches_only_identical_bytes() {
         assert!(ct_eq(b"secret-token", b"secret-token"));
@@ -240,8 +254,173 @@ mod tests {
     #[test]
     fn research_dir_env_overrides_install_check_path() {
         // `RESEARCH_DIR` wins over the `~/.ryu` default (matches Core's resolver).
+        let _lock = env_lock();
+        clear_dir_env();
         std::env::set_var("RESEARCH_DIR", "/tmp/ryu-research-test-dir");
         assert_eq!(sidecar_dir(), PathBuf::from("/tmp/ryu-research-test-dir"));
-        std::env::remove_var("RESEARCH_DIR");
+        clear_dir_env();
+    }
+
+    #[test]
+    fn sidecar_dir_default_is_ryu_dir_join_research_sidecar() {
+        let _lock = env_lock();
+        clear_dir_env();
+        // With RESEARCH_DIR unset, sidecar_dir == ryu_dir()/research-sidecar.
+        std::env::set_var("RYU_DIR", "/tmp/ryu-home-xyz");
+        assert_eq!(
+            sidecar_dir(),
+            PathBuf::from("/tmp/ryu-home-xyz/research-sidecar")
+        );
+        clear_dir_env();
+    }
+
+    #[test]
+    fn ryu_dir_prefers_env_over_home() {
+        let _lock = env_lock();
+        clear_dir_env();
+        std::env::set_var("RYU_DIR", "/custom/ryu");
+        assert_eq!(ryu_dir(), PathBuf::from("/custom/ryu"));
+        // An empty RYU_DIR is ignored → falls back to ~/.ryu (release suffix).
+        std::env::set_var("RYU_DIR", "");
+        let fallback = ryu_dir();
+        assert!(fallback.ends_with(".ryu"), "got {fallback:?}");
+        clear_dir_env();
+    }
+
+    #[test]
+    fn profile_suffix_is_empty_for_release_and_dashed_otherwise() {
+        let _lock = env_lock();
+        clear_dir_env();
+        // Unset → defaults to "release" → empty suffix.
+        assert_eq!(profile_suffix(), "");
+        std::env::set_var("RYU_PROFILE", "release");
+        assert_eq!(profile_suffix(), "");
+        // Whitespace-only is treated as unset → release.
+        std::env::set_var("RYU_PROFILE", "   ");
+        assert_eq!(profile_suffix(), "");
+        // A real profile becomes a "-<profile>" suffix (trimmed).
+        std::env::set_var("RYU_PROFILE", "  dev ");
+        assert_eq!(profile_suffix(), "-dev");
+        clear_dir_env();
+    }
+
+    #[test]
+    fn ryu_dir_default_uses_profile_suffix() {
+        let _lock = env_lock();
+        clear_dir_env();
+        std::env::set_var("RYU_PROFILE", "dev");
+        // RYU_DIR unset → ~/.ryu-dev (profile-suffixed).
+        let d = ryu_dir();
+        assert!(d.ends_with(".ryu-dev"), "got {d:?}");
+        clear_dir_env();
+    }
+
+    #[test]
+    fn sidecar_host_install_check_reads_real_disk() {
+        let _lock = env_lock();
+        clear_dir_env();
+        let tmp = std::env::temp_dir().join(format!("ryu-research-inst-{}", std::process::id()));
+        std::env::set_var("RESEARCH_DIR", &tmp);
+        // No ryu_research/ dir yet → not installed.
+        assert!(!SidecarHost.is_installed());
+        // Create the package dir → installed.
+        std::fs::create_dir_all(tmp.join("ryu_research")).unwrap();
+        assert!(SidecarHost.is_installed());
+        std::fs::remove_dir_all(&tmp).ok();
+        clear_dir_env();
+    }
+
+    #[tokio::test]
+    async fn start_sidecar_is_a_noop_ok() {
+        // The out-of-process host deliberately no-ops lazy-start (engine lifecycle
+        // is Core-side). It must succeed so the proxy path proceeds.
+        assert!(SidecarHost.start_sidecar().await.is_ok());
+    }
+
+    // ── Fail-closed bearer gate (security-critical) ─────────────────────────────
+    //
+    // `require_ext_token`/`Next` have no public constructors, so we exercise the
+    // REAL middleware by serving the same guarded router shape `main()` builds on an
+    // ephemeral loopback port and driving it with real requests.
+
+    async fn spawn_guarded(token: Option<String>) -> String {
+        use axum::routing::get;
+        let app = Router::new()
+            .route("/guarded", get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(move |req: Request, next: Next| {
+                let expected = token.clone();
+                async move { require_ext_token(req, next, expected.as_deref()).await }
+            }));
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn no_token_configured_rejects_all_fail_closed() {
+        let base = spawn_guarded(None).await;
+        let client = reqwest::Client::new();
+        // Even a well-formed bearer is rejected when the server has no expected token.
+        let resp = client
+            .get(format!("{base}/guarded"))
+            .header("Authorization", "Bearer anything")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 401);
+    }
+
+    #[tokio::test]
+    async fn correct_bearer_passes_wrong_and_missing_rejected() {
+        let base = spawn_guarded(Some("s3cr3t".to_owned())).await;
+        let client = reqwest::Client::new();
+
+        // Correct token → 200.
+        let ok = client
+            .get(format!("{base}/guarded"))
+            .header("Authorization", "Bearer s3cr3t")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ok.status().as_u16(), 200);
+
+        // Wrong token → 401.
+        let wrong = client
+            .get(format!("{base}/guarded"))
+            .header("Authorization", "Bearer nope")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(wrong.status().as_u16(), 401);
+
+        // No Authorization header → 401.
+        let missing = client.get(format!("{base}/guarded")).send().await.unwrap();
+        assert_eq!(missing.status().as_u16(), 401);
+
+        // Non-Bearer scheme → 401.
+        let basic = client
+            .get(format!("{base}/guarded"))
+            .header("Authorization", "Basic s3cr3t")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(basic.status().as_u16(), 401);
+    }
+
+    #[tokio::test]
+    async fn bearer_value_is_trimmed_before_compare() {
+        // The gate trims the presented token, so surrounding spaces still match.
+        let base = spawn_guarded(Some("tok".to_owned())).await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("{base}/guarded"))
+            .header("Authorization", "Bearer   tok  ")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
     }
 }

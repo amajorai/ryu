@@ -66,7 +66,7 @@ import {
 import { Textarea } from "@ryu/ui/components/textarea";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -1982,7 +1982,19 @@ const bannerPrefsKey = (agent: string) => `ryu:agent-banner:${agent}`;
 function loadBannerPrefs(agent: string): BannerPrefs {
 	try {
 		const raw = localStorage.getItem(bannerPrefsKey(agent));
-		return raw ? (JSON.parse(raw) as BannerPrefs) : {};
+		const prefs = raw ? (JSON.parse(raw) as BannerPrefs) : {};
+		// A stale/hand-edited `color` string that isn't a known swatch reaches
+		// `fillOf` → `PALETTE[color].fill`, which throws during canvas paint and
+		// crashes the editor on open. Numbers are always valid (treated as a hue);
+		// drop any string that isn't a palette swatch so the banner falls back to
+		// its derived default instead of exploding.
+		if (
+			typeof prefs.color === "string" &&
+			!BANNER_COLORS.includes(prefs.color as DitherColor)
+		) {
+			prefs.color = undefined;
+		}
+		return prefs;
 	} catch {
 		// Corrupt or unavailable storage must never break the editor.
 		return {};

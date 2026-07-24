@@ -3,8 +3,8 @@
 //! Quests (the auto-detecting todo list) used to run in-process: a
 //! `ryu_quests::QuestEngine` field on `ServerState`, an `/api/quests/*` route
 //! merge, a scheduler `JobTarget::Quest` arm that called `global_engine()`
-//! directly, an activity subscribe-loop over the in-process broadcast, and an MCP
-//! quest-board widget reading the live store. Quests is now an out-of-process app
+//! directly, and an activity subscribe-loop over the in-process broadcast. Quests
+//! is now an out-of-process app
 //! (`com.ryu.quests`): the `ryu-quests` sidecar owns `quests.db`, the engine, and
 //! the `/api/quests/*` surface — served through the generic ext-proxy
 //! `public_mount`. Core links NO quest code; its three remaining reverse-couplings
@@ -74,8 +74,8 @@ pub fn sidecar_port(manifests: &[crate::plugin_manifest::PluginManifest]) -> u16
     crate::profile::port(raw)
 }
 
-/// Process-global quests client, so the scheduler (`JobTarget::Quest`) and the MCP
-/// quest-board widget — neither of which carries `ServerState` — can reach the
+/// Process-global quests client, so the scheduler (`JobTarget::Quest`) — which
+/// does not carry `ServerState` — can reach the
 /// sidecar. Set once from `main.rs`, mirroring the `ryu_*::global_engine` pattern
 /// the other decoupled engines used.
 static GLOBAL_CLIENT: std::sync::OnceLock<QuestsClient> = std::sync::OnceLock::new();
@@ -172,8 +172,8 @@ impl QuestsClient {
     }
 
     /// POST a mutation to the sidecar and return the parsed JSON body, mapping a
-    /// transport error or non-2xx status to `Err(error_text)`. Backs the MCP
-    /// quest-board widget's create/complete/dismiss/reopen operations.
+    /// transport error or non-2xx status to `Err(error_text)`. Backs the quests
+    /// create/complete/dismiss/reopen operations.
     pub async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         let resp = reqwest::Client::new()
             .post(format!("{}{path}", self.base_url()))
@@ -241,7 +241,10 @@ impl QuestsClient {
         if let Ok(recent) = registry
             .call_tool(
                 "shadow__recent_context",
-                json!({ "minutes": CONTEXT_MINUTES }),
+                // `q` is Shadow's minute-window query param (the declarative
+                // `shadow__recent_context` http tool forwards args verbatim as
+                // query params through the `/api/shadow/*` proxy).
+                json!({ "q": CONTEXT_MINUTES }),
                 None,
             )
             .await
@@ -254,7 +257,8 @@ impl QuestsClient {
             if let Ok(semantic) = registry
                 .call_tool(
                     "shadow__semantic_search",
-                    json!({ "query": condition, "limit": 5 }),
+                    // `q` is Shadow's search query param (see above).
+                    json!({ "q": condition, "limit": 5 }),
                     None,
                 )
                 .await

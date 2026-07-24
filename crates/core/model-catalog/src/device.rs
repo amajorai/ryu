@@ -435,6 +435,117 @@ mod tests {
     }
 
     #[test]
+    fn fit_ok_without_headroom_on_discrete_gpu() {
+        // A model that fits VRAM but not with the 1.3x "great" margin → Ok.
+        // gpu_need = file * 1.2. Pick vram between gpu_need and gpu_need*1.3.
+        let file = 10u64 * 1024 * 1024 * 1024; // 10 GB
+        let vram = 13u64 * 1024 * 1024 * 1024; // gpu_need=12GB, *1.3=15.6GB → Ok
+        let ram = 32u64 * 1024 * 1024 * 1024;
+        assert_eq!(
+            estimate_fit(Some(file), &dev(Some(ram), Some(vram), false)),
+            FitVerdict::Ok
+        );
+    }
+
+    #[test]
+    fn fit_zero_bytes_is_unknown() {
+        // A zero-length weight (metadata-only / unknown size) can't be judged.
+        assert_eq!(
+            estimate_fit(Some(0), &dev(Some(16_000_000_000), Some(16_000_000_000), false)),
+            FitVerdict::Unknown
+        );
+    }
+
+    #[test]
+    fn fit_too_big_when_no_gpu_and_ram_too_small() {
+        // 40 GB model, no GPU, 8 GB RAM → won't fit in system RAM either.
+        let file = 40u64 * 1024 * 1024 * 1024;
+        let ram = 8u64 * 1024 * 1024 * 1024;
+        assert_eq!(
+            estimate_fit(Some(file), &dev(Some(ram), None, false)),
+            FitVerdict::TooBig
+        );
+    }
+
+    #[test]
+    fn fit_unified_unknown_without_ram() {
+        // Unified-memory flag but no RAM figure → can't decide.
+        assert_eq!(
+            estimate_fit(Some(1_000_000_000), &dev(None, None, true)),
+            FitVerdict::Unknown
+        );
+    }
+
+    #[test]
+    fn fit_unified_tiers_ok_and_partial_and_too_big() {
+        // Exercise the `tiered` boundaries via the unified-memory path.
+        // need = file*1.2 + 1.5GB. Use a 10 GB file: need ≈ 13.5 GB.
+        let file = 10u64 * 1024 * 1024 * 1024;
+        let need_gb = 13.5_f64;
+        let gb = |g: f64| (g * GIB) as u64;
+        // Ok band: need*1.15 <= pool < need*1.5.
+        let ok_ram = gb(need_gb * 1.2);
+        assert_eq!(
+            estimate_fit(Some(file), &dev(Some(ok_ram), Some(ok_ram), true)),
+            FitVerdict::Ok
+        );
+        // Partial band: need <= pool < need*1.15.
+        let partial_ram = gb(need_gb * 1.05);
+        assert_eq!(
+            estimate_fit(Some(file), &dev(Some(partial_ram), Some(partial_ram), true)),
+            FitVerdict::Partial
+        );
+        // Below need → too big.
+        let small_ram = gb(need_gb * 0.5);
+        assert_eq!(
+            estimate_fit(Some(file), &dev(Some(small_ram), Some(small_ram), true)),
+            FitVerdict::TooBig
+        );
+    }
+
+    #[test]
+    fn human_bytes_hundreds_of_gb_drops_decimal() {
+        // >= 100 GB rounds to a whole number (no ".0").
+        assert_eq!(human_bytes(128u64 * 1024 * 1024 * 1024), "128 GB");
+        // Sub-MB falls through to raw bytes.
+        assert_eq!(human_bytes(999), "999 B");
+    }
+
+    #[test]
+    fn default_parallel_slots_scales_with_memory() {
+        // >=32 GB pool → 6 slots (discrete VRAM preferred over RAM).
+        let big = dev(Some(64 * GIB as u64), Some(40 * GIB as u64), false);
+        assert_eq!(default_parallel_slots(&big), 6);
+        // 16–32 GB → 4.
+        let mid = dev(Some(20 * GIB as u64), None, false);
+        assert_eq!(default_parallel_slots(&mid), 4);
+        // 8–16 GB → 3.
+        let small = dev(Some(10 * GIB as u64), None, false);
+        assert_eq!(default_parallel_slots(&small), 3);
+        // Unknown/tiny → 2.
+        let tiny = dev(None, None, false);
+        assert_eq!(default_parallel_slots(&tiny), 2);
+        // Unified memory ignores the VRAM figure and uses total RAM.
+        let unified = dev(Some(64 * GIB as u64), Some(64 * GIB as u64), true);
+        assert_eq!(default_parallel_slots(&unified), 6);
+    }
+
+    #[test]
+    fn fit_verdict_str_and_label_cover_all_variants() {
+        for v in [
+            FitVerdict::TooBig,
+            FitVerdict::Cpu,
+            FitVerdict::Partial,
+            FitVerdict::Ok,
+            FitVerdict::Great,
+            FitVerdict::Unknown,
+        ] {
+            assert!(!v.as_str().is_empty());
+            assert!(!v.label().is_empty());
+        }
+    }
+
+    #[test]
     fn detect_never_panics() {
         let _ = DeviceInfo::detect();
     }

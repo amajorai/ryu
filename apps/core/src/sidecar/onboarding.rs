@@ -6,10 +6,10 @@ use tokio::sync::RwLock;
 
 use crate::registry::ModelRegistry;
 use crate::sidecar::adapters::acp::binary_in_path;
-use crate::win_process::NoWindow;
 use crate::sidecar::providers::llamacpp::LlamaCppDownloader;
 use crate::sidecar::providers::outetts::OuteTtsDownloader;
 use crate::sidecar::providers::whispercpp::WhisperCppDownloader;
+use crate::win_process::NoWindow;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetupStatus {
@@ -828,5 +828,148 @@ impl SetupManager {
         }
 
         status
+    }
+}
+
+#[cfg(test)]
+mod onboarding_tests {
+    use super::*;
+
+    // ── LocalStackStatus::is_ready ──────────────────────────────────────────
+
+    fn blank_status() -> LocalStackStatus {
+        LocalStackStatus {
+            llamacpp_installed: false,
+            gguf_installed: false,
+            embed_gguf_installed: false,
+            reranker_gguf_installed: false,
+            whisper_installed: false,
+            parakeet_installed: false,
+            vad_installed: false,
+            outetts_installed: false,
+            kokoro_installed: false,
+            sdcpp_installed: false,
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn is_ready_requires_binary_and_weights() {
+        let mut s = blank_status();
+        assert!(!s.is_ready(), "nothing installed → not ready");
+
+        s.llamacpp_installed = true;
+        assert!(!s.is_ready(), "binary without weights → not ready");
+
+        s.gguf_installed = true;
+        assert!(s.is_ready(), "binary + weights → ready");
+    }
+
+    #[test]
+    fn is_ready_ignores_voice_and_extras() {
+        // Chat readiness must NOT depend on whisper/parakeet/tts/image extras — a
+        // voice download failure must never block chat.
+        let mut s = blank_status();
+        s.llamacpp_installed = true;
+        s.gguf_installed = true;
+        // Every extra stays false; readiness still holds.
+        assert!(s.is_ready());
+
+        // And a fully-loaded extras set with NO chat stack is still not ready.
+        let extras = LocalStackStatus {
+            whisper_installed: true,
+            parakeet_installed: true,
+            vad_installed: true,
+            outetts_installed: true,
+            kokoro_installed: true,
+            sdcpp_installed: true,
+            embed_gguf_installed: true,
+            reranker_gguf_installed: true,
+            ..blank_status()
+        };
+        assert!(!extras.is_ready());
+    }
+
+    #[test]
+    fn local_stack_status_serde_round_trips() {
+        let mut s = blank_status();
+        s.llamacpp_installed = true;
+        s.warnings.push("gguf failed".into());
+        let json = serde_json::to_string(&s).unwrap();
+        let back: LocalStackStatus = serde_json::from_str(&json).unwrap();
+        assert!(back.llamacpp_installed);
+        assert!(!back.gguf_installed);
+        assert_eq!(back.warnings, vec!["gguf failed".to_string()]);
+    }
+
+    // ── SetupStatus ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn setup_status_new_points_at_bin_dir() {
+        let s = SetupStatus::new();
+        assert!(s.installed_sidecars.is_empty());
+        assert!(s.installation_path.ends_with("bin"));
+    }
+
+    // ── SetupManager (in-memory set — hermetic, no fs/network) ───────────────
+
+    #[tokio::test]
+    async fn mark_and_query_installed() {
+        let mgr = SetupManager::new();
+        assert!(!mgr.is_installed("llamacpp").await);
+
+        mgr.mark_installed("llamacpp").await;
+        assert!(mgr.is_installed("llamacpp").await);
+        assert!(!mgr.is_installed("whispercpp").await);
+    }
+
+    #[tokio::test]
+    async fn mark_installed_is_idempotent() {
+        let mgr = SetupManager::new();
+        mgr.mark_installed("llamacpp").await;
+        mgr.mark_installed("llamacpp").await;
+        let installed = mgr.list_installed().await;
+        assert_eq!(
+            installed.iter().filter(|n| *n == "llamacpp").count(),
+            1,
+            "double-mark must not duplicate (set semantics)"
+        );
+    }
+
+    #[tokio::test]
+    async fn uninstall_removes_only_named() {
+        let mgr = SetupManager::new();
+        mgr.mark_installed("llamacpp").await;
+        mgr.mark_installed("whispercpp").await;
+
+        mgr.uninstall("llamacpp").await;
+        assert!(!mgr.is_installed("llamacpp").await);
+        assert!(mgr.is_installed("whispercpp").await);
+    }
+
+    #[tokio::test]
+    async fn uninstall_absent_is_noop() {
+        let mgr = SetupManager::new();
+        // Removing something never installed must not panic or error.
+        mgr.uninstall("ghost").await;
+        assert!(mgr.list_installed().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_installed_reflects_all_marks() {
+        let mgr = SetupManager::new();
+        mgr.mark_installed("a").await;
+        mgr.mark_installed("b").await;
+        mgr.mark_installed("c").await;
+        let mut got = mgr.list_installed().await;
+        got.sort();
+        assert_eq!(got, vec!["a", "b", "c"]);
+    }
+
+    #[tokio::test]
+    async fn installation_path_ends_in_bin() {
+        let mgr = SetupManager::new();
+        let p = mgr.get_installation_path().await;
+        assert!(p.ends_with("bin"));
     }
 }

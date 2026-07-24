@@ -106,7 +106,11 @@ pub fn sign_manifest(key: &SigningKey, manifest: &Value) -> String {
 /// key. A tampered manifest or a wrong key returns `false`. The gateway wrapper
 /// resolves the verifying key (a caller-pinned public key, else the process
 /// key) and passes it in.
-pub fn verify_manifest(manifest: &Value, signature_b64: &str, verifying_key: &VerifyingKey) -> bool {
+pub fn verify_manifest(
+    manifest: &Value,
+    signature_b64: &str,
+    verifying_key: &VerifyingKey,
+) -> bool {
     let Ok(sig_bytes) = B64.decode(signature_b64) else {
         return false;
     };
@@ -159,7 +163,10 @@ mod tests {
     #[test]
     fn validate_grants_approves_allowlisted() {
         let allow = vec!["mcp.tools".to_string(), "memory.read".to_string()];
-        let d = validate_grants(&["mcp.tools".to_string(), "memory.read".to_string()], &allow);
+        let d = validate_grants(
+            &["mcp.tools".to_string(), "memory.read".to_string()],
+            &allow,
+        );
         assert!(d.all_approved());
         assert_eq!(d.approved.len(), 2);
         assert!(d.denied.is_empty());
@@ -225,8 +232,16 @@ mod tests {
     fn malformed_signature_fails_verify() {
         let key = test_key();
         let manifest = json!({"id": "x"});
-        assert!(!verify_manifest(&manifest, "not-base64!!!", &key.verifying_key()));
-        assert!(!verify_manifest(&manifest, &B64.encode([0u8; 10]), &key.verifying_key()));
+        assert!(!verify_manifest(
+            &manifest,
+            "not-base64!!!",
+            &key.verifying_key()
+        ));
+        assert!(!verify_manifest(
+            &manifest,
+            &B64.encode([0u8; 10]),
+            &key.verifying_key()
+        ));
     }
 
     #[test]

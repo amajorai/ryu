@@ -93,9 +93,12 @@ pub struct RetrievableChunk {
     pub mem_importance: i32,
     /// Denormalized owner (the source document's / memory's `owner_user_id`), so the
     /// per-caller tenancy filter runs in-process without a cross-store join. `None`
-    /// = unattributed: shared knowledge (OKF / legacy Space chunk) for `Space`, and
-    /// fail-closed (owner-only, invisible to a mismatched caller) for user-scope
-    /// `Memory`. Refreshed for legacy memory rows by `backfill_memory_owner`.
+    /// is fail-closed for BOTH sources on a bound node: owner-only (invisible to a
+    /// mismatched caller) for user-scope `Memory`, and hidden unless the chunk also
+    /// carries an explicit `owner_org_id`/`visibility` shared stamp for `Space`
+    /// (OKF bundles stamp one; a bare-unowned Space chunk is legacy/unattributed,
+    /// not shared). Refreshed for legacy rows by `backfill_memory_owner` /
+    /// `backfill_okf_space_owner`.
     #[serde(default)]
     pub owner_user_id: Option<String>,
     /// Denormalized owning org, paired with `owner_user_id` for the org/team
@@ -147,7 +150,9 @@ pub struct RetrievalOptions {
     /// `node_bound` is `false` (default / UNBOUND node) NO owner filtering runs, so
     /// every existing caller is byte-identical. When `true`, a user-scope memory
     /// chunk is returned only to its owner (`caller_user_id`), and a `Space` chunk
-    /// only if unowned (shared/OKF) or owned by the caller / shared to their org.
+    /// only if owned by the caller or explicitly shared to their org/team
+    /// (`caller_org_id` matching the chunk's stamped `owner_org_id`) — a bare
+    /// unowned `Space` chunk is hidden (fail-closed).
     #[serde(default)]
     pub node_bound: bool,
     /// The verified caller's user id (bound-node owner match). `None` = anonymous.
@@ -209,7 +214,11 @@ impl<'a> RetrievalOwner<'a> {
     }
 
     /// Attributed to `user_id` within `org_id` at `visibility`.
-    pub fn owned(user_id: Option<&'a str>, org_id: Option<&'a str>, visibility: Option<&'a str>) -> Self {
+    pub fn owned(
+        user_id: Option<&'a str>,
+        org_id: Option<&'a str>,
+        visibility: Option<&'a str>,
+    ) -> Self {
         Self {
             user_id,
             org_id,
@@ -685,8 +694,18 @@ impl RetrievalStore {
         // tenancy existed (best-effort; never blocks opening the store). Deliberately
         // NOT in `init_schema` (the in-memory test store runs that and must never
         // read the real account vault).
-        if let Err(e) = Self::backfill_memory_owner(&conn, backfill_owner) {
+        if let Err(e) = Self::backfill_memory_owner(&conn, backfill_owner.clone()) {
             tracing::warn!("retrieval memory-owner backfill skipped: {e:#}");
+        }
+        // One-shot org-visibility backfill for pre-tenancy OKF Space chunks: stamps
+        // the explicit shared stamp `space_tenancy_allows` now requires, so legacy
+        // OKF content does not go dark under the fail-closed bare-unowned default.
+        // Non-OKF legacy Space chunks (no `okf_chunks` row) are deliberately left
+        // unowned — this store cannot tell a leaked private document from
+        // node-shared content, so it fails closed exactly like the memory backfill
+        // does for a bound-but-unresolvable owner.
+        if let Err(e) = Self::backfill_okf_space_owner(&conn, backfill_owner) {
+            tracing::warn!("retrieval OKF space-owner backfill skipped: {e:#}");
         }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -739,6 +758,57 @@ impl RetrievalStore {
             params![owner],
         )?;
         tracing::info!("retrieval memory-owner backfill: attributed {claimed} memory chunk(s)");
+        Ok(())
+    }
+
+    /// Attribute pre-tenancy OKF SPACE chunks to the node's org once the node
+    /// binds — the twin of [`Self::backfill_memory_owner`] for `ChunkSource::Space`.
+    ///
+    /// OKF chunks ingested before the `owner_org_id`/`visibility` denorm existed
+    /// carry NULL/NULL (the old "bare unowned = shared" fallback `space_tenancy_allows`
+    /// used to honor). Under the fail-closed default a bare-unowned chunk is now
+    /// HIDDEN, so this stamps every unowned chunk that [`ingest_okf_bundle`]
+    /// actually produced (identified via its `okf_chunks` sidecar row — the only
+    /// reliable signal that a NULL-owner Space chunk is genuinely OKF/node-shared
+    /// rather than a legacy manually-indexed chunk of unknown provenance) to the
+    /// node's org at `visibility = "org"`. Non-OKF unowned Space chunks are left
+    /// alone — deliberately fail-closed, exactly as the memory backfill fails
+    /// closed for a bound node with no resolvable account. `owner` is `None` on an
+    /// unbound node (or bound with no signed-in account) → skip, byte-identical.
+    /// Idempotent via its own marker row in `retrieval_meta`.
+    fn backfill_okf_space_owner(conn: &Connection, owner: Option<(String, String)>) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS retrieval_meta (key TEXT PRIMARY KEY, value TEXT)",
+        )
+        .context("creating retrieval_meta")?;
+        let done: Option<String> = conn
+            .query_row(
+                "SELECT value FROM retrieval_meta WHERE key = 'okf_owner_backfill_v1'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if done.is_some() {
+            return Ok(());
+        }
+        let Some((_, org_id)) = owner else {
+            return Ok(());
+        };
+        let claimed = conn
+            .execute(
+                "UPDATE chunks SET owner_org_id = ?1, visibility = 'org'
+                 WHERE source = 'space'
+                   AND owner_user_id IS NULL
+                   AND owner_org_id IS NULL
+                   AND id IN (SELECT chunk_id FROM okf_chunks)",
+                params![org_id],
+            )
+            .context("backfilling retrieval OKF space-chunk owner")?;
+        conn.execute(
+            "INSERT OR REPLACE INTO retrieval_meta (key, value) VALUES ('okf_owner_backfill_v1', ?1)",
+            params![org_id],
+        )?;
+        tracing::info!("retrieval OKF space-owner backfill: attributed {claimed} chunk(s)");
         Ok(())
     }
 
@@ -983,10 +1053,19 @@ impl RetrievalStore {
     /// ingested chunks for `bundle_id` (via [`remove_okf_bundle`](Self::remove_okf_bundle)),
     /// then re-inserts. Re-ingesting an updated bundle therefore replaces stale
     /// chunks and drops concepts that no longer exist — no orphans accumulate.
+    ///
+    /// `org_id` is the installing node's registered org (`None` on an unbound
+    /// node). OKF content has no single user owner, so every chunk is stamped
+    /// `owner_user_id = NULL`, `owner_org_id = org_id`, `visibility = "org"` when
+    /// bound — an EXPLICIT shared stamp `space_tenancy_allows` recognizes, rather
+    /// than relying on a bare-unowned chunk being treated as shared (that fallback
+    /// is fail-closed on a bound node; see the predicate's doc comment). `None`
+    /// leaves the chunk fully unattributed, matching the unbound no-op.
     pub async fn ingest_okf_bundle(
         &self,
         bundle_id: &str,
         bundle: &ryu_knowledge::Bundle,
+        org_id: Option<&str>,
     ) -> Result<OkfIngestSummary> {
         // Re-index is a full replace: clear the prior generation first so removed
         // concepts and shrunk bodies do not leave orphaned chunks behind.
@@ -1031,6 +1110,10 @@ impl RetrievalStore {
             }
         }
 
+        // No specific user owns OKF content; a bound-node install stamps the
+        // installing node's org as an EXPLICIT shared visibility so the fail-closed
+        // `space_tenancy_allows` still lets every member read it.
+        let okf_visibility = org_id.map(|_| "org");
         let chunk_count = rows.len();
         let concept_count = bundle.concepts.len();
         let conn = self.conn.lock().await;
@@ -1039,15 +1122,19 @@ impl RetrievalStore {
             .context("opening okf ingest transaction")?;
         for row in &rows {
             tx.execute(
-                "INSERT INTO chunks (id, source, space_id, content, embedding, embedding_model, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO chunks
+                    (id, source, space_id, content, embedding, embedding_model, created_at,
+                     owner_org_id, visibility)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET
                      source          = excluded.source,
                      space_id        = excluded.space_id,
                      content         = excluded.content,
                      embedding       = excluded.embedding,
                      embedding_model = excluded.embedding_model,
-                     created_at      = excluded.created_at",
+                     created_at      = excluded.created_at,
+                     owner_org_id    = excluded.owner_org_id,
+                     visibility      = excluded.visibility",
                 params![
                     row.chunk_id,
                     ChunkSource::Space.as_str(),
@@ -1055,7 +1142,9 @@ impl RetrievalStore {
                     row.content,
                     row.blob,
                     model,
-                    now
+                    now,
+                    org_id,
+                    okf_visibility,
                 ],
             )
             .context("indexing okf chunk")?;
@@ -1417,20 +1506,27 @@ fn memory_tenancy_allows(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> b
     }
 }
 
-/// Per-caller tenancy for a SPACE chunk. UNBOUND → no-op. BOUND: an UNOWNED chunk
-/// (OKF bundle / legacy manual index) is shared knowledge and stays visible; an
-/// OWNED chunk is visible only to its owner, or to the caller's org when explicitly
-/// shared (`visibility` in `org`/`team`).
+/// Per-caller tenancy for a SPACE chunk — the retrieval twin of
+/// `memory_tenancy_allows`, and FAIL-CLOSED like it. UNBOUND → no-op. BOUND: a
+/// chunk is visible to its recorded owner (`owner_user_id == caller_user_id`), or
+/// — for content with no specific user owner (OKF bundles, node-shared docs) — to
+/// any caller in the org it was EXPLICITLY stamped shared to (`owner_org_id`
+/// matches the caller's org AND `visibility` is `org`/`team`). A BARE unowned
+/// chunk (no `owner_user_id` AND no matching explicit org/team stamp — pre-tenancy
+/// legacy rows the backfill has not reached) is HIDDEN, not shared: unlike memory,
+/// Space chunks carry real document CONTENT, so treating "nobody recorded an
+/// owner" as "safe to show everyone" was the content-escape gap this closes.
+/// Genuinely shared knowledge (OKF bundles) stamps its explicit org/team
+/// visibility at index time (see [`RetrievalStore::ingest_okf_bundle`]) so it
+/// never depends on the bare-unowned case to stay visible.
 fn space_tenancy_allows(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
     if !opts.node_bound {
         return true;
     }
-    let Some(owner) = chunk.owner_user_id.as_deref() else {
-        // Unowned Space chunk = shared knowledge (OKF, node-shared bundle).
-        return true;
-    };
-    if opts.caller_user_id.as_deref() == Some(owner) {
-        return true;
+    if let Some(owner) = chunk.owner_user_id.as_deref() {
+        if opts.caller_user_id.as_deref() == Some(owner) {
+            return true;
+        }
     }
     matches!(
         (
@@ -1753,7 +1849,8 @@ mod tests {
                 ChunkSource::Memory,
                 None,
                 "The user prefers dark mode and concise answers.",
-            RetrievalOwner::shared())
+                RetrievalOwner::shared(),
+            )
             .await
             .unwrap();
         store
@@ -1762,7 +1859,8 @@ mod tests {
                 ChunkSource::Space,
                 Some("docs"),
                 "Ryu Core runs on port 7980 and routes chat through adapters.",
-            RetrievalOwner::shared())
+                RetrievalOwner::shared(),
+            )
             .await
             .unwrap();
         store
@@ -1771,7 +1869,8 @@ mod tests {
                 ChunkSource::Space,
                 Some("docs"),
                 "The gateway enforces firewall, routing, and budgets.",
-            RetrievalOwner::shared())
+                RetrievalOwner::shared(),
+            )
             .await
             .unwrap();
         store
@@ -1780,7 +1879,8 @@ mod tests {
                 ChunkSource::Space,
                 Some("recipes"),
                 "Preheat the oven to 200 degrees and bake the bread.",
-            RetrievalOwner::shared())
+                RetrievalOwner::shared(),
+            )
             .await
             .unwrap();
     }
@@ -1859,7 +1959,8 @@ mod tests {
                 None,
                 "preference",
                 3,
-            RetrievalOwner::shared())
+                RetrievalOwner::shared(),
+            )
             .await
             .unwrap();
         store
@@ -1870,7 +1971,8 @@ mod tests {
                 Some("/proj/x"),
                 "project_context",
                 4,
-            RetrievalOwner::shared())
+                RetrievalOwner::shared(),
+            )
             .await
             .unwrap();
 
@@ -2103,7 +2205,7 @@ mod tests {
     async fn ingests_okf_bundle_and_retrieves_concept() {
         let store = mem_store();
         let summary = store
-            .ingest_okf_bundle("b1", &sample_bundle())
+            .ingest_okf_bundle("b1", &sample_bundle(), None)
             .await
             .unwrap();
         assert_eq!(summary.concepts, 2);
@@ -2128,7 +2230,7 @@ mod tests {
     async fn okf_cross_links_are_preserved_as_edges() {
         let store = mem_store();
         store
-            .ingest_okf_bundle("b1", &sample_bundle())
+            .ingest_okf_bundle("b1", &sample_bundle(), None)
             .await
             .unwrap();
         let edges = store.okf_links("b1").await.unwrap();
@@ -2141,12 +2243,12 @@ mod tests {
     async fn reingest_is_idempotent_on_concept_path() {
         let store = mem_store();
         let first = store
-            .ingest_okf_bundle("b1", &sample_bundle())
+            .ingest_okf_bundle("b1", &sample_bundle(), None)
             .await
             .unwrap();
         // Re-ingesting the same bundle replaces rather than duplicates.
         let second = store
-            .ingest_okf_bundle("b1", &sample_bundle())
+            .ingest_okf_bundle("b1", &sample_bundle(), None)
             .await
             .unwrap();
         assert_eq!(first.chunks, second.chunks);
@@ -2164,7 +2266,7 @@ mod tests {
     async fn remove_okf_bundle_clears_chunks() {
         let store = mem_store();
         store
-            .ingest_okf_bundle("b1", &sample_bundle())
+            .ingest_okf_bundle("b1", &sample_bundle(), None)
             .await
             .unwrap();
         let removed = store.remove_okf_bundle("b1").await.unwrap();
@@ -2187,7 +2289,7 @@ mod tests {
     async fn reconstruct_okf_concepts_round_trips_metadata_and_body() {
         let store = mem_store();
         store
-            .ingest_okf_bundle("b1", &sample_bundle())
+            .ingest_okf_bundle("b1", &sample_bundle(), None)
             .await
             .unwrap();
 
@@ -2299,8 +2401,14 @@ mod tests {
             .await
             .unwrap();
         let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
-        assert!(!ids.contains(&"alice-mem"), "Bob must NOT see Alice's user-scope memory");
-        assert!(ids.contains(&"bob-mem"), "Bob sees his own user-scope memory");
+        assert!(
+            !ids.contains(&"alice-mem"),
+            "Bob must NOT see Alice's user-scope memory"
+        );
+        assert!(
+            ids.contains(&"bob-mem"),
+            "Bob sees his own user-scope memory"
+        );
         assert!(
             ids.contains(&"shared-node-mem"),
             "node-scope memory is the shared brain, visible to Bob"
@@ -2320,7 +2428,10 @@ mod tests {
         let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
         assert!(ids.contains(&"alice-mem"));
         assert!(ids.contains(&"shared-node-mem"));
-        assert!(!ids.contains(&"bob-mem"), "Alice must not see Bob's private memory");
+        assert!(
+            !ids.contains(&"bob-mem"),
+            "Alice must not see Bob's private memory"
+        );
     }
 
     /// An UNBOUND node is byte-identical: no owner filtering, every chunk visible
@@ -2341,10 +2452,11 @@ mod tests {
         assert!(ids.contains(&"shared-node-mem"));
     }
 
-    /// A Space chunk owned by Alice (visibility private) does not escape to Bob, but
-    /// an UNOWNED (OKF / shared-knowledge) Space chunk stays visible to everyone.
+    /// A Space chunk owned by Alice (visibility private) does not escape to Bob —
+    /// pins the OWNED branch of `space_tenancy_allows` on its own, independent of
+    /// the unowned/explicit-shared cases below.
     #[tokio::test]
-    async fn space_chunk_owner_filter_and_shared_okf() {
+    async fn bob_cannot_retrieve_alices_private_space_chunk_on_bound_node() {
         let store = mem_store();
         store
             .index_chunk(
@@ -2356,9 +2468,37 @@ mod tests {
             )
             .await
             .unwrap();
+
+        let bob_hits = store
+            .retrieve("quarterly revenue", &bound_opts("bob"))
+            .await
+            .unwrap();
+        assert!(
+            bob_hits.iter().all(|c| c.id != "alice-doc"),
+            "Bob must not read Alice's private document chunk"
+        );
+
+        // No-lockout: Alice, the owner, still can.
+        let alice_hits = store
+            .retrieve("quarterly revenue", &bound_opts("alice"))
+            .await
+            .unwrap();
+        assert!(
+            alice_hits.iter().any(|c| c.id == "alice-doc"),
+            "Alice must still read her own document chunk"
+        );
+    }
+
+    /// The content-escape regression test for the fail-closed flip: a BARE unowned
+    /// Space chunk (no `owner_user_id`, no matching explicit org/team stamp — a
+    /// pre-tenancy legacy row) is now HIDDEN on a bound node rather than the old
+    /// fail-open "unowned = shared" default.
+    #[tokio::test]
+    async fn unowned_space_chunk_is_hidden_on_bound_node() {
+        let store = mem_store();
         store
             .index_chunk(
-                "okf-shared",
+                "legacy-bare",
                 ChunkSource::Space,
                 Some("docs"),
                 "quarterly revenue reporting standards overview",
@@ -2368,12 +2508,100 @@ mod tests {
             .unwrap();
 
         let hits = store
-            .retrieve("quarterly revenue", &bound_opts("bob"))
+            .retrieve("quarterly revenue reporting", &bound_opts("bob"))
             .await
             .unwrap();
+        assert!(
+            hits.iter().all(|c| c.id != "legacy-bare"),
+            "a bare-unowned Space chunk must be hidden on a bound node, not shared"
+        );
+    }
+
+    /// OKF-style content stamped with an EXPLICIT org-shared visibility (the exact
+    /// shape `RetrievalStore::ingest_okf_bundle` now writes: no specific user
+    /// owner, `owner_org_id` + `visibility = "org"`) stays visible to every member
+    /// of that org — this is how genuinely shared knowledge survives the
+    /// fail-closed flip above.
+    #[tokio::test]
+    async fn explicit_shared_space_chunk_visible_to_all_members() {
+        let store = mem_store();
+        store
+            .index_chunk(
+                "okf-shared",
+                ChunkSource::Space,
+                Some("docs"),
+                "quarterly revenue reporting standards overview",
+                RetrievalOwner::owned(None, Some("org1"), Some("org")),
+            )
+            .await
+            .unwrap();
+
+        let hits = store
+            .retrieve("quarterly revenue reporting", &bound_opts("bob"))
+            .await
+            .unwrap();
+        assert!(
+            hits.iter().any(|c| c.id == "okf-shared"),
+            "explicitly org-shared knowledge stays visible to every member"
+        );
+    }
+
+    /// UNBOUND node: Space tenancy stays a total no-op, byte-identical regardless
+    /// of owner shape — including the bare-unowned case that is hidden when bound.
+    #[tokio::test]
+    async fn unbound_node_space_tenancy_noop() {
+        let store = mem_store();
+        store
+            .index_chunk(
+                "legacy-bare",
+                ChunkSource::Space,
+                Some("docs"),
+                "quarterly revenue reporting standards overview",
+                RetrievalOwner::shared(),
+            )
+            .await
+            .unwrap();
+        store
+            .index_chunk(
+                "alice-doc",
+                ChunkSource::Space,
+                Some("docs"),
+                "quarterly revenue was forty two million",
+                RetrievalOwner::owned(Some("alice"), Some("org1"), Some("private")),
+            )
+            .await
+            .unwrap();
+
+        let opts = RetrievalOptions {
+            top_k: 10,
+            ..Default::default()
+        };
+        let hits = store.retrieve("quarterly revenue", &opts).await.unwrap();
         let ids: Vec<&str> = hits.iter().map(|c| c.id.as_str()).collect();
-        assert!(!ids.contains(&"alice-doc"), "Bob must not read Alice's private document chunk");
-        assert!(ids.contains(&"okf-shared"), "shared/OKF knowledge stays visible");
+        assert!(ids.contains(&"legacy-bare"));
+        assert!(ids.contains(&"alice-doc"));
+    }
+
+    /// Integration: `ingest_okf_bundle` called with the node's org (the real
+    /// production writer, not just the pure `RetrievalOwner::owned(None, ..)`
+    /// shape exercised above) produces chunks that pass the fail-closed
+    /// `space_tenancy_allows` for every bound-node member.
+    #[tokio::test]
+    async fn okf_bundle_ingested_with_org_stays_visible_to_bound_members() {
+        let store = mem_store();
+        store
+            .ingest_okf_bundle("b1", &sample_bundle(), Some("org1"))
+            .await
+            .unwrap();
+
+        let hits = store
+            .retrieve("orders fact table customer purchases", &bound_opts("bob"))
+            .await
+            .unwrap();
+        assert!(
+            !hits.is_empty(),
+            "OKF content ingested with the node's org must stay visible to a bound-node member"
+        );
     }
 
     /// The pure filter functions, exercised directly (no DB): the same matrix the
@@ -2398,7 +2626,10 @@ mod tests {
         assert!(!memory_tenancy_allows(&base, &bob));
         assert!(memory_tenancy_allows(&base, &alice));
         // node/project: shared.
-        let node = RetrievableChunk { mem_scope: Some("node".into()), ..base.clone() };
+        let node = RetrievableChunk {
+            mem_scope: Some("node".into()),
+            ..base.clone()
+        };
         assert!(memory_tenancy_allows(&node, &bob));
         // unbound: everything.
         let unbound = RetrievalOptions::default();

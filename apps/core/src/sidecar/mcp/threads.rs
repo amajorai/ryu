@@ -562,21 +562,36 @@ mod tests {
     #[tokio::test]
     async fn create_then_list_then_read_roundtrip() {
         let store = ConversationStore::open_in_memory().expect("store");
-        let created = dispatch("create_thread", json!({ "title": "Ticket 1" }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("create");
+        let created = dispatch(
+            "create_thread",
+            json!({ "title": "Ticket 1" }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("create");
         assert_eq!(created["ok"], json!(true));
         let thread_id = created["thread_id"].as_str().expect("thread_id").to_owned();
 
-        let listed = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("list");
+        let listed = dispatch(
+            "list_threads",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("list");
         assert_eq!(listed["count"], json!(1));
         assert_eq!(listed["threads"][0]["thread_id"], json!(thread_id));
 
-        let read = dispatch("read_thread", json!({ "thread_id": thread_id }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("read");
+        let read = dispatch(
+            "read_thread",
+            json!({ "thread_id": thread_id }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("read");
         assert_eq!(read["ok"], json!(true));
         assert_eq!(read["message_count"], json!(0));
     }
@@ -584,15 +599,25 @@ mod tests {
     #[tokio::test]
     async fn pin_and_archive_flags_affect_listing() {
         let store = ConversationStore::open_in_memory().expect("store");
-        let a = dispatch("create_thread", json!({ "title": "A" }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("a")["thread_id"]
+        let a = dispatch(
+            "create_thread",
+            json!({ "title": "A" }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("a")["thread_id"]
             .as_str()
             .unwrap()
             .to_owned();
-        let b = dispatch("create_thread", json!({ "title": "B" }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("b")["thread_id"]
+        let b = dispatch(
+            "create_thread",
+            json!({ "title": "B" }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("b")["thread_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -606,9 +631,14 @@ mod tests {
         )
         .await
         .expect("pin");
-        let listed = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("list");
+        let listed = dispatch(
+            "list_threads",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("list");
         assert_eq!(listed["threads"][0]["thread_id"], json!(b));
 
         // Archive A → excluded by default, included when asked.
@@ -620,22 +650,37 @@ mod tests {
         )
         .await
         .expect("archive");
-        let default_list = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("list2");
+        let default_list = dispatch(
+            "list_threads",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("list2");
         assert_eq!(default_list["count"], json!(1));
-        let full_list = dispatch("list_threads", json!({ "include_archived": true }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("list3");
+        let full_list = dispatch(
+            "list_threads",
+            json!({ "include_archived": true }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("list3");
         assert_eq!(full_list["count"], json!(2));
     }
 
     #[tokio::test]
     async fn set_title_updates_thread() {
         let store = ConversationStore::open_in_memory().expect("store");
-        let id = dispatch("create_thread", json!({}), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("create")["thread_id"]
+        let id = dispatch(
+            "create_thread",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("create")["thread_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -647,9 +692,14 @@ mod tests {
         )
         .await
         .expect("title");
-        let read = dispatch("read_thread", json!({ "thread_id": id }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("read");
+        let read = dispatch(
+            "read_thread",
+            json!({ "thread_id": id }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("read");
         assert_eq!(read["title"], json!("Renamed"));
     }
 
@@ -657,9 +707,14 @@ mod tests {
     async fn send_message_reports_unavailable_without_runner() {
         // No global agent runner is published in tests, so the tool degrades.
         let store = ConversationStore::open_in_memory().expect("store");
-        let id = dispatch("create_thread", json!({}), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("create")["thread_id"]
+        let id = dispatch(
+            "create_thread",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("create")["thread_id"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -678,13 +733,27 @@ mod tests {
     #[tokio::test]
     async fn missing_required_args_are_errors() {
         let store = ConversationStore::open_in_memory().expect("store");
-        assert!(dispatch("read_thread", json!({}), &store, &ToolPrincipal::Unrestricted).await.is_err());
+        assert!(dispatch(
+            "read_thread",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unrestricted
+        )
+        .await
+        .is_err());
+        assert!(dispatch(
+            "set_thread_title",
+            json!({ "thread_id": "x" }),
+            &store,
+            &ToolPrincipal::Unrestricted
+        )
+        .await
+        .is_err());
         assert!(
-            dispatch("set_thread_title", json!({ "thread_id": "x" }), &store, &ToolPrincipal::Unrestricted)
+            dispatch("nope", json!({}), &store, &ToolPrincipal::Unrestricted)
                 .await
                 .is_err()
         );
-        assert!(dispatch("nope", json!({}), &store, &ToolPrincipal::Unrestricted).await.is_err());
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -736,11 +805,7 @@ mod tests {
             .ensure_conversation("bob-thread", None, Some("Bob"), owner("bob"))
             .await
             .unwrap();
-        (
-            store,
-            "alice-thread".to_owned(),
-            "bob-thread".to_owned(),
-        )
+        (store, "alice-thread".to_owned(), "bob-thread".to_owned())
     }
 
     #[tokio::test]
@@ -797,7 +862,11 @@ mod tests {
         assert_eq!(sent["ok"], json!(false));
         assert_eq!(sent["error"], json!("thread not found"));
 
-        for tool in ["set_thread_title", "set_thread_pinned", "set_thread_archived"] {
+        for tool in [
+            "set_thread_title",
+            "set_thread_pinned",
+            "set_thread_archived",
+        ] {
             let out = dispatch(
                 tool,
                 json!({ "thread_id": alice_id, "title": "pwned", "pinned": true, "archived": true }),
@@ -839,18 +908,28 @@ mod tests {
     async fn a_thread_created_by_bobs_agent_is_owned_by_bob() {
         let (store, _, bob_id) = two_tenant_store().await;
 
-        let created = dispatch("create_thread", json!({ "title": "worker" }), &store, &bob())
-            .await
-            .expect("create");
+        let created = dispatch(
+            "create_thread",
+            json!({ "title": "worker" }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("create");
         let worker = created["thread_id"].as_str().unwrap();
         let meta = store.get_access_meta(worker).await.unwrap().unwrap();
         assert_eq!(meta.owner_user_id.as_deref(), Some("bob"));
         assert_eq!(meta.org_id.as_deref(), Some(ORG));
 
         // And a fork of his OWN thread is his too.
-        let forked = dispatch("fork_thread", json!({ "thread_id": bob_id }), &store, &bob())
-            .await
-            .expect("fork");
+        let forked = dispatch(
+            "fork_thread",
+            json!({ "thread_id": bob_id }),
+            &store,
+            &bob(),
+        )
+        .await
+        .expect("fork");
         assert_eq!(forked["ok"], json!(true));
         let fork_id = forked["thread_id"].as_str().unwrap();
         let meta = store.get_access_meta(fork_id).await.unwrap().unwrap();
@@ -867,9 +946,14 @@ mod tests {
     #[tokio::test]
     async fn an_unresolved_principal_on_a_bound_node_sees_nothing() {
         let (store, alice_id, _) = two_tenant_store().await;
-        let out = dispatch("list_threads", json!({}), &store, &ToolPrincipal::Unresolved)
-            .await
-            .expect("list");
+        let out = dispatch(
+            "list_threads",
+            json!({}),
+            &store,
+            &ToolPrincipal::Unresolved,
+        )
+        .await
+        .expect("list");
         assert_eq!(out["count"], json!(0));
         let read = dispatch(
             "read_thread",
@@ -893,11 +977,20 @@ mod tests {
         let listed = dispatch("list_threads", json!({}), &store, &principal)
             .await
             .expect("list");
-        assert_eq!(listed["count"], json!(2), "unbound node must still see every thread");
+        assert_eq!(
+            listed["count"],
+            json!(2),
+            "unbound node must still see every thread"
+        );
 
-        let read = dispatch("read_thread", json!({ "thread_id": alice_id }), &store, &principal)
-            .await
-            .expect("read");
+        let read = dispatch(
+            "read_thread",
+            json!({ "thread_id": alice_id }),
+            &store,
+            &principal,
+        )
+        .await
+        .expect("read");
         assert_eq!(read["ok"], json!(true));
     }
 

@@ -280,7 +280,9 @@ pub fn hover(x: i32, y: i32) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
-        unsafe { let _ = SetCursorPos(x, y); }
+        unsafe {
+            let _ = SetCursorPos(x, y);
+        }
         return Ok(());
     }
     #[cfg(target_os = "macos")]
@@ -304,8 +306,8 @@ pub fn long_press(x: i32, y: i32, duration_ms: u64, button: MouseButton) -> Resu
         unsafe {
             let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y);
             let (down_flag, up_flag) = match button {
-                MouseButton::Left   => (MOUSEEVENTF_LEFTDOWN,   MOUSEEVENTF_LEFTUP),
-                MouseButton::Right  => (MOUSEEVENTF_RIGHTDOWN,  MOUSEEVENTF_RIGHTUP),
+                MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+                MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
                 MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
             };
             send_mouse_event(x, y, down_flag);
@@ -329,8 +331,10 @@ pub fn long_press(x: i32, y: i32, duration_ms: u64, button: MouseButton) -> Resu
 
 /// Drag from (from_x, from_y) to (to_x, to_y).
 pub fn drag(
-    from_x: i32, from_y: i32,
-    to_x: i32, to_y: i32,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
     duration_ms: u64,
     hold_duration_ms: u64,
 ) -> Result<()> {
@@ -365,7 +369,14 @@ pub fn drag(
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        tracing::debug!("drag({},{} -> {},{}, {}ms)", from_x, from_y, to_x, to_y, duration_ms);
+        tracing::debug!(
+            "drag({},{} -> {},{}, {}ms)",
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            duration_ms
+        );
         Ok(())
     }
 }
@@ -378,8 +389,8 @@ fn windows_click(x: i32, y: i32, button: MouseButton, count: u32) -> Result<()> 
     unsafe {
         let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y);
         let (down_flag, up_flag) = match button {
-            MouseButton::Left   => (MOUSEEVENTF_LEFTDOWN,   MOUSEEVENTF_LEFTUP),
-            MouseButton::Right  => (MOUSEEVENTF_RIGHTDOWN,  MOUSEEVENTF_RIGHTUP),
+            MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+            MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
             MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP),
         };
         for _ in 0..count {
@@ -395,13 +406,18 @@ fn windows_click(x: i32, y: i32, button: MouseButton, count: u32) -> Result<()> 
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn send_mouse_event(x: i32, y: i32, flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS) {
+unsafe fn send_mouse_event(
+    x: i32,
+    y: i32,
+    flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS,
+) {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     let input = INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
-                dx: x, dy: y,
+                dx: x,
+                dy: y,
                 mouseData: 0,
                 dwFlags: flags,
                 time: 0,
@@ -425,13 +441,13 @@ fn macos_click(x: i32, y: i32, button: MouseButton, count: u32) -> Result<()> {
     let pt = CGPoint::new(x as f64, y as f64);
 
     let (mouse_down, mouse_up) = match button {
-        MouseButton::Left   => (CGEventType::LeftMouseDown,  CGEventType::LeftMouseUp),
-        MouseButton::Right  => (CGEventType::RightMouseDown, CGEventType::RightMouseUp),
+        MouseButton::Left => (CGEventType::LeftMouseDown, CGEventType::LeftMouseUp),
+        MouseButton::Right => (CGEventType::RightMouseDown, CGEventType::RightMouseUp),
         MouseButton::Middle => (CGEventType::OtherMouseDown, CGEventType::OtherMouseUp),
     };
     let mouse_button = match button {
-        MouseButton::Left   => CGMouseButton::Left,
-        MouseButton::Right  => CGMouseButton::Right,
+        MouseButton::Left => CGMouseButton::Left,
+        MouseButton::Right => CGMouseButton::Right,
         MouseButton::Middle => CGMouseButton::Center,
     };
 
@@ -445,7 +461,9 @@ fn macos_click(x: i32, y: i32, button: MouseButton, count: u32) -> Result<()> {
             ev.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, (i + 1) as i64);
             ev.post(CGEventTapLocation::HID);
         }
-        if count > 1 { std::thread::sleep(std::time::Duration::from_millis(50)); }
+        if count > 1 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
     Ok(())
 }
@@ -459,7 +477,9 @@ fn macos_move_cursor(x: i32, y: i32) -> Result<()> {
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| anyhow::anyhow!("CGEventSource failed"))?;
     let pt = CGPoint::new(x as f64, y as f64);
-    if let Ok(ev) = CGEvent::new_mouse_event(source, CGEventType::MouseMoved, pt, CGMouseButton::Left) {
+    if let Ok(ev) =
+        CGEvent::new_mouse_event(source, CGEventType::MouseMoved, pt, CGMouseButton::Left)
+    {
         ev.post(CGEventTapLocation::HID);
     }
     Ok(())
@@ -510,7 +530,12 @@ fn macos_drag(
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| anyhow::anyhow!("CGEventSource failed"))?;
     let from = CGPoint::new(from_x as f64, from_y as f64);
-    if let Ok(ev) = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, from, CGMouseButton::Left) {
+    if let Ok(ev) = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::LeftMouseDown,
+        from,
+        CGMouseButton::Left,
+    ) {
         ev.post(CGEventTapLocation::HID);
     }
     std::thread::sleep(std::time::Duration::from_millis(hold_duration_ms));
@@ -521,15 +546,73 @@ fn macos_drag(
         let cx = from_x + ((to_x - from_x) as f64 * t) as i32;
         let cy = from_y + ((to_y - from_y) as f64 * t) as i32;
         let pt = CGPoint::new(cx as f64, cy as f64);
-        if let Ok(ev) = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDragged, pt, CGMouseButton::Left) {
+        if let Ok(ev) = CGEvent::new_mouse_event(
+            source.clone(),
+            CGEventType::LeftMouseDragged,
+            pt,
+            CGMouseButton::Left,
+        ) {
             ev.post(CGEventTapLocation::HID);
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
     let to = CGPoint::new(to_x as f64, to_y as f64);
-    if let Ok(ev) = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, to, CGMouseButton::Left) {
+    if let Ok(ev) =
+        CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, to, CGMouseButton::Left)
+    {
         ev.post(CGEventTapLocation::HID);
     }
     Ok(())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    // Coordinates far outside any possible display: AXUIElementCopyElementAtPosition
+    // resolves no element there regardless of Accessibility permission, so `ax_press`
+    // returns false and NOTHING is pressed. This is the one AX branch we can drive
+    // hermetically — the HID-posting plans (HidPlain / HidRestore / AxThenHidRestore)
+    // are omitted because they inject real pointer events.
+    const OFF_SCREEN: (i32, i32) = (-1_000_000, -1_000_000);
+
+    #[test]
+    fn ax_press_at_off_screen_finds_no_element() {
+        assert!(!ax_press_at(OFF_SCREEN.0, OFF_SCREEN.1));
+    }
+
+    #[test]
+    fn execute_click_ax_only_errors_when_no_element() {
+        // AxOnly must not fall back to HID; with no pressable element it errors.
+        let result = execute_click(
+            OFF_SCREEN.0,
+            OFF_SCREEN.1,
+            MouseButton::Left,
+            1,
+            ClickPlan::AxOnly,
+        );
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("AX press failed"), "got: {err}");
+    }
+
+    #[test]
+    fn mouse_button_variants_are_distinct() {
+        assert_ne!(MouseButton::Left, MouseButton::Right);
+        assert_ne!(MouseButton::Right, MouseButton::Middle);
+        assert_eq!(MouseButton::Left, MouseButton::Left);
+    }
+
+    #[test]
+    fn cursor_position_reads_without_moving_the_cursor() {
+        // Reading the pointer location via CGEventCreate/CGEventGetLocation is a pure
+        // query — it posts no event and does not warp the cursor (unlike warp_cursor,
+        // which is intentionally never called in tests). Under a real window server it
+        // yields a coordinate; a headless run may yield None. Either is acceptable —
+        // we only assert it never panics and any coordinate is within plausible bounds.
+        if let Some((x, y)) = cursor_position() {
+            assert!((-100_000..=100_000).contains(&x), "x out of range: {x}");
+            assert!((-100_000..=100_000).contains(&y), "y out of range: {y}");
+        }
+    }
 }

@@ -163,7 +163,11 @@ pub async fn plugin_bridge_dispatch(
             )
         }
         Err(e) => {
-            return err_response(StatusCode::INTERNAL_SERVER_ERROR, "server_error", e.to_string())
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                e.to_string(),
+            )
         }
     };
     let grants: HashSet<String> = record.approved_grants.into_iter().collect();
@@ -224,7 +228,9 @@ pub async fn plugin_bridge_dispatch(
     let bridge = PluginHookBridge::new(plugin_id, grants, state);
     match bridge.handle(bridge_path.to_owned(), body.args).await {
         InvokeOutcome::Result(r) if r.is_error => {
-            let message = r.error.unwrap_or_else(|| "capability call failed".to_owned());
+            let message = r
+                .error
+                .unwrap_or_else(|| "capability call failed".to_owned());
             let (status, code) = classify_bridge_error(&message);
             err_response(status, code, message)
         }
@@ -321,7 +327,11 @@ pub async fn plugin_bridge_stream(
             )
         }
         Err(e) => {
-            return err_response(StatusCode::INTERNAL_SERVER_ERROR, "server_error", e.to_string())
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                e.to_string(),
+            )
         }
     };
     let grants: HashSet<String> = record.approved_grants.into_iter().collect();
@@ -469,11 +479,7 @@ fn forward_frame(frame: &str) -> Option<Vec<u8>> {
     let data = frame.strip_prefix("data:").map(str::trim).unwrap_or("");
     let is_error = serde_json::from_str::<Value>(data)
         .ok()
-        .and_then(|v| {
-            v.get("type")
-                .and_then(Value::as_str)
-                .map(|t| t == "error")
-        })
+        .and_then(|v| v.get("type").and_then(Value::as_str).map(|t| t == "error"))
         .unwrap_or(false);
     if is_error {
         return Some(b"data: {\"type\":\"error\",\"errorText\":\"agent run failed\"}\n\n".to_vec());
@@ -498,13 +504,19 @@ mod tests {
         assert_eq!(bridge_path_for("agent.run"), Some("host.runAgent"));
         assert_eq!(bridge_path_for("storage.get"), Some("host.storage_get"));
         assert_eq!(bridge_path_for("storage.set"), Some("host.storage_set"));
-        assert_eq!(bridge_path_for("storage.delete"), Some("host.storage_delete"));
+        assert_eq!(
+            bridge_path_for("storage.delete"),
+            Some("host.storage_delete")
+        );
         assert_eq!(bridge_path_for("storage.keys"), Some("host.storage_keys"));
         assert_eq!(
             bridge_path_for("spaces.createDoc"),
             Some("host.spaces_create_doc")
         );
-        assert_eq!(bridge_path_for("spaces.getDoc"), Some("host.spaces_get_doc"));
+        assert_eq!(
+            bridge_path_for("spaces.getDoc"),
+            Some("host.spaces_get_doc")
+        );
         assert_eq!(
             bridge_path_for("spaces.updateDoc"),
             Some("host.spaces_update_doc")
@@ -521,8 +533,14 @@ mod tests {
             bridge_path_for("finetune.capability"),
             Some("host.finetune_capability")
         );
-        assert_eq!(bridge_path_for("finetune.start"), Some("host.finetune_start"));
-        assert_eq!(bridge_path_for("finetune.merge"), Some("host.finetune_merge"));
+        assert_eq!(
+            bridge_path_for("finetune.start"),
+            Some("host.finetune_start")
+        );
+        assert_eq!(
+            bridge_path_for("finetune.merge"),
+            Some("host.finetune_merge")
+        );
         // `finetune.stream` is a STREAMING method — it has a required grant but no
         // unary bridge path (it's handled by the stream endpoint, not dispatch).
         assert_eq!(bridge_path_for("finetune.stream"), None);
@@ -536,7 +554,10 @@ mod tests {
 
     #[test]
     fn required_grant_matches_bridge_vocabulary() {
-        assert_eq!(required_grant_for("model.complete"), Some("hook:side-model"));
+        assert_eq!(
+            required_grant_for("model.complete"),
+            Some("hook:side-model")
+        );
         assert_eq!(required_grant_for("agent.run"), Some("hook:run-agent"));
         assert_eq!(required_grant_for("storage.get"), Some("storage:kv"));
         assert_eq!(required_grant_for("storage.keys"), Some("storage:kv"));
@@ -545,7 +566,10 @@ mod tests {
         assert_eq!(required_grant_for("spaces.updateDoc"), Some("spaces:docs"));
         assert_eq!(required_grant_for("spaces.listDocs"), Some("spaces:docs"));
         assert_eq!(required_grant_for("spaces.deleteDoc"), Some("spaces:docs"));
-        assert_eq!(required_grant_for("finetune.capability"), Some("finetune:runs"));
+        assert_eq!(
+            required_grant_for("finetune.capability"),
+            Some("finetune:runs")
+        );
         assert_eq!(required_grant_for("finetune.start"), Some("finetune:runs"));
         assert_eq!(required_grant_for("finetune.get"), Some("finetune:runs"));
         // `view.action` is grant-gated but has NO unary bridge path — it is
@@ -585,13 +609,23 @@ mod tests {
     #[test]
     fn stream_filter_forwards_only_text_error_done() {
         // Forwarded: reply text, errors, terminal sentinel.
-        assert!(stream_frame_allowed(r#"data: {"type":"text-delta","delta":"hi"}"#));
-        assert!(stream_frame_allowed(r#"data: {"type":"text-start","id":"1"}"#));
-        assert!(stream_frame_allowed(r#"data: {"type":"error","errorText":"boom"}"#));
+        assert!(stream_frame_allowed(
+            r#"data: {"type":"text-delta","delta":"hi"}"#
+        ));
+        assert!(stream_frame_allowed(
+            r#"data: {"type":"text-start","id":"1"}"#
+        ));
+        assert!(stream_frame_allowed(
+            r#"data: {"type":"error","errorText":"boom"}"#
+        ));
         assert!(stream_frame_allowed("data: [DONE]"));
         // Dropped: agent internals never exposed to an untrusted app frame.
-        assert!(!stream_frame_allowed(r#"data: {"type":"tool-input-start"}"#));
-        assert!(!stream_frame_allowed(r#"data: {"type":"tool-output-available"}"#));
+        assert!(!stream_frame_allowed(
+            r#"data: {"type":"tool-input-start"}"#
+        ));
+        assert!(!stream_frame_allowed(
+            r#"data: {"type":"tool-output-available"}"#
+        ));
         assert!(!stream_frame_allowed(r#"data: {"type":"reasoning-delta"}"#));
         assert!(!stream_frame_allowed(r#"data: {"type":"start"}"#));
         assert!(!stream_frame_allowed(r#"data: {"type":"finish"}"#));
@@ -614,7 +648,10 @@ mod tests {
         expected.extend_from_slice(b"\n\n");
         assert_eq!(text, expected);
         // [DONE] passes.
-        assert_eq!(forward_frame("data: [DONE]").unwrap(), b"data: [DONE]\n\n".to_vec());
+        assert_eq!(
+            forward_frame("data: [DONE]").unwrap(),
+            b"data: [DONE]\n\n".to_vec()
+        );
         // An error frame is REPLACED — the raw errorText (which may embed an internal
         // url like http://127.0.0.1:7981/...) never reaches the untrusted frame.
         let leaky = r#"data: {"type":"error","errorText":"Agent unreachable: error for url (http://127.0.0.1:7981/v1/chat/completions)"}"#;

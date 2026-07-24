@@ -96,7 +96,12 @@ pub async fn set_config(State(ctx): State<HealingCtx>, Json(body): Json<Value>) 
             let _ = host.pref_set(key, s).await;
         }
     }
-    set_bool(&*ctx.host, HEALING_ENABLED_PREF, body.get("enabled").and_then(Value::as_bool)).await;
+    set_bool(
+        &*ctx.host,
+        HEALING_ENABLED_PREF,
+        body.get("enabled").and_then(Value::as_bool),
+    )
+    .await;
     set_bool(
         &*ctx.host,
         HEALING_AUTO_DECIDE_PREF,
@@ -104,10 +109,16 @@ pub async fn set_config(State(ctx): State<HealingCtx>, Json(body): Json<Value>) 
     )
     .await;
     if let Some(n) = body.get("max_attempts").and_then(Value::as_u64) {
-        let _ = ctx.host.pref_set(HEALING_MAX_ATTEMPTS_PREF, &n.to_string()).await;
+        let _ = ctx
+            .host
+            .pref_set(HEALING_MAX_ATTEMPTS_PREF, &n.to_string())
+            .await;
     }
     if let Some(n) = body.get("cooldown_secs").and_then(Value::as_i64) {
-        let _ = ctx.host.pref_set(HEALING_COOLDOWN_SECS_PREF, &n.to_string()).await;
+        let _ = ctx
+            .host
+            .pref_set(HEALING_COOLDOWN_SECS_PREF, &n.to_string())
+            .await;
     }
     set_str(
         &*ctx.host,
@@ -169,6 +180,124 @@ pub async fn report_failure(State(_ctx): State<HealingCtx>, Json(body): Json<Val
         .evaluate(&source_id, source, instruction, failure)
         .await;
     Json(verdict).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{tmp_dir, MockHost};
+    use crate::{
+        set_global_engine, HealEngine, HEALING_AUTO_DECIDE_PREF, HEALING_ENABLED_PREF,
+        HEALING_MAX_ATTEMPTS_PREF,
+    };
+    use axum::body::to_bytes;
+    use axum::extract::State;
+    use axum::http::StatusCode;
+
+    async fn body_json(resp: Response) -> Value {
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn config_get_returns_resolved_view() {
+        let host = Arc::new(
+            MockHost::new(tmp_dir())
+                .with_pref(HEALING_ENABLED_PREF, "false")
+                .with_pref(HEALING_MAX_ATTEMPTS_PREF, "7"),
+        );
+        let ctx = HealingCtx::new(host);
+        let resp = config(State(ctx)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let v = body_json(resp).await;
+        assert_eq!(v.get("enabled").and_then(Value::as_bool), Some(false));
+        assert_eq!(v.get("max_attempts").and_then(Value::as_u64), Some(7));
+    }
+
+    #[tokio::test]
+    async fn set_config_writes_every_provided_pref() {
+        let host = Arc::new(MockHost::new(tmp_dir()));
+        let ctx = HealingCtx::new(host.clone());
+        let body = json!({
+            "enabled": false,
+            "auto_decide": true,
+            "max_attempts": 5,
+            "cooldown_secs": 0,
+            "diagnose_model": "m-x",
+            "diagnose_effort": "high",
+        });
+        let resp = set_config(State(ctx), Json(body)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let prefs = host.prefs.lock().unwrap();
+        assert_eq!(prefs.get(HEALING_ENABLED_PREF).map(String::as_str), Some("false"));
+        assert_eq!(
+            prefs.get(HEALING_AUTO_DECIDE_PREF).map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            prefs.get(HEALING_MAX_ATTEMPTS_PREF).map(String::as_str),
+            Some("5")
+        );
+        assert_eq!(
+            prefs.get(crate::HEALING_COOLDOWN_SECS_PREF).map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prefs.get(HEALING_DIAGNOSE_MODEL_PREF).map(String::as_str),
+            Some("m-x")
+        );
+        assert_eq!(
+            prefs.get(HEALING_DIAGNOSE_EFFORT_PREF).map(String::as_str),
+            Some("high")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_config_ignores_absent_and_mistyped_fields() {
+        let host = Arc::new(MockHost::new(tmp_dir()));
+        let ctx = HealingCtx::new(host.clone());
+        // enabled as a string (not a bool) is ignored; max_attempts as a string too.
+        let body = json!({ "enabled": "true", "max_attempts": "9", "unrelated": 1 });
+        let resp = set_config(State(ctx), Json(body)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(host.prefs.lock().unwrap().is_empty(), "no prefs written");
+    }
+
+    // This single test owns the process-global engine (a `OnceLock`), so it is the
+    // ONLY test that calls `set_global_engine`. It exercises both the
+    // `report-failure` ingress and the `status` handler against that engine.
+    #[tokio::test]
+    async fn report_failure_and_status_handlers_use_global_engine() {
+        let host = Arc::new(
+            MockHost::new(tmp_dir()).with_pref(HEALING_AUTO_DECIDE_PREF, "true"),
+        );
+        host.set_reply(Ok(
+            "{\"diagnosis\":\"d\",\"corrected_prompt\":\"cp\"}".to_string()
+        ));
+        let engine = HealEngine::new(host);
+        set_global_engine(engine);
+
+        // report-failure: agent kind, auto-decide ON -> rerun_agent verdict.
+        let ctx = HealingCtx::new(Arc::new(MockHost::new(tmp_dir())));
+        let body = json!({
+            "source_id": "conv-global",
+            "kind": "agent",
+            "agent_id": "ag",
+            "instruction": "orig",
+            "failure": "boom",
+        });
+        let resp = report_failure(State(ctx.clone()), Json(body)).await;
+        let v = body_json(resp).await;
+        assert_eq!(v.get("action").and_then(Value::as_str), Some("rerun_agent"));
+        assert_eq!(v.get("prompt").and_then(Value::as_str), Some("cp"));
+
+        // status: the attempt just recorded is now visible.
+        let resp = status(State(ctx)).await;
+        let v = body_json(resp).await;
+        let attempts = v.get("attempts").expect("attempts");
+        assert!(attempts.get("conv-global").is_some(), "attempt recorded");
+    }
 }
 
 /// `GET /api/healing/status` — the in-memory per-source attempt map.

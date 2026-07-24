@@ -698,6 +698,238 @@ mod tests {
         assert_eq!(extract_codex_text(Some(&blocks)), "a\n\nb");
     }
 
+    // ── extra coverage ───────────────────────────────────────────────────────
+
+    /// Serialize env-var mutation across tests in this module (CLAUDE_CONFIG_DIR /
+    /// CODEX_HOME are process-global). A poisoned lock is fine to reuse here.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        format!(
+            "{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    #[test]
+    fn extract_claude_text_non_string_non_array_is_empty() {
+        // A null / number / missing content flattens to the empty string, never panics.
+        assert_eq!(extract_claude_text(None), "");
+        assert_eq!(extract_claude_text(Some(&serde_json::json!(42))), "");
+        assert_eq!(extract_claude_text(Some(&serde_json::json!(null))), "");
+    }
+
+    #[test]
+    fn extract_codex_text_ignores_non_text_block_types() {
+        // Only input_text/output_text/text are kept; reasoning/other blocks drop.
+        let blocks = serde_json::json!([
+            {"type": "reasoning", "text": "hidden"},
+            {"type": "text", "text": "keep"},
+            {"type": "tool_call", "text": "drop"},
+        ]);
+        assert_eq!(extract_codex_text(Some(&blocks)), "keep");
+        // A bare string content passes through.
+        assert_eq!(
+            extract_codex_text(Some(&serde_json::json!("plain"))),
+            "plain"
+        );
+    }
+
+    #[test]
+    fn first_line_title_variants() {
+        // Empty transcript → placeholder.
+        assert_eq!(first_line_title(&[]), "Untitled thread");
+
+        // Picks the first USER line, skipping leading assistant turns.
+        let msgs = vec![
+            ImportedMessage {
+                role: "assistant".into(),
+                content: "hi there".into(),
+            },
+            ImportedMessage {
+                role: "user".into(),
+                content: "  \n  real question\nmore".into(),
+            },
+        ];
+        assert_eq!(first_line_title(&msgs), "real question");
+
+        // No user turn → falls back to the first message.
+        let only_assistant = vec![ImportedMessage {
+            role: "assistant".into(),
+            content: "just me".into(),
+        }];
+        assert_eq!(first_line_title(&only_assistant), "just me");
+
+        // A blank first user line yields the placeholder (not an empty title).
+        let blank = vec![ImportedMessage {
+            role: "user".into(),
+            content: "   \n\t".into(),
+        }];
+        assert_eq!(first_line_title(&blank), "Untitled thread");
+    }
+
+    #[test]
+    fn first_line_title_truncates_over_80_chars_on_char_boundary() {
+        let long = "x".repeat(200);
+        let msgs = vec![ImportedMessage {
+            role: "user".into(),
+            content: long,
+        }];
+        let title = first_line_title(&msgs);
+        // 80 chars + a single ellipsis char.
+        assert_eq!(title.chars().count(), 81);
+        assert!(title.ends_with('…'));
+    }
+
+    #[test]
+    fn parse_claude_file_filters_and_scrapes_metadata() {
+        let dir = std::env::temp_dir().join(format!("ryu-nh-claude-{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("thread.jsonl");
+        let lines = [
+            r#"{"type":"summary","summary":"  My Thread  "}"#,
+            r#"{"type":"user","cwd":"/w","gitBranch":"main","sessionId":"sid-1","message":{"role":"user","content":"hello"}}"#,
+            // Sidechain (sub-agent) line is skipped entirely.
+            r#"{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":"sub"}}"#,
+            // Content blocks: only text blocks survive.
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"world"}]}}"#,
+            // Empty-text turn is dropped.
+            r#"{"type":"user","message":{"role":"user","content":"   "}}"#,
+            // A non-user/assistant type is ignored.
+            r#"{"type":"system","message":{"role":"system","content":"noise"}}"#,
+            "not json at all",
+            "",
+        ];
+        std::fs::write(&path, lines.join("\n")).unwrap();
+
+        let (messages, meta) = parse_claude_file(&path).unwrap();
+        assert_eq!(messages.len(), 2, "only the two real text turns survive");
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "hello");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[1].content, "world");
+        assert_eq!(meta.title.as_deref(), Some("My Thread"));
+        assert_eq!(meta.cwd.as_deref(), Some("/w"));
+        assert_eq!(meta.git_branch.as_deref(), Some("main"));
+        assert_eq!(meta.native_session_id.as_deref(), Some("sid-1"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_codex_file_reads_payload_and_skips_events() {
+        let dir = std::env::temp_dir().join(format!("ryu-nh-codex-{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout-x.jsonl");
+        let lines = [
+            r#"{"type":"session_meta","payload":{"type":"session_meta","cwd":"/proj","session_id":"cx-1"}}"#,
+            r#"{"payload":{"type":"turn_context","cwd":"/ignored-second"}}"#,
+            r#"{"payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"ask"}]}}"#,
+            r#"{"payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}"#,
+            // user_message / agent_message events are governance traffic — skipped.
+            r#"{"payload":{"type":"user_message","message":"internal"}}"#,
+            r#"{"payload":{"type":"message","role":"tool","content":[{"type":"text","text":"x"}]}}"#,
+        ];
+        std::fs::write(&path, lines.join("\n")).unwrap();
+
+        let (messages, meta) = parse_codex_file(&path).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "ask");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[1].content, "answer");
+        // First session_meta wins for cwd (turn_context does not overwrite it).
+        assert_eq!(meta.cwd.as_deref(), Some("/proj"));
+        assert_eq!(meta.native_session_id.as_deref(), Some("cx-1"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_thread_round_trips_via_claude_config_dir() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join(format!("ryu-nh-home-{}", uniq()));
+        let proj = home.join("projects").join("-w-proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let uuid = "11111111-2222-3333-4444-555555555555";
+        std::fs::write(
+            proj.join(format!("{uuid}.jsonl")),
+            [
+                r#"{"type":"summary","summary":"Titled"}"#,
+                r#"{"type":"user","cwd":"/w/proj","message":{"role":"user","content":"q1"}}"#,
+                r#"{"type":"assistant","message":{"role":"assistant","content":"a1"}}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        std::env::set_var("CLAUDE_CONFIG_DIR", &home);
+
+        let threads = list_threads("claude", None).unwrap();
+        assert_eq!(threads.len(), 1);
+        let t = &threads[0];
+        assert_eq!(t.title, "Titled");
+        assert_eq!(t.message_count, 2);
+        // Filename stem is the fallback session id.
+        assert_eq!(t.native_session_id.as_deref(), Some(uuid));
+
+        let imported = read_thread("claude", &t.id).unwrap();
+        assert_eq!(imported.messages.len(), 2);
+        assert_eq!(imported.thread.title, "Titled");
+        assert!(!imported.truncated);
+
+        // cwd_filter that doesn't match the slug returns nothing.
+        assert!(list_threads("claude", Some("/other")).unwrap().is_empty());
+        // The matching slug returns the thread.
+        assert_eq!(list_threads("claude", Some("/w/proj")).unwrap().len(), 1);
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn read_thread_rejects_bad_engine_and_missing_file() {
+        // Unsupported engine → error, not empty.
+        assert!(read_thread("gemini", "whatever").is_err());
+    }
+
+    #[test]
+    fn materialize_drops_empty_and_unparseable_files() {
+        let dir = std::env::temp_dir().join(format!("ryu-nh-mat-{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // One good, one empty (no messages), one garbage.
+        let good = dir.join("good.jsonl");
+        std::fs::write(
+            &good,
+            r#"{"type":"user","message":{"role":"user","content":"hi"}}"#,
+        )
+        .unwrap();
+        let empty = dir.join("empty.jsonl");
+        std::fs::write(&empty, "{}\n").unwrap();
+
+        let candidates = vec![
+            Candidate {
+                mtime: 2,
+                id: "proj/good".into(),
+                path: good,
+            },
+            Candidate {
+                mtime: 1,
+                id: "proj/empty".into(),
+                path: empty,
+            },
+        ];
+        let out = materialize("claude", candidates, parse_claude_file);
+        assert_eq!(out.len(), 1, "the message-less file is dropped");
+        assert_eq!(out[0].id, "proj/good");
+        assert_eq!(out[0].native_session_id.as_deref(), Some("good"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Smoke test against the developer's REAL on-disk history. Ignored by
     /// default (machine-dependent); run with:
     ///   cargo test -p ryu-core native_history::tests::smoke -- --ignored --nocapture

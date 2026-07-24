@@ -283,7 +283,11 @@ pub async fn any_manifest_declares(state: &ServerState, phase: &str) -> bool {
 /// Collect enabled hooks and run those for `phase`. The one entry point the
 /// process-global dispatcher uses. Fail-open + DB-free fast path: returns empty
 /// without touching the plugin store when no loaded manifest declares `phase`.
-pub async fn dispatch_phase(state: &ServerState, phase: &str, ctx: &HookContext) -> Vec<HookDirective> {
+pub async fn dispatch_phase(
+    state: &ServerState,
+    phase: &str,
+    ctx: &HookContext,
+) -> Vec<HookDirective> {
     if !tool_exec::is_available() {
         return Vec::new();
     }
@@ -661,7 +665,10 @@ mod tests {
             tool_name: Some(name.into()),
             ..Default::default()
         };
-        assert_eq!(gate_without_storage(&m, &ctx("bash__run")), GateVerdict::Run);
+        assert_eq!(
+            gate_without_storage(&m, &ctx("bash__run")),
+            GateVerdict::Run
+        );
         assert_eq!(
             gate_without_storage(&m, &ctx("fs__delete_file")),
             GateVerdict::Run
@@ -890,8 +897,8 @@ mod tests {
             flags: std::iter::once(("io.ryu.double-check".to_string(), true)).collect(),
             ..Default::default()
         };
-        let directive = run_fixture("double-check", ctx, serde_json::json!("Wrong: 2+2 is 4."))
-        .await;
+        let directive =
+            run_fixture("double-check", ctx, serde_json::json!("Wrong: 2+2 is 4.")).await;
         assert_eq!(
             directive,
             HookDirective::Note {
@@ -1080,8 +1087,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let directive =
-            run_fixture("security-guidance", ctx, serde_json::json!("unused")).await;
+        let directive = run_fixture("security-guidance", ctx, serde_json::json!("unused")).await;
         assert_eq!(directive, HookDirective::None);
     }
 
@@ -1174,7 +1180,8 @@ mod tests {
             input: Some("just a normal message".into()),
             ..Default::default()
         };
-        let directive = run_fixture("com.ryuhq.auto-expand", ctx, serde_json::json!("unused")).await;
+        let directive =
+            run_fixture("com.ryuhq.auto-expand", ctx, serde_json::json!("unused")).await;
         assert_eq!(directive, HookDirective::None);
     }
 
@@ -1295,7 +1302,10 @@ mod tests {
         };
         match run_code(&code, ctx, serde_json::json!("x")).await {
             HookDirective::Note { text } => {
-                assert!(text.contains("task-7") && text.contains("did the thing"), "{text}");
+                assert!(
+                    text.contains("task-7") && text.contains("did the thing"),
+                    "{text}"
+                );
             }
             other => panic!("expected Note, got {other:?}"),
         }

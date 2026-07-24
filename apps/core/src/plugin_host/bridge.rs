@@ -91,10 +91,7 @@ impl PluginHookBridge {
             "storage_get" | "storage_set" | "storage_delete" | "storage_keys" => {
                 self.storage(method, args).await
             }
-            "spaces_create_doc"
-            | "spaces_get_doc"
-            | "spaces_update_doc"
-            | "spaces_list_docs"
+            "spaces_create_doc" | "spaces_get_doc" | "spaces_update_doc" | "spaces_list_docs"
             | "spaces_delete_doc" => self.spaces(method, args).await,
             "finetune_capability"
             | "finetune_start"
@@ -570,7 +567,9 @@ mod tests {
                 "dispatch path for '{}' but no grant in the kernel-contracts table",
                 m.method
             );
-            let internal = path.strip_prefix("host.").expect("dispatch path is host.<...>");
+            let internal = path
+                .strip_prefix("host.")
+                .expect("dispatch path is host.<...>");
             assert!(
                 handled_method(internal),
                 "dispatch path '{path}' for '{}' is not matched by the bridge",

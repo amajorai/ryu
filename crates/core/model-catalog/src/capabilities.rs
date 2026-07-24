@@ -424,4 +424,115 @@ mod tests {
             "diffusion surfaces directly in the report"
         );
     }
+
+    /// Build an in-memory GGUF v3 file carrying the given string metadata.
+    fn synth_gguf(strings: &[(&str, &str)]) -> Vec<u8> {
+        const GGUF_MAGIC: u32 = 0x4655_4747;
+        const STRING: u32 = 8;
+        let mut out = Vec::new();
+        out.extend_from_slice(&GGUF_MAGIC.to_le_bytes());
+        out.extend_from_slice(&3u32.to_le_bytes()); // version
+        out.extend_from_slice(&0u64.to_le_bytes()); // tensor_count
+        out.extend_from_slice(&(strings.len() as u64).to_le_bytes());
+        for (k, v) in strings {
+            out.extend_from_slice(&(k.len() as u64).to_le_bytes());
+            out.extend_from_slice(k.as_bytes());
+            out.extend_from_slice(&STRING.to_le_bytes());
+            out.extend_from_slice(&(v.len() as u64).to_le_bytes());
+            out.extend_from_slice(v.as_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn override_store_roundtrip_and_delete() {
+        crate::ensure_test_host();
+        let agent = "cap-test-agent-unique-a1";
+        let ov = CapabilityOverrides {
+            tools: Some(true),
+            reasoning: None,
+            vision: Some(false),
+        };
+        save_override(agent, &ov).unwrap();
+        let loaded = load_override(agent);
+        assert_eq!(loaded.tools, Some(true));
+        assert_eq!(loaded.vision, Some(false));
+        assert_eq!(loaded.reasoning, None);
+        // Unknown agent → all-None.
+        assert!(load_override("cap-test-never-saved-zzz").is_empty());
+        // Saving an all-None override deletes the record ("reset to auto").
+        save_override(agent, &CapabilityOverrides::default()).unwrap();
+        assert!(load_override(agent).is_empty());
+    }
+
+    #[test]
+    fn detect_local_reads_caps_and_vision_from_disk() {
+        crate::ensure_test_host();
+        let stem = "cap-test-vision-model-unique-a2";
+        let path = installed::model_file_path(stem);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let bytes = synth_gguf(&[
+            ("general.architecture", "llama"),
+            (
+                "tokenizer.chat_template",
+                "{% if tools %}call {{ tools }}{% endif %} <think>",
+            ),
+        ]);
+        std::fs::write(&path, &bytes).unwrap();
+        // A sibling mmproj adapter marks the model vision-capable.
+        std::fs::write(installed::mmproj_file_path(stem), b"proj").unwrap();
+        installed::record(installed::InstalledModel {
+            repo_id: "acme/cap-test".into(),
+            filename: format!("{stem}.gguf"),
+            stem: stem.into(),
+            size_bytes: Some(bytes.len() as u64),
+            format: ryu_model_format::ModelFormat::Gguf,
+            mmproj: Some("mmproj-f16.gguf".into()),
+            finetune_base: None,
+        })
+        .unwrap();
+
+        let caps = detect_local(stem).expect("resolves to an installed gguf");
+        assert!(caps.tools, "template references tools");
+        assert!(caps.reasoning, "template has a <think> marker");
+        assert!(caps.vision, "mmproj adapter present");
+        assert!(!caps.diffusion);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(installed::mmproj_file_path(stem));
+        let _ = installed::remove(stem);
+    }
+
+    #[test]
+    fn detect_local_none_for_unresolvable_ref() {
+        crate::ensure_test_host();
+        assert!(detect_local("cap-test-no-such-ref-unique-a3").is_none());
+    }
+
+    #[test]
+    fn detect_local_is_diffusion_reads_architecture() {
+        crate::ensure_test_host();
+        let flux = "cap-test-flux-unique-a4";
+        std::fs::create_dir_all(installed::model_file_path(flux).parent().unwrap()).unwrap();
+        std::fs::write(
+            installed::model_file_path(flux),
+            synth_gguf(&[("general.architecture", "flux")]),
+        )
+        .unwrap();
+        assert!(detect_local_is_diffusion(flux));
+
+        let chat = "cap-test-chat-unique-a5";
+        std::fs::write(
+            installed::model_file_path(chat),
+            synth_gguf(&[("general.architecture", "qwen2")]),
+        )
+        .unwrap();
+        assert!(!detect_local_is_diffusion(chat));
+
+        // A missing / unreadable file yields false, never a panic.
+        assert!(!detect_local_is_diffusion("cap-test-missing-unique-a6"));
+
+        let _ = std::fs::remove_file(installed::model_file_path(flux));
+        let _ = std::fs::remove_file(installed::model_file_path(chat));
+    }
 }

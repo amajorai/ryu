@@ -48,13 +48,41 @@ export interface PluginSettingsField {
 	type: PluginFieldType | string;
 }
 
+/**
+ * Which settings dialog a tab belongs in.
+ * - `"node"` — affects the whole node/gateway (shared by every user on it); rendered
+ *   in the Gateway (node) settings dialog. This is the default for a tab that does
+ *   not declare a scope, matching the historical behaviour (tabs always wrote
+ *   node-scoped preferences via the active node).
+ * - `"user"` — per-user / desktop-client-local (like appearance); rendered in the
+ *   App Settings dialog and does not affect other users on the same node.
+ */
+export type SettingsScope = "node" | "user";
+
+/** Coerce a raw manifest `scope` value to a known scope; anything but the literal
+ *  `"user"` (including absent/unknown) falls back to `"node"`. */
+function parseScope(value: unknown): SettingsScope {
+	return value === "user" ? "user" : "node";
+}
+
 /** A named group of fields a plugin contributes to the settings surface. */
 export interface PluginSettingsTab {
 	fields: PluginSettingsField[];
 	id: string;
 	/** The owning plugin id (manifest id), tagged by Core. */
 	plugin: string;
+	/** The dialog this tab renders in (node = Gateway, user = App Settings). */
+	scope: SettingsScope;
 	title: string;
+	/**
+	 * A rich settings view an app ships instead of declarative `fields`. When set,
+	 * the desktop resolves it to a component (first-party built-in apps) or a
+	 * sandboxed UI (third-party, future) rather than rendering `fields`. This is how
+	 * an app whose settings can't be expressed as simple fields (a full custom UI)
+	 * still registers through its manifest. Opaque here — the settings renderer owns
+	 * the vocabulary.
+	 */
+	view?: string;
 }
 
 function asString(value: unknown): string | undefined {
@@ -121,14 +149,19 @@ export function parseSettingsTabs(
 		const fields = Array.isArray(entry.fields)
 			? (entry.fields.map(parseField).filter(Boolean) as PluginSettingsField[])
 			: [];
-		if (fields.length === 0) {
+		const view = asString(entry.view);
+		// A tab needs SOMETHING to render: either declarative fields or a named view.
+		// Drop an empty tab rather than show an inert section.
+		if (fields.length === 0 && !view) {
 			continue;
 		}
 		tabs.push({
 			plugin,
 			id: asString(entry.id) ?? `${plugin}.settings`,
 			title: asString(entry.title) ?? "Settings",
+			scope: parseScope(entry.scope),
 			fields,
+			view,
 		});
 	}
 	return tabs;
@@ -148,6 +181,46 @@ export function groupTabsByPlugin(
 		}
 	}
 	return byPlugin;
+}
+
+/** Tabs grouped by owning entity, split into the two settings headers. */
+export interface ScopedEntityTabs {
+	/** Entities that contribute a companion surface (Ryu Apps), by id → tabs. */
+	apps: Map<string, PluginSettingsTab[]>;
+	/** Everything else (plain plugins), by id → tabs. */
+	plugins: Map<string, PluginSettingsTab[]>;
+}
+
+/**
+ * Filter tabs to one {@link SettingsScope} and split them across the two nav
+ * headers a settings dialog renders — **Apps** (entities with a companion) and
+ * **Plugins** (the rest) — grouped by owning entity id, preserving order.
+ *
+ * `isApp` decides the header: an *app* is a plugin that contributes a companion
+ * surface (`AppInfo.companion != null`); a *plugin* is one that does not. The
+ * caller supplies the predicate (it holds the `useApps()` list); this stays a
+ * pure function so both dialogs share it.
+ */
+export function splitScopedTabs(
+	tabs: PluginSettingsTab[],
+	scope: SettingsScope,
+	isApp: (pluginId: string) => boolean
+): ScopedEntityTabs {
+	const apps = new Map<string, PluginSettingsTab[]>();
+	const plugins = new Map<string, PluginSettingsTab[]>();
+	for (const tab of tabs) {
+		if (tab.scope !== scope) {
+			continue;
+		}
+		const bucket = isApp(tab.plugin) ? apps : plugins;
+		const existing = bucket.get(tab.plugin);
+		if (existing) {
+			existing.push(tab);
+		} else {
+			bucket.set(tab.plugin, [tab]);
+		}
+	}
+	return { apps, plugins };
 }
 
 /** Coerce a stored bare-string preference into a boolean (for `toggle` fields). */

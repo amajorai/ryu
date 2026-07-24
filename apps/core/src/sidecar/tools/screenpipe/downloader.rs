@@ -117,3 +117,26 @@ impl Default for ScreenpipeDownloader {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bin_path_uses_the_npm_wrapper_name() {
+        // npm's `--prefix ~/.ryu` install drops a `.cmd` wrapper on Windows, a bare
+        // shim elsewhere — both under `~/.ryu/bin`.
+        let p = bin_path();
+        assert!(p.ends_with(if cfg!(target_os = "windows") {
+            "screenpipe.cmd"
+        } else {
+            "screenpipe"
+        }));
+        assert_eq!(p.parent().unwrap().file_name().unwrap(), "bin");
+    }
+
+    #[test]
+    fn default_downloader_has_no_progress_callback() {
+        assert!(ScreenpipeDownloader::default().on_progress.is_none());
+    }
+}

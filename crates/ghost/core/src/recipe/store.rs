@@ -11,12 +11,18 @@ pub struct RecipeStore {
 }
 
 impl RecipeStore {
-    /// Open (or create) the recipe store at the default location.
+    /// Open (or create) the recipe store at the default location. Honors
+    /// `GHOST_DATA_DIR` (Core sets it to the profile-aware `~/.ryu{profile}/ghost`, so
+    /// a dev and a release Ghost don't share one recipe store); falls back to the
+    /// legacy `~/.ghost` when unset.
     pub fn open() -> Result<Self> {
-        let dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-            .join(".ghost")
-            .join("recipes");
+        let base = match std::env::var_os("GHOST_DATA_DIR") {
+            Some(dir) => PathBuf::from(dir),
+            None => dirs::home_dir()
+                .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
+                .join(".ghost"),
+        };
+        let dir = base.join("recipes");
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("Failed to create recipe dir: {}", dir.display()))?;
         Ok(Self { dir })

@@ -855,7 +855,10 @@ impl SidecarManager {
         })
         .await
         .map_err(|_| {
-            anyhow::anyhow!("sidecar '{name}' did not warm within {}s", timeout.as_secs())
+            anyhow::anyhow!(
+                "sidecar '{name}' did not warm within {}s",
+                timeout.as_secs()
+            )
         })?
     }
 
@@ -961,9 +964,11 @@ impl SidecarManager {
                     // Resolve the Arc from whichever map owns it (same pattern as
                     // the health monitor). Snapshot it out before any await so no
                     // lock guard is held across `.stop()`.
-                    let sidecar = manager.sidecars.get(&name).map(Arc::clone).or_else(|| {
-                        manager.dynamic.read().unwrap().get(&name).map(Arc::clone)
-                    });
+                    let sidecar = manager
+                        .sidecars
+                        .get(&name)
+                        .map(Arc::clone)
+                        .or_else(|| manager.dynamic.read().unwrap().get(&name).map(Arc::clone));
                     let Some(sidecar) = sidecar else {
                         continue;
                     };
@@ -1011,13 +1016,9 @@ impl SidecarManager {
         let Some(timeout) = timeout else {
             return false;
         };
-        self.activity
-            .lock()
-            .unwrap()
-            .get(name)
-            .is_some_and(|st| {
-                st.in_flight == 0 && now.saturating_duration_since(st.last_activity) >= timeout
-            })
+        self.activity.lock().unwrap().get(name).is_some_and(|st| {
+            st.in_flight == 0 && now.saturating_duration_since(st.last_activity) >= timeout
+        })
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -1057,9 +1058,11 @@ impl SidecarManager {
                     // A monitored sidecar is either a built-in (in `sidecars`) or a
                     // manifest one (in `dynamic`). Clone the Arc out so no lock guard
                     // is held across the `.await`. Gone from both → stop monitoring.
-                    let sidecar = manager.sidecars.get(&name).map(Arc::clone).or_else(|| {
-                        manager.dynamic.read().unwrap().get(&name).map(Arc::clone)
-                    });
+                    let sidecar = manager
+                        .sidecars
+                        .get(&name)
+                        .map(Arc::clone)
+                        .or_else(|| manager.dynamic.read().unwrap().get(&name).map(Arc::clone));
                     let Some(sidecar) = sidecar else {
                         break;
                     };
@@ -1200,7 +1203,10 @@ mod tests {
         mgr.stop_and_deregister("com.acme.tool/engine")
             .await
             .unwrap();
-        assert!(!sc.is_running(), "sidecar should be stopped after deregister");
+        assert!(
+            !sc.is_running(),
+            "sidecar should be stopped after deregister"
+        );
         assert!(
             mgr.statuses()
                 .iter()
@@ -1278,8 +1284,7 @@ mod tests {
     /// instant-stop). An empty/garbage string ⇒ feature off (empty map).
     #[test]
     fn parse_idle_config_keeps_valid_skips_junk() {
-        let cfg =
-            parse_idle_config("llamacpp-rerank=900, research=1800 ,bad,zero=0,x=abc,=5, ");
+        let cfg = parse_idle_config("llamacpp-rerank=900, research=1800 ,bad,zero=0,x=abc,=5, ");
         assert_eq!(cfg.len(), 2, "only the two valid entries survive: {cfg:?}");
         assert_eq!(cfg["llamacpp-rerank"], Duration::from_secs(900));
         assert_eq!(cfg["research"], Duration::from_secs(1800));
@@ -1326,7 +1331,10 @@ mod tests {
             .get_mut("rerank")
             .unwrap()
             .last_activity = Instant::now() - Duration::from_secs(120);
-        assert_eq!(mgr.idle_stop_due(Instant::now()), vec!["rerank".to_string()]);
+        assert_eq!(
+            mgr.idle_stop_due(Instant::now()),
+            vec!["rerank".to_string()]
+        );
 
         // An in-flight request pins it alive even with an expired clock.
         let guard = mgr.enter_request("rerank");
@@ -1465,7 +1473,7 @@ mod tests {
     #[test]
     fn idle_override_makes_a_sidecar_reapable_without_env_seed() {
         let mgr = SidecarManager::new_noop(); // empty env idle_config
-        // No override yet + no env config ⇒ nothing is ever due.
+                                              // No override yet + no env config ⇒ nothing is ever due.
         mgr.touch_activity("com.acme.tool/engine");
         mgr.activity
             .lock()

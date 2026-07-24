@@ -1,5 +1,6 @@
 import {
 	ArrowDown01Icon,
+	ArrowRight01Icon,
 	BrowserIcon,
 	Cancel01Icon,
 	CheckListIcon,
@@ -11,11 +12,20 @@ import {
 	PlusSignIcon,
 	RefreshIcon,
 	Robot01Icon,
+	Search01Icon,
+	SmartPhone01Icon,
 	SourceCodeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { PatchDiff } from "@pierre/diffs/react";
 import { FileTree, useFileTree } from "@pierre/trees/react";
+import {
+	ContextMenu,
+	ContextMenuContent,
+	ContextMenuItem,
+	ContextMenuSeparator,
+	ContextMenuTrigger,
+} from "@ryu/ui/components/context-menu";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -25,7 +35,6 @@ import {
 	DropdownMenuSubTrigger,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu";
-import { SidebarContent, SidebarGroup } from "@ryu/ui/components/sidebar";
 import {
 	Tooltip,
 	TooltipContent,
@@ -46,6 +55,7 @@ import {
 	type InspectedPart,
 	PartInspector,
 } from "@/src/components/chat/PartInspector.tsx";
+import { OverflowTooltip } from "@/src/components/layout/overflow-tooltip.tsx";
 import type { CoworkContextPanelProps } from "@/src/components/panels/CoworkContextPanel.tsx";
 import {
 	CoworkContextPanel,
@@ -54,6 +64,16 @@ import {
 import { SubagentAvatar } from "@/src/components/panels/subagent-identity.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useApps } from "@/src/hooks/useApps.ts";
+import {
+	diffViewPrefsToOptions,
+	setDiffViewPrefs,
+	useDiffViewPrefs,
+} from "@/src/hooks/useDiffViewPrefs.ts";
+import {
+	fileTreePrefsToOptions,
+	setFileTreePrefs,
+	useFileTreePrefs,
+} from "@/src/hooks/useFileTreePrefs.ts";
 import { apiUrl, makeHeaders } from "@/src/lib/api/client.ts";
 import type { Artifact } from "@/src/lib/artifacts.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
@@ -460,6 +480,7 @@ type TabKind =
 	| "terminal"
 	| "codereview"
 	| "browser"
+	| "simulator"
 	| "files"
 	| "cowork"
 	| "subagent"
@@ -482,12 +503,14 @@ const BOTTOM_TAB_TYPES: TabTypeDef[] = [
 	{ kind: "terminal", label: "Terminal", icon: ComputerTerminal01Icon },
 	{ kind: "codereview", label: "Code Review", icon: FileCodeIcon },
 	{ kind: "browser", label: "Browser", icon: Globe02Icon },
+	{ kind: "simulator", label: "Simulator", icon: SmartPhone01Icon },
 ];
 
 const RIGHT_TAB_TYPES: TabTypeDef[] = [
 	{ kind: "files", label: "Files", icon: FolderOpenIcon },
 	{ kind: "codereview", label: "Changes", icon: FileCodeIcon },
 	{ kind: "browser", label: "Browser", icon: Globe02Icon },
+	{ kind: "simulator", label: "Simulator", icon: SmartPhone01Icon },
 ];
 
 let tabCounter = 0;
@@ -521,6 +544,25 @@ function usePanelTabs(initial: PanelTab[]) {
 		});
 	};
 
+	// Close every tab except `uid`, and make `uid` active — the window tabs'
+	// "Close others" behavior.
+	const closeOthers = (uid: string) => {
+		setTabs((prev) => prev.filter((t) => t.uid === uid));
+		setActiveUid(uid);
+	};
+
+	const closeAll = () => {
+		setTabs([]);
+		setActiveUid("");
+	};
+
+	// Append an existing tab (moved in from the other dock) and focus it. The uid
+	// comes from the shared module counter so it stays unique across docks.
+	const adoptTab = (tab: PanelTab) => {
+		setTabs((prev) => [...prev, tab]);
+		setActiveUid(tab.uid);
+	};
+
 	// Open a single reusable tab of a kind: focus the existing one (updating its
 	// label) or create it. Used to surface a clicked subagent's transcript without
 	// stacking a new tab per click.
@@ -541,7 +583,16 @@ function usePanelTabs(initial: PanelTab[]) {
 		[tabs]
 	);
 
-	return { tabs, activeUid, setActiveUid, addTab, closeTab, openTab };
+	return {
+		tabs,
+		activeUid,
+		setActiveUid,
+		addTab,
+		closeTab,
+		closeOthers,
+		closeAll,
+		openTab,
+	};
 }
 
 interface PanelTabBarProps {
@@ -549,8 +600,15 @@ interface PanelTabBarProps {
 	addTypes: TabTypeDef[];
 	onActivate: (uid: string) => void;
 	onAdd: (kind: TabKind) => void;
+	onCloseAll: () => void;
+	onCloseOthers: (uid: string) => void;
 	onClosePanel: () => void;
 	onCloseTab: (uid: string) => void;
+	// Move a tab to the sibling dock (right ⇄ bottom). Omitted if there is no
+	// sibling to move to.
+	onMoveToOtherPanel?: (uid: string) => void;
+	otherPanelIcon: typeof Cancel01Icon;
+	otherPanelLabel: string;
 	tabs: PanelTab[];
 }
 
@@ -559,6 +617,11 @@ function PanelTabBar({
 	activeUid,
 	onActivate,
 	onCloseTab,
+	onCloseOthers,
+	onCloseAll,
+	onMoveToOtherPanel,
+	otherPanelIcon,
+	otherPanelLabel,
 	onAdd,
 	addTypes,
 	onClosePanel,
@@ -585,47 +648,98 @@ function PanelTabBar({
 		if (kind === "inspector") {
 			return SourceCodeIcon;
 		}
+		if (kind === "simulator") {
+			return SmartPhone01Icon;
+		}
 		return Globe02Icon;
 	};
 
 	return (
-		<div className="flex shrink-0 items-center border-border/60 border-b bg-sidebar">
+		// Floating rounded-pill strip, matching the main window tab bar (gap between
+		// pills, no attached underline). The dock card already provides the floating
+		// surface, so the strip itself is transparent.
+		<div className="flex shrink-0 items-center gap-1 bg-sidebar px-1.5 py-1.5">
 			{tabs.map((tab) => (
-				<div
-					className={cn(
-						"group flex h-9 shrink-0 cursor-pointer select-none items-center gap-1.5 border-b-2 px-3 font-medium text-xs transition-colors",
-						activeUid === tab.uid
-							? "border-primary bg-background/60 text-foreground"
-							: "border-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-					)}
-					key={tab.uid}
-					// biome-ignore lint/a11y/useKeyWithClickEvents: tab row click is intentional
-					onClick={() => onActivate(tab.uid)}
-				>
-					<HugeiconsIcon
-						className="size-3.5 shrink-0"
-						icon={iconFor(tab.kind)}
-					/>
-					{tab.label}
-					<Tooltip>
-						<TooltipTrigger
-							render={
-								<button
-									aria-label="Close tab"
-									className="hover:!opacity-100 ml-0.5 flex size-3.5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-60"
-									onClick={(e) => {
-										e.stopPropagation();
-										onCloseTab(tab.uid);
-									}}
-									type="button"
-								>
-									<HugeiconsIcon className="size-2.5" icon={Cancel01Icon} />
-								</button>
-							}
-						/>
-						<TooltipContent>Close tab</TooltipContent>
-					</Tooltip>
-				</div>
+				<ContextMenu key={tab.uid}>
+					<ContextMenuTrigger className="flex h-8 max-w-[180px] shrink-0 items-center">
+						{/* biome-ignore lint/a11y/noStaticElementInteractions: custom tab interaction, mirrors the window tab bar */}
+						<div
+							className={cn(
+								"group/tab relative flex h-8 w-full min-w-0 items-center rounded-full transition-colors",
+								activeUid === tab.uid ? "bg-muted" : "hover:bg-muted/50"
+							)}
+							data-active={activeUid === tab.uid}
+							// Middle-click closes the tab, exactly like the window tabs.
+							onMouseDown={(e) => {
+								if (e.button === 1) {
+									e.preventDefault();
+									onCloseTab(tab.uid);
+								}
+							}}
+						>
+							{/* Icon zone — the kind icon morphs into a close X on tab hover. */}
+							<button
+								aria-label="Close tab"
+								className={cn(
+									"relative ml-2 flex size-4 shrink-0 items-center justify-center rounded-full",
+									activeUid === tab.uid
+										? "text-foreground/60"
+										: "text-muted-foreground/50"
+								)}
+								onClick={() => onCloseTab(tab.uid)}
+								type="button"
+							>
+								<HugeiconsIcon
+									className="absolute size-3 transition-all duration-150 group-hover/tab:scale-50 group-hover/tab:opacity-0"
+									icon={iconFor(tab.kind)}
+								/>
+								<HugeiconsIcon
+									className="absolute size-3 scale-50 opacity-0 transition-all duration-150 group-hover/tab:scale-100 group-hover/tab:opacity-100"
+									icon={Cancel01Icon}
+								/>
+							</button>
+							{/* Title — activates the tab. */}
+							<button
+								className={cn(
+									"flex h-full min-w-0 flex-1 items-center overflow-hidden pr-3 pl-1.5",
+									activeUid === tab.uid
+										? "text-foreground"
+										: "text-muted-foreground"
+								)}
+								onClick={() => onActivate(tab.uid)}
+								type="button"
+							>
+								<OverflowTooltip
+									className="min-w-0 overflow-hidden whitespace-nowrap font-medium text-xs leading-none"
+									fade
+									text={tab.label}
+								/>
+							</button>
+						</div>
+					</ContextMenuTrigger>
+					<ContextMenuContent>
+						<ContextMenuItem onClick={() => onCloseTab(tab.uid)}>
+							<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
+							Close
+						</ContextMenuItem>
+						<ContextMenuItem
+							disabled={tabs.length <= 1}
+							onClick={() => onCloseOthers(tab.uid)}
+						>
+							Close others
+						</ContextMenuItem>
+						<ContextMenuItem onClick={onCloseAll}>Close all</ContextMenuItem>
+						{onMoveToOtherPanel && (
+							<>
+								<ContextMenuSeparator />
+								<ContextMenuItem onClick={() => onMoveToOtherPanel(tab.uid)}>
+									<HugeiconsIcon className="size-4" icon={otherPanelIcon} />
+									Move to {otherPanelLabel}
+								</ContextMenuItem>
+							</>
+						)}
+					</ContextMenuContent>
+				</ContextMenu>
 			))}
 
 			{/* Add tab button + dropdown */}
@@ -742,7 +856,8 @@ function FileTreePanel({ folder }: { folder?: string | null }) {
 			.finally(() => setLoading(false));
 	}, [folder, terminalShell]);
 
-	const { model } = useFileTree({ paths });
+	const prefs = useFileTreePrefs();
+	const options = useMemo(() => fileTreePrefsToOptions(prefs), [prefs]);
 
 	if (!folder) {
 		return (
@@ -768,17 +883,91 @@ function FileTreePanel({ folder }: { folder?: string | null }) {
 		);
 	}
 
-	// @pierre/trees virtualizes by default: its host is `height: 100%` and the
-	// inner scroll container is `flex: 1; min-height: 0`, so it only renders rows
-	// when every ancestor has a definite height. Without `flex-1`/`h-full` down
-	// the chain the tree collapses to 0px and shows nothing — keep these.
 	return (
-		<SidebarContent className="h-full w-full overflow-hidden">
-			<SidebarGroup className="min-h-0 flex-1 p-1">
-				<FileTree className="h-full w-full" model={model} />
-			</SidebarGroup>
-		</SidebarContent>
+		<div className="flex h-full flex-col">
+			{/* Inline controls — the simple subset. Full option set lives in
+			    Settings › Appearance › File tree. */}
+			<div className="flex shrink-0 items-center gap-1 border-border/60 border-b bg-sidebar px-1.5 py-1">
+				<div className="flex shrink-0 items-center rounded-md bg-background p-0.5">
+					{(
+						[
+							["compact", "Compact"],
+							["default", "Default"],
+							["relaxed", "Relaxed"],
+						] as const
+					).map(([value, label]) => (
+						<button
+							aria-pressed={prefs.density === value}
+							className={cn(
+								"rounded px-2 py-0.5 text-[11px] transition-colors",
+								prefs.density === value
+									? "bg-sidebar-accent text-foreground"
+									: "text-muted-foreground hover:text-foreground"
+							)}
+							key={value}
+							onClick={() => setFileTreePrefs({ density: value })}
+							type="button"
+						>
+							{label}
+						</button>
+					))}
+				</div>
+				<div className="flex-1" />
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<button
+								aria-label="Toggle file search"
+								aria-pressed={prefs.showSearch}
+								className={cn(
+									"flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-sidebar-accent hover:text-foreground",
+									prefs.showSearch ? "text-foreground" : "text-muted-foreground"
+								)}
+								onClick={() =>
+									setFileTreePrefs({ showSearch: !prefs.showSearch })
+								}
+								type="button"
+							>
+								<HugeiconsIcon className="size-3.5" icon={Search01Icon} />
+							</button>
+						}
+					/>
+					<TooltipContent>
+						{prefs.showSearch ? "Hide search" : "Show search"}
+					</TooltipContent>
+				</Tooltip>
+			</div>
+			{/* @pierre/trees virtualizes at height:100% with a flex-1/min-h-0 inner
+			    scroller, so every ancestor needs a definite height. Keyed on the prefs
+			    so display options (constructor-time in `useFileTree`) take effect. */}
+			<div className="min-h-0 flex-1 overflow-hidden p-1">
+				<FileTreeView
+					key={JSON.stringify(prefs)}
+					options={options}
+					paths={paths}
+				/>
+			</div>
+		</div>
 	);
+}
+
+// Builds the `@pierre/trees` model ONCE (`useFileTree` captures its options at
+// construction and ignores later changes) and pushes path updates through
+// `resetPaths` — without this the tree stays empty, because `git ls-files`
+// resolves after mount so the model is built with `[]`. The parent remounts this
+// (via `key`) when display prefs change, since those are constructor-time.
+function FileTreeView({
+	paths,
+	options,
+}: {
+	options: ReturnType<typeof fileTreePrefsToOptions>;
+	paths: readonly string[];
+}) {
+	const { model } = useFileTree(options);
+	useEffect(() => {
+		model.resetPaths(paths);
+	}, [paths, model]);
+	return <FileTree className="h-full w-full" model={model} />;
 }
 
 // ── Code review panel (@pierre/diffs) ────────────────────────────────────────
@@ -832,6 +1021,28 @@ function buildDiffCommand(
 	return "git diff HEAD";
 }
 
+/** `@pierre/diffs` `PatchDiff` is SINGULAR — it throws "patch must contain exactly
+ *  1 file diff" on a multi-file patch. A `git diff` almost always spans several
+ *  files, so split it on the `diff --git` file boundaries and render one PatchDiff
+ *  per file. Keyed by the file path so React reconciles cleanly across refreshes. */
+function splitPatchByFile(patch: string): { path: string; patch: string }[] {
+	return patch
+		.split(/\n(?=diff --git )/)
+		.map((chunk) => chunk.trim())
+		.filter(Boolean)
+		.map((chunk) => {
+			const match = chunk.match(/^diff --git a\/\S+ b\/(\S+)/);
+			return { path: match ? match[1] : chunk.slice(0, 60), patch: chunk };
+		});
+}
+
+// Files beyond this index are rendered collapsed once a patch touches more than
+// LARGE_PATCH_FILE_COUNT files — collapsed diffs skip syntax highlighting until
+// the user expands them, which keeps a 50-file review from tokenizing everything
+// up front. Small diffs (the common case) are unaffected.
+const EAGER_DIFF_FILE_COUNT = 15;
+const LARGE_PATCH_FILE_COUNT = 20;
+
 function PatchDiffPanel({ folder }: { folder?: string | null }) {
 	const [mode, setMode] = useState<DiffMode>("working");
 	const [commit, setCommit] = useState<CommitInfo | null>(null);
@@ -841,6 +1052,13 @@ function PatchDiffPanel({ folder }: { folder?: string | null }) {
 	const [patch, setPatch] = useState("");
 	const [loading, setLoading] = useState(false);
 	const terminalShell = useWorkspaceStore((s) => s.terminalShell);
+	const diffPrefs = useDiffViewPrefs();
+
+	// Translate the plain-English prefs into `@pierre/diffs` options once per change.
+	const diffOptions = useMemo(
+		() => diffViewPrefsToOptions(diffPrefs),
+		[diffPrefs]
+	);
 
 	const git = useCallback(
 		async (command: string): Promise<string> => {
@@ -933,7 +1151,23 @@ function PatchDiffPanel({ folder }: { folder?: string | null }) {
 			</div>
 		);
 	} else if (patch.trim()) {
-		body = <PatchDiff disableWorkerPool patch={patch} />;
+		const files = splitPatchByFile(patch);
+		const collapseTail = files.length > LARGE_PATCH_FILE_COUNT;
+		body = (
+			<div className="flex flex-col gap-3">
+				{files.map((file, i) => (
+					<PatchDiff
+						disableWorkerPool
+						key={file.path}
+						options={{
+							...diffOptions,
+							collapsed: collapseTail && i >= EAGER_DIFF_FILE_COUNT,
+						}}
+						patch={file.patch}
+					/>
+				))}
+			</div>
+		);
 	} else {
 		body = (
 			<div className="flex h-full items-center justify-center p-4 text-center text-muted-foreground text-xs">
@@ -1030,6 +1264,31 @@ function PatchDiffPanel({ folder }: { folder?: string | null }) {
 					</DropdownMenuContent>
 				</DropdownMenu>
 				<div className="flex-1" />
+				{/* Quick split ↔ stacked toggle. Full option set lives in
+				    Settings › Appearance › Diff viewer. */}
+				<div className="mr-1 flex shrink-0 items-center rounded-md bg-background p-0.5">
+					{(
+						[
+							["split", "Split"],
+							["unified", "Stacked"],
+						] as const
+					).map(([value, label]) => (
+						<button
+							aria-pressed={diffPrefs.diffStyle === value}
+							className={cn(
+								"rounded px-2 py-0.5 text-[11px] transition-colors",
+								diffPrefs.diffStyle === value
+									? "bg-sidebar-accent text-foreground"
+									: "text-muted-foreground hover:text-foreground"
+							)}
+							key={value}
+							onClick={() => setDiffViewPrefs({ diffStyle: value })}
+							type="button"
+						>
+							{label}
+						</button>
+					))}
+				</div>
 				<Tooltip>
 					<TooltipTrigger
 						render={
@@ -1070,6 +1329,21 @@ function IframePanel({
 }) {
 	const [src, setSrc] = useState(initialUrl);
 	const [inputVal, setInputVal] = useState(initialUrl);
+	// A sandboxed cross-origin iframe is opaque: `onLoad` fires on success (and on
+	// about:blank), but there is no reliable `onError` for X-Frame-Options /
+	// navigation failures. So we can only show progress, not a hard failure —
+	// clear the spinner on `onLoad`, and after a few seconds surface a hint that
+	// heavy pages (some sites ship multi-MB documents) are still downloading, so a
+	// blank pane doesn't read as a hang.
+	const [loading, setLoading] = useState(true);
+	const [slow, setSlow] = useState(false);
+
+	useEffect(() => {
+		setLoading(true);
+		setSlow(false);
+		const t = setTimeout(() => setSlow(true), 4000);
+		return () => clearTimeout(t);
+	}, [src]);
 
 	const navigate = (raw: string) => {
 		let url = raw.trim();
@@ -1088,7 +1362,9 @@ function IframePanel({
 
 	return (
 		<div className="flex h-full flex-col">
-			<SidebarContent className="shrink-0 border-border/60 border-b bg-sidebar px-2 py-1.5">
+			{/* Plain shrink-0 bar — NOT SidebarContent, whose base `flex-1` grows to
+			    eat half the panel and shove the iframe into the bottom half. */}
+			<div className="shrink-0 border-border/60 border-b bg-sidebar px-2 py-1.5">
 				<form
 					className="flex items-center gap-2"
 					onSubmit={(e) => {
@@ -1101,21 +1377,30 @@ function IframePanel({
 						icon={Globe02Icon}
 					/>
 					<input
-						className="/60 min-w-0 flex-1 rounded-md bg-background px-2 py-0.5 text-xs outline-none focus:border-primary/60"
+						className="min-w-0 flex-1 rounded-md bg-background px-2 py-0.5 text-xs outline-none focus:border-primary/60"
 						onChange={(e) => setInputVal(e.target.value)}
 						placeholder="Enter URL…"
 						spellCheck={false}
 						value={inputVal}
 					/>
 				</form>
-			</SidebarContent>
-			<iframe
-				className="min-h-0 w-full flex-1 border-0 bg-white"
-				key={src}
-				sandbox="allow-scripts allow-forms allow-popups"
-				src={src}
-				title={title}
-			/>
+			</div>
+			<div className="relative min-h-0 w-full flex-1">
+				<iframe
+					className="absolute inset-0 h-full w-full border-0 bg-white"
+					key={src}
+					onLoad={() => setLoading(false)}
+					sandbox="allow-scripts allow-forms allow-popups"
+					src={src}
+					title={title}
+				/>
+				{loading && (
+					<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80 text-muted-foreground text-xs">
+						<HugeiconsIcon className="size-4 animate-spin" icon={RefreshIcon} />
+						<span>{slow ? "Still loading — large page…" : "Loading…"}</span>
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }
@@ -1253,7 +1538,7 @@ function BrowserSidecarPanel() {
 
 	return (
 		<div className="flex h-full flex-col">
-			<SidebarContent className="shrink-0 border-border/60 border-b bg-sidebar px-2 py-1.5">
+			<div className="shrink-0 border-border/60 border-b bg-sidebar px-2 py-1.5">
 				<form
 					className="flex items-center gap-2"
 					onSubmit={(e) => {
@@ -1280,7 +1565,7 @@ function BrowserSidecarPanel() {
 						Refresh
 					</button>
 				</form>
-			</SidebarContent>
+			</div>
 			<div className="flex min-h-0 flex-1">
 				<ul className="w-48 shrink-0 overflow-y-auto border-border/60 border-r text-xs">
 					{tabs.length === 0 && (
@@ -1334,6 +1619,376 @@ function BrowserSidecarPanel() {
 				</div>
 			</div>
 		</div>
+	);
+}
+
+// ── Simulator sidecar panel (com.ryu.simulator) ───────────────────────────────
+
+const SIMULATOR_PLUGIN_ID = "com.ryu.simulator";
+const SIM_BASE = "/api/ext/com.ryu.simulator";
+const SIM_POLL_MS = 1500;
+
+type SimPlatform = "ios" | "android";
+
+interface SimDevice {
+	id: string;
+	kind: "simulator" | "emulator";
+	name: string;
+	os: string;
+	platform: SimPlatform;
+	state: "booted" | "shutdown" | "unknown";
+}
+
+interface SimPlatformCap {
+	available: boolean;
+	interactive: boolean;
+	reason?: string;
+}
+
+interface SimCapabilities {
+	android: SimPlatformCap;
+	ios: SimPlatformCap;
+}
+
+// Feature-detected simulator tab: when the `com.ryu.simulator` app is enabled, drive its
+// device-control sidecar (simctl/adb) through Core's ext-proxy. When disabled, prompt to
+// enable it. Availability of each platform is a RUNTIME probe from the sidecar, never an
+// OS sniff on the desktop — iOS shows only on a Mac node with Xcode; Android wherever the
+// SDK is installed on the connected node.
+function SimulatorTabPanel() {
+	const { apps } = useApps();
+	const enabled = apps.some((a) => a.id === SIMULATOR_PLUGIN_ID && a.enabled);
+	if (!enabled) {
+		return (
+			<div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground text-xs">
+				<HugeiconsIcon className="size-6 opacity-60" icon={SmartPhone01Icon} />
+				<p className="max-w-xs">
+					Enable the <span className="font-medium">Simulators</span> app to
+					drive iOS Simulators and Android Emulators from here.
+				</p>
+			</div>
+		);
+	}
+	return <SimulatorSidecarPanel />;
+}
+
+function SimulatorSidecarPanel() {
+	const node = useActiveNode();
+	const [caps, setCaps] = useState<SimCapabilities | null>(null);
+	const [devices, setDevices] = useState<SimDevice[]>([]);
+	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [shot, setShot] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	const headers = useMemo(() => makeHeaders(node.token ?? null), [node.token]);
+	const selected = devices.find((d) => d.id === selectedId) ?? null;
+
+	const call = useCallback(
+		async (path: string, init?: RequestInit) => {
+			const resp = await fetch(
+				apiUrl({ url: node.url, token: node.token ?? null }, path),
+				{ headers, ...init }
+			);
+			if (!resp.ok) {
+				throw new Error(`${resp.status}`);
+			}
+			return resp;
+		},
+		[node.url, node.token, headers]
+	);
+
+	const refresh = useCallback(async () => {
+		setError(null);
+		try {
+			const [capResp, devResp] = await Promise.all([
+				call(`${SIM_BASE}/capabilities`),
+				call(`${SIM_BASE}/devices`),
+			]);
+			setCaps((await capResp.json()) as SimCapabilities);
+			const data = (await devResp.json()) as { devices: SimDevice[] };
+			setDevices(data.devices);
+			setSelectedId((prev) => prev ?? data.devices[0]?.id ?? null);
+		} catch (e) {
+			setError(
+				e instanceof Error
+					? `Simulator sidecar unreachable (${e.message})`
+					: "error"
+			);
+		}
+	}, [call]);
+
+	useEffect(() => {
+		refresh().catch(() => undefined);
+	}, [refresh]);
+
+	const screenshot = useCallback(
+		async (id: string) => {
+			try {
+				const resp = await call(
+					`${SIM_BASE}/devices/${encodeURIComponent(id)}/screenshot`
+				);
+				const data = (await resp.json()) as { image: string };
+				setShot(`data:image/png;base64,${data.image}`);
+			} catch {
+				// A shutdown device has no screen — keep the last frame, don't error-spam.
+			}
+		},
+		[call]
+	);
+
+	// Live screenshot polling while a booted device is selected (matches the browser
+	// panel's screenshot-preview MVP; live video is a followup).
+	useEffect(() => {
+		if (selected?.state !== "booted") {
+			return;
+		}
+		let cancelled = false;
+		const tick = () => {
+			if (!cancelled) {
+				screenshot(selected.id).catch(() => undefined);
+			}
+		};
+		tick();
+		const h = setInterval(tick, SIM_POLL_MS);
+		return () => {
+			cancelled = true;
+			clearInterval(h);
+		};
+	}, [selected, screenshot]);
+
+	const action = useCallback(
+		async (id: string, path: string, body?: unknown) => {
+			setBusy(true);
+			setError(null);
+			try {
+				await call(`${SIM_BASE}/devices/${encodeURIComponent(id)}/${path}`, {
+					method: "POST",
+					headers: body
+						? { ...headers, "Content-Type": "application/json" }
+						: headers,
+					body: body ? JSON.stringify(body) : undefined,
+				});
+				await refresh();
+			} catch (e) {
+				setError(e instanceof Error ? e.message : "action failed");
+			} finally {
+				setBusy(false);
+			}
+		},
+		[call, headers, refresh]
+	);
+
+	// Map a click on the screenshot to device pixel coordinates and tap there (Android
+	// only — iOS has no simctl coordinate tap).
+	const tapAt = useCallback(
+		(e: ReactMouseEvent<HTMLImageElement>) => {
+			if (selected?.platform !== "android") {
+				return;
+			}
+			const img = e.currentTarget;
+			if (!(img.naturalWidth && img.naturalHeight)) {
+				return;
+			}
+			const rect = img.getBoundingClientRect();
+			const x = Math.round(
+				((e.clientX - rect.left) / rect.width) * img.naturalWidth
+			);
+			const y = Math.round(
+				((e.clientY - rect.top) / rect.height) * img.naturalHeight
+			);
+			action(selected.id, "tap", { x, y }).catch(() => undefined);
+		},
+		[selected, action]
+	);
+
+	const canTap =
+		selected?.platform === "android" && selected.state === "booted";
+
+	return (
+		<div className="flex h-full flex-col">
+			{/* Toolbar */}
+			<div className="flex shrink-0 items-center gap-2 border-border/60 border-b bg-sidebar px-2 py-1.5">
+				<HugeiconsIcon
+					className="size-3.5 shrink-0 text-muted-foreground"
+					icon={SmartPhone01Icon}
+				/>
+				<span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+					{selected
+						? `${selected.name} — ${selected.os}`
+						: "No device selected"}
+				</span>
+				{selected && selected.state !== "booted" && (
+					<button
+						className="rounded-md px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
+						disabled={busy}
+						onClick={() => action(selected.id, "boot").catch(() => undefined)}
+						type="button"
+					>
+						Boot
+					</button>
+				)}
+				{selected?.state === "booted" && (
+					<>
+						{selected.platform === "android" && (
+							<>
+								<button
+									className="rounded-md px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
+									disabled={busy}
+									onClick={() =>
+										action(selected.id, "key", { key: "home" }).catch(
+											() => undefined
+										)
+									}
+									type="button"
+								>
+									Home
+								</button>
+								<button
+									className="rounded-md px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
+									disabled={busy}
+									onClick={() =>
+										action(selected.id, "key", { key: "back" }).catch(
+											() => undefined
+										)
+									}
+									type="button"
+								>
+									Back
+								</button>
+							</>
+						)}
+						<button
+							className="rounded-md px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50"
+							disabled={busy}
+							onClick={() =>
+								action(selected.id, "shutdown").catch(() => undefined)
+							}
+							type="button"
+						>
+							Shutdown
+						</button>
+					</>
+				)}
+				<button
+					className="rounded-md p-1 text-muted-foreground hover:bg-accent"
+					onClick={() => refresh().catch(() => undefined)}
+					type="button"
+				>
+					<HugeiconsIcon className="size-3.5" icon={RefreshIcon} />
+				</button>
+			</div>
+
+			<div className="flex min-h-0 flex-1">
+				{/* Device list */}
+				<div className="w-52 shrink-0 overflow-y-auto border-border/60 border-r text-xs">
+					<SimDeviceList
+						caps={caps}
+						devices={devices}
+						onSelect={(id) => {
+							setSelectedId(id);
+							setShot(null);
+						}}
+						selectedId={selectedId}
+					/>
+				</div>
+
+				{/* Device screen */}
+				<div className="flex min-w-0 flex-1 items-center justify-center overflow-auto bg-muted/20 p-2">
+					{error ? (
+						<p className="text-center text-muted-foreground text-xs">{error}</p>
+					) : shot ? (
+						// biome-ignore lint/performance/noImgElement: sidecar screenshot data URI, not a static asset.
+						// biome-ignore lint/a11y/noStaticElementInteractions: the device screen is the interactive surface (Android tap).
+						<img
+							alt="Device screen"
+							className={cn(
+								"max-h-full max-w-full rounded border border-border/60",
+								canTap && "cursor-crosshair"
+							)}
+							onClick={canTap ? tapAt : undefined}
+							src={shot}
+						/>
+					) : (
+						<p className="max-w-xs text-center text-muted-foreground text-xs">
+							{selected
+								? selected.state === "booted"
+									? "Loading device screen…"
+									: "Boot the device to see its screen."
+								: "Select a device to preview its screen. Live embedding is a followup."}
+						</p>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+// The grouped device list: iOS + Android sections, each showing an unavailable-reason
+// line when the connected node can't run that platform.
+function SimDeviceList({
+	caps,
+	devices,
+	selectedId,
+	onSelect,
+}: {
+	caps: SimCapabilities | null;
+	devices: SimDevice[];
+	onSelect: (id: string) => void;
+	selectedId: string | null;
+}) {
+	const sections: Array<{ platform: SimPlatform; label: string }> = [
+		{ platform: "ios", label: "iOS Simulators" },
+		{ platform: "android", label: "Android Emulators" },
+	];
+	return (
+		<>
+			{sections.map(({ platform, label }) => {
+				const cap = caps?.[platform];
+				const list = devices.filter((d) => d.platform === platform);
+				return (
+					<div key={platform}>
+						<div className="border-border/40 border-b bg-muted/30 px-2 py-1 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+							{label}
+						</div>
+						{cap && !cap.available ? (
+							<p className="px-2 py-1.5 text-[11px] text-muted-foreground/80">
+								{cap.reason ?? "Not available on this node."}
+							</p>
+						) : list.length === 0 ? (
+							<p className="px-2 py-1.5 text-[11px] text-muted-foreground/80">
+								No devices found.
+							</p>
+						) : (
+							list.map((d) => (
+								<button
+									className={cn(
+										"flex w-full items-center gap-2 border-border/40 border-b px-2 py-1.5 text-left",
+										d.id === selectedId ? "bg-accent" : "hover:bg-muted/50"
+									)}
+									key={d.id}
+									onClick={() => onSelect(d.id)}
+									type="button"
+								>
+									<span
+										className={cn(
+											"size-1.5 shrink-0 rounded-full",
+											d.state === "booted"
+												? "bg-emerald-500"
+												: "bg-muted-foreground/40"
+										)}
+									/>
+									<span className="min-w-0 flex-1 truncate">{d.name}</span>
+									<span className="shrink-0 text-[10px] text-muted-foreground/60">
+										{d.os}
+									</span>
+								</button>
+							))
+						)}
+					</div>
+				);
+			})}
+		</>
 	);
 }
 
@@ -1621,6 +2276,9 @@ function TabContent({
 		}
 		return <CoworkContextPanel {...cowork} />;
 	}
+	if (tab.kind === "simulator") {
+		return <SimulatorTabPanel />;
+	}
 	return <BrowserTabPanel title={tab.label} />;
 }
 
@@ -1794,6 +2452,16 @@ export interface WorkspacePanelsProps {
 	inspectorRequest?: { part: InspectedPart; nonce: number } | null;
 	onBottomOpenChange: (v: boolean) => void;
 	onRightOpenChange: (v: boolean) => void;
+	/**
+	 * Chat's Pinned summary sidebar. When provided it docks as its own column
+	 * stacked against (left of) the right panel — both push the chat narrower,
+	 * shadcn-sidebar style, and both can be open at once. When the chat column
+	 * would drop below a usable width the panel auto-demotes to a floating
+	 * overlay that no longer affects content width; `floating` tells the
+	 * renderer which mode it is in (only the floating overlay should dismiss
+	 * on press-away). Null/undefined = hidden.
+	 */
+	renderPinnedSummary?: ((opts: { floating: boolean }) => ReactNode) | null;
 	rightOpen: boolean;
 	/**
 	 * A request to open a spawned subagent's transcript in the right panel. Its
@@ -1806,6 +2474,14 @@ export interface WorkspacePanelsProps {
 // How long the hover-peek stays after the pointer leaves (matches the left sidebar).
 const PEEK_HIDE_DELAY = 200;
 
+// The Pinned summary column: the panel's fixed w-72 plus the same 12px gutter
+// the right dock uses.
+const PINNED_PANEL_WIDTH = 288;
+const PANEL_GUTTER = 12;
+// When docking the pinned column would leave the chat narrower than this, the
+// panel auto-demotes to a floating overlay instead (stops pushing content).
+const MIN_CHAT_WIDTH = 520;
+
 export function WorkspacePanels({
 	children,
 	folder,
@@ -1817,6 +2493,7 @@ export function WorkspacePanels({
 	subagentRequest,
 	artifactRequest,
 	inspectorRequest,
+	renderPinnedSummary,
 }: WorkspacePanelsProps) {
 	// Both docks start with no tabs open: a docked panel shows the launchpad empty
 	// state (openable tab types as quick actions) rather than pre-opening tabs the
@@ -1923,6 +2600,31 @@ export function WorkspacePanels({
 			RIGHT_TAB_TYPES.find((t) => t.kind === kind)?.label ?? kind
 		);
 
+	// Move a tab between the two docks, preserving its identity, and reveal the
+	// destination dock if it was closed so the moved tab is visible.
+	const moveTabToRight = (uid: string) => {
+		const tab = bottom.tabs.find((t) => t.uid === uid);
+		if (!tab) {
+			return;
+		}
+		bottom.closeTab(uid);
+		right.adoptTab(tab);
+		if (!rightOpen) {
+			onRightOpenChange(true);
+		}
+	};
+	const moveTabToBottom = (uid: string) => {
+		const tab = right.tabs.find((t) => t.uid === uid);
+		if (!tab) {
+			return;
+		}
+		right.closeTab(uid);
+		bottom.adoptTab(tab);
+		if (!bottomOpen) {
+			onBottomOpenChange(true);
+		}
+	};
+
 	const bottomCard = (onClosePanel: () => void) => (
 		<div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-sidebar shadow-2xl ring-1 ring-border/40">
 			<PanelTabBar
@@ -1930,8 +2632,13 @@ export function WorkspacePanels({
 				addTypes={BOTTOM_TAB_TYPES}
 				onActivate={bottom.setActiveUid}
 				onAdd={addBottomTab}
+				onCloseAll={bottom.closeAll}
+				onCloseOthers={bottom.closeOthers}
 				onClosePanel={onClosePanel}
 				onCloseTab={bottom.closeTab}
+				onMoveToOtherPanel={moveTabToRight}
+				otherPanelIcon={ArrowRight01Icon}
+				otherPanelLabel="right panel"
 				tabs={bottom.tabs}
 			/>
 			<div className="min-h-0 flex-1 overflow-hidden">
@@ -1951,8 +2658,13 @@ export function WorkspacePanels({
 				addTypes={RIGHT_TAB_TYPES}
 				onActivate={right.setActiveUid}
 				onAdd={addRightTab}
+				onCloseAll={right.closeAll}
+				onCloseOthers={right.closeOthers}
 				onClosePanel={onClosePanel}
 				onCloseTab={right.closeTab}
+				onMoveToOtherPanel={moveTabToBottom}
+				otherPanelIcon={ArrowDown01Icon}
+				otherPanelLabel="bottom panel"
 				tabs={right.tabs}
 			/>
 			<div className="min-h-0 flex-1 overflow-hidden">
@@ -1996,6 +2708,41 @@ export function WorkspacePanels({
 	// panel slides for both the toggle and the peek — no duplicate instances, no
 	// snap.
 	const rightVisible = rightOpen || rightPeek;
+
+	// ── Pinned summary column (chat sidebar stacked against the right dock) ─────
+	//
+	// Docked by default: its own in-flow spacer pushes the chat, exactly like the
+	// right dock, and the two stack (pinned column left of the right panel) so
+	// both can be open at once. Measured against the container width: when
+	// docking it would squeeze the chat below MIN_CHAT_WIDTH, the panel
+	// auto-demotes to a floating overlay that stops affecting content width —
+	// the same idea as the left sidebar's floating mode. The demotion check uses
+	// the would-be-docked width, not the current mode, so it can't oscillate.
+	const containerRef = useRef<HTMLDivElement>(null);
+	const [containerWidth, setContainerWidth] = useState(0);
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) {
+			return;
+		}
+		const observer = new ResizeObserver((entries) => {
+			const width = entries[0]?.contentRect.width;
+			if (width != null) {
+				setContainerWidth(width);
+			}
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
+	const pinnedRequested = Boolean(renderPinnedSummary);
+	const rightDockWidth = rightOpen ? rightWidth + PANEL_GUTTER : 0;
+	const pinnedColumnWidth = PINNED_PANEL_WIDTH + PANEL_GUTTER;
+	const pinnedFloating =
+		pinnedRequested &&
+		containerWidth > 0 &&
+		containerWidth - rightDockWidth - pinnedColumnWidth < MIN_CHAT_WIDTH;
+	const pinnedDocked = pinnedRequested && !pinnedFloating;
 	const closeBottom = () => {
 		onBottomOpenChange(false);
 	};
@@ -2005,8 +2752,9 @@ export function WorkspacePanels({
 	};
 
 	return (
-		// Outer row: [ chat column (+ bottom panel) ] [ right spacer ] · right panel floats on the edge
-		<div className="relative flex h-full overflow-hidden">
+		// Outer row: [ chat column (+ bottom panel) ] [ pinned spacer ] [ right
+		// spacer ] · the pinned-summary and right panels are edge-pinned absolutes
+		<div className="relative flex h-full overflow-hidden" ref={containerRef}>
 			{/* Chat column — shrinks when the bottom/right panels are docked */}
 			<div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
 				<div className="min-h-0 flex-1 overflow-hidden">{children}</div>
@@ -2038,6 +2786,16 @@ export function WorkspacePanels({
 				</div>
 			</div>
 
+			{/* In-flow spacer: animates the chat's width when the pinned summary
+			    column docks (stacked left of the right panel's spacer) */}
+			<div
+				className="shrink-0"
+				style={{
+					width: pinnedDocked ? pinnedColumnWidth : 0,
+					transition: rightResizing ? "none" : `width 300ms ${DOCK_EASE}`,
+				}}
+			/>
+
 			{/* In-flow spacer: animates the chat's width when the right panel docks */}
 			<div
 				className="shrink-0"
@@ -2046,6 +2804,38 @@ export function WorkspacePanels({
 					transition: rightResizing ? "none" : `width 300ms ${DOCK_EASE}`,
 				}}
 			/>
+
+			{/* The docked pinned-summary column — edge-pinned like the right panel
+			    but offset by the right dock's width so the two stack. It sits under
+			    the right panel (z-10 < z-20) so the right panel's slide-out passes
+			    over it. display:none when hidden, same as the bottom panel, so it
+			    never flashes on first mount. */}
+			<div
+				className="absolute top-12 bottom-0 z-10"
+				style={{
+					right: rightDockWidth,
+					width: pinnedColumnWidth,
+					display: pinnedDocked ? "block" : "none",
+					transition: rightResizing ? "none" : `right 300ms ${DOCK_EASE}`,
+				}}
+			>
+				<div className="h-full overflow-y-auto py-2 pr-2 pl-1">
+					{pinnedDocked && renderPinnedSummary?.({ floating: false })}
+				</div>
+			</div>
+
+			{/* Floating pinned summary — the auto-demoted overlay used when docking
+			    would leave the chat too narrow. Overlays the message column (no
+			    spacer), so it dismisses on press-away; the titlebar toggle brings
+			    it back. */}
+			{pinnedFloating && (
+				<div
+					className="pointer-events-none absolute top-14 z-20"
+					style={{ right: rightDockWidth + PANEL_GUTTER }}
+				>
+					{renderPinnedSummary?.({ floating: true })}
+				</div>
+			)}
 
 			{/* The one right-panel instance — pinned to the right edge, slides via
 			    transform for both docking and hover-peek. It starts BELOW the frosted

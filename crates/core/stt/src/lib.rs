@@ -345,4 +345,477 @@ mod tests {
         assert_eq!(v["endMs"], 20);
         assert_eq!(v["text"], "hi");
     }
+
+    // ── negative / clamp edge cases for the parser ────────────────────────────
+
+    #[test]
+    fn verbose_segments_clamp_negative_timestamps_to_zero() {
+        // A defensive engine could emit a negative offset; the parser clamps to 0
+        // rather than underflowing the u64 cast.
+        let body = json!({
+            "segments": [ { "start": -1.0, "end": -0.5, "text": "  neg  " } ]
+        });
+        let segs = parse_verbose_segments(&body);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].start_ms, 0);
+        assert_eq!(segs[0].end_ms, 0);
+        assert_eq!(segs[0].text, "neg");
+    }
+
+    #[test]
+    fn verbose_segment_missing_text_defaults_empty_but_keeps_timing() {
+        // start/end present but no `text` → kept with an empty string, not dropped.
+        let body = json!({ "segments": [ { "start": 1.0, "end": 2.0 } ] });
+        let segs = parse_verbose_segments(&body);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].start_ms, 1000);
+        assert_eq!(segs[0].end_ms, 2000);
+        assert_eq!(segs[0].text, "");
+    }
+
+    #[test]
+    fn transcription_and_segment_defaults_are_empty() {
+        let t = Transcription::default();
+        assert!(t.text.is_empty());
+        assert!(t.segments.is_empty());
+        let s = TranscriptSegment::default();
+        assert_eq!(s.start_ms, 0);
+        assert_eq!(s.end_ms, 0);
+        assert!(s.text.is_empty());
+        // Clone/Debug are derived — exercise them so they count.
+        let _ = format!("{:?}", t.clone());
+        let _ = format!("{:?}", s.clone());
+    }
+
+    // ── HTTP-proxy engine dispatch (whisper.cpp + Gateway) ────────────────────
+    //
+    // These stand up a loopback axum server so the success / non-2xx / bad-body
+    // branches run deterministically without any real voice server or network.
+
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use axum::{http::HeaderMap, http::StatusCode, Router};
+    use tokio::net::TcpListener;
+
+    /// Serializes the few tests that read/write process-global env vars
+    /// (`RYU_STT_ENGINE`, `RYU_STT_GATEWAY_PROVIDER`, `RYU_STT_GATEWAY_MODEL`).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    struct FakeHost {
+        whisper: String,
+        gateway: String,
+        bearer: Result<String, String>,
+    }
+
+    impl Default for FakeHost {
+        fn default() -> Self {
+            Self {
+                whisper: "http://127.0.0.1:0".to_string(),
+                gateway: "http://127.0.0.1:0".to_string(),
+                bearer: Ok("testtoken".to_string()),
+            }
+        }
+    }
+
+    impl SttHost for FakeHost {
+        fn whisper_base_url(&self) -> String {
+            self.whisper.clone()
+        }
+        fn gateway_url(&self) -> String {
+            self.gateway.clone()
+        }
+        fn gateway_bearer(&self) -> Result<String, String> {
+            self.bearer.clone()
+        }
+        fn parakeet_model_dir(&self) -> PathBuf {
+            PathBuf::from("/nonexistent/parakeet-model")
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct Captured {
+        provider: Option<String>,
+        model: Option<String>,
+        authorization: Option<String>,
+    }
+
+    struct TestServer {
+        addr: std::net::SocketAddr,
+        captured: Arc<Mutex<Vec<Captured>>>,
+        _handle: tokio::task::JoinHandle<()>,
+    }
+
+    impl TestServer {
+        fn url(&self) -> String {
+            format!("http://{}", self.addr)
+        }
+        fn last(&self) -> Captured {
+            self.captured.lock().unwrap().last().cloned().unwrap_or_default()
+        }
+    }
+
+    /// A loopback HTTP server that records the request headers of each call and
+    /// replies with a fixed status + body on every path (fallback route).
+    async fn spawn_server(status: StatusCode, resp_body: &'static str) -> TestServer {
+        let captured: Arc<Mutex<Vec<Captured>>> = Arc::new(Mutex::new(Vec::new()));
+        let cap = captured.clone();
+        let app = Router::new().fallback(move |headers: HeaderMap, _body: String| {
+            let cap = cap.clone();
+            async move {
+                let get = |k: &str| {
+                    headers
+                        .get(k)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string)
+                };
+                cap.lock().unwrap().push(Captured {
+                    provider: get("x-ryu-slot-stt-provider"),
+                    model: get("x-ryu-slot-stt-model"),
+                    authorization: get("authorization"),
+                });
+                (status, resp_body)
+            }
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        TestServer {
+            addr,
+            captured,
+            _handle: handle,
+        }
+    }
+
+    /// A bound-then-dropped loopback address: connecting to it refuses instantly.
+    async fn dead_url() -> String {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        drop(l);
+        format!("http://{addr}")
+    }
+
+    // ── whisper.cpp engine ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn whisper_success_parses_text_and_segments() {
+        let server = spawn_server(
+            StatusCode::OK,
+            r#"{"text":"  hello there  ","segments":[{"start":0.0,"end":1.0,"text":" hello"},{"start":1.0,"end":2.0,"text":" there"}]}"#,
+        )
+        .await;
+        let host = FakeHost {
+            whisper: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let out = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"fakeaudio".to_vec(),
+            "clip.wav".to_string(),
+            Some("whisper"),
+        )
+        .await
+        .expect("whisper transcription should succeed");
+        assert_eq!(out.text, "hello there");
+        assert_eq!(out.segments.len(), 2);
+        assert_eq!(out.segments[0].text, "hello");
+        assert_eq!(out.segments[1].end_ms, 2000);
+    }
+
+    #[tokio::test]
+    async fn whisper_text_only_wrapper_returns_string() {
+        let server = spawn_server(StatusCode::OK, r#"{"text":"just text"}"#).await;
+        let host = FakeHost {
+            whisper: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        // The text-only wrapper `transcribe_wav` drops segments.
+        let text = transcribe_wav(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("whisper"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(text, "just text");
+    }
+
+    #[tokio::test]
+    async fn whisper_non_success_status_is_error() {
+        let server = spawn_server(StatusCode::INTERNAL_SERVER_ERROR, "model exploded").await;
+        let host = FakeHost {
+            whisper: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("whisper"),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("whisper returned 500"), "got: {err}");
+        assert!(err.contains("model exploded"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn whisper_unparseable_body_is_error() {
+        let server = spawn_server(StatusCode::OK, "this is not json").await;
+        let host = FakeHost {
+            whisper: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("whisper"),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("could not parse whisper response"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn whisper_unreachable_host_is_error() {
+        let host = FakeHost {
+            whisper: dead_url().await,
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("whisper"),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("not reachable"), "got: {err}");
+        assert!(err.contains("whispercpp"), "actionable hint expected: {err}");
+    }
+
+    #[tokio::test]
+    async fn empty_engine_selector_falls_through_to_compiled_default() {
+        // Without `voice-parakeet` (the cargo-test build), the compiled default is
+        // whisper, so a blank selector must hit the whisper arm. Hold ENV_LOCK
+        // because this path reads `RYU_STT_ENGINE`.
+        let _g = env_guard();
+        let prev = std::env::var("RYU_STT_ENGINE").ok();
+        std::env::remove_var("RYU_STT_ENGINE");
+        let server = spawn_server(StatusCode::OK, r#"{"text":"fallback"}"#).await;
+        let host = FakeHost {
+            whisper: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let out = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("   "),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "fallback");
+        if let Some(v) = prev {
+            std::env::set_var("RYU_STT_ENGINE", v);
+        }
+    }
+
+    // ── Gateway engine ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn gateway_success_sends_default_slot_headers_and_bearer() {
+        let _g = env_guard();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        let server = spawn_server(
+            StatusCode::OK,
+            r#"{"text":" gw text ","segments":[{"start":0.0,"end":0.5,"text":"gw"}]}"#,
+        )
+        .await;
+        let host = FakeHost {
+            gateway: server.url(),
+            bearer: Ok("secret-slot-token".to_string()),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let out = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "gw text");
+        assert_eq!(out.segments.len(), 1);
+        let cap = server.last();
+        assert_eq!(cap.provider.as_deref(), Some("openai"));
+        assert_eq!(cap.model.as_deref(), Some("whisper-large-v3"));
+        assert_eq!(cap.authorization.as_deref(), Some("Bearer secret-slot-token"));
+    }
+
+    #[tokio::test]
+    async fn gateway_env_overrides_provider_and_model() {
+        let _g = env_guard();
+        std::env::set_var("RYU_STT_GATEWAY_PROVIDER", "groq");
+        std::env::set_var("RYU_STT_GATEWAY_MODEL", "whisper-turbo");
+        let server = spawn_server(StatusCode::OK, r#"{"text":"x"}"#).await;
+        // Trailing slash on the gateway base must be trimmed before the path join.
+        let host = FakeHost {
+            gateway: format!("{}/", server.url()),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let out = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.text, "x");
+        let cap = server.last();
+        assert_eq!(cap.provider.as_deref(), Some("groq"));
+        assert_eq!(cap.model.as_deref(), Some("whisper-turbo"));
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+    }
+
+    #[tokio::test]
+    async fn gateway_bearer_error_short_circuits() {
+        let _g = env_guard();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        // No server is contacted — the bearer failure must propagate before the POST.
+        let host = FakeHost {
+            gateway: "http://127.0.0.1:0".to_string(),
+            bearer: Err("no gateway token configured".to_string()),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "no gateway token configured");
+    }
+
+    #[tokio::test]
+    async fn gateway_non_success_status_is_error() {
+        let _g = env_guard();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        let server = spawn_server(StatusCode::UNAUTHORIZED, "bad key").await;
+        let host = FakeHost {
+            gateway: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("gateway STT returned 401"), "got: {err}");
+        assert!(err.contains("bad key"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn gateway_unparseable_body_is_error() {
+        let _g = env_guard();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        let server = spawn_server(StatusCode::OK, "<html>not json</html>").await;
+        let host = FakeHost {
+            gateway: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("could not parse gateway STT response"),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_unreachable_host_is_error() {
+        let _g = env_guard();
+        std::env::remove_var("RYU_STT_GATEWAY_PROVIDER");
+        std::env::remove_var("RYU_STT_GATEWAY_MODEL");
+        let host = FakeHost {
+            gateway: dead_url().await,
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("gateway"),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("gateway STT unreachable"), "got: {err}");
+    }
+
+    // ── parakeet dispatch (feature off in `cargo test`) ───────────────────────
+
+    #[tokio::test]
+    async fn parakeet_engine_without_feature_reports_not_built() {
+        let host = FakeHost::default();
+        let client = reqwest::Client::new();
+        let err = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"a".to_vec(),
+            "c.wav".to_string(),
+            Some("parakeet"),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("parakeet transcription failed"), "got: {err}");
+        assert!(err.contains("not built"), "got: {err}");
+    }
 }

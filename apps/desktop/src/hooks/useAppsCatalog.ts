@@ -24,8 +24,8 @@ import { TOKEN_KEY } from "@/lib/auth-client.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type AddMarketplaceParams,
-	addMarketplaceSource,
 	type AppInfo,
+	addMarketplaceSource,
 	type CatalogEntry,
 	disableApp,
 	enableApp,
@@ -197,8 +197,24 @@ export function useAppsCatalog(initialQuery = ""): UseAppsCatalogResult {
 		const byId = new Map(infos.map((a) => [a.id, a]));
 		return catalogEntries.map((entry) => {
 			const info = byId.get(entry.id) ?? null;
+			// Surface plugin dependencies in the catalog detail ("Requires these
+			// apps"). Core's catalog source emits `requires`, but fall back to the
+			// live app record (list_apps carries it too) so a built-in app's deps
+			// show even when the source omits them. Convert the record's camelCase
+			// `minVersion` to the catalog entry's snake_case `min_version` shape.
+			const requires =
+				entry.requires ??
+				(info?.requires
+					? {
+							apps: info.requires.apps.map((d) => ({
+								id: d.id,
+								min_version: d.minVersion,
+							})),
+							grants: info.requires.grants,
+						}
+					: null);
 			return {
-				entry,
+				entry: requires === entry.requires ? entry : { ...entry, requires },
 				info,
 				installed: info?.installed ?? false,
 				enabled: info?.enabled ?? false,

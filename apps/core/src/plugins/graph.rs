@@ -643,7 +643,10 @@ mod tests {
             m("spaces", "1.0.0", &[]),
             m("meetings", "1.0.0", &[("spaces", None)]),
         ];
-        assert_eq!(resolve_disable_order("meetings", &enabled), vec!["meetings"]);
+        assert_eq!(
+            resolve_disable_order("meetings", &enabled),
+            vec!["meetings"]
+        );
     }
 
     /// The disable order is exactly the reverse of the enable order — the property

@@ -355,4 +355,129 @@ mod tests {
         // Empty/whitespace clears the selection.
         assert!(parse_active_pref("   ").is_none());
     }
+
+    #[test]
+    fn slugify_repo_replaces_unsafe_chars() {
+        assert_eq!(slugify_repo("acme/My.Model-1_x"), "acme_My.Model-1_x");
+        assert_eq!(slugify_repo("a b/c:d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn record_load_resolve_remove_roundtrip() {
+        crate::ensure_test_host();
+        let stem = "inst-test-gguf-unique-b1";
+        let path = model_file_path(stem);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"gguf-bytes").unwrap();
+        record(InstalledModel {
+            repo_id: "acme/inst-test-b1".into(),
+            filename: format!("{stem}.gguf"),
+            stem: stem.into(),
+            size_bytes: Some(10),
+            format: ModelFormat::Gguf,
+            mmproj: None,
+            finetune_base: None,
+        })
+        .unwrap();
+
+        // Present on disk → appears in load_present + installed_repo_ids.
+        assert!(load_present().iter().any(|m| m.stem == stem));
+        assert!(installed_repo_ids().contains("acme/inst-test-b1"));
+
+        // Resolve by stem and by repo id; a miss returns None.
+        assert_eq!(resolve_to_stem(stem).as_deref(), Some(stem));
+        assert_eq!(resolve_to_stem("acme/inst-test-b1").as_deref(), Some(stem));
+        assert!(resolve_to_stem("inst-test-nope-b1").is_none());
+
+        // GGUF resolve_active → ref is the stem, engine left blank for the caller.
+        let active = resolve_active("acme/inst-test-b1").expect("resolves");
+        assert_eq!(active.format, ModelFormat::Gguf);
+        assert_eq!(active.r#ref, stem);
+        assert!(active.engine.is_empty());
+
+        // Reverse lookup.
+        assert_eq!(repo_for_stem(stem).as_deref(), Some("acme/inst-test-b1"));
+
+        // Remove drops the record; a second remove is an idempotent no-op success.
+        remove(stem).unwrap();
+        assert!(load_present().iter().all(|m| m.stem != stem));
+        remove(stem).unwrap();
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_present_filters_records_with_no_file_on_disk() {
+        crate::ensure_test_host();
+        let stem = "inst-test-phantom-unique-b2";
+        // Record WITHOUT creating the file → must be filtered from load_present.
+        record(InstalledModel {
+            repo_id: "acme/phantom-b2".into(),
+            filename: format!("{stem}.gguf"),
+            stem: stem.into(),
+            size_bytes: None,
+            format: ModelFormat::Gguf,
+            mmproj: None,
+            finetune_base: None,
+        })
+        .unwrap();
+        assert!(
+            load_present().iter().all(|m| m.stem != stem),
+            "a record with no on-disk file must not show as installed"
+        );
+        remove(stem).unwrap();
+    }
+
+    #[test]
+    fn snapshot_present_only_when_dir_nonempty_and_ref_is_repo_id() {
+        crate::ensure_test_host();
+        let repo = "acme/snap-test-unique-b3";
+        let slug = slugify_repo(repo);
+        let dir = model_snapshot_dir(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.safetensors"), b"weights").unwrap();
+        record(InstalledModel {
+            repo_id: repo.into(),
+            filename: repo.into(),
+            stem: slug.clone(),
+            size_bytes: Some(7),
+            format: ModelFormat::Safetensors,
+            mmproj: None,
+            finetune_base: None,
+        })
+        .unwrap();
+
+        assert!(load_present().iter().any(|m| m.stem == slug));
+        // A snapshot resolve_active carries the repo id as its ref (not the slug).
+        let active = resolve_active(&slug).expect("resolves");
+        assert_eq!(active.format, ModelFormat::Safetensors);
+        assert_eq!(active.r#ref, repo);
+
+        remove(&slug).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_snapshot_dir_counts_as_absent() {
+        crate::ensure_test_host();
+        let slug = "inst-test-empty-snap-unique-b4";
+        let dir = model_snapshot_dir(slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        record(InstalledModel {
+            repo_id: "acme/empty-b4".into(),
+            filename: "acme/empty-b4".into(),
+            stem: slug.into(),
+            size_bytes: None,
+            format: ModelFormat::Mlx,
+            mmproj: None,
+            finetune_base: None,
+        })
+        .unwrap();
+        assert!(
+            load_present().iter().all(|m| m.stem != slug),
+            "an empty snapshot directory is not a present install"
+        );
+        remove(slug).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -16,8 +16,8 @@ use anyhow::{bail, Result};
 use tokio::process::Command;
 
 use crate::catalog::registry;
-use crate::win_process::NoWindow;
 use crate::sidecar::download_manager::VersionStore;
+use crate::win_process::NoWindow;
 
 /// Key under which the installed/adopted version is recorded in `versions.json`.
 pub const VERSION_KEY: &str = "omlx";
@@ -52,12 +52,7 @@ pub async fn omlx_binary() -> Option<String> {
     candidates.push("/usr/local/bin/omlx".to_string());
 
     for cand in candidates {
-        if let Ok(out) = Command::new(&cand)
-            .arg("--help")
-            .no_window()
-            .output()
-            .await
-        {
+        if let Ok(out) = Command::new(&cand).arg("--help").no_window().output().await {
             if out.status.success() {
                 return Some(cand);
             }

@@ -52,7 +52,10 @@ pub fn owner_of(tenancy: &Tenancy) -> DocOwner {
 /// used to before this coupling was hoisted Core-side.
 fn backfill_owner() -> Option<(String, String)> {
     let org = crate::sidecar::control_plane::registered_org()?;
-    match crate::auth::load_accounts().active().map(|a| a.user_id.clone()) {
+    match crate::auth::load_accounts()
+        .active()
+        .map(|a| a.user_id.clone())
+    {
         Some(owner) => Some((owner, org.id)),
         None => {
             tracing::warn!(
@@ -136,12 +139,15 @@ pub async fn apply_saved_embedding_pref(store: &SpaceStore, prefs: &PreferencesS
 /// [`ResourceTenancy`] the `resource_access` row-gate expects from BOTH the
 /// conversation and the Spaces stores.
 pub async fn doc_access_meta(store: &SpaceStore, doc_id: &str) -> Result<Option<ResourceTenancy>> {
-    Ok(store.get_access_meta(doc_id).await?.map(|m| ResourceTenancy {
-        owner_user_id: m.owner_user_id,
-        org_id: m.org_id,
-        visibility: m.visibility,
-        team_id: m.team_id,
-    }))
+    Ok(store
+        .get_access_meta(doc_id)
+        .await?
+        .map(|m| ResourceTenancy {
+            owner_user_id: m.owner_user_id,
+            org_id: m.org_id,
+            visibility: m.visibility,
+            team_id: m.team_id,
+        }))
 }
 
 /// Read a Space's access metadata and map it into the shared [`ResourceTenancy`]
@@ -154,12 +160,15 @@ pub async fn space_access_meta(
     store: &SpaceStore,
     space_id: &str,
 ) -> Result<Option<ResourceTenancy>> {
-    Ok(store.space_access_meta(space_id).await?.map(|m| ResourceTenancy {
-        owner_user_id: m.owner_user_id,
-        org_id: m.org_id,
-        visibility: m.visibility,
-        team_id: m.team_id,
-    }))
+    Ok(store
+        .space_access_meta(space_id)
+        .await?
+        .map(|m| ResourceTenancy {
+            owner_user_id: m.owner_user_id,
+            org_id: m.org_id,
+            visibility: m.visibility,
+            team_id: m.team_id,
+        }))
 }
 
 #[cfg(test)]

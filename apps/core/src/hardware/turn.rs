@@ -295,4 +295,19 @@ mod tests {
         assert_eq!(sentence_chunks("just one clause"), vec!["just one clause"]);
         assert!(sentence_chunks("   ").is_empty());
     }
+
+    #[test]
+    fn sentence_chunks_splits_on_newline_and_keeps_trailing_tail() {
+        // Newline is a terminator; the terminator-less tail is still emitted.
+        let chunks = sentence_chunks("line one\nline two. tail no dot");
+        assert_eq!(chunks, vec!["line one", "line two.", "tail no dot"]);
+    }
+
+    #[test]
+    fn sentence_chunks_drops_whitespace_only_segments_between_terminators() {
+        // The blank lines between the two sentences are whitespace-only segments
+        // that must not produce empty chunks.
+        let chunks = sentence_chunks("One.\n\n\nTwo.");
+        assert_eq!(chunks, vec!["One.", "Two."]);
+    }
 }

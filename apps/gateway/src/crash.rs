@@ -137,4 +137,56 @@ mod tests {
         assert!(!parse_bool("off", true));
         assert!(parse_bool("1", false));
     }
+
+    #[test]
+    fn scrub_event_redacts_home_from_message_and_every_frame() {
+        use sentry::protocol::{Event, Exception, Frame, Stacktrace};
+
+        let home = "/home/alice";
+        let mut event: Event<'static> = Event {
+            exception: vec![Exception {
+                ty: "panic".to_string(),
+                value: Some("panic at /home/alice/.ryu/secret.toml".to_string()),
+                stacktrace: Some(Stacktrace {
+                    frames: vec![Frame {
+                        abs_path: Some("/home/alice/src/main.rs".to_string()),
+                        filename: Some("/home/alice/src/main.rs".to_string()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+
+        scrub_event(Some(home), &mut event);
+
+        let ex = &event.exception.values[0];
+        assert_eq!(ex.value.as_deref(), Some("panic at ~/.ryu/secret.toml"));
+        let frame = &ex.stacktrace.as_ref().unwrap().frames[0];
+        assert_eq!(frame.abs_path.as_deref(), Some("~/src/main.rs"));
+        assert_eq!(frame.filename.as_deref(), Some("~/src/main.rs"));
+    }
+
+    #[test]
+    fn scrub_event_is_a_noop_without_a_home_prefix() {
+        use sentry::protocol::{Event, Exception};
+
+        let mut event: Event<'static> = Event {
+            exception: vec![Exception {
+                ty: "panic".to_string(),
+                value: Some("panic at /var/log/app.log".to_string()),
+                ..Default::default()
+            }]
+            .into(),
+            ..Default::default()
+        };
+        scrub_event(Some("/home/alice"), &mut event);
+        assert_eq!(
+            event.exception.values[0].value.as_deref(),
+            Some("panic at /var/log/app.log")
+        );
+    }
 }

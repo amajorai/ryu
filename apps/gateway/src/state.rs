@@ -16,9 +16,9 @@ use crate::{
         FirewallRegistry, FirewallScanner,
     },
     jobs::MediaJobStore,
+    metrics::Metrics,
     passthrough::PassthroughRegistry,
     pipeline::RequestContext,
-    metrics::Metrics,
     policy::{EffectivePolicy, ResolveCache},
     providers::ProviderRegistry,
     quota::ProviderQuotas,
@@ -252,7 +252,9 @@ fn apply_stage_backends(
     // W6c: the four newly-inverted stages, same fail-closed selection. These
     // registries carry their own internal RwLock, so `set_active` takes `&self`.
     let avail = firewall.available();
-    select_stage_backend("firewall", &cfg.firewall, avail, |id| firewall.set_active(id))?;
+    select_stage_backend("firewall", &cfg.firewall, avail, |id| {
+        firewall.set_active(id)
+    })?;
     let avail = router.available();
     select_stage_backend("router", &cfg.router, avail, |id| router.set_active(id))?;
     let avail = smart_router.available();
@@ -670,8 +672,8 @@ mod stage_backend_selection_tests {
     /// ignored.
     #[test]
     fn default_config_selects_builtin_for_every_stage() {
-        let state = AppState::new(GatewayConfig::default())
-            .expect("default stage backends must build");
+        let state =
+            AppState::new(GatewayConfig::default()).expect("default stage backends must build");
         assert_eq!(state.cache.active_id(), CacheRegistry::BUILTIN);
         assert_eq!(state.budget.active_id().as_str(), "builtin");
         // W6c: the four newly-inverted stages are read + applied to their built-in.
@@ -708,16 +710,13 @@ mod stage_backend_selection_tests {
         let budget = crate::budget::BudgetRegistry::new(crate::config::BudgetConfig::default());
         let mut semantic_cache = crate::semantic_cache::SemanticCacheRegistry::disabled();
         let mut audit = crate::audit::AuditRegistry::from_logger(Default::default());
-        let mut evals =
-            crate::evals::EvalsRegistry::new(crate::config::EvalsConfig::default());
+        let mut evals = crate::evals::EvalsRegistry::new(crate::config::EvalsConfig::default());
         let mut circuit_breaker =
             crate::circuit_breaker::CircuitBreakerRegistry::new(Default::default());
-        let mut rate_limiter =
-            crate::rate_limit::RateLimiterRegistry::new(Default::default());
+        let mut rate_limiter = crate::rate_limit::RateLimiterRegistry::new(Default::default());
         let firewall =
             crate::firewall::FirewallRegistry::new(crate::config::FirewallConfig::default());
-        let router =
-            crate::router::RouterRegistry::new(crate::config::RoutingConfig::default());
+        let router = crate::router::RouterRegistry::new(crate::config::RoutingConfig::default());
         let smart_router = crate::router::smart::SmartRouterRegistry::new(
             crate::config::SmartRoutingConfig::default(),
         );
@@ -752,7 +751,10 @@ mod stage_backend_selection_tests {
         assert!(select_stage_backend("semantic_cache", "builtin", vec![], |_| false).is_ok());
         let err = select_stage_backend("semantic_cache", "redis", vec![], |_| false)
             .expect_err("non-default id on a disabled stage must be refused");
-        assert!(err.contains("semantic_cache") && err.contains("redis"), "{err}");
+        assert!(
+            err.contains("semantic_cache") && err.contains("redis"),
+            "{err}"
+        );
     }
 }
 

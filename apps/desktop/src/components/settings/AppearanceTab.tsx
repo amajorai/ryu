@@ -5,6 +5,8 @@ import {
 	Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { PatchDiff } from "@pierre/diffs/react";
+import { FileTree, useFileTree } from "@pierre/trees/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Collapsible,
@@ -45,6 +47,20 @@ import {
 	setDialogOverlayBlur,
 	useDialogOverlayBlur,
 } from "@/src/hooks/useDialogOverlayBlur.ts";
+import {
+	type DiffViewPrefs,
+	diffViewPrefsToOptions,
+	resetDiffViewPrefs,
+	setDiffViewPrefs,
+	useDiffViewPrefs,
+} from "@/src/hooks/useDiffViewPrefs.ts";
+import {
+	type FileTreePrefs,
+	fileTreePrefsToOptions,
+	resetFileTreePrefs,
+	setFileTreePrefs,
+	useFileTreePrefs,
+} from "@/src/hooks/useFileTreePrefs.ts";
 import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { usePersistedToggle } from "@/src/hooks/usePersistedToggle.ts";
 import {
@@ -249,16 +265,13 @@ function initTokens(variantId: string): CustomTokens {
 			sidebar: "#f9f9f9",
 		};
 	}
-	const raw = variantToCustomTokens(variant);
-	return {
-		background: colorToHex(raw.background),
-		foreground: colorToHex(raw.foreground),
-		primary: colorToHex(raw.primary),
-		muted: colorToHex(raw.muted),
-		mutedForeground: colorToHex(raw.mutedForeground),
-		border: colorToHex(raw.border),
-		sidebar: colorToHex(raw.sidebar),
-	};
+	// Keep the preset's raw CSS colour strings (e.g. `oklch(1 0 0 / 10%)` for a
+	// dark border). These are what get re-applied live and saved, so they MUST
+	// stay lossless — converting to 6-digit hex here dropped the alpha channel
+	// and collapsed translucent borders/inputs to solid #ffffff (white outlines
+	// + blown-out muted surfaces in dark mode). Hex is a display-only concern,
+	// handled in the colour fields via `colorToHex`.
+	return variantToCustomTokens(variant);
 }
 
 function PresetSwatch({
@@ -310,7 +323,10 @@ function ColorField({
 	value: string;
 	onChange: (key: keyof CustomTokens, val: string) => void;
 }) {
-	const hexVal = HEX_6_RE.test(value) ? value : "#888888";
+	// `value` may be a raw preset string (oklch/rgba, possibly translucent). The
+	// swatch + picker only speak 6-digit hex, so derive a display hex here — the
+	// picker emitting an opaque hex on edit is the user's explicit choice.
+	const hexVal = colorToHex(value);
 	const textColor = getContrastColor(hexVal);
 
 	return (
@@ -356,7 +372,9 @@ function PrimaryColorField({
 	value: string;
 	onChange: (key: keyof CustomTokens, val: string) => void;
 }) {
-	const hexVal = HEX_6_RE.test(value) ? value : "#888888";
+	// `value` may be a raw preset string (oklch). Derive a display hex so the
+	// swatch renders and preset-matching works; the picker still emits hex.
+	const hexVal = colorToHex(value);
 	const matchesPreset = PRIMARY_PRESETS.some(
 		(p) => (mode === "light" ? p.light : p.dark).toLowerCase() === hexVal
 	);
@@ -617,6 +635,92 @@ function deriveToolDetailPreset(
 	return "custom";
 }
 
+// Diff viewer (`@pierre/diffs`) option lists for the Appearance selects.
+const DIFF_STYLE_OPTIONS = [
+	{ value: "split", label: "Split (side-by-side)" },
+	{ value: "unified", label: "Stacked (inline)" },
+] as const;
+const DIFF_INDICATOR_OPTIONS = [
+	{ value: "bars", label: "Bars" },
+	{ value: "classic", label: "Classic (+/−)" },
+	{ value: "none", label: "None" },
+] as const;
+const DIFF_LINE_DIFF_OPTIONS = [
+	{ value: "word", label: "Word" },
+	{ value: "word-alt", label: "Word (alternate)" },
+	{ value: "char", label: "Character" },
+	{ value: "none", label: "Off" },
+] as const;
+const DIFF_HUNK_SEPARATOR_OPTIONS = [
+	{ value: "simple", label: "Simple" },
+	{ value: "metadata", label: "Metadata" },
+	{ value: "line-info", label: "Line info" },
+	{ value: "line-info-basic", label: "Line info (basic)" },
+] as const;
+const DIFF_THEME_OPTIONS = [
+	{ value: "system", label: "Auto (match app)" },
+	{ value: "light", label: "Light" },
+	{ value: "dark", label: "Dark" },
+] as const;
+
+// A tiny single-file patch rendered live in the Diff viewer settings section so
+// changes (layout, markers, wrap, …) are visible instantly. Covers context,
+// additions and deletions so every indicator has something to show.
+const DIFF_PREVIEW_PATCH = `diff --git a/greeting.ts b/greeting.ts
+index 1a2b3c4..5d6e7f8 100644
+--- a/greeting.ts
++++ b/greeting.ts
+@@ -1,4 +1,4 @@
+ export function greeting(name: string) {
+-  const message = "Hello, " + name;
+-  return message;
++  const message = \`Hello, \${name}!\`;
++  return message.trim();
+ }
+`;
+
+// File tree (`@pierre/trees`) option lists for the Appearance selects.
+const FILE_TREE_DENSITY_OPTIONS = [
+	{ value: "compact", label: "Compact" },
+	{ value: "default", label: "Default" },
+	{ value: "relaxed", label: "Relaxed" },
+] as const;
+const FILE_TREE_ICON_OPTIONS = [
+	{ value: "standard", label: "Standard" },
+	{ value: "minimal", label: "Minimal" },
+	{ value: "complete", label: "Complete" },
+	{ value: "none", label: "No icons" },
+] as const;
+const FILE_TREE_SEARCH_MODE_OPTIONS = [
+	{ value: "expand-matches", label: "Expand matches" },
+	{ value: "collapse-non-matches", label: "Collapse non-matches" },
+	{ value: "hide-non-matches", label: "Hide non-matches" },
+] as const;
+const FILE_TREE_EXPANSION_OPTIONS = [
+	{ value: "closed", label: "Collapsed" },
+	{ value: "open", label: "Expanded" },
+] as const;
+
+// A small sample tree rendered live in the File tree settings section.
+const FILE_TREE_PREVIEW_PATHS = [
+	"src/components/Button.tsx",
+	"src/components/Card.tsx",
+	"src/hooks/useTheme.ts",
+	"src/index.ts",
+	"package.json",
+	"README.md",
+] as const;
+
+// The preview builds its model from static paths, so no `resetPaths` is needed;
+// remounting it (via a `key` on the prefs) applies the constructor-time options.
+function FileTreePreview({ prefs }: { prefs: FileTreePrefs }) {
+	const { model } = useFileTree({
+		...fileTreePrefsToOptions(prefs),
+		paths: FILE_TREE_PREVIEW_PATHS as unknown as string[],
+	});
+	return <FileTree className="h-full w-full" model={model} />;
+}
+
 export function AppearanceTab() {
 	const { theme, setTheme } = useTheme();
 	const pointerCursorEnabled = usePointerCursor();
@@ -653,6 +757,8 @@ export function AppearanceTab() {
 		"ryu:stream-animation",
 		true
 	);
+	const diffPrefs = useDiffViewPrefs();
+	const fileTreePrefs = useFileTreePrefs();
 
 	const toolDetailPreset = deriveToolDetailPreset(
 		groupToolUses,
@@ -955,6 +1061,12 @@ export function AppearanceTab() {
 
 		// Composer usage meters (visible, bar-on, percent-off, used mode)
 		resetUsageBarPrefs();
+
+		// Diff viewer options
+		resetDiffViewPrefs();
+
+		// File tree options
+		resetFileTreePrefs();
 
 		setPinUserMessage(true);
 
@@ -1528,6 +1640,403 @@ export function AppearanceTab() {
 						}
 						description="Show how much of your allowance is left instead of how much you've used."
 						title="Show remaining instead of used"
+					/>
+				</SettingsGroup>
+			</SettingsSection>
+
+			<SettingsSection
+				caption="How code diffs render in the workspace Changes tab. The Split/Stacked control also lives in that tab's toolbar."
+				title="Diff viewer"
+			>
+				<SettingsCard className="overflow-hidden p-0">
+					<div className="border-border/60 border-b px-3 py-1.5 text-muted-foreground text-xs">
+						Live preview
+					</div>
+					<div className="max-h-64 overflow-auto text-xs">
+						<PatchDiff
+							disableWorkerPool
+							options={diffViewPrefsToOptions(diffPrefs)}
+							patch={DIFF_PREVIEW_PATCH}
+						/>
+					</div>
+				</SettingsCard>
+
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Select
+								items={DIFF_STYLE_OPTIONS}
+								onValueChange={(v) =>
+									setDiffViewPrefs({
+										diffStyle: v as DiffViewPrefs["diffStyle"],
+									})
+								}
+								value={diffPrefs.diffStyle}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{DIFF_STYLE_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Split shows old and new side by side; Stacked shows changes inline in one column."
+						title="Layout"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={DIFF_THEME_OPTIONS}
+								onValueChange={(v) =>
+									setDiffViewPrefs({
+										themeMode: v as DiffViewPrefs["themeMode"],
+									})
+								}
+								value={diffPrefs.themeMode}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{DIFF_THEME_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Syntax-highlight theme for diffs. Auto follows the app's light/dark mode."
+						title="Theme"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={DIFF_INDICATOR_OPTIONS}
+								onValueChange={(v) =>
+									setDiffViewPrefs({
+										diffIndicators: v as DiffViewPrefs["diffIndicators"],
+									})
+								}
+								value={diffPrefs.diffIndicators}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{DIFF_INDICATOR_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="How added and removed lines are marked in the gutter."
+						title="Change markers"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={DIFF_LINE_DIFF_OPTIONS}
+								onValueChange={(v) =>
+									setDiffViewPrefs({
+										lineDiffType: v as DiffViewPrefs["lineDiffType"],
+									})
+								}
+								value={diffPrefs.lineDiffType}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{DIFF_LINE_DIFF_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Highlight the exact characters or words that changed within a line."
+						title="Inline highlighting"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={DIFF_HUNK_SEPARATOR_OPTIONS}
+								onValueChange={(v) =>
+									setDiffViewPrefs({
+										hunkSeparators: v as DiffViewPrefs["hunkSeparators"],
+									})
+								}
+								value={diffPrefs.hunkSeparators}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{DIFF_HUNK_SEPARATOR_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Style of the separators shown between collapsed sections of unchanged code."
+						title="Hunk separators"
+					/>
+				</SettingsGroup>
+
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={diffPrefs.showBackground}
+								id="diff-show-background-toggle"
+								onCheckedChange={(v) => setDiffViewPrefs({ showBackground: v })}
+							/>
+						}
+						description="Fill changed lines with a red/green background instead of leaving them plain."
+						title="Line backgrounds"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={diffPrefs.showLineNumbers}
+								id="diff-show-line-numbers-toggle"
+								onCheckedChange={(v) =>
+									setDiffViewPrefs({ showLineNumbers: v })
+								}
+							/>
+						}
+						description="Show the line-number gutter alongside the diff."
+						title="Line numbers"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={diffPrefs.wrapLines}
+								id="diff-wrap-lines-toggle"
+								onCheckedChange={(v) => setDiffViewPrefs({ wrapLines: v })}
+							/>
+						}
+						description="Wrap long lines instead of scrolling horizontally."
+						title="Wrap long lines"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={diffPrefs.expandUnchanged}
+								id="diff-expand-unchanged-toggle"
+								onCheckedChange={(v) =>
+									setDiffViewPrefs({ expandUnchanged: v })
+								}
+							/>
+						}
+						description="Show unchanged context lines expanded by default instead of collapsing them."
+						title="Expand unchanged context"
+					/>
+				</SettingsGroup>
+			</SettingsSection>
+
+			<SettingsSection
+				caption="How the workspace Files tab renders your project tree. Density and search also live in that tab's toolbar."
+				title="File tree"
+			>
+				<SettingsCard className="overflow-hidden p-0">
+					<div className="border-border/60 border-b px-3 py-1.5 text-muted-foreground text-xs">
+						Live preview
+					</div>
+					<div className="h-52 overflow-hidden text-xs">
+						<FileTreePreview
+							key={JSON.stringify(fileTreePrefs)}
+							prefs={fileTreePrefs}
+						/>
+					</div>
+				</SettingsCard>
+
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Select
+								items={FILE_TREE_DENSITY_OPTIONS}
+								onValueChange={(v) =>
+									setFileTreePrefs({
+										density: v as FileTreePrefs["density"],
+									})
+								}
+								value={fileTreePrefs.density}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{FILE_TREE_DENSITY_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Row height and spacing of tree items."
+						title="Density"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={FILE_TREE_ICON_OPTIONS}
+								onValueChange={(v) =>
+									setFileTreePrefs({
+										iconSet: v as FileTreePrefs["iconSet"],
+									})
+								}
+								value={fileTreePrefs.iconSet}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{FILE_TREE_ICON_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Which built-in file-type icon set to use, or none."
+						title="Icons"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={FILE_TREE_SEARCH_MODE_OPTIONS}
+								onValueChange={(v) =>
+									setFileTreePrefs({
+										searchMode: v as FileTreePrefs["searchMode"],
+									})
+								}
+								value={fileTreePrefs.searchMode}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{FILE_TREE_SEARCH_MODE_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="How a search query reshapes the tree (expand, collapse, or hide non-matches)."
+						title="Search mode"
+					/>
+					<SettingsItem
+						actions={
+							<Select
+								items={FILE_TREE_EXPANSION_OPTIONS}
+								onValueChange={(v) =>
+									setFileTreePrefs({
+										initialExpansion: v as FileTreePrefs["initialExpansion"],
+									})
+								}
+								value={fileTreePrefs.initialExpansion}
+							>
+								<SelectTrigger className="h-8 w-56 text-sm">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									{FILE_TREE_EXPANSION_OPTIONS.map((o) => (
+										<SelectItem key={o.value} value={o.value}>
+											{o.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						}
+						description="Whether folders start expanded or collapsed."
+						title="Initial state"
+					/>
+				</SettingsGroup>
+
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={fileTreePrefs.coloredIcons}
+								id="file-tree-colored-icons-toggle"
+								onCheckedChange={(v) => setFileTreePrefs({ coloredIcons: v })}
+							/>
+						}
+						description="Tint file icons by type instead of a single muted color."
+						title="Colored icons"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={fileTreePrefs.stickyFolders}
+								id="file-tree-sticky-folders-toggle"
+								onCheckedChange={(v) => setFileTreePrefs({ stickyFolders: v })}
+							/>
+						}
+						description="Pin a parent folder to the top while scrolling through its children."
+						title="Sticky folders"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={fileTreePrefs.showSearch}
+								id="file-tree-show-search-toggle"
+								onCheckedChange={(v) => setFileTreePrefs({ showSearch: v })}
+							/>
+						}
+						description="Show the filter box above the tree."
+						title="Search box"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={fileTreePrefs.flattenEmptyDirectories}
+								id="file-tree-flatten-toggle"
+								onCheckedChange={(v) =>
+									setFileTreePrefs({ flattenEmptyDirectories: v })
+								}
+							/>
+						}
+						description="Collapse a chain of single-child folders into one row (e.g. src/main/java)."
+						title="Flatten empty directories"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={fileTreePrefs.dragAndDrop}
+								id="file-tree-dnd-toggle"
+								onCheckedChange={(v) => setFileTreePrefs({ dragAndDrop: v })}
+							/>
+						}
+						description="Allow dragging items to move or reorder them."
+						title="Drag and drop"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={fileTreePrefs.renaming}
+								id="file-tree-renaming-toggle"
+								onCheckedChange={(v) => setFileTreePrefs({ renaming: v })}
+							/>
+						}
+						description="Allow inline rename (F2 or double-click)."
+						title="Inline rename"
 					/>
 				</SettingsGroup>
 			</SettingsSection>

@@ -123,8 +123,15 @@ impl InspectorClient {
         if text.trim().is_empty() || rubric.trim().is_empty() {
             return InspectorVerdict::allow();
         }
-        run_inspection(&rubric_system_prompt(rubric), text, model, timeout_ms, providers, router)
-            .await
+        run_inspection(
+            &rubric_system_prompt(rubric),
+            text,
+            model,
+            timeout_ms,
+            providers,
+            router,
+        )
+        .await
     }
 }
 
@@ -181,7 +188,12 @@ async fn run_inspection(
     match parse_verdict(content) {
         Some(v) => v,
         None => {
-            warn!(reply = %content, "inspector: unparseable verdict; failing open (allow)");
+            // An echoing model can mirror user message content back in its
+            // reply, so log only the reply's length — never the text.
+            warn!(
+                reply_len = content.len(),
+                "inspector: unparseable verdict; failing open (allow)"
+            );
             InspectorVerdict::allow()
         }
     }
@@ -358,20 +370,26 @@ mod tests {
     fn inspect_rubric_empty_inputs_allow() {
         let providers = empty_providers();
         let router = ModelRouter::new(Default::default());
-        assert!(!tokio_block(InspectorClient::inspect_rubric(
-            "", "rubric", "m", 1500, &providers, &router
-        ))
-        .flagged);
-        assert!(!tokio_block(InspectorClient::inspect_rubric(
-            "text", "", "m", 1500, &providers, &router
-        ))
-        .flagged);
+        assert!(
+            !tokio_block(InspectorClient::inspect_rubric(
+                "", "rubric", "m", 1500, &providers, &router
+            ))
+            .flagged
+        );
+        assert!(
+            !tokio_block(InspectorClient::inspect_rubric(
+                "text", "", "m", 1500, &providers, &router
+            ))
+            .flagged
+        );
     }
 
     #[test]
     fn parse_verdict_reads_clean_json() {
-        let v = parse_verdict(r#"{"flagged": true, "categories": ["injection"], "reason": "ignore prior"}"#)
-            .expect("clean json parses");
+        let v = parse_verdict(
+            r#"{"flagged": true, "categories": ["injection"], "reason": "ignore prior"}"#,
+        )
+        .expect("clean json parses");
         assert!(v.flagged);
         assert_eq!(v.categories, vec!["injection"]);
     }
@@ -388,9 +406,12 @@ mod tests {
     #[test]
     fn verdict_available_distinguishes_judge_answer_from_fail_open() {
         // A parsed verdict (the judge answered) is marked available…
-        let answered = parse_verdict(r#"{"flagged": false, "reason": "clean"}"#)
-            .expect("clean json parses");
-        assert!(answered.available, "a parsed verdict means the judge answered");
+        let answered =
+            parse_verdict(r#"{"flagged": false, "reason": "clean"}"#).expect("clean json parses");
+        assert!(
+            answered.available,
+            "a parsed verdict means the judge answered"
+        );
         // …while every fail-open/allow path is NOT available, so the caller runs
         // its deterministic seed backstop only when the judge did not answer.
         assert!(!InspectorVerdict::allow().available);

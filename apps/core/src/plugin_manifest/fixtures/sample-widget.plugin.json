@@ -1,0 +1,25 @@
+{
+	"id": "sample-widget",
+	"name": "Sample Widget",
+	"version": "1.0.0",
+	"description": "Reference third-party MCP widget plugin. A tiny local Node MCP server (server.mjs) exposes one render tool (sample_widget__render) that returns structured data AND serves a self-contained skybridge HTML resource (ui://widget/sample.html). contributes.widgets binds the tool to that resource; the widget:render grant + this manifest are the consent gate that lets Core promote the tool's result into an inline chat widget. Copy this directory as the starting point for your own widget plugin.",
+	"runnables": [],
+	"permission_grants": ["widget:render"],
+	"mcp_servers": {
+		"sample_widget": {
+			"command": "node",
+			"args": ["server.mjs"],
+			"description": "Sample widget MCP server: one render tool + the ui://widget/sample.html resource."
+		}
+	},
+	"contributes": {
+		"widgets": [
+			{
+				"tool_id": "sample_widget__render",
+				"uri": "ui://widget/sample.html",
+				"mime": "text/html+skybridge",
+				"default_display_mode": "inline"
+			}
+		]
+	}
+}

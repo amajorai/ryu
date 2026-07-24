@@ -15,7 +15,10 @@ enum CircuitState {
     /// Circuit tripped; all requests are rejected immediately.
     Open { opened_at: Instant },
     /// One probe request allowed through to test if provider has recovered.
-    HalfOpen,
+    /// `probe_in_flight` is true while that single probe is outstanding; further
+    /// requests are rejected until the probe resolves via record_success (→ Closed)
+    /// or record_failure (→ Open).
+    HalfOpen { probe_in_flight: bool },
 }
 
 /// Public snapshot of a single provider's circuit-breaker state.
@@ -63,11 +66,32 @@ impl CircuitBreakers {
             });
 
         match *entry {
-            CircuitState::Closed { .. } | CircuitState::HalfOpen => false,
+            CircuitState::Closed { .. } => false,
+            CircuitState::HalfOpen {
+                probe_in_flight: true,
+            } => {
+                // A probe is already outstanding; reject further concurrent
+                // requests until it resolves via record_success/record_failure.
+                true
+            }
+            CircuitState::HalfOpen {
+                probe_in_flight: false,
+            } => {
+                // No probe currently in flight (shouldn't normally be observed —
+                // record_success/record_failure always move out of HalfOpen —
+                // but handled for completeness): admit this caller as the probe.
+                *entry = CircuitState::HalfOpen {
+                    probe_in_flight: true,
+                };
+                false
+            }
             CircuitState::Open { opened_at } => {
                 if opened_at.elapsed() >= reset_timeout {
-                    // Transition to half-open; allow one probe request
-                    *entry = CircuitState::HalfOpen;
+                    // Transition to half-open; allow exactly one probe request
+                    // through (this caller), then gate everyone else out.
+                    *entry = CircuitState::HalfOpen {
+                        probe_in_flight: true,
+                    };
                     info!(
                         provider,
                         "circuit breaker: half-open, allowing probe request"
@@ -87,7 +111,7 @@ impl CircuitBreakers {
         }
         let was_open = matches!(
             self.states.get(provider).as_deref(),
-            Some(CircuitState::HalfOpen | CircuitState::Open { .. })
+            Some(CircuitState::HalfOpen { .. } | CircuitState::Open { .. })
         );
         self.states.insert(
             provider.to_string(),
@@ -121,7 +145,7 @@ impl CircuitBreakers {
                         consecutive_failures: 0,
                         open_for_secs: Some(opened_at.elapsed().as_secs()),
                     },
-                    CircuitState::HalfOpen => ProviderHealthSnapshot {
+                    CircuitState::HalfOpen { .. } => ProviderHealthSnapshot {
                         circuit: "half_open".to_string(),
                         consecutive_failures: 0,
                         open_for_secs: None,
@@ -165,7 +189,7 @@ impl CircuitBreakers {
                 }
             }
             // A failure during half-open immediately re-opens
-            CircuitState::HalfOpen => {
+            CircuitState::HalfOpen { .. } => {
                 warn!(
                     provider,
                     "circuit breaker: probe failed, re-opening circuit"
@@ -303,5 +327,266 @@ impl CircuitBreakerRegistry {
     /// See [`CircuitBreakerBackend::snapshot`].
     pub fn snapshot(&self) -> HashMap<String, ProviderHealthSnapshot> {
         self.active.snapshot()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(enabled: bool, threshold: u32, reset_secs: u64) -> CircuitBreakerConfig {
+        CircuitBreakerConfig {
+            enabled,
+            failure_threshold: threshold,
+            reset_timeout_secs: reset_secs,
+        }
+    }
+
+    // ─── CircuitBreakers state machine ───────────────────────────────────────
+
+    #[test]
+    fn fresh_provider_circuit_is_closed() {
+        let cb = CircuitBreakers::new(config(true, 3, 30));
+        assert!(!cb.is_open("openai"));
+    }
+
+    #[test]
+    fn disabled_breaker_never_opens_even_past_threshold() {
+        let cb = CircuitBreakers::new(config(false, 1, 30));
+        // Even one failure would trip a threshold-1 breaker, but disabled short
+        // circuits every verb before it touches state.
+        for _ in 0..10 {
+            cb.record_failure("openai");
+        }
+        assert!(!cb.is_open("openai"));
+        // No state was ever recorded, so the snapshot is empty.
+        assert!(cb.snapshot().is_empty());
+    }
+
+    #[test]
+    fn opens_only_after_threshold_consecutive_failures() {
+        let cb = CircuitBreakers::new(config(true, 3, 30));
+        cb.record_failure("openai");
+        assert!(!cb.is_open("openai"), "1 < 3 stays closed");
+        cb.record_failure("openai");
+        assert!(!cb.is_open("openai"), "2 < 3 stays closed");
+        cb.record_failure("openai");
+        // The third consecutive failure hits the threshold and opens. Reset is a
+        // large 30s so `is_open` sees ~0s elapsed and reports open, not half-open.
+        assert!(cb.is_open("openai"), "3 >= 3 opens the circuit");
+    }
+
+    #[test]
+    fn success_resets_the_consecutive_failure_count() {
+        let cb = CircuitBreakers::new(config(true, 3, 30));
+        cb.record_failure("openai");
+        cb.record_failure("openai");
+        // A success in the Closed state zeroes the running count, so the next two
+        // failures are not enough to trip the threshold-3 breaker.
+        cb.record_success("openai");
+        cb.record_failure("openai");
+        cb.record_failure("openai");
+        assert!(!cb.is_open("openai"), "count reset by success; 2 < 3");
+    }
+
+    #[test]
+    fn open_circuit_transitions_to_half_open_after_reset_timeout() {
+        // reset_timeout 0 => an Open circuit is instantly eligible for a probe, so
+        // the first `is_open` after opening flips it to HalfOpen and returns false.
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai"); // threshold 1 => opens immediately
+        assert!(
+            !cb.is_open("openai"),
+            "reset elapsed => half-open probe allowed"
+        );
+        assert_eq!(cb.snapshot()["openai"].circuit, "half_open");
+    }
+
+    #[test]
+    fn half_open_probe_success_closes_the_circuit() {
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai");
+        assert!(!cb.is_open("openai")); // -> half-open
+        cb.record_success("openai"); // probe succeeded
+        let snap = cb.snapshot();
+        assert_eq!(snap["openai"].circuit, "closed");
+        assert_eq!(snap["openai"].consecutive_failures, 0);
+    }
+
+    #[test]
+    fn half_open_probe_failure_reopens_the_circuit() {
+        // reset 0 lets us reach HalfOpen without sleeping. `snapshot` reads the
+        // stored state directly (it does not re-evaluate the reset timer), so
+        // immediately after the probe failure it reports "open" — proof the
+        // HalfOpen -> Open transition fired.
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai"); // opens
+        assert!(!cb.is_open("openai")); // -> half-open (probe allowed)
+        assert_eq!(cb.snapshot()["openai"].circuit, "half_open");
+        cb.record_failure("openai"); // probe failed -> re-open
+        assert_eq!(cb.snapshot()["openai"].circuit, "open");
+    }
+
+    #[test]
+    fn open_circuit_stays_open_before_reset_timeout_elapses() {
+        let cb = CircuitBreakers::new(config(true, 1, 30));
+        cb.record_failure("openai");
+        // ~0s elapsed < 30s reset => still open on every immediate check.
+        assert!(cb.is_open("openai"));
+        assert!(cb.is_open("openai"));
+        assert_eq!(cb.snapshot()["openai"].circuit, "open");
+    }
+
+    #[test]
+    fn record_failure_is_noop_while_already_open() {
+        let cb = CircuitBreakers::new(config(true, 1, 30));
+        cb.record_failure("openai"); // opens, records opened_at
+        let opened_for = cb.snapshot()["openai"].open_for_secs;
+        assert!(opened_for.is_some());
+        // A further failure while Open returns early and must NOT reset opened_at
+        // to a new Instant or change consecutive_failures (which is 0 while open).
+        cb.record_failure("openai");
+        assert_eq!(cb.snapshot()["openai"].consecutive_failures, 0);
+    }
+
+    #[test]
+    fn circuits_are_tracked_independently_per_provider() {
+        let cb = CircuitBreakers::new(config(true, 2, 30));
+        cb.record_failure("openai");
+        cb.record_failure("openai");
+        cb.record_failure("anthropic");
+        assert!(cb.is_open("openai"), "openai hit threshold 2");
+        assert!(!cb.is_open("anthropic"), "anthropic only 1 failure");
+    }
+
+    #[test]
+    fn snapshot_only_lists_observed_providers() {
+        let cb = CircuitBreakers::new(config(true, 5, 30));
+        cb.record_failure("openai");
+        cb.is_open("anthropic"); // observing also inserts a Closed entry
+        let snap = cb.snapshot();
+        assert!(snap.contains_key("openai"));
+        assert!(snap.contains_key("anthropic"));
+        assert!(!snap.contains_key("modal"), "never-touched provider absent");
+        assert_eq!(snap["openai"].consecutive_failures, 1);
+        assert_eq!(snap["openai"].circuit, "closed");
+    }
+
+    #[test]
+    fn snapshot_open_reports_open_for_secs_not_null() {
+        let cb = CircuitBreakers::new(config(true, 1, 30));
+        cb.record_failure("openai");
+        let snap = cb.snapshot();
+        assert_eq!(snap["openai"].circuit, "open");
+        assert!(snap["openai"].open_for_secs.is_some());
+        // Consecutive-failure count is superseded by the `circuit` string once open.
+        assert_eq!(snap["openai"].consecutive_failures, 0);
+    }
+
+    #[test]
+    fn half_open_admits_exactly_one_probe() {
+        // reset 0 => the Open circuit is instantly eligible; the FIRST is_open
+        // call after opening flips to HalfOpen and admits its own caller as the
+        // probe. Any further concurrent callers must be rejected, not admitted.
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai"); // threshold 1 => opens immediately
+        assert!(
+            !cb.is_open("openai"),
+            "first caller is admitted as the probe"
+        );
+        assert!(
+            cb.is_open("openai"),
+            "second concurrent caller must be rejected, not admitted"
+        );
+        assert!(
+            cb.is_open("openai"),
+            "third concurrent caller must also be rejected"
+        );
+    }
+
+    #[test]
+    fn probe_failure_reopens_and_gates_again() {
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai"); // opens
+        assert!(!cb.is_open("openai")); // -> half-open, this call is the probe
+        cb.record_failure("openai"); // probe failed -> re-open
+                                     // reset_timeout_secs: 0 means the freshly-reopened circuit is again
+                                     // instantly eligible: the next is_open flips to HalfOpen and admits
+                                     // exactly one caller as the new probe, then gates the rest again.
+        assert!(
+            !cb.is_open("openai"),
+            "first caller after re-open is admitted as the new probe"
+        );
+        assert!(
+            cb.is_open("openai"),
+            "second caller after re-open must be rejected"
+        );
+    }
+
+    #[test]
+    fn probe_success_closes() {
+        let cb = CircuitBreakers::new(config(true, 1, 0));
+        cb.record_failure("openai"); // opens
+        assert!(!cb.is_open("openai")); // -> half-open, this call is the probe
+        cb.record_success("openai"); // probe succeeded -> closed
+        assert!(!cb.is_open("openai"));
+        assert!(!cb.is_open("openai"));
+        assert!(!cb.is_open("openai"));
+    }
+
+    // ─── CircuitBreakerRegistry swap seam ────────────────────────────────────
+
+    #[test]
+    fn registry_builtin_is_active_by_default() {
+        let reg = CircuitBreakerRegistry::new(config(true, 5, 30));
+        assert_eq!(reg.active_id(), CircuitBreakerRegistry::BUILTIN);
+        assert_eq!(reg.available(), vec![CircuitBreakerRegistry::BUILTIN]);
+    }
+
+    #[test]
+    fn registry_delegates_verbs_to_active_backend() {
+        let reg = CircuitBreakerRegistry::new(config(true, 1, 30));
+        reg.record_failure("openai");
+        assert!(reg.is_open("openai"));
+        reg.record_success("openai");
+        assert!(!reg.is_open("openai"));
+        assert!(reg.snapshot().contains_key("openai"));
+    }
+
+    #[test]
+    fn registry_set_active_unknown_id_is_false_and_unchanged() {
+        let mut reg = CircuitBreakerRegistry::new(config(true, 5, 30));
+        assert!(!reg.set_active("does-not-exist"));
+        assert_eq!(reg.active_id(), CircuitBreakerRegistry::BUILTIN);
+    }
+
+    #[test]
+    fn registry_register_is_idempotent_on_order() {
+        let mut reg = CircuitBreakerRegistry::new(config(true, 5, 30));
+        let extra: Arc<dyn CircuitBreakerBackend> =
+            Arc::new(CircuitBreakers::new(config(true, 5, 30)));
+        reg.register("fleet", Arc::clone(&extra));
+        reg.register("fleet", extra); // re-register same id must not duplicate order
+        assert_eq!(
+            reg.available(),
+            vec![
+                CircuitBreakerRegistry::BUILTIN.to_string(),
+                "fleet".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn registry_set_active_switches_backend() {
+        let mut reg = CircuitBreakerRegistry::new(config(true, 5, 30));
+        let extra: Arc<dyn CircuitBreakerBackend> =
+            Arc::new(CircuitBreakers::new(config(true, 1, 30)));
+        reg.register("fleet", extra);
+        assert!(reg.set_active("fleet"));
+        assert_eq!(reg.active_id(), "fleet");
+        // The fleet backend has threshold 1, so a single failure opens via the
+        // registry's delegating verb — proof the swap took effect.
+        reg.record_failure("openai");
+        assert!(reg.is_open("openai"));
     }
 }

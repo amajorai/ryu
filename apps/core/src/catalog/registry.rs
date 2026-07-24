@@ -183,17 +183,10 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             deprecated: false,
             recommended: true,
         },
-        CatalogEntry {
-            name: "spider",
-            display_name: "Spider",
-            description: "Web crawler — more than just search",
-            category: SidecarCategory::Tool,
-            source: SidecarSource::Github {
-                repo: "spider-rs/spider",
-            },
-            deprecated: false,
-            recommended: true,
-        },
+        // Spider is no longer a Ryu-managed sidecar: it became a declarative
+        // `command` plugin (fixtures/spider.plugin.json) backed by a BYO `spider`
+        // CLI (`cargo install spider_cli`) reached via the command-tool allowlist,
+        // so it is not listed in the managed-sidecar install catalog.
         CatalogEntry {
             name: "llmfit",
             display_name: "LLMFit",
@@ -485,9 +478,10 @@ mod tests {
         assert!(recommended.contains(&"zeroclaw"));
         assert!(recommended.contains(&"ghost"));
         assert!(recommended.contains(&"llamacpp"));
-        // The default-installed tool apps are all recommended.
+        // The default-installed tool apps are all recommended. (Spider is no
+        // longer a managed-sidecar catalog entry — it is a BYO CLI behind a
+        // declarative command plugin.)
         assert!(recommended.contains(&"agentbrowser"));
-        assert!(recommended.contains(&"spider"));
         assert!(recommended.contains(&"shadow"));
         assert!(recommended.contains(&"llmfit"));
     }
@@ -557,8 +551,9 @@ mod tests {
             .collect();
         // zeroclaw + openclaw (the only claws with a real agent runtime).
         assert_eq!(agents.len(), 2);
-        // agentbrowser, spider, llmfit, shadow, ghost, unsloth.
-        assert_eq!(tools.len(), 6);
+        // agentbrowser, llmfit, shadow, ghost, unsloth. (spider left the catalog
+        // when it became a BYO declarative command plugin.)
+        assert_eq!(tools.len(), 5);
         // llamacpp, ollama, vllm, sglang, mlx, mlx-vlm, omlx (Apple Silicon only),
         // docker-model-runner (adopt-only), apfel (Apple FM, Apple Silicon macOS 26+).
         assert_eq!(providers.len(), 9);
@@ -575,7 +570,7 @@ mod tests {
 
     #[test]
     fn seeded_entries_have_nonempty_source_and_valid_category() {
-        let seeded_names = ["agentbrowser", "spider", "shadow", "ghost", "llmfit"];
+        let seeded_names = ["agentbrowser", "shadow", "ghost", "llmfit"];
         let r = static_registry();
         for name in seeded_names {
             let entry = r

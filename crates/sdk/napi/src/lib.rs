@@ -23,7 +23,8 @@ pub fn validate_plugin_id(id: String) -> Result<()> {
 /// runnable contracts). Returns the normalized manifest JSON, or throws.
 #[napi]
 pub fn parse_and_validate_manifest(json: String) -> Result<String> {
-    let manifest = ryu_sdk::PluginManifest::parse_and_validate(&json).map_err(Error::from_reason)?;
+    let manifest =
+        ryu_sdk::PluginManifest::parse_and_validate(&json).map_err(Error::from_reason)?;
     serde_json::to_string(&manifest).map_err(|e| Error::from_reason(e.to_string()))
 }
 
@@ -83,7 +84,10 @@ pub struct ChatDelta {
 fn to_core_messages(messages: Vec<ChatMessage>) -> Vec<ryu_sdk::ChatMessage> {
     messages
         .into_iter()
-        .map(|m| ryu_sdk::ChatMessage { role: m.role, content: m.content })
+        .map(|m| ryu_sdk::ChatMessage {
+            role: m.role,
+            content: m.content,
+        })
         .collect()
 }
 
@@ -100,11 +104,9 @@ impl ModelClient {
     /// `RYU_GATEWAY_URL` / `RYU_GATEWAY_TOKEN`.
     #[napi(constructor)]
     pub fn new(model: String, base_url: Option<String>, token: Option<String>) -> Result<Self> {
-        let inner = ryu_sdk::ModelClient::new(
-            model,
-            ryu_sdk::ModelClientOptions { base_url, token },
-        )
-        .map_err(|e| Error::from_reason(e.to_string()))?;
+        let inner =
+            ryu_sdk::ModelClient::new(model, ryu_sdk::ModelClientOptions { base_url, token })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(Self { inner })
     }
 
@@ -113,7 +115,10 @@ impl ModelClient {
     pub async fn chat(&self, messages: Vec<ChatMessage>) -> Result<ChatResult> {
         let inner = self.inner.clone();
         let msgs = to_core_messages(messages);
-        let res = inner.chat(&msgs).await.map_err(|e| Error::from_reason(e.to_string()))?;
+        let res = inner
+            .chat(&msgs)
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(ChatResult {
             content: res.content,
             finish_reason: res.finish_reason,
@@ -205,7 +210,10 @@ impl EmbeddingClient {
     #[napi]
     pub async fn embed(&self, inputs: Vec<String>) -> Result<EmbeddingResult> {
         let inner = self.inner.clone();
-        let res = inner.embed(&inputs).await.map_err(|e| Error::from_reason(e.to_string()))?;
+        let res = inner
+            .embed(&inputs)
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(EmbeddingResult {
             embeddings: res
                 .embeddings

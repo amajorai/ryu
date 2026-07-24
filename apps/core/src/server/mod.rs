@@ -1,3 +1,4 @@
+use crate::win_process::NoWindow;
 use axum::{
     extract::{Path, State},
     http::{HeaderValue, Method, Request, StatusCode},
@@ -8,7 +9,6 @@ use axum::{
 };
 use serde_json::json;
 use std::collections::HashMap;
-use crate::win_process::NoWindow;
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -48,6 +48,7 @@ pub mod openapi;
 pub mod plugin_bridge_api;
 pub mod preferences;
 pub mod realtime_ws;
+pub mod shadow_proxy;
 /// Re-export shim: `crate::server::retrieval` is the extracted [`ryu_rag`] crate.
 /// Provider/model selection lives in [`crate::rag_host`] (the single resolver);
 /// this alias keeps the many `retrieval::`-qualified reference sites unchanged.
@@ -56,8 +57,8 @@ pub mod spaces;
 pub mod sync;
 pub mod usage_api;
 pub mod voice;
-pub mod widgets;
 pub mod voice_ws;
+pub mod widgets;
 
 // The git/worktree engine moved to the `ryu-workspace` crate; alias it so the
 // in-file `worktree::…` references (WorktreeRun's diff/guard, the apply handler)
@@ -73,11 +74,11 @@ use crate::sidecar::adapters::{
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::onboarding::SetupManager;
 use crate::sidecar::{install_state::InstallStatusStore, SidecarManager};
-use ryu_skills::SkillRegistry;
 use conversations::{ConversationStore, Session, SessionStatus};
 use memory::MemoryStore;
 use preferences::PreferencesStore;
 use retrieval::{ChunkSource, RetrievalStore};
+use ryu_skills::SkillRegistry;
 use ryu_tracing::TraceStore;
 use spaces::SpaceStore;
 
@@ -334,6 +335,23 @@ pub(crate) fn enforce_remote_auth(
     Ok(auth_token)
 }
 
+/// Constant-time string equality — no early return on the first differing byte, so
+/// comparing an attacker-supplied bearer against the shared `RYU_TOKEN` leaks no
+/// timing signal about how many leading bytes matched. Length mismatch short-circuits
+/// (token length is not secret). Used because Core supports non-loopback binds
+/// (`RYU_BIND`/mesh), where a naive `==` is a remotely-observable side channel.
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 async fn require_auth(
     req: Request<axum::body::Body>,
     next: middleware::Next,
@@ -351,7 +369,7 @@ async fn require_auth(
         .map(str::to_string);
 
     if let Some(t) = &provided {
-        if *t == expected {
+        if ct_eq(t, &expected) {
             return Ok(next.run(req).await);
         }
     }
@@ -1459,9 +1477,14 @@ mod resource_acl_tests {
         // Before this change the SAME row would have had NULL tenancy and Bob would
         // have gotten Write. Prove the pre-fix state is what the gate now denies.
         assert_eq!(
-            resource_access(store.get_access_meta("unclaimed").await, Some(&bob), BOUND, "nf")
-                .err()
-                .map(|r| r.status()),
+            resource_access(
+                store.get_access_meta("unclaimed").await,
+                Some(&bob),
+                BOUND,
+                "nf"
+            )
+            .err()
+            .map(|r| r.status()),
             Some(StatusCode::NOT_FOUND),
             "an id with no row at all is a 404, not a silent allow"
         );
@@ -1558,8 +1581,14 @@ mod resource_acl_tests {
     #[tokio::test]
     async fn data_clear_on_a_bound_node_only_removes_the_callers_own_chats() {
         let store = crate::server::conversations::ConversationStore::open_in_memory().unwrap();
-        store.claim_tenancy("a1", "alice", Some("org1")).await.unwrap();
-        store.claim_tenancy("b1", "bob", Some("org1")).await.unwrap();
+        store
+            .claim_tenancy("a1", "alice", Some("org1"))
+            .await
+            .unwrap();
+        store
+            .claim_tenancy("b1", "bob", Some("org1"))
+            .await
+            .unwrap();
 
         let removed = store.clear_conversations_owned_by("bob").await.unwrap();
         assert_eq!(removed, 1);
@@ -1965,9 +1994,7 @@ async fn reset_data_path() -> impl IntoResponse {
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn export_data_path(
-    axum::Extension(caller): axum::Extension<
-        Option<crate::identity_verify::VerifiedCaller>,
-    >,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(req): Json<DataPathExportReq>,
 ) -> impl IntoResponse {
     // ── ACL ──────────────────────────────────────────────────────────────────
@@ -2083,13 +2110,6 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/version", get(get_version))
         .route("/api/update/check", get(update_check))
         .route("/api/node/init", post(node_init))
-        // Auth routes — no RYU_TOKEN required (Desktop must be able to call these).
-        .route("/api/auth/login", post(auth_login))
-        .route("/api/auth/status", get(auth_status))
-        .route("/api/auth/logout", post(auth_logout))
-        .route("/api/auth/accounts", get(auth_accounts_list))
-        .route("/api/auth/accounts/switch", post(auth_accounts_switch))
-        .route("/api/auth/accounts/remove", post(auth_accounts_remove))
         // ── Ryu Hardware Protocol (RHP v1) public surface ────────────────────
         // The realtime device link: a device presents a PER-DEVICE Bearer token,
         // which `require_auth` (which only knows the global RYU_TOKEN) would
@@ -2168,6 +2188,18 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         ));
 
     let protected = Router::new()
+        // Cloud-account auth surface. Behind `require_auth` like every other
+        // protected route: loopback dev (no RYU_TOKEN configured) passes through
+        // exactly as the desktop expects, while an exposed node (mesh/non-loopback
+        // bind, where RYU_TOKEN is mandatory at boot) requires the node bearer.
+        // Previously on the public router, which served the active account's cloud
+        // bearer token, PII, and an SSRF-able login flow to any network peer.
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/status", get(auth_status))
+        .route("/api/auth/logout", post(auth_logout))
+        .route("/api/auth/accounts", get(auth_accounts_list))
+        .route("/api/auth/accounts/switch", post(auth_accounts_switch))
+        .route("/api/auth/accounts/remove", post(auth_accounts_remove))
         .route("/api/catalog", get(get_catalog))
         // ── Model catalog (HF browse + device-fit + install; logic in Core) ──
         .route("/api/models/catalog", get(models_catalog_list))
@@ -2210,6 +2242,10 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // their configured key; gateway still executes — see composio_catalog) ──
         .route("/api/composio/status", get(composio_status))
         .route("/api/composio/toolkits", get(composio_toolkits))
+        // Merged Integrations directory (integrations.sh + Composio toolkits),
+        // deduped by brand slug.
+        .route("/api/integrations", get(integrations_list))
+        .route("/api/integrations/:id", get(integrations_get))
         .route("/api/composio/actions", get(composio_actions))
         .route("/api/composio/triggers", get(composio_triggers))
         // Composio connections — proactively connect the user's accounts to a
@@ -2289,6 +2325,16 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/apps/:id/disable", post(disable_app_handler))
         .route("/api/apps/:id/uninstall", post(uninstall_app_handler))
         .route("/api/apps/:id/update", post(update_app_handler))
+        // Generic per-app document surface: an app's docs live in its seeded system
+        // Space, kind-isolated as `app:<id>`. Lets an app-owned sidebar section list +
+        // create its docs declaratively (a `sidebar_sections` `source`/`create`)
+        // instead of the shell hardcoding a Canvas/Whiteboard section + the plugin-host
+        // bridge. GET → `{ documents: [{ id, title, space_id, updated_at }] }`; POST
+        // (`{ title? }`) → `{ id, space_id }`.
+        .route(
+            "/api/apps/:id/docs",
+            get(list_app_docs).post(create_app_doc),
+        )
         // ── Agents (catalog + CRUD + ACP session management) ────────────────
         // The ONE mount of the `/api/agents/*` catalog/CRUD/session surface, in its
         // own gated sub-router (see `agents_routes`) so the Agents App's enabled bit
@@ -2323,7 +2369,6 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/widgets/tools/call", post(widgets::widget_call_tool))
         .route("/api/widgets/follow-up", post(widgets::widget_follow_up))
         .route("/api/widgets/state", post(widgets::widget_state))
-        .route("/api/apps/ui/:slug", get(widgets::apps_ui_bundle))
         .route("/api/mcp/resources/read", post(widgets::mcp_resources_read))
         // ── Unified tool catalog: search + describe (#474) ───────────────────
         .route("/api/tools/search", get(tools_search))
@@ -2370,7 +2415,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/tools/import/openapi", post(import_openapi_tools))
         // Import a GraphQL endpoint as a single gateway-governed `http` tool.
         .route("/api/tools/import/graphql", post(import_graphql_tool))
-.route("/api/mcp/updates", get(mcp_updates))
+        .route("/api/mcp/updates", get(mcp_updates))
         // ── Knowledge catalog (browse + install OKF bundles via the okf module) ──
         .route("/api/knowledge/catalog", get(knowledge_catalog_list))
         .route(
@@ -2417,6 +2462,8 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         // ── Danger zone: irreversible bulk "delete all X" (settings) ─────────
         .route("/api/data/counts", get(data_admin::data_counts))
         .route("/api/data/clear", post(data_admin::data_clear))
+        // Full node wipe → fresh state (arms a marker; wipe runs on next boot).
+        .route("/api/node/reset", post(data_admin::node_reset))
         .route("/api/conversations", get(list_conversations))
         // Semantic search over past chat messages (the `search_conversations`
         // capability). Static segment registered before `:id` so it never
@@ -2482,6 +2529,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/btw", post(btw_handler))
         .route("/api/btw/:id", axum::routing::delete(delete_btw_handler))
         .route("/api/conversations/:id/btw", get(list_btw_handler))
+        // ── Advisor consult bridge ────────────────────────────────────────────
+        //    The loopback endpoint the declarative `advisor__consult` plugin tool
+        //    (fixtures/advisor.plugin.json, an `http`-backend runnable) proxies to.
+        //    Lives in Core because it resolves the `advisor-model` preference and
+        //    routes a high-effort completion through the Gateway (`call_side_model`)
+        //    — the model-resolution the former native `sidecar/mcp/advisor` provider
+        //    did, now behind a stable HTTP seam a declarative tool can reach.
+        .route("/api/advisor/consult", post(advisor_consult_handler))
         // ── Predictive typing: system-wide inline autocomplete brain ──────────
         // Gated on the (opt-in) Predict app in its own sub-router. See
         // `predict_routes` — and the OPT-IN adjudication in `plugins::builtins`.
@@ -2682,10 +2737,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
             get(notifications_stream),
         )
         // App navigation requests emitted via the `host.navigate` bridge primitive.
-        .route(
-            "/api/events/navigation/stream",
-            get(navigation_stream),
-        )
+        .route("/api/events/navigation/stream", get(navigation_stream))
         // Unified multiplex of every feature event bus over ONE connection so the
         // desktop stays within the browser's 6-per-host HTTP/1.1 budget.
         .route("/api/events/all", get(all_events_stream))
@@ -2799,7 +2851,14 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/data-path/validate", post(validate_data_path))
         .route("/api/data-path/switch", post(switch_data_path))
         .route("/api/data-path/reset", post(reset_data_path))
-        .route("/api/data-path/export", post(export_data_path));
+        .route("/api/data-path/export", post(export_data_path))
+        // ── Shadow proxy (`/api/shadow/*`) ──────────────────────────────────
+        // The desktop webview's companion/review/search surfaces reach the
+        // device-local Shadow through Core: Shadow's own HTTP surface is
+        // bearer-gated and 403s every browser (Origin-bearing) request, so this
+        // authenticated allowlisted proxy is the ONLY webview lane to Shadow
+        // data. See `server::shadow_proxy`.
+        .merge(shadow_proxy::routes());
     // Agent-mail management routes (`/api/mail/*` protected CRUD) are served by the
     // `com.ryu.mail` app's `ryu-mail` sidecar via the generic `public_mount` loader
     // (registered on the PUBLIC router, which enforces the same node bearer per-route);
@@ -2889,10 +2948,7 @@ fn spaces_routes(app_store: &PluginStore) -> Router<ServerState> {
         .route("/api/spaces/:id/databases", post(create_database))
         .route("/api/spaces/:id/whiteboards", post(create_whiteboard))
         .route("/api/spaces/:id/files", post(create_file))
-        .route(
-            "/api/spaces/:id/documents/:doc_id/blob",
-            get(get_file_blob),
-        )
+        .route("/api/spaces/:id/documents/:doc_id/blob", get(get_file_blob))
         .route(
             "/api/spaces/:id/documents/:doc_id",
             get(get_document)
@@ -2970,9 +3026,8 @@ fn spaces_routes(app_store: &PluginStore) -> Router<ServerState> {
 /// are `.merge`d and gated by one `route_layer`, so the mounted route set + gate is
 /// byte-identical to the pre-extraction inline router.
 fn skills_routes(state: &ServerState) -> Router<ServerState> {
-    let crate_routes = ryu_skills::routes::<ServerState>(ryu_skills::SkillsCtx::new(
-        state.skills.clone(),
-    ));
+    let crate_routes =
+        ryu_skills::routes::<ServerState>(ryu_skills::SkillsCtx::new(state.skills.clone()));
     Router::new()
         // Skills catalog (browse + install from skills.sh; logic in Core).
         .route("/api/skills/catalog", get(skills_catalog_list))
@@ -3396,11 +3451,7 @@ fn retrieval_routes(app_store: &PluginStore) -> Router<ServerState> {
         .route("/api/retrieval/index", post(index_retrieval_chunk))
         .route("/api/retrieval/search", post(search_retrieval))
         .route_layer(middleware::from_fn_with_state(
-            AppGate::new(
-                app_store,
-                crate::plugins::builtins::RAG_PLUGIN_ID,
-                "RAG",
-            ),
+            AppGate::new(app_store, crate::plugins::builtins::RAG_PLUGIN_ID, "RAG"),
             require_app_enabled,
         ))
 }
@@ -3922,7 +3973,6 @@ async fn post_email_test(
     }
 }
 
-
 // -- Alert delivery targets (node-level policy-alert recipients) ------------------
 
 /// Node-level alert delivery targets for self-host policy alerts. `targets` are
@@ -3998,7 +4048,6 @@ async fn put_alert_delivery(
             .into_response(),
     }
 }
-
 
 // ── Per-model launch config (advanced inference) ───────────────────────────────
 
@@ -4269,10 +4318,7 @@ async fn all_events_stream(
                             continue;
                         }
                         let data = serde_json::to_string(&ev).unwrap_or_default();
-                        return Some((
-                            Ok(Event::default().event("notifications").data(data)),
-                            rx,
-                        ));
+                        return Some((Ok(Event::default().event("notifications").data(data)), rx));
                     }
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => return None,
@@ -4528,11 +4574,24 @@ async fn auth_login(
     summary = "Device authorization status",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-async fn auth_status(State(state): State<ServerState>) -> Json<serde_json::Value> {
+async fn auth_status(
+    State(state): State<ServerState>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+) -> Json<serde_json::Value> {
     let s = state.auth.lock().await;
     let authenticated = matches!(s.status, crate::auth::AuthStatus::Authenticated);
     let pending = matches!(s.status, crate::auth::AuthStatus::Pending);
     tracing::debug!("auth_status: authenticated={authenticated} pending={pending}");
+    // The raw cloud bearer is only ever handed to a genuine loopback peer (the
+    // local desktop's oauth.ts poll). A remote caller — even one holding the node
+    // bearer that admitted it through `require_auth` — gets the status booleans
+    // but never the account's cloud token (same peer-IP gate as realtime_ws's
+    // loopback allowance).
+    let token = if peer.ip().is_loopback() {
+        s.token.clone()
+    } else {
+        None
+    };
     Json(json!({
         "authenticated": authenticated,
         "pending": pending,
@@ -4540,7 +4599,7 @@ async fn auth_status(State(state): State<ServerState>) -> Json<serde_json::Value
         // BOTH `authenticated` and `token` are present, then stores the bearer
         // token client-side. Dropping this field (regressed in 9b3ac61c) left the
         // app polling forever on the auth-code page despite Core being authed.
-        "token": s.token,
+        "token": token,
         "userCode": s.user_code,
         "verificationUri": s.verification_uri,
     }))
@@ -4732,9 +4791,13 @@ async fn chat_stream(
     // the run path for agents — there is no separate REST "run" endpoint — so the
     // gate lands here, before either the team or single-agent branch dispatches.
     // Non-breaking: an anonymous (node-token-only) caller is allowed unchanged.
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_RUN)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_RUN,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -4878,7 +4941,11 @@ async fn build_hook_context(
     flags: &std::collections::HashMap<String, bool>,
 ) -> crate::plugin_host::HookContext {
     const MAX_TRANSCRIPT: usize = 20;
-    let transcript = match state.conversations.get_active_messages(conversation_id).await {
+    let transcript = match state
+        .conversations
+        .get_active_messages(conversation_id)
+        .await
+    {
         Ok(msgs) => {
             let skip = msgs.len().saturating_sub(MAX_TRANSCRIPT);
             msgs.into_iter()
@@ -5674,8 +5741,7 @@ async fn agent_capabilities(
     use crate::model_catalog::capabilities::{self as caps, CapabilityReport, DetectedCaps};
 
     let overrides = caps::load_override(&agent_id);
-    let model_ref =
-        resolve_capability_model_ref(&state, &agent_id, query.model).await;
+    let model_ref = resolve_capability_model_ref(&state, &agent_id, query.model).await;
     let local_detected = model_ref.as_deref().and_then(caps::detect_local);
 
     // ACP plane: tools flow through the MCP bridge (always supported); reasoning
@@ -6252,22 +6318,60 @@ async fn index_retrieval_chunk(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<IndexChunkBody>,
 ) -> axum::response::Response {
+    // Same coarse RBAC gate as `search_retrieval` below, but WRITE-side: indexing
+    // plants a chunk into trusted RAG context, so it takes `space.write`, not
+    // `space.read`. Without this gate a holder of only the node token resolved
+    // `caller = None` and fell into the `shared()` arm below — attacker-authored
+    // content became globally-retrievable context for every user on the node.
+    // `enforce_permission` denies `None` callers on a bound node and allows
+    // everyone on an unbound personal node, so local-first is untouched.
+    if let Err(status) = enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return json_error(status, "forbidden".to_owned());
+    }
     let source = match body.source.as_deref() {
         Some("space") => ChunkSource::Space,
         _ => ChunkSource::Memory,
     };
     // Stamp the indexing caller as the chunk's owner on a bound node so the
     // retrieval tenancy filter can gate it; unbound → shared (filter is a no-op).
+    // A bound node with NO verified caller refuses outright rather than writing an
+    // unattributed chunk: this handler carries no permission gate of its own (it
+    // predates the RBAC epic), so any node-token holder — signed in or not — could
+    // otherwise index content that lands owned by nobody. For a `Space` chunk that
+    // used to be silently fail-open-visible to every member (the content-escape gap
+    // `space_tenancy_allows` now closes); refusing here means the gap is never
+    // reachable from this endpoint in the first place.
     let node_org = node_org_id();
     let owner = match (node_org.as_deref(), caller.as_ref()) {
         (Some(org), Some(c)) => {
             retrieval::RetrievalOwner::owned(Some(c.user_id.as_str()), Some(org), Some("private"))
         }
-        _ => retrieval::RetrievalOwner::shared(),
+        // Bound node + unresolvable caller: refuse rather than stamp `shared()`
+        // (globally retrievable). `enforce_permission` already denied this shape;
+        // kept as a fail-closed backstop so a gate regression cannot reopen it.
+        (Some(_), None) => {
+            return json_error(
+                StatusCode::FORBIDDEN,
+                "authentication required to index retrieval content on a bound node".to_owned(),
+            );
+        }
+        (None, _) => retrieval::RetrievalOwner::shared(),
     };
     match state
         .retrieval
-        .index_chunk(&body.id, source, body.space_id.as_deref(), &body.content, owner)
+        .index_chunk(
+            &body.id,
+            source,
+            body.space_id.as_deref(),
+            &body.content,
+            owner,
+        )
         .await
     {
         Ok(()) => Json(json!({ "success": true, "id": body.id })).into_response(),
@@ -6780,13 +6884,33 @@ async fn list_apps_catalog(State(state): State<ServerState>) -> Json<serde_json:
 async fn active_plugin_source(state: &ServerState) -> Option<crate::catalog_source::Source> {
     state
         .catalog_sources
-        .get_active(crate::catalog_source::CatalogKind::Plugin, &state.preferences)
+        .get_active(
+            crate::catalog_source::CatalogKind::Plugin,
+            &state.preferences,
+        )
         .await
 }
 
 /// Merged Ryu Marketplace plugin catalog: built-in manifests + marketplace items +
 /// legacy registry, deduped by id. Used by `list_apps_catalog` and the marketplace
 /// browse path.
+/// Catalog entries for every built-in APP — a compiled fixture that ships a Companion
+/// runnable — derived from `BUILTIN_MANIFESTS` once. They re-classify default-off Core
+/// apps (Canvas/Whiteboard/Meetings/Clips/…) that the open git catalog lists as bare
+/// plugin cards with empty `kinds`: mapped through `plugin_manifest_to_entry` they carry
+/// the companion `kinds`, the explicit `type:"app"`, and the `runnables` the
+/// preview needs, and (placed above the marketplace/git groups) they win the id dedup.
+/// Internal system fixtures (firewall/routing/…) have NO Companion runnable and are
+/// excluded, so this never over-exposes non-app plugins in the store.
+static BUILTIN_APP_ENTRIES: std::sync::LazyLock<Vec<serde_json::Value>> =
+    std::sync::LazyLock::new(|| {
+        crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .iter()
+            .filter(|m| m.runnables.iter().any(|r| r.kind.as_str() == "companion"))
+            .map(plugin_manifest_to_entry)
+            .collect()
+    });
+
 async fn merged_plugin_catalog_entries(state: &ServerState) -> Vec<serde_json::Value> {
     // 1. Loaded built-in / installed plugin manifests — always offline-safe.
     let manifest_entries: Vec<serde_json::Value> = {
@@ -6796,10 +6920,10 @@ async fn merged_plugin_catalog_entries(state: &ServerState) -> Vec<serde_json::V
 
     // 2. Ryu Marketplace federated source (best-effort; never blanks built-ins).
     let mut marketplace_entries: Vec<serde_json::Value> = Vec::new();
-    if let Some(source) = state
-        .catalog_sources
-        .source_by_id(crate::catalog_source::CatalogKind::Plugin, "ryu-marketplace")
-    {
+    if let Some(source) = state.catalog_sources.source_by_id(
+        crate::catalog_source::CatalogKind::Plugin,
+        "ryu-marketplace",
+    ) {
         let q = crate::catalog_source::CatalogQuery {
             limit: 40,
             ..Default::default()
@@ -6844,10 +6968,14 @@ async fn merged_plugin_catalog_entries(state: &ServerState) -> Vec<serde_json::V
         .and_then(|v| v.get("entries").and_then(|e| e.as_array()).cloned())
         .unwrap_or_default();
 
-    // Dedup by id, first-writer-wins: loaded built-ins > Mongo marketplace > git
-    // catalog > legacy registry.
+    // Dedup by id, first-writer-wins: loaded built-ins > compiled built-in apps >
+    // Mongo marketplace > git catalog > legacy registry. The compiled built-in-app
+    // group sits above the remote sources so a default-off Core app is classified
+    // from its authoritative fixture (companion `type:"app"`) instead of the open
+    // catalog's bare plugin card.
     merge_plugin_catalog_entries(vec![
         manifest_entries,
+        BUILTIN_APP_ENTRIES.clone(),
         marketplace_entries,
         git_catalog_entries,
         registry_entries,
@@ -6904,7 +7032,10 @@ async fn plugin_catalog_browse(
 
     let active_id = state
         .catalog_sources
-        .active_id(crate::catalog_source::CatalogKind::Plugin, &state.preferences)
+        .active_id(
+            crate::catalog_source::CatalogKind::Plugin,
+            &state.preferences,
+        )
         .await
         .unwrap_or_else(|| "ryu-marketplace".to_string());
 
@@ -7016,6 +7147,10 @@ fn plugin_manifest_to_entry(m: &crate::plugin_manifest::PluginManifest) -> serde
             })
             .collect()
     };
+    // Explicit app-vs-plugin discriminator: an app ships a Companion UI surface;
+    // everything else is a plugin. Emitted so the browse client no longer has to
+    // derive app-ness from `kinds.contains("companion")`.
+    let is_app = kinds.iter().any(|k| *k == "companion");
     let mut entry = json!({
         "id": m.id,
         "name": m.name,
@@ -7023,6 +7158,7 @@ fn plugin_manifest_to_entry(m: &crate::plugin_manifest::PluginManifest) -> serde
         "version": m.version,
         "source": "built-in",
         "kinds": kinds,
+        "type": if is_app { "app" } else { "plugin" },
         "tags": if m.keywords.is_empty() { Vec::<String>::new() } else { m.keywords.clone() },
         "permission_grants": m.permission_grants,
         "built_in": crate::plugins::builtins::find_system_plugin(&m.id).is_some(),
@@ -7035,6 +7171,19 @@ fn plugin_manifest_to_entry(m: &crate::plugin_manifest::PluginManifest) -> serde
         // Snake_case card/hero presentation keys (the browse card + hero read snake).
         if let Some(icon) = &m.icon_url {
             obj.insert("icon_url".to_owned(), json!(icon));
+        }
+        // Icon-primitive glyph id: the manifest's `icon`, else the Companion
+        // surface's `icon` (how built-in apps author their glyph) so a built-in
+        // lights up its card without a redundant top-level field.
+        if let Some(icon) = m
+            .icon
+            .clone()
+            .or_else(|| m.companion.as_ref().and_then(|c| c.icon.clone()))
+        {
+            obj.insert("icon".to_owned(), json!(icon));
+        }
+        if let Some(dither) = &m.icon_dither {
+            obj.insert("icon_dither".to_owned(), dither.clone());
         }
         if let Some(bg) = &m.icon_background {
             obj.insert("icon_background".to_owned(), json!(bg));
@@ -7128,12 +7277,6 @@ fn merge_plugin_contract_fields(
     if !m.targets.is_empty() {
         obj.insert("targets".to_owned(), json!(m.targets));
     }
-    // Logical bundle children — separate plugins this app ships that install/
-    // uninstall together with it (an "Includes these apps" grouping). Emitted only
-    // when non-empty; NOT dependency edges, so this is a display hint, not a graph.
-    if !m.bundles.is_empty() {
-        obj.insert("bundles".to_owned(), json!(m.bundles));
-    }
     // capabilities: declared, else derived from permission_grants.
     obj.insert("capabilities".to_owned(), json!(m.resolved_capabilities()));
     // runnables: bundled runnables as {id, kind, name}. `enabled` is intentionally
@@ -7185,6 +7328,14 @@ fn plugin_marketplace_item_to_entry(
     if let Some(k) = &integration_kind {
         kinds.push(k.clone());
     }
+    // App-ness for a REMOTE card: a marketplace card carries no runnables, so a
+    // built-in's "companion" kind (derived from its Companion runnable) is absent
+    // here. The card discloses it via `has_companion`; surfacing "companion" in
+    // `kinds` is what makes the browse client's `isCompanionApp` classify a
+    // canvas/whiteboard/finetune card as an app instead of collapsing it to a plugin.
+    if it.get("has_companion").and_then(|v| v.as_bool()) == Some(true) {
+        kinds.push("companion".to_owned());
+    }
     let mut tags: Vec<String> = Vec::new();
     if let Some(c) = &category {
         tags.push(c.clone());
@@ -7193,6 +7344,22 @@ fn plugin_marketplace_item_to_entry(
         tags.push(d.clone());
     }
     let descriptor_only = source_id == "integrations-sh";
+    // Explicit app-vs-plugin type for a REMOTE card. Precedence: the card's own
+    // `type` (the publisher's explicit declaration) → `has_companion`. A card
+    // lacking both is a plugin. (Builtin apps that the remote repo lists without
+    // these flags are re-classified from their compiled fixture in
+    // `merged_plugin_catalog_entries`, which wins the id dedup.)
+    let item_type = match it.get("type").and_then(|v| v.as_str()) {
+        Some("app") => "app",
+        Some("plugin") => "plugin",
+        _ => {
+            if it.get("has_companion").and_then(|v| v.as_bool()) == Some(true) {
+                "app"
+            } else {
+                "plugin"
+            }
+        }
+    };
     let mut entry = json!({
         "id": id,
         "name": it.get("name").and_then(|v| v.as_str()).unwrap_or(id),
@@ -7200,6 +7367,7 @@ fn plugin_marketplace_item_to_entry(
         "version": it.get("version").and_then(|v| v.as_str()).unwrap_or(""),
         "source": source_id,
         "kinds": kinds,
+        "type": item_type,
         "tags": tags,
         "permission_grants": [],
         "built_in": false,
@@ -7226,10 +7394,19 @@ fn plugin_marketplace_item_to_entry(
         {
             obj.insert("targets".to_owned(), json!(targets));
         }
-        for key in ["icon_background", "accent_color", "developer", "tagline"] {
+        for key in [
+            "icon",
+            "icon_background",
+            "accent_color",
+            "developer",
+            "tagline",
+        ] {
             if let Some(v) = it.get(key).and_then(|v| v.as_str()) {
                 obj.insert(key.to_owned(), json!(v));
             }
+        }
+        if let Some(dither) = it.get("icon_dither").filter(|v| v.is_object()) {
+            obj.insert("icon_dither".to_owned(), dither.clone());
         }
         if let Some(banner) = it.get("banner").filter(|v| v.is_object()) {
             obj.insert("banner".to_owned(), banner.clone());
@@ -7700,7 +7877,8 @@ async fn install_app_bundle(
             None => {
                 return json_error(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "bundle manifest declares backend_sha256 but carries no backend_code".to_owned(),
+                    "bundle manifest declares backend_sha256 but carries no backend_code"
+                        .to_owned(),
                 );
             }
         }
@@ -7920,8 +8098,7 @@ async fn install_plugin_from_catalog(
     // on cyclic catalog data — the cycle is then *reported* by the resolver in
     // phase 2 rather than hanging here.
     let mut fetched: Vec<crate::plugin_manifest::PluginManifest> = Vec::new();
-    let mut ui_codes: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut ui_codes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
     queue.push_back(id.clone());
@@ -7982,15 +8159,6 @@ async fn install_plugin_from_catalog(
                 queue.push_back(dep.id.clone());
             }
         }
-        // Logical bundle children: separate plugins this app ships that install
-        // TOGETHER with it. NOT dependency edges — they never enter the resolver
-        // below — but they (and, since the BFS also walks THEIR `dependencies()`,
-        // their own requires) must be fetched so they can be installed alongside.
-        for bundle_id in &manifest.bundles {
-            if !visited.contains(bundle_id) {
-                queue.push_back(bundle_id.clone());
-            }
-        }
     }
 
     // ── Phase 2: PLAN — topological order, cycles/versions/missing deps ───────
@@ -8015,20 +8183,6 @@ async fn install_plugin_from_catalog(
                 .into_response();
         }
     };
-
-    // Extend the requires-`order` with the target's logical bundle children (and
-    // their own fetched manifests) that the resolver did not include. Bundle ids
-    // never reach `resolve_enable_order`, so the topological order above is
-    // unchanged; these are appended as extra DISABLED installs (order irrelevant).
-    // An already-installed bundle child/shared dep is in `installed`, so it is
-    // filtered out here and never re-installed (no duplicate-install 409).
-    let installed_ids: std::collections::HashSet<&str> =
-        installed.iter().map(|m| m.id.as_str()).collect();
-    let order = crate::plugins::catalog::extend_install_list_with_bundles(
-        order,
-        &fetched,
-        &installed_ids,
-    );
 
     // ── Phase 3: INSTALL the closure in order, rolling back on any failure ────
     let outcome = crate::plugins::catalog::install_closure(
@@ -8718,6 +8872,29 @@ async fn activate_plugin(
     // + a no-op for every non-MCP-server manifest.
     sync_mcp_entry_for_record(state, manifest, McpEntryMutation::SetEnabled(true)).await;
 
+    // Register the plugin's declared `mcp_servers` into the MCP registry (the
+    // manifest-owned successor to Core's hardcoded built-in servers). Idempotent +
+    // a no-op for every manifest with no `mcp_servers`.
+    let registered = crate::sidecar::mcp::register_manifest_mcp_servers(&state.mcp, manifest);
+    if !registered.is_empty() {
+        tracing::info!(
+            plugin = %manifest.id,
+            servers = ?registered,
+            "activate_plugin: registered plugin-declared MCP server(s)"
+        );
+    }
+
+    // Materialize + activate the plugin's bundled Agent Skills (folder convention:
+    // `<plugin_dir>/skills/<slug>/SKILL.md`). Spawned + best-effort so a copy never
+    // blocks the enable response; a no-op for a plugin with no on-disk `skills/`
+    // (including every built-in — those need the compile-time embed follow-up).
+    {
+        let plugin_id = manifest.id.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::skills_catalog::plugin_skills::install_plugin_skills(&plugin_id);
+        });
+    }
+
     // Collect per-Runnable outcomes for the response (success + failures both
     // surfaced so the caller can observe partial failures without silent drops).
     let statuses = runnable_results
@@ -8859,14 +9036,33 @@ fn build_runnable_registry(state: &ServerState) -> crate::runnable::RunnableRegi
                         .and_then(|v| serde_json::from_value(v.clone()).ok())
                         .ok_or_else(|| format!("tool '{}': missing or invalid config", entry.id))?;
 
-                    let id = format!("app__{}", cfg.slug);
-                    mcp.register_app_tool(
+                    // A namespaced non-Alias tool keeps its NATIVE id (`exa__search`);
+                    // everything else stays `app__<slug>` (see `app_tool_registered_id`).
+                    // The registered `server` stays `"app"` and `name` stays the slug,
+                    // so catalog classification + `allow:["app"]` grouping are unchanged.
+                    let id = crate::sidecar::mcp::app_tool_registered_id(&cfg);
+                    // Tag the resolved backend so the catalog can surface a
+                    // `command` tool as its own ToolKind. A malformed backend was
+                    // rejected at manifest validation; if it somehow fails here we
+                    // register untagged (falls back to App classification).
+                    let tag = cfg.resolve_backend().ok().map(|b| {
+                        use crate::plugin_manifest::schema::ToolBackend;
+                        use crate::sidecar::mcp::AppToolBackendTag;
+                        match b {
+                            ToolBackend::Alias { .. } => AppToolBackendTag::Alias,
+                            ToolBackend::InlineDeno { .. } => AppToolBackendTag::InlineDeno,
+                            ToolBackend::Http { .. } => AppToolBackendTag::Http,
+                            ToolBackend::Command { .. } => AppToolBackendTag::Command,
+                        }
+                    });
+                    mcp.register_app_tool_tagged(
                         id,
                         cfg.slug.clone(),
                         Some(format!(
                             "App-registered tool '{}' (slug: {})",
                             entry.name, cfg.slug
                         )),
+                        tag,
                     );
                     Ok(())
                 },
@@ -9068,6 +9264,18 @@ pub async fn fire_activation_event(state: &ServerState, event: &str) {
                 );
             }
         }
+        // Re-materialize the plugin's declared MCP servers into the registry, but
+        // ONLY on the boot seam (`onStartup` fires once from `main.rs`).
+        // `McpRegistry::load` starts from built-ins + `mcp.json` only, so without
+        // this an enabled plugin's `mcp_servers` would never reappear after a
+        // restart. Gated on `onStartup` because `register_server` rebuilds the whole
+        // server map + clears the tool/resource caches — running it on every
+        // unrelated event firing (`onChat`/`onCommand:*`/`onRoute`/…) would wipe the
+        // MCP tool cache and force stdio servers to re-spawn on the next list. The
+        // enable-time registration lives in `activate_plugin`, not here.
+        if event == "onStartup" {
+            crate::sidecar::mcp::register_manifest_mcp_servers(&state.mcp, manifest);
+        }
     }
 }
 
@@ -9147,6 +9355,8 @@ async fn plugin_contributions(
     let mut slash_commands = Vec::new();
     let mut turn_hooks = Vec::new();
     let mut views = Vec::new();
+    let mut sidebar_sections = Vec::new();
+    let mut sidebar_buttons = Vec::new();
 
     // Surface filter (`targets`): a plugin that doesn't target the calling host
     // contributes nothing to it. Absent/unknown `x-ryu-surface` = no filter, and
@@ -9182,6 +9392,21 @@ async fn plugin_contributions(
             c.views
                 .iter()
                 .filter_map(|v| serde_json::to_value(v).ok())
+                .map(tag),
+        );
+        // App-registered sidebar sections + buttons — same tag-and-collect shape as
+        // views; the `spec`/`target` stay opaque to Core and the desktop's sidebar
+        // renderer interprets them.
+        sidebar_sections.extend(
+            c.sidebar_sections
+                .iter()
+                .filter_map(|s| serde_json::to_value(s).ok())
+                .map(tag),
+        );
+        sidebar_buttons.extend(
+            c.sidebar_buttons
+                .iter()
+                .filter_map(|b| serde_json::to_value(b).ok())
                 .map(tag),
         );
         turn_hooks.extend(
@@ -9255,6 +9480,8 @@ async fn plugin_contributions(
         "slash_commands": slash_commands,
         "turn_hooks": turn_hooks,
         "views": views,
+        "sidebar_sections": sidebar_sections,
+        "sidebar_buttons": sidebar_buttons,
         "channels": channels,
         "companions": companions,
     }))
@@ -9402,9 +9629,7 @@ fn build_routing_patch(mut routing: serde_json::Value, enabled: bool) -> serde_j
         routing = json!({});
     }
     let obj = routing.as_object_mut().expect("object");
-    let smart = obj
-        .entry("smart_routing")
-        .or_insert_with(|| json!({}));
+    let smart = obj.entry("smart_routing").or_insert_with(|| json!({}));
     if !smart.is_object() {
         *smart = json!({});
     }
@@ -9557,8 +9782,7 @@ async fn apply_policy(
                 match crate::sidecar::gateway::fetch_config(&state.client).await {
                     Ok(cfg) => match cfg.get("firewall") {
                         Some(live_fw) if live_fw.is_object() => {
-                            let firewall =
-                                build_firewall_patch(live_fw.clone(), enabled, &bundle);
+                            let firewall = build_firewall_patch(live_fw.clone(), enabled, &bundle);
                             outcome.gateway_touched = true;
                             push_gateway_policy_section(
                                 &state.client,
@@ -9780,10 +10004,8 @@ async fn apply_sidecars(
             // Per-app idle-stop timeout (scale-to-zero) declared on the spec, applied
             // BEFORE start so the reaper knows the window as soon as the sidecar is up.
             if let Some(secs) = spec.idle_stop_secs {
-                let name = crate::sidecar::manifest_sidecar::namespaced_name(
-                    &manifest.id,
-                    &spec.name,
-                );
+                let name =
+                    crate::sidecar::manifest_sidecar::namespaced_name(&manifest.id, &spec.name);
                 manager.set_idle_override(&name, secs);
             }
             // Lazy sidecars are REGISTER-ONLY here (claim port + appear in status as
@@ -9811,8 +10033,7 @@ async fn apply_sidecars(
                 }
             });
         } else {
-            let name =
-                crate::sidecar::manifest_sidecar::namespaced_name(&manifest.id, &spec.name);
+            let name = crate::sidecar::manifest_sidecar::namespaced_name(&manifest.id, &spec.name);
             tokio::spawn(async move {
                 if let Err(e) = manager.stop_and_deregister(&name).await {
                     tracing::warn!("manifest sidecar '{name}' failed to stop: {e}");
@@ -9956,9 +10177,7 @@ async fn set_app_grants_handler(
             })),
         )
             .into_response(),
-        Err(EnableError::Other(e)) => {
-            json_error(StatusCode::BAD_REQUEST, e.to_string())
-        }
+        Err(EnableError::Other(e)) => json_error(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 
@@ -9992,7 +10211,15 @@ async fn disable_app_handler(
     let all_manifests: Vec<crate::plugin_manifest::PluginManifest> =
         state.app_manifests.read().await.clone();
 
-    match disable_app(&state.app_store, &id, &all_manifests, params.cascade, params.force).await {
+    match disable_app(
+        &state.app_store,
+        &id,
+        &all_manifests,
+        params.cascade,
+        params.force,
+    )
+    .await
+    {
         Ok(outcome) => {
             // Deactivate every plugin this call disabled, in disable order
             // (dependents first, the target last) — so a dependent is never left
@@ -10001,7 +10228,8 @@ async fn disable_app_handler(
             let mut policy_outcome = PolicyApplyOutcome::default();
             for record in &outcome.disabled {
                 if let Some(manifest) = all_manifests.iter().find(|m| m.id == record.id) {
-                    policy_outcome = policy_outcome.merge(deactivate_plugin(&state, manifest).await);
+                    policy_outcome =
+                        policy_outcome.merge(deactivate_plugin(&state, manifest).await);
                 }
                 disabled_ids.push(record.id.clone());
             }
@@ -10025,9 +10253,10 @@ async fn disable_app_handler(
             attach_gateway_policy_notice(&mut body, policy_outcome);
             Json(body).into_response()
         }
-        Err(DisableError::NotInstalled { id }) => {
-            json_error(StatusCode::NOT_FOUND, format!("app '{id}' is not installed"))
-        }
+        Err(DisableError::NotInstalled { id }) => json_error(
+            StatusCode::NOT_FOUND,
+            format!("app '{id}' is not installed"),
+        ),
         // Load-bearing plugin (engines/durable): disabling it breaks a core function
         // every install relies on, so it is refused unless `?force=true`. 409 with a
         // stable machine code so the desktop can render a "force disable?" prompt.
@@ -10055,9 +10284,7 @@ async fn disable_app_handler(
             })),
         )
             .into_response(),
-        Err(DisableError::Other(e)) => {
-            json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        }
+        Err(DisableError::Other(e)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
@@ -10149,7 +10376,8 @@ async fn uninstall_app_handler(
             let mut policy_outcome = PolicyApplyOutcome::default();
             for record in &outcome.disabled {
                 if let Some(manifest) = all_manifests.iter().find(|m| m.id == record.id) {
-                    policy_outcome = policy_outcome.merge(deactivate_plugin(&state, manifest).await);
+                    policy_outcome =
+                        policy_outcome.merge(deactivate_plugin(&state, manifest).await);
                 }
             }
             // ONE plugin model: uninstalling a synth MCP-server record must also
@@ -10160,29 +10388,23 @@ async fn uninstall_app_handler(
             // no-op for every non-MCP-server manifest.
             if let Some(manifest) = all_manifests.iter().find(|m| m.id == outcome.removed) {
                 sync_mcp_entry_for_record(&state, manifest, McpEntryMutation::Remove).await;
+                // Remove the app's downloaded `~/.ryu/bin` sidecar binary (the
+                // uninstall counterpart to download-on-enable). Disable never reaches
+                // here, so a merely-disabled app keeps its bin for an instant
+                // re-enable. No-op for apps without a `Local` sidecar.
+                crate::sidecar::manifest_sidecar::remove_local_sidecar_binaries(manifest).await;
             }
-            // Logical-bundle children uninstalled alongside the target get the SAME
-            // full teardown: deactivate the in-memory manifest, drop the MCP entry,
-            // and remove the on-disk dir. Their store rows are already gone; the
-            // single `reload_manifests_inner` below picks up every removed dir.
-            for child_id in &outcome.bundled_removed {
-                if let Some(manifest) = all_manifests.iter().find(|m| m.id == *child_id) {
-                    policy_outcome =
-                        policy_outcome.merge(deactivate_plugin(&state, manifest).await);
-                    sync_mcp_entry_for_record(&state, manifest, McpEntryMutation::Remove).await;
-                }
-                if crate::plugin_manifest::validate_plugin_id(child_id).is_ok() {
-                    let child_dir = crate::plugin_manifest::PluginManifestLoader::plugins_dir()
-                        .join(child_id);
-                    if child_dir.exists() {
-                        if let Err(e) = tokio::fs::remove_dir_all(&child_dir).await {
-                            tracing::warn!(
-                                plugin = %child_id,
-                                "uninstall: failed to remove bundled child directory: {e}"
-                            );
-                        }
-                    }
-                }
+            // Delete the plugin's bundled Agent Skills from `~/.claude/skills`.
+            // `deactivate_plugin` (above) only flipped them inactive + left the
+            // files (mirroring a disable); uninstall is where the owner-marked
+            // directories are actually removed. Owned-only (never touches a user's
+            // hand-installed skill). A no-op for a plugin that bundled none.
+            {
+                let removed_id = outcome.removed.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    crate::skills_catalog::plugin_skills::remove_plugin_skills(&removed_id)
+                })
+                .await;
             }
             // Complete the on-disk teardown for the removed target. `uninstall_app`
             // dropped only the lifecycle row; the disk-backed Community plugins that
@@ -10221,8 +10443,7 @@ async fn uninstall_app_handler(
                 "plugin.contributions.changed",
                 json!({"type": "contributions_changed"}),
             );
-            let disabled_ids: Vec<String> =
-                outcome.disabled.iter().map(|r| r.id.clone()).collect();
+            let disabled_ids: Vec<String> = outcome.disabled.iter().map(|r| r.id.clone()).collect();
             let mut body = json!({
                 "success": true,
                 "removed": outcome.removed,
@@ -10230,18 +10451,14 @@ async fn uninstall_app_handler(
                 // `?cascade=true`, its dependents). Cascaded dependents stay
                 // installed-but-disabled; only the target's record is removed.
                 "disabled": disabled_ids,
-                // Logical-bundle children uninstalled together with the target, and
-                // those left installed because another bundle owns them or a live
-                // dependent still needs them.
-                "bundled_removed": outcome.bundled_removed,
-                "bundled_skipped": outcome.bundled_skipped,
             });
             attach_gateway_policy_notice(&mut body, policy_outcome);
             Json(body).into_response()
         }
-        Err(UninstallError::NotInstalled { id }) => {
-            json_error(StatusCode::NOT_FOUND, format!("app '{id}' is not installed"))
-        }
+        Err(UninstallError::NotInstalled { id }) => json_error(
+            StatusCode::NOT_FOUND,
+            format!("app '{id}' is not installed"),
+        ),
         // Built-in / default-on: can only be disabled. 409 with a stable machine
         // code so the desktop renders a "disable instead" affordance.
         Err(UninstallError::Protected { id }) => (
@@ -10301,7 +10518,9 @@ async fn deactivate_plugin(
                     serde_json::from_value::<crate::plugin_manifest::schema::ToolConfig>(v.clone())
                         .ok()
                 }) {
-                    state.mcp.unregister_app_tool(&format!("app__{}", cfg.slug));
+                    state
+                        .mcp
+                        .unregister_app_tool(&crate::sidecar::mcp::app_tool_registered_id(&cfg));
                 }
             }
             crate::runnable::RunnableKind::Agent => {
@@ -10361,6 +10580,21 @@ async fn deactivate_plugin(
     // longer a no-op against the running server. Best-effort + a no-op for every
     // non-MCP-server manifest.
     sync_mcp_entry_for_record(state, manifest, McpEntryMutation::SetEnabled(false)).await;
+    // Symmetric to enable: deregister the plugin's declared `mcp_servers` from the
+    // MCP registry so a disabled/uninstalled plugin's server stops being
+    // spawned/listed. A no-op for every manifest with no `mcp_servers`.
+    crate::sidecar::mcp::deregister_manifest_mcp_servers(&state.mcp, manifest);
+    // Symmetric to enable, but files-preserving: deactivate the plugin's bundled
+    // skills (flip each owned slug inactive) while LEAVING them on disk, mirroring
+    // how a disabled plugin's record persists. The uninstall path deletes the files
+    // separately (`remove_plugin_skills`). A no-op for a plugin with no bundled
+    // skills. Spawned + best-effort.
+    {
+        let plugin_id = manifest.id.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::skills_catalog::plugin_skills::deactivate_plugin_skills(&plugin_id);
+        });
+    }
     policy_outcome
 }
 
@@ -10431,7 +10665,10 @@ async fn update_app_handler(
     let record = match state.app_store.get(&id).await {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return json_error(StatusCode::NOT_FOUND, format!("app '{id}' is not installed"))
+            return json_error(
+                StatusCode::NOT_FOUND,
+                format!("app '{id}' is not installed"),
+            )
         }
         Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     };
@@ -10554,8 +10791,7 @@ async fn install_new_dependencies_for_update(
     //    the SAME verify seam as the target. The visited-set (seeded with the target
     //    so it is never fetched as its own dependency) terminates cyclic data.
     let mut fetched: Vec<PluginManifest> = Vec::new();
-    let mut ui_codes: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut ui_codes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
 
@@ -10623,19 +10859,16 @@ async fn install_new_dependencies_for_update(
 
     // ── Plan: the pure update-closure planner (target excluded, installed
     //    subtracted, NEW edges seen). One resolver, tested in `plugins::lifecycle`.
-    let dep_order = match crate::plugins::lifecycle::plan_update_dep_closure(
-        manifest,
-        &installed,
-        &fetched,
-    ) {
-        Ok(order) => order,
-        Err(e) => {
-            return Err((
-                StatusCode::CONFLICT,
-                format!("dependency resolution failed for `{}`: {e}", manifest.id),
-            ));
-        }
-    };
+    let dep_order =
+        match crate::plugins::lifecycle::plan_update_dep_closure(manifest, &installed, &fetched) {
+            Ok(order) => order,
+            Err(e) => {
+                return Err((
+                    StatusCode::CONFLICT,
+                    format!("dependency resolution failed for `{}`: {e}", manifest.id),
+                ));
+            }
+        };
     if dep_order.is_empty() {
         return Ok(vec![]);
     }
@@ -10753,9 +10986,13 @@ async fn list_agents(
     State(state): State<ServerState>,
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_VIEW)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_VIEW,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -11229,9 +11466,13 @@ async fn create_agent(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(input): Json<CreateAgent>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_EDIT)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_EDIT,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -11266,9 +11507,13 @@ async fn get_agent(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_VIEW)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_VIEW,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -11303,9 +11548,13 @@ async fn update_agent(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(patch): Json<UpdateAgent>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_EDIT)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_EDIT,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -11348,9 +11597,13 @@ async fn delete_agent(
 ) -> (StatusCode, Json<serde_json::Value>) {
     // No `agent.delete` permission in the vocab; deletion is a mutation, gated at
     // the `agent.edit` tier.
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::AGENT_EDIT)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_EDIT,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -12509,9 +12762,7 @@ async fn apply_skills_disclosure(state: &ServerState) {
         .get(ryu_skills::SKILLS_DISCLOSURE_PREF)
         .await
     {
-        ryu_skills::set_progressive_disclosure(ryu_skills::disclosure_value_is_progressive(
-            &v,
-        ));
+        ryu_skills::set_progressive_disclosure(ryu_skills::disclosure_value_is_progressive(&v));
     }
 }
 
@@ -12884,6 +13135,119 @@ async fn btw_handler(
             StatusCode::BAD_GATEWAY,
             format!("side-question model unavailable: {e}"),
         ),
+    }
+}
+
+/// Preference key holding the (stronger) advisor model. Shared with the
+/// `com.ryuhq.advisor` turn-hook plugin's settings tab so one picker drives both
+/// the auto-review hook and the `advisor__consult` tool.
+const ADVISOR_MODEL_PREF: &str = "advisor-model";
+
+/// Resolve the advisor model, swappable and never hardcoded to a remote provider:
+/// explicit body arg → preference `advisor-model` → env `RYU_ADVISOR_MODEL` /
+/// `RYU_DEFAULT_LLM_MODEL` → the bundled local default. Mirrors the resolution the
+/// deleted `sidecar/mcp/advisor` provider did, so the tool's model selection is
+/// unchanged by the move to a declarative `http` tool.
+async fn resolve_advisor_model(state: &ServerState, explicit: Option<&str>) -> String {
+    if let Some(m) = explicit {
+        let t = m.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    if let Ok(Some(pref)) = state.preferences.get(ADVISOR_MODEL_PREF).await {
+        let t = pref.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    for var in ["RYU_ADVISOR_MODEL", "RYU_DEFAULT_LLM_MODEL"] {
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                return val;
+            }
+        }
+    }
+    crate::registry::DEFAULT_LOCAL_CHAT_MODEL_ID.to_string()
+}
+
+/// `POST /api/advisor/consult` request body — mirrors the `advisor__consult`
+/// tool's `input_schema` (fixtures/advisor.plugin.json). The agent supplies the
+/// context it wants reviewed (the transcript is not reachable at tool dispatch).
+#[derive(serde::Deserialize)]
+struct AdvisorConsultBody {
+    question: String,
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+/// `POST /api/advisor/consult` — the loopback bridge behind the declarative
+/// `advisor__consult` plugin tool. Consult a stronger reviewer model for a second
+/// opinion: resolve the swappable advisor model, build the review prompt from the
+/// agent-supplied `question`/`context`, and route ONE high-effort, non-streaming
+/// completion through the Gateway (`call_side_model`). Returns `{ ok, model,
+/// advice }` (byte-shape identical to the former native provider) so the tool,
+/// declared `unwrap_body: true`, surfaces it verbatim. A Gateway failure is a
+/// `200 { ok: false, model, error }` (not an HTTP error) so the agent's turn
+/// continues, matching the old provider's soft-failure posture.
+#[utoipa::path(
+    post,
+    path = "/api/advisor/consult",
+    tag = "Chat",
+    summary = "Consult a stronger advisor model for a second opinion",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn advisor_consult_handler(
+    State(state): State<ServerState>,
+    Json(body): Json<AdvisorConsultBody>,
+) -> axum::response::Response {
+    let question = body.question.trim();
+    if question.is_empty() {
+        // The tool's schema marks `question` required, so this is only hit by a
+        // hand-rolled caller. Return a soft failure (200) so a turn never aborts.
+        return Json(json!({
+            "ok": false,
+            "error": "missing required field 'question'",
+        }))
+        .into_response();
+    }
+    let context = body.context.as_deref().map(str::trim).unwrap_or("");
+    let model = resolve_advisor_model(&state, body.model.as_deref()).await;
+
+    let system = "You are a stronger reviewer advising a capable assistant. The assistant has \
+                  come to you for a second opinion before committing to an approach, while stuck, \
+                  or before declaring a task done. Give concrete, actionable advice: flag wrong \
+                  assumptions, missing steps, better approaches, and risks. If the direction is \
+                  already sound, say so plainly and add the single highest-value improvement. Be \
+                  specific and brief. Advise; do not just restate the plan back.";
+    let mut user = format!("The assistant is asking for advice.\n\nQuestion:\n{question}");
+    if !context.is_empty() {
+        user.push_str(&format!("\n\nRelevant context / current plan:\n{context}"));
+    }
+    user.push_str("\n\nGive your advice now.");
+
+    match call_side_model(&state, &model, "high", system, user.as_str()).await {
+        Ok(advice) if !advice.trim().is_empty() => Json(json!({
+            "ok": true,
+            "model": model,
+            "advice": advice.trim(),
+        }))
+        .into_response(),
+        Ok(_) => Json(json!({
+            "ok": false,
+            "model": model,
+            "error": "the advisor model returned no advice",
+        }))
+        .into_response(),
+        Err(e) => Json(json!({
+            "ok": false,
+            "model": model,
+            "error": e,
+        }))
+        .into_response(),
     }
 }
 
@@ -14281,6 +14645,7 @@ fn build_openapi_plugin_manifest(
                     "url": t.url,
                     "method": t.method,
                     "header_params": t.header_params,
+                    "secret_headers": t.secret_headers,
                     "description": t.description,
                     "input_schema": t.input_schema,
                 })),
@@ -14312,7 +14677,8 @@ async fn import_openapi_tools(
     State(state): State<ServerState>,
     Json(body): Json<ImportOpenApiBody>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let bad = |status: StatusCode, msg: String| (status, Json(json!({ "success": false, "error": msg })));
+    let bad =
+        |status: StatusCode, msg: String| (status, Json(json!({ "success": false, "error": msg })));
 
     let spec_url = if let Some(u) = body
         .spec_url
@@ -14361,7 +14727,8 @@ async fn import_openapi_tools(
         Ok(s) => s,
         Err(e) => return bad(StatusCode::UNPROCESSABLE_ENTITY, e),
     };
-    let api = match crate::openapi_import::spec_to_api(&spec, crate::openapi_import::DEFAULT_OP_CAP) {
+    let api = match crate::openapi_import::spec_to_api(&spec, crate::openapi_import::DEFAULT_OP_CAP)
+    {
         Ok(a) => a,
         Err(e) => return bad(StatusCode::UNPROCESSABLE_ENTITY, e),
     };
@@ -14393,7 +14760,9 @@ async fn import_openapi_tools(
         ),
         Err((StatusCode::CONFLICT, _)) => (
             StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": format!("'{plugin_id}' is already installed") })),
+            Json(
+                json!({ "success": false, "error": format!("'{plugin_id}' is already installed") }),
+            ),
         ),
         Err((status, msg)) => bad(status, msg),
     }
@@ -14459,10 +14828,14 @@ async fn import_graphql_tool(
     State(state): State<ServerState>,
     Json(body): Json<ImportGraphqlBody>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let bad = |status: StatusCode, msg: String| (status, Json(json!({ "success": false, "error": msg })));
+    let bad =
+        |status: StatusCode, msg: String| (status, Json(json!({ "success": false, "error": msg })));
     let url = body.url.trim();
     if url.is_empty() {
-        return bad(StatusCode::BAD_REQUEST, "`url` must not be empty".to_owned());
+        return bad(
+            StatusCode::BAD_REQUEST,
+            "`url` must not be empty".to_owned(),
+        );
     }
     let Some(domain) = reqwest::Url::parse(url)
         .ok()
@@ -14502,7 +14875,9 @@ async fn import_graphql_tool(
         ),
         Err((StatusCode::CONFLICT, _)) => (
             StatusCode::CONFLICT,
-            Json(json!({ "success": false, "error": format!("'{plugin_id}' is already installed") })),
+            Json(
+                json!({ "success": false, "error": format!("'{plugin_id}' is already installed") }),
+            ),
         ),
         Err((status, msg)) => bad(status, msg),
     }
@@ -14521,6 +14896,7 @@ mod api_import_tests {
             method: method.to_owned(),
             url: format!("https://api.x.example/{slug}"),
             header_params: vec!["X-API-Key".to_owned()],
+            secret_headers: std::collections::BTreeMap::new(),
             input_schema: json!({ "type": "object" }),
         }
     }
@@ -14540,10 +14916,18 @@ mod api_import_tests {
         let slugs: Vec<String> = manifest
             .runnables
             .iter()
-            .map(|r| r.config.as_ref().unwrap()["slug"].as_str().unwrap().to_owned())
+            .map(|r| {
+                r.config.as_ref().unwrap()["slug"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
             .collect();
         assert!(slugs.contains(&"get_a".to_owned()));
-        assert!(slugs.contains(&"get_a_2".to_owned()), "collision not de-duped: {slugs:?}");
+        assert!(
+            slugs.contains(&"get_a_2".to_owned()),
+            "collision not de-duped: {slugs:?}"
+        );
         assert!(manifest
             .permission_grants
             .contains(&"tool:http-egress:api.x.example".to_owned()));
@@ -14814,8 +15198,8 @@ async fn mutate_mcp_entry(
         if !cfg_path.exists() {
             return Ok(false);
         }
-        let raw = std::fs::read_to_string(&cfg_path)
-            .map_err(|e| format!("cannot read mcp.json: {e}"))?;
+        let raw =
+            std::fs::read_to_string(&cfg_path).map_err(|e| format!("cannot read mcp.json: {e}"))?;
         let val: serde_json::Value =
             serde_json::from_str(&raw).map_err(|e| format!("mcp.json is malformed: {e}"))?;
         let mut file_map: std::collections::BTreeMap<String, McpServerConfig> = val
@@ -15024,6 +15408,9 @@ async fn call_mcp_tool(
     match state
         .mcp
         .call_tool_with_identity(
+            // The calling agent, so its configured `approval_tools` (policy
+            // Layer A) feed the approval gate.
+            Some(agent_id),
             &body.tool,
             body.arguments,
             allowlist.as_deref(),
@@ -15069,7 +15456,7 @@ async fn call_mcp_tool(
     summary = "Search the unified tool catalog",
     params(
         ("q" = Option<String>, Query, description = "Natural-language capability query"),
-        ("kind" = Option<String>, Query, description = "mcp|builtin|composio|app|core-api|any"),
+        ("kind" = Option<String>, Query, description = "mcp|builtin|composio|app|command|core-api|any"),
         ("limit" = Option<usize>, Query, description = "Max results (default 8)"),
         ("agent" = Option<String>, Query, description = "Narrow to this agent's allowlist"),
     ),
@@ -15588,9 +15975,13 @@ async fn create_space(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<CreateSpaceBody>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -15625,9 +16016,13 @@ async fn list_spaces(
     State(state): State<ServerState>,
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -15653,9 +16048,13 @@ async fn delete_space(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_DELETE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_DELETE,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -15692,9 +16091,13 @@ async fn list_documents(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -15707,6 +16110,121 @@ async fn list_documents(
         .await
     {
         Ok(documents) => Json(json!({ "space_id": id, "documents": documents })).into_response(),
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// The seeded system-space NAME an app's documents live in. There is no server-side
+/// app→space link yet — the association is the space NAME, seeded at boot in
+/// `main.rs` (`ensure_system_space("Canvas"/"Whiteboard"/…)`), so the mapping lives
+/// here. An app not in this map has no document space (its section shows nothing).
+fn app_space_name(plugin_id: &str) -> Option<&'static str> {
+    match plugin_id {
+        "com.ryu.canvas" => Some("Canvas"),
+        "com.ryu.whiteboard" => Some("Whiteboard"),
+        _ => None,
+    }
+}
+
+/// `GET /api/apps/:id/docs` — an app's documents (kind `app:<id>`, isolated by
+/// `app_list_docs`) in its seeded Space, shaped for a sidebar section's declarative
+/// `source`: `{ documents: [{ id, title, space_id, updated_at }] }`.
+async fn list_app_docs(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Path(plugin_id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read".to_owned(),
+        );
+    }
+    let Some(space_name) = app_space_name(&plugin_id) else {
+        return Json(json!({ "documents": [] })).into_response();
+    };
+    let space_id = match state.spaces.ensure_system_space(space_name, None).await {
+        Ok(id) => id,
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    match state.spaces.app_list_docs(&plugin_id, &space_id).await {
+        Ok(docs) => {
+            let documents: Vec<serde_json::Value> = docs
+                .iter()
+                .map(|d| {
+                    json!({
+                        "id": d.id,
+                        "title": d.title,
+                        "space_id": space_id,
+                        "updated_at": d.updated_at,
+                    })
+                })
+                .collect();
+            Json(json!({ "documents": documents })).into_response()
+        }
+        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CreateAppDocBody {
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// `POST /api/apps/:id/docs` (`{ title? }`) — create a doc of kind `app:<id>` in the
+/// app's Space and return `{ id, space_id }`, so a section's "+" can create-and-open.
+async fn create_app_doc(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Path(plugin_id): axum::extract::Path<String>,
+    Json(body): Json<CreateAppDocBody>,
+) -> axum::response::Response {
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.write".to_owned(),
+        );
+    }
+    let Some(space_name) = app_space_name(&plugin_id) else {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!("no document space for app: {plugin_id}"),
+        );
+    };
+    let space_id = match state.spaces.ensure_system_space(space_name, None).await {
+        Ok(id) => id,
+        Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let title = body
+        .title
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "Untitled".to_owned());
+    match state
+        .spaces
+        .app_create_doc(
+            &plugin_id,
+            &space_id,
+            &title,
+            &crate::server::spaces::background_owner(),
+        )
+        .await
+    {
+        Ok(id) => Json(json!({ "id": id, "space_id": space_id })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
@@ -15732,9 +16250,13 @@ async fn ingest_document(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<IngestBody>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -15797,9 +16319,13 @@ async fn search_space(
     // Coarse RBAC: searching a space requires `space.read` (this also denies a
     // tokenless caller on a bound node). The per-resource tenancy filter below then
     // ensures the returned chunks only come from documents THIS caller may read.
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -15865,7 +16391,12 @@ async fn create_page(
     };
     let tenancy = spaces::owner_of(&caller_tenancy(&caller));
     let result = match body.parent_id.as_deref() {
-        Some(parent) => state.spaces.create_child_page(&id, title, parent, &tenancy).await,
+        Some(parent) => {
+            state
+                .spaces
+                .create_child_page(&id, title, parent, &tenancy)
+                .await
+        }
         None => state.spaces.create_page(&id, title, &tenancy).await,
     };
     match result {
@@ -15997,9 +16528,13 @@ async fn create_file(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(body): Json<CreateFileBody>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16033,7 +16568,13 @@ async fn create_file(
     }
     match state
         .spaces
-        .create_file(&id, title, &bytes, mime, &spaces::owner_of(&caller_tenancy(&caller)))
+        .create_file(
+            &id,
+            title,
+            &bytes,
+            mime,
+            &spaces::owner_of(&caller_tenancy(&caller)),
+        )
         .await
     {
         Ok(document_id) => Json(json!({
@@ -16069,9 +16610,13 @@ async fn get_file_blob(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16191,9 +16736,13 @@ async fn get_document(
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
     // Org/team RBAC (coarse): reading a document requires `space.read`.
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16239,9 +16788,13 @@ async fn update_document(
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
     Json(body): Json<UpdateDocumentBody>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_WRITE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16289,9 +16842,13 @@ async fn delete_document(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path((_id, doc_id)): axum::extract::Path<(String, String)>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_DELETE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_DELETE,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16572,9 +17129,13 @@ async fn get_space_graph(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
     // Org/team RBAC (coarse): reading the graph requires `space.read`.
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16607,9 +17168,13 @@ async fn get_global_graph(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::Response {
     // Org/team RBAC (coarse): reading the graph requires `space.read`.
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::SPACE_READ)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -16909,6 +17474,228 @@ async fn composio_toolkits(
     }
 }
 
+/// Pull a list of category names out of a Composio toolkit's `categories` field,
+/// which the upstream API may serialize as bare strings or `{name|slug|id}`
+/// objects. Non-string / unrecognized shapes are skipped rather than surfaced as
+/// empty strings.
+fn composio_toolkit_categories(value: &serde_json::Value) -> Vec<String> {
+    let Some(arr) = value.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|cat| {
+            if let Some(s) = cat.as_str() {
+                return Some(s.to_string());
+            }
+            for key in ["name", "slug", "id"] {
+                if let Some(s) = cat.get(key).and_then(serde_json::Value::as_str) {
+                    return Some(s.to_string());
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+/// Build the merged Integrations directory: the integrations.sh directory folded
+/// with the user's Composio toolkits, deduped by brand slug. Unsorted and
+/// unfiltered — callers apply their own query/sort/pagination. Both the list
+/// endpoint and the by-id endpoint share this so they never diverge.
+async fn build_merged_integrations(
+    state: &ServerState,
+) -> Vec<crate::catalog_source::IntegrationBrand> {
+    use crate::catalog_source::{integration_brand_slug, IntegrationBrand};
+
+    let mut order: Vec<String> = Vec::new();
+    let mut by_slug: std::collections::HashMap<String, IntegrationBrand> =
+        std::collections::HashMap::new();
+
+    for brand in crate::catalog_source::integrations_sh_brands().await {
+        if brand.id.is_empty() {
+            continue;
+        }
+        order.push(brand.id.clone());
+        by_slug.insert(brand.id.clone(), brand);
+    }
+
+    // Composio toolkits degrade gracefully: a fetch error (or no configured key)
+    // just means no composio-sourced brands, not a failed endpoint.
+    if let Ok(value) = crate::composio_catalog::list_toolkits(&state.client).await {
+        if let Some(data) = value.get("data").and_then(serde_json::Value::as_array) {
+            for toolkit in data {
+                let name = toolkit
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let toolkit_slug = toolkit
+                    .get("slug")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let slug = {
+                    let from_name = integration_brand_slug(&name);
+                    if from_name.is_empty() {
+                        integration_brand_slug(&toolkit_slug)
+                    } else {
+                        from_name
+                    }
+                };
+                if slug.is_empty() {
+                    continue;
+                }
+                let description = toolkit
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let logo = toolkit
+                    .get("logo")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let categories = toolkit
+                    .get("categories")
+                    .map(composio_toolkit_categories)
+                    .unwrap_or_default();
+
+                match by_slug.get_mut(&slug) {
+                    Some(existing) => {
+                        // Slug in both directory and composio: union sources, keep
+                        // the directory's logo/description where present.
+                        if !existing.sources.iter().any(|s| s == "composio") {
+                            existing.sources.push("composio".into());
+                        }
+                        for cat in categories {
+                            if !existing.categories.contains(&cat) {
+                                existing.categories.push(cat);
+                            }
+                        }
+                        if existing.description.is_none() {
+                            existing.description = description;
+                        }
+                        if existing.logo.is_none() {
+                            existing.logo = logo;
+                        }
+                    }
+                    None => {
+                        order.push(slug.clone());
+                        by_slug.insert(
+                            slug.clone(),
+                            IntegrationBrand {
+                                id: slug,
+                                name: if name.is_empty() { toolkit_slug } else { name },
+                                description,
+                                logo,
+                                categories,
+                                sources: vec!["composio".into()],
+                                feeds: Vec::new(),
+                                domain: None,
+                                popularity: None,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .filter_map(|slug| by_slug.remove(&slug))
+        .collect()
+}
+
+/// `GET /api/integrations?q=&cursor=&limit=` — the merged Integrations Store
+/// directory (integrations.sh + the user's Composio toolkits), deduped by brand
+/// slug, sorted by popularity then name, offset-cursor paginated.
+#[utoipa::path(
+    get,
+    path = "/api/integrations",
+    tag = "Composio",
+    summary = "Browse the merged Integrations directory (directory + Composio)",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn integrations_list(
+    State(state): State<ServerState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let mut merged = build_merged_integrations(&state).await;
+
+    let needle = params
+        .get("q")
+        .map(String::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if !needle.is_empty() {
+        merged.retain(|brand| {
+            brand.name.to_ascii_lowercase().contains(&needle)
+                || brand.id.contains(&needle)
+                || brand
+                    .categories
+                    .iter()
+                    .any(|c| c.to_ascii_lowercase().contains(&needle))
+                || brand
+                    .domain
+                    .as_deref()
+                    .is_some_and(|d| d.to_ascii_lowercase().contains(&needle))
+        });
+    }
+
+    // Stable sort by popularity desc then name asc so pagination is deterministic.
+    merged.sort_by(|a, b| {
+        b.popularity
+            .unwrap_or(0)
+            .cmp(&a.popularity.unwrap_or(0))
+            .then_with(|| {
+                a.name
+                    .to_ascii_lowercase()
+                    .cmp(&b.name.to_ascii_lowercase())
+            })
+    });
+
+    let total = merged.len();
+    let offset = params
+        .get("cursor")
+        .and_then(|c| c.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(60);
+    let next_cursor = (offset + limit < total).then(|| (offset + limit).to_string());
+    let slice: Vec<_> = merged.into_iter().skip(offset).take(limit).collect();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "integrations": slice,
+            "next_cursor": next_cursor,
+            "total": total,
+        })),
+    )
+}
+
+/// `GET /api/integrations/:id` — one merged Integrations brand by slug.
+#[utoipa::path(
+    get,
+    path = "/api/integrations/{id}",
+    tag = "Composio",
+    summary = "Get one merged Integrations brand by slug",
+    params(("id" = String, Path)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn integrations_get(
+    State(state): State<ServerState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let merged = build_merged_integrations(&state).await;
+    match merged.into_iter().find(|brand| brand.id == id) {
+        Some(brand) => (StatusCode::OK, Json(json!(brand))),
+        None => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))),
+    }
+}
+
 /// `GET /api/composio/actions?toolkit=&q=&limit=` — list a toolkit's actions.
 #[utoipa::path(
     get,
@@ -17171,14 +17958,14 @@ async fn composio_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // Replay window (webhook-unify #5): reject a stale, timestamp-signed delivery
-    // before doing any work. Back-compat: a delivery with no timestamp header (or
-    // an unparseable one) is accepted — only a present, parseable-but-stale one is
-    // refused, so existing unsigned callers are unaffected.
-    if !webhook_timestamp_fresh(&headers) {
+    // Replay window (webhook-unify #5): the Composio/Svix HMAC covers the body only,
+    // so a valid delivery is replayable unless we bind it to a timestamp. Require a
+    // present + parseable + in-window timestamp (Svix/Composio always send one); a
+    // stripped or stale timestamp is refused before any work is done.
+    if !webhook_timestamp_present_and_fresh(&headers) {
         return (
             StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "stale webhook timestamp (replay window exceeded)" })),
+            Json(json!({ "error": "missing or stale webhook timestamp (replay window exceeded)" })),
         );
     }
     // Authenticate the raw bytes BEFORE parsing — verify over exactly what was
@@ -17191,6 +17978,19 @@ async fn composio_webhook(
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid or missing webhook signature" })),
+        );
+    }
+
+    // Dedup AFTER auth so an unauthenticated caller cannot poison the seen-set
+    // with a forged id and suppress a legitimate delivery. Duplicate ⇒ 200 OK so
+    // the provider stops retrying (the work already happened on first delivery).
+    // Relay parity: matches `ryu_relay.rs`'s `SeenDeliveries` dedup for the
+    // direct-HTTP path (that transport hits the same non-idempotent handler).
+    let delivery_id = webhook_delivery_id(&headers);
+    if !crate::webhook_ingress::first_http_delivery(&delivery_id) {
+        return (
+            StatusCode::OK,
+            Json(json!({ "ok": true, "duplicate": true })),
         );
     }
 
@@ -17224,6 +18024,41 @@ fn webhook_timestamp_fresh(headers: &axum::http::HeaderMap) -> bool {
     let ts = ["webhook-timestamp", "x-timestamp", "x-request-timestamp"]
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    crate::webhook_ingress::timestamp_fresh(ts, now)
+}
+
+/// Read the delivery id from the common header spellings: Svix-style
+/// `webhook-id` (Composio uses Svix), then `x-github-delivery`, then the
+/// generic `x-delivery-id`. Absent ⇒ empty string (not dedupable) — matches
+/// [`crate::webhook_ingress::first_http_delivery`]'s empty-id-is-always-new
+/// contract, so a caller that never sends an id behaves exactly as before.
+fn webhook_delivery_id(headers: &axum::http::HeaderMap) -> String {
+    ["webhook-id", "x-github-delivery", "x-delivery-id"]
+        .iter()
+        .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
+        .unwrap_or("")
+        .to_owned()
+}
+
+/// Strict freshness for the Composio/Svix receiver: the delivery MUST carry a
+/// present, parseable, in-window timestamp. Composio's HMAC signs the body only, so
+/// an absent-timestamp delivery is otherwise replayable by stripping the header (the
+/// body signature still validates). Svix/Composio always send `webhook-timestamp`, so
+/// this rejects only forged/stripped deliveries — not any legitimate one. Unlike the
+/// generic [`webhook_timestamp_fresh`] this does NOT accept an absent timestamp; the
+/// generic path stays lenient for schemes (e.g. GitHub `x-hub-signature-256`) that
+/// legitimately carry no timestamp header.
+fn webhook_timestamp_present_and_fresh(headers: &axum::http::HeaderMap) -> bool {
+    let ts = ["webhook-timestamp", "x-timestamp", "x-request-timestamp"]
+        .iter()
+        .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()));
+    if ts.is_none() {
+        return false;
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -17275,11 +18110,22 @@ async fn workflow_webhook(
     // Delegate to the shared delivery path so the HTTP route and the relay
     // dispatcher use byte-identical auth + run semantics (webhook-unify): the
     // per-workflow HMAC secret lives only in Core, so this is the single verifier.
+    // `delivery_id` (relay parity): a retried at-least-once delivery is deduped
+    // inside `deliver_workflow_webhook` itself, right after the signature check.
     use crate::webhook_ingress::WorkflowWebhookOutcome;
-    match crate::webhook_ingress::deliver_workflow_webhook(&id, &body, signature).await {
+    let delivery_id = webhook_delivery_id(&headers);
+    match crate::webhook_ingress::deliver_workflow_webhook(&id, &body, signature, &delivery_id)
+        .await
+    {
         WorkflowWebhookOutcome::Ran(run_id) => (
             StatusCode::OK,
             Json(json!({ "ok": true, "run_id": run_id })),
+        ),
+        // Duplicate ⇒ 200 OK so the provider stops retrying (the work already
+        // happened on the first delivery of this id).
+        WorkflowWebhookOutcome::Duplicate => (
+            StatusCode::OK,
+            Json(json!({ "ok": true, "duplicate": true })),
         ),
         WorkflowWebhookOutcome::NotFound => (
             StatusCode::NOT_FOUND,
@@ -18642,7 +19488,15 @@ async fn knowledge_catalog_install(
         }
     };
     let warnings = bundle.warnings.clone();
-    match state.retrieval.ingest_okf_bundle(&bundle_id, &bundle).await {
+    // Stamp the node's registered org as the explicit shared-visibility owner so
+    // `space_tenancy_allows`'s fail-closed default (bound node, unowned chunk =
+    // hidden) does not swallow this genuinely node-shared content.
+    let node_org = node_org_id();
+    match state
+        .retrieval
+        .ingest_okf_bundle(&bundle_id, &bundle, node_org.as_deref())
+        .await
+    {
         Ok(summary) => (
             StatusCode::OK,
             Json(json!({
@@ -19204,7 +20058,6 @@ async fn install_sidecar(
     use crate::sidecar::providers::llamacpp::LlamaCppDownloader;
     use crate::sidecar::providers::ollama::OllamaDownloader;
     use crate::sidecar::tools::screenpipe::ScreenpipeDownloader;
-    use crate::sidecar::tools::spider::SpiderDownloader;
 
     let setup = Arc::clone(&state.setup);
     let install_status = Arc::clone(&state.install_status);
@@ -19284,15 +20137,6 @@ async fn install_sidecar(
                     crate::downloads::DownloadKind::Tool,
                     "Screenpipe".to_string(),
                     async { ScreenpipeDownloader::new().ensure_installed().await },
-                )
-                .await
-                .map(|_| "installed".to_string()),
-            "spider" => downloads
-                .register_indeterminate(
-                    "tool:spider".to_string(),
-                    crate::downloads::DownloadKind::Tool,
-                    "Spider".to_string(),
-                    async { SpiderDownloader::new().ensure_installed().await },
                 )
                 .await
                 .map(|_| "installed".to_string()),
@@ -20650,7 +21494,10 @@ mod gateway_config_write_tests {
         assert_eq!(fw.get("policy").and_then(|v| v.as_str()), Some("sanitize"));
         // Pre-existing inspector table survived the merge + re-serialize.
         assert!(fw.get("inspector").and_then(|v| v.as_table()).is_some());
-        let pats = fw.get("custom_patterns").and_then(|v| v.as_array()).unwrap();
+        let pats = fw
+            .get("custom_patterns")
+            .and_then(|v| v.as_array())
+            .unwrap();
         assert_eq!(pats.len(), 1);
         let p0 = pats[0].as_table().unwrap();
         assert_eq!(p0.get("name").and_then(|v| v.as_str()), Some("internal_id"));
@@ -21032,9 +21879,13 @@ async fn gateway_put_config(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(patch): Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::GATEWAY_CONFIGURE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::GATEWAY_CONFIGURE,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -21377,16 +22228,10 @@ async fn gateway_run_evals(
             // non-2xx (or an unparseable response missing `cases`) we pass the
             // gateway's body through untouched — never fabricate scores over an
             // error, and never 500 on a shape we don't recognise.
-            if status.is_success()
-                && !code_specs.is_empty()
-                && response_body.get("cases").is_some()
+            if status.is_success() && !code_specs.is_empty() && response_body.get("cases").is_some()
             {
-                ryu_eval_code::merge_code_evaluators(
-                    &mut response_body,
-                    &case_inputs,
-                    &code_specs,
-                )
-                .await;
+                ryu_eval_code::merge_code_evaluators(&mut response_body, &case_inputs, &code_specs)
+                    .await;
             }
 
             (status, Json(response_body))
@@ -21632,9 +22477,13 @@ async fn list_workflows(
     State(state): State<ServerState>,
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::Response {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_VIEW)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::WORKFLOW_VIEW,
+    )
+    .await
+    .is_err()
     {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -21744,9 +22593,13 @@ async fn create_workflow(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(workflow): Json<crate::workflow::Workflow>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_EDIT)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::WORKFLOW_EDIT,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -21789,9 +22642,13 @@ async fn get_workflow(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_VIEW)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::WORKFLOW_VIEW,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -21820,9 +22677,13 @@ async fn delete_workflow(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_DELETE)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::WORKFLOW_DELETE,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -22034,9 +22895,13 @@ async fn run_workflow(
     axum::extract::Path(id): axum::extract::Path<String>,
     body: Option<Json<RunWorkflowBody>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if enforce_permission(&state, &caller, crate::identity_verify::permissions::WORKFLOW_RUN)
-        .await
-        .is_err()
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::WORKFLOW_RUN,
+    )
+    .await
+    .is_err()
     {
         return (
             StatusCode::FORBIDDEN,
@@ -22893,7 +23758,10 @@ mod gateway_policy_notice_tests {
             },
         );
         assert_eq!(body["externally_managed"], json!(false));
-        assert!(body.get("notice").is_none(), "no restart notice when reconfigured");
+        assert!(
+            body.get("notice").is_none(),
+            "no restart notice when reconfigured"
+        );
     }
 
     /// An enable/disable that touched NO gateway policy must not add the fields at
@@ -22947,7 +23815,11 @@ mod gateway_policy_patch_tests {
     /// Disabling forces `enabled = false` (the plugin owns the toggle direction).
     #[test]
     fn firewall_disable_forces_enabled_false() {
-        let out = build_firewall_patch(json!({ "policy": "warn_and_continue" }), false, &FirewallPolicyBundle::default());
+        let out = build_firewall_patch(
+            json!({ "policy": "warn_and_continue" }),
+            false,
+            &FirewallPolicyBundle::default(),
+        );
         assert_eq!(out["enabled"], json!(false));
         assert_eq!(out["policy"], json!("warn_and_continue"));
     }
@@ -22979,8 +23851,14 @@ mod gateway_policy_patch_tests {
             .iter()
             .filter_map(|p| p["name"].as_str())
             .collect();
-        assert!(names.contains(&"widget_id"), "pack pattern pushed on enable");
-        assert!(names.contains(&"operator_secret"), "operator pattern preserved");
+        assert!(
+            names.contains(&"widget_id"),
+            "pack pattern pushed on enable"
+        );
+        assert!(
+            names.contains(&"operator_secret"),
+            "operator pattern preserved"
+        );
 
         // DISABLE: the pack pattern is removed by name; the operator's stays.
         let disabled = build_firewall_patch(enabled, false, &pack);
@@ -22990,12 +23868,22 @@ mod gateway_policy_patch_tests {
             .iter()
             .filter_map(|p| p["name"].as_str())
             .collect();
-        assert!(!names.contains(&"widget_id"), "pack pattern removed on disable");
-        assert!(names.contains(&"operator_secret"), "operator pattern still intact");
+        assert!(
+            !names.contains(&"widget_id"),
+            "pack pattern removed on disable"
+        );
+        assert!(
+            names.contains(&"operator_secret"),
+            "operator pattern still intact"
+        );
         // A pattern-pack plugin must NOT touch the global `enabled` flag — it was
         // `true` in `current` and stays `true` through both enable and disable, so
         // removing a narrow pack never disarms the whole firewall.
-        assert_eq!(disabled["enabled"], json!(true), "pack toggle preserves global enabled");
+        assert_eq!(
+            disabled["enabled"],
+            json!(true),
+            "pack toggle preserves global enabled"
+        );
     }
 
     /// The global-switch decoupling (the "any one firewall plugin drives the global
@@ -23012,7 +23900,11 @@ mod gateway_policy_patch_tests {
         // leave it armed — only its pattern is dropped.
         let armed = json!({ "enabled": true, "policy": "block" });
         let out = build_firewall_patch(armed, false, &pack);
-        assert_eq!(out["enabled"], json!(true), "disable-pack keeps firewall armed");
+        assert_eq!(
+            out["enabled"],
+            json!(true),
+            "disable-pack keeps firewall armed"
+        );
         assert_eq!(out["policy"], json!("block"), "policy preserved");
         assert_eq!(
             out["custom_patterns"]
@@ -23029,7 +23921,11 @@ mod gateway_policy_patch_tests {
         // must NOT force the whole firewall on — a narrow pack can't arm enforcement.
         let disarmed = json!({ "enabled": false, "policy": "block" });
         let out = build_firewall_patch(disarmed, true, &pack);
-        assert_eq!(out["enabled"], json!(false), "enable-pack does not arm firewall");
+        assert_eq!(
+            out["enabled"],
+            json!(false),
+            "enable-pack does not arm firewall"
+        );
         let names: Vec<&str> = out["custom_patterns"]
             .as_array()
             .unwrap()
@@ -23086,7 +23982,11 @@ mod gateway_policy_patch_tests {
             json!("gemma-mini"),
             "existing smart_routing fields preserved"
         );
-        assert_eq!(out["model_map"]["gemma"]["provider"], json!("local"), "model_map preserved");
+        assert_eq!(
+            out["model_map"]["gemma"]["provider"],
+            json!("local"),
+            "model_map preserved"
+        );
 
         // Disable path, starting from a config with no smart_routing block at all.
         let out = build_routing_patch(json!({ "default_provider": "local" }), false);
@@ -23908,9 +24808,14 @@ mod mcp_plugin_governance_tests {
         assert!(!rec.enabled, "an installed MCP server record is DISABLED");
 
         // The plugin lifecycle governs it: uninstall removes the record.
-        crate::plugins::lifecycle::uninstall_app(&store, "brave-search", &[manifest.clone()], false)
-            .await
-            .expect("uninstall");
+        crate::plugins::lifecycle::uninstall_app(
+            &store,
+            "brave-search",
+            &[manifest.clone()],
+            false,
+        )
+        .await
+        .expect("uninstall");
         assert!(
             store.get("brave-search").await.expect("get").is_none(),
             "uninstall (a plugin-lifecycle op) removed the MCP server's record"
@@ -23944,7 +24849,9 @@ mod mcp_plugin_governance_tests {
                     .map(|(k, v)| {
                         (
                             k.clone(),
-                            v.get("enabled").and_then(serde_json::Value::as_bool).unwrap_or(true),
+                            v.get("enabled")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(true),
                         )
                     })
                     .collect()
@@ -23958,23 +24865,36 @@ mod mcp_plugin_governance_tests {
         // that actually gates spawn) leaves every other entry untouched.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mcp.json");
-        std::fs::write(&path, mcp_json_with(&[("brave-search", false), ("other", true)])).unwrap();
+        std::fs::write(
+            &path,
+            mcp_json_with(&[("brave-search", false), ("other", true)]),
+        )
+        .unwrap();
 
-        let changed =
-            mutate_mcp_entry(path.clone(), "brave-search", McpEntryMutation::SetEnabled(true))
-                .await
-                .unwrap();
-        assert!(changed, "flipping a disabled entry to enabled changes the file");
+        let changed = mutate_mcp_entry(
+            path.clone(),
+            "brave-search",
+            McpEntryMutation::SetEnabled(true),
+        )
+        .await
+        .unwrap();
+        assert!(
+            changed,
+            "flipping a disabled entry to enabled changes the file"
+        );
 
         let state = read_mcp_enabled(&path);
         assert_eq!(state.get("brave-search"), Some(&true), "target now enabled");
         assert_eq!(state.get("other"), Some(&true), "sibling untouched");
 
         // Idempotent: a second SetEnabled(true) is a no-op.
-        let again =
-            mutate_mcp_entry(path.clone(), "brave-search", McpEntryMutation::SetEnabled(true))
-                .await
-                .unwrap();
+        let again = mutate_mcp_entry(
+            path.clone(),
+            "brave-search",
+            McpEntryMutation::SetEnabled(true),
+        )
+        .await
+        .unwrap();
         assert!(!again, "setting to the current state is a no-op");
     }
 
@@ -23984,7 +24904,11 @@ mod mcp_plugin_governance_tests {
         // mcp.json entry (so the server actually stops) while siblings survive.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mcp.json");
-        std::fs::write(&path, mcp_json_with(&[("brave-search", true), ("other", true)])).unwrap();
+        std::fs::write(
+            &path,
+            mcp_json_with(&[("brave-search", true), ("other", true)]),
+        )
+        .unwrap();
 
         let changed = mutate_mcp_entry(path.clone(), "brave-search", McpEntryMutation::Remove)
             .await
@@ -24003,9 +24927,11 @@ mod mcp_plugin_governance_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mcp.json");
         std::fs::write(&path, mcp_json_with(&[("other", true)])).unwrap();
-        assert!(!mutate_mcp_entry(path.clone(), "ghost-server", McpEntryMutation::Remove)
-            .await
-            .unwrap());
+        assert!(
+            !mutate_mcp_entry(path.clone(), "ghost-server", McpEntryMutation::Remove)
+                .await
+                .unwrap()
+        );
 
         let missing = dir.path().join("does-not-exist.json");
         assert!(
@@ -24015,41 +24941,601 @@ mod mcp_plugin_governance_tests {
             "a missing mcp.json is a no-op, not an error"
         );
     }
+}
 
-    #[test]
-    fn all_eight_builtin_apps_declare_widget_render_and_a_widget_contribution() {
-        // Migration guard (rule 3): every built-in Ryu App must declare the
-        // widget:render grant AND a contributes.widgets entry, or its widget stops
-        // rendering under the unified grant-gated promotion path. Loads the REAL
-        // embedded fixtures, not a hand-built manifest.
-        let manifests = crate::plugin_manifest::PluginManifestLoader::load();
-        let apps = [
-            "checklist",
-            "smart-intake-form",
-            "data-grid-explorer",
-            "chart-studio",
-            "decision-wizard",
-            "quest-board",
-            "worktree-diff-review",
-            "gateway-budget-dial",
-        ];
-        for id in apps {
-            let m = manifests
-                .iter()
-                .find(|m| m.id == id)
-                .unwrap_or_else(|| panic!("built-in app '{id}' must load"));
-            assert!(
-                m.permission_grants
-                    .iter()
-                    .any(|g| g == crate::sidecar::mcp::WIDGET_RENDER_GRANT),
-                "app '{id}' must declare the widget:render grant or its widget stops rendering"
-            );
-            assert!(
-                m.contributes
-                    .as_ref()
-                    .is_some_and(|c| !c.widgets.is_empty()),
-                "app '{id}' must declare a contributes.widgets entry (the promotion source of record)"
+// ── require_auth node-admittance middleware ──────────────────────────────────
+//
+// The single highest-stakes surface in this file: the `RYU_TOKEN` bearer gate
+// every protected route inherits. Driven end-to-end through a stand-in Router
+// (the `app_gate_tests` pattern) so the real `ct_eq` match, the 401 fail-closed
+// branches, and the JWT carve-out's inertness on an unbound node are all pinned.
+//
+// `registered_org()` is `None` in tests (only the network-gated
+// `register_managed_node` ever writes it), so `jwt_authorizes_org_read` returns
+// false — which is exactly the guarantee to assert: with no bound org, EVERY
+// non-token request 401s, allowlisted path or not.
+#[cfg(test)]
+mod require_auth_tests {
+    use super::require_auth;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        middleware,
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    /// A stand-in protected router wired exactly like `create_router`'s tail:
+    /// `require_auth` layered over an `Extension<Option<String>>` carrying the
+    /// expected token (the outer layer runs first, inserting the extension before
+    /// `require_auth` reads it).
+    fn router(expected: Option<&str>) -> Router {
+        Router::new()
+            .route("/x", get(|| async { "protected ok" }))
+            .route("/api/sandboxes", get(|| async { "sandboxes ok" }))
+            .layer(middleware::from_fn(require_auth))
+            .layer(axum::Extension(expected.map(str::to_owned)))
+    }
+
+    async fn get_status(expected: Option<&str>, path: &str, bearer: Option<&str>) -> StatusCode {
+        let mut builder = Request::builder().method("GET").uri(path);
+        if let Some(t) = bearer {
+            builder = builder.header("authorization", format!("Bearer {t}"));
+        }
+        router(expected)
+            .oneshot(builder.body(Body::empty()).expect("request builds"))
+            .await
+            .expect("router is infallible")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn no_configured_token_lets_everything_through() {
+        // Loopback dev: no `RYU_TOKEN` ⇒ the extension flattens to `None` ⇒ every
+        // request passes without a header. This is the local-first default.
+        assert_eq!(get_status(None, "/x", None).await, StatusCode::OK);
+        assert_eq!(get_status(None, "/x", Some("anything")).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn correct_bearer_token_is_admitted() {
+        assert_eq!(
+            get_status(Some("s3cret"), "/x", Some("s3cret")).await,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn wrong_or_absent_bearer_is_unauthorized() {
+        // Wrong token ⇒ 401.
+        assert_eq!(
+            get_status(Some("s3cret"), "/x", Some("nope")).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // No Authorization header at all ⇒ 401 (not a silent pass).
+        assert_eq!(
+            get_status(Some("s3cret"), "/x", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // A prefix/near-miss must not satisfy the constant-time compare.
+        assert_eq!(
+            get_status(Some("s3cret"), "/x", Some("s3cre")).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn jwt_carveout_is_inert_on_an_unbound_node() {
+        // The allowlisted GET route is reachable by JWT ONLY on an org-bound node.
+        // In tests the node is unbound (`registered_org() == None`), so the carve-out
+        // never fires and the route stays strictly RYU_TOKEN-gated — a tokenless
+        // request 401s exactly like every other route.
+        assert_eq!(
+            get_status(Some("s3cret"), "/api/sandboxes", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // A bogus bearer on the allowlisted path is still 401 (JWT verify fails
+        // closed with no bound org to authorize against).
+        assert_eq!(
+            get_status(Some("s3cret"), "/api/sandboxes", Some("not-a-jwt")).await,
+            StatusCode::UNAUTHORIZED
+        );
+        // The RYU_TOKEN itself still admits the allowlisted route unchanged.
+        assert_eq!(
+            get_status(Some("s3cret"), "/api/sandboxes", Some("s3cret")).await,
+            StatusCode::OK
+        );
+    }
+}
+
+// ── Pure request/parse/format helpers ────────────────────────────────────────
+//
+// The thin, DB-less logic scattered through the god module: constant-time token
+// compare, header extraction, error-envelope framing, webhook freshness/dedup,
+// slug/version/URL helpers, and the unbound-node invariants of the tenancy
+// resolvers. Each is a real branch (security carve-out, replay guard, fail-open
+// default), not an assertion pad.
+#[cfg(test)]
+mod pure_helper_tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderName, HeaderValue};
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                k.parse::<HeaderName>().unwrap(),
+                HeaderValue::from_str(v).unwrap(),
             );
         }
+        h
+    }
+
+    fn caller(user_id: &str, org: Option<&str>) -> crate::identity_verify::VerifiedCaller {
+        crate::identity_verify::VerifiedCaller {
+            user_id: user_id.to_owned(),
+            email: None,
+            org_id: org.map(str::to_owned),
+            role: crate::identity_verify::OrgRole::Member,
+        }
+    }
+
+    // ── ct_eq: constant-time bearer compare ──────────────────────────────────
+    #[test]
+    fn ct_eq_matches_only_identical_strings() {
+        assert!(ct_eq("token", "token"));
+        assert!(ct_eq("", ""));
+        // Length mismatch short-circuits false (prefix is not a match).
+        assert!(!ct_eq("token", "toke"));
+        assert!(!ct_eq("toke", "token"));
+        // Same length, one differing byte.
+        assert!(!ct_eq("token", "tokeb"));
+    }
+
+    // ── path_allows_jwt_auth: the JWT carve-out allowlist ─────────────────────
+    #[test]
+    fn only_sandboxes_is_jwt_allowlisted() {
+        assert!(path_allows_jwt_auth("/api/sandboxes"));
+        // Everything else — including near neighbours and trailing-slash variants —
+        // stays strictly RYU_TOKEN-gated.
+        assert!(!path_allows_jwt_auth("/api/sandboxes/"));
+        assert!(!path_allows_jwt_auth("/api/sandboxes/123"));
+        assert!(!path_allows_jwt_auth("/api/conversations"));
+        assert!(!path_allows_jwt_auth("/"));
+        assert!(!path_allows_jwt_auth(""));
+    }
+
+    // ── header_str / header_decoded ──────────────────────────────────────────
+    #[test]
+    fn header_str_trims_and_drops_blanks() {
+        let h = headers(&[("a", "  hi  "), ("blank", "   "), ("empty", "")]);
+        assert_eq!(header_str(&h, "a").as_deref(), Some("hi"));
+        assert_eq!(header_str(&h, "blank"), None);
+        assert_eq!(header_str(&h, "empty"), None);
+        assert_eq!(header_str(&h, "absent"), None);
+    }
+
+    #[test]
+    fn header_decoded_percent_decodes_and_falls_back_on_bad_escapes() {
+        let h = headers(&[
+            ("enc", "a%40b.com"),
+            ("plain", "no-encoding"),
+            ("bad", "100%zz"),
+        ]);
+        assert_eq!(header_decoded(&h, "enc").as_deref(), Some("a@b.com"));
+        assert_eq!(header_decoded(&h, "plain").as_deref(), Some("no-encoding"));
+        // An undecodable percent sequence must not panic or drop the value — the
+        // raw string is returned verbatim.
+        assert_eq!(header_decoded(&h, "bad").as_deref(), Some("100%zz"));
+    }
+
+    // ── surface_from_headers ─────────────────────────────────────────────────
+    #[test]
+    fn surface_parses_case_insensitively_and_unknown_is_none() {
+        use crate::plugin_manifest::Surface;
+        assert_eq!(
+            surface_from_headers(&headers(&[("x-ryu-surface", "desktop")])),
+            Some(Surface::Desktop)
+        );
+        // Case-insensitive + trimmed (header_str trims first).
+        assert_eq!(
+            surface_from_headers(&headers(&[("x-ryu-surface", "  ISLAND ")])),
+            Some(Surface::Island)
+        );
+        // Unknown surface ⇒ None ("do not filter", never "filter everything out").
+        assert_eq!(
+            surface_from_headers(&headers(&[("x-ryu-surface", "toaster")])),
+            None
+        );
+        // Absent ⇒ None.
+        assert_eq!(surface_from_headers(&HeaderMap::new()), None);
+    }
+
+    // ── append_return_to_query ───────────────────────────────────────────────
+    #[test]
+    fn append_return_to_query_encodes_and_passes_through_bad_uris() {
+        let out = append_return_to_query("https://x.com/verify?code=1", "app://home?a=b");
+        // Appended as an encoded query pair, preserving the existing `code`.
+        assert!(out.starts_with("https://x.com/verify?code=1&"));
+        assert!(out.contains("return_to=app%3A%2F%2Fhome"));
+        // A non-URL input is returned unchanged rather than mangled.
+        assert_eq!(
+            append_return_to_query("not a url", "x"),
+            "not a url".to_owned()
+        );
+    }
+
+    // ── json_error ───────────────────────────────────────────────────────────
+    #[tokio::test]
+    async fn json_error_sets_status_and_escapes_body() {
+        // A message with a quote, backslash and newline must round-trip as valid
+        // JSON (the whole reason this goes through serde, not string interpolation).
+        let msg = "boom: \"x\"\\y\nz";
+        let resp = json_error(StatusCode::BAD_REQUEST, msg.to_owned());
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("application/json")
+        );
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("body is valid JSON despite control chars");
+        assert_eq!(parsed["error"], msg);
+    }
+
+    // ── download_control_result ──────────────────────────────────────────────
+    #[test]
+    fn download_control_result_maps_ok_and_missing() {
+        let (ok_status, ok_body) = download_control_result(true);
+        assert_eq!(ok_status, StatusCode::OK);
+        assert_eq!(ok_body.0, json!({ "ok": true }));
+
+        let (miss_status, miss_body) = download_control_result(false);
+        assert_eq!(miss_status, StatusCode::NOT_FOUND);
+        assert_eq!(miss_body.0["ok"], false);
+        assert_eq!(miss_body.0["error"], "unknown download id");
+    }
+
+    // ── plugin_note_frame: SSE data framing ──────────────────────────────────
+    #[test]
+    fn plugin_note_frame_is_a_well_formed_sse_event() {
+        let frame = plugin_note_frame("double-check: looks good");
+        let text = String::from_utf8(frame).expect("utf8");
+        assert!(text.starts_with("data: "));
+        assert!(text.ends_with("\n\n"));
+        let payload = text
+            .trim_start_matches("data: ")
+            .trim_end_matches("\n\n");
+        let value: serde_json::Value = serde_json::from_str(payload).expect("frame carries JSON");
+        assert_eq!(value["type"], "data-plugin_note");
+        assert_eq!(value["data"]["text"], "double-check: looks good");
+    }
+
+    // ── webhook freshness / dedup ────────────────────────────────────────────
+    fn now_secs() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn webhook_timestamp_fresh_is_lenient_when_absent_strict_when_stale() {
+        // Absent ⇒ fresh (schemes like GitHub's carry no timestamp header).
+        assert!(webhook_timestamp_fresh(&HeaderMap::new()));
+        // Present + current ⇒ fresh.
+        assert!(webhook_timestamp_fresh(&headers(&[(
+            "webhook-timestamp",
+            &now_secs().to_string()
+        )])));
+        // Present + far in the past ⇒ replay, rejected.
+        assert!(!webhook_timestamp_fresh(&headers(&[(
+            "webhook-timestamp",
+            &(now_secs() - 10_000).to_string()
+        )])));
+    }
+
+    #[test]
+    fn webhook_present_and_fresh_rejects_a_stripped_timestamp() {
+        // The replay-via-header-strip branch: the strict receiver MUST reject a
+        // delivery that carries no timestamp (Composio's HMAC signs only the body,
+        // so an absent timestamp is otherwise replayable).
+        assert!(!webhook_timestamp_present_and_fresh(&HeaderMap::new()));
+        // A present + current timestamp still passes.
+        assert!(webhook_timestamp_present_and_fresh(&headers(&[(
+            "webhook-timestamp",
+            &now_secs().to_string()
+        )])));
+        // A present but stale timestamp is rejected.
+        assert!(!webhook_timestamp_present_and_fresh(&headers(&[(
+            "webhook-timestamp",
+            &(now_secs() - 10_000).to_string()
+        )])));
+    }
+
+    #[test]
+    fn webhook_delivery_id_reads_known_spellings_and_defaults_empty() {
+        // Svix/Composio spelling wins.
+        assert_eq!(
+            webhook_delivery_id(&headers(&[("webhook-id", "svix_1")])),
+            "svix_1"
+        );
+        // GitHub spelling.
+        assert_eq!(
+            webhook_delivery_id(&headers(&[("x-github-delivery", "gh_2")])),
+            "gh_2"
+        );
+        // Generic fallback.
+        assert_eq!(
+            webhook_delivery_id(&headers(&[("x-delivery-id", "gen_3")])),
+            "gen_3"
+        );
+        // Absent ⇒ empty (the "always new / not dedupable" contract).
+        assert_eq!(webhook_delivery_id(&HeaderMap::new()), "");
+    }
+
+    // ── normalize_key / slugify_domain ───────────────────────────────────────
+    #[test]
+    fn normalize_key_collapses_and_trims_non_alphanumerics() {
+        assert_eq!(normalize_key("1password.com:events"), "1password-com-events");
+        assert_eq!(normalize_key("--Foo!!Bar--"), "foo-bar");
+        assert_eq!(normalize_key("Already-normal"), "already-normal");
+        assert_eq!(normalize_key("!!!"), "");
+    }
+
+    #[test]
+    fn slugify_domain_lowercases_and_dashes_separators() {
+        assert_eq!(slugify_domain("api.example.com"), "api-example-com");
+        assert_eq!(slugify_domain("API.Example.COM"), "api-example-com");
+        assert_eq!(slugify_domain(".leading.and.trailing."), "leading-and-trailing");
+    }
+
+    // ── apis_guru_swagger_url ────────────────────────────────────────────────
+    #[test]
+    fn apis_guru_swagger_url_prefers_the_preferred_version() {
+        let entry = json!({
+            "preferred": "2.0",
+            "versions": {
+                "1.0": { "swaggerUrl": "https://ex/1.0.json" },
+                "2.0": { "swaggerUrl": "https://ex/2.0.json" }
+            }
+        });
+        assert_eq!(
+            apis_guru_swagger_url(&entry).as_deref(),
+            Some("https://ex/2.0.json")
+        );
+    }
+
+    #[test]
+    fn apis_guru_swagger_url_falls_back_and_handles_missing() {
+        // `preferred` absent (or not a real version) ⇒ first version key.
+        let entry = json!({
+            "preferred": "nope",
+            "versions": { "1.0": { "swaggerUrl": "https://ex/1.0.json" } }
+        });
+        assert_eq!(
+            apis_guru_swagger_url(&entry).as_deref(),
+            Some("https://ex/1.0.json")
+        );
+        // No versions object ⇒ None.
+        assert_eq!(apis_guru_swagger_url(&json!({})), None);
+        // Version present but no swaggerUrl ⇒ None.
+        assert_eq!(
+            apis_guru_swagger_url(&json!({ "versions": { "1.0": {} } })),
+            None
+        );
+    }
+
+    // ── agent_version_status ─────────────────────────────────────────────────
+    #[test]
+    fn agent_version_status_compares_semver_and_degrades_gracefully() {
+        assert_eq!(
+            agent_version_status(Some("1.0.0"), Some("1.2.0")),
+            Some("behind_latest")
+        );
+        assert_eq!(
+            agent_version_status(Some("2.0.0"), Some("1.9.9")),
+            Some("current")
+        );
+        assert_eq!(
+            agent_version_status(Some("1.0.0"), Some("1.0.0")),
+            Some("current")
+        );
+        // One side known ⇒ "unknown"; neither ⇒ None.
+        assert_eq!(agent_version_status(Some("1.0.0"), None), Some("unknown"));
+        assert_eq!(agent_version_status(None, Some("1.0.0")), Some("unknown"));
+        assert_eq!(agent_version_status(None, None), None);
+        // Unparseable version ⇒ None (never a bogus comparison).
+        assert_eq!(agent_version_status(Some("not-semver"), Some("1.0.0")), None);
+    }
+
+    // ── npx_package_of ───────────────────────────────────────────────────────
+    #[test]
+    fn npx_package_of_skips_flags_env_and_separator() {
+        assert_eq!(
+            npx_package_of("npx -y @scope/pkg").as_deref(),
+            Some("@scope/pkg")
+        );
+        assert_eq!(
+            npx_package_of("FOO=bar npx --yes some-pkg arg1").as_deref(),
+            Some("some-pkg")
+        );
+        // `pkg@1.2.3` ⇒ the version is stripped by npm_package_name.
+        assert_eq!(npx_package_of("npx -- pkg@1.2.3").as_deref(), Some("pkg"));
+        // Non-npx command ⇒ None (uvx self-fetch / managed binary).
+        assert_eq!(npx_package_of("uvx some-tool"), None);
+        // npx with only flags and no package ⇒ None.
+        assert_eq!(npx_package_of("npx -y"), None);
+    }
+
+    // ── composio_toolkit_categories ──────────────────────────────────────────
+    #[test]
+    fn composio_categories_accept_strings_and_objects() {
+        // Bare strings.
+        assert_eq!(
+            composio_toolkit_categories(&json!(["email", "crm"])),
+            vec!["email".to_owned(), "crm".to_owned()]
+        );
+        // Objects: name > slug > id priority; unknown-shaped entries dropped.
+        assert_eq!(
+            composio_toolkit_categories(&json!([
+                { "name": "Email" },
+                { "slug": "sales" },
+                { "id": "misc" },
+                { "unrelated": "x" }
+            ])),
+            vec!["Email".to_owned(), "sales".to_owned(), "misc".to_owned()]
+        );
+        // Non-array ⇒ empty.
+        assert!(composio_toolkit_categories(&json!({ "a": 1 })).is_empty());
+        assert!(composio_toolkit_categories(&json!("nope")).is_empty());
+    }
+
+    // ── buyer_bearer_from_headers ────────────────────────────────────────────
+    #[test]
+    fn buyer_bearer_prefers_dedicated_header_then_authorization() {
+        // Dedicated header wins even when Authorization is also present.
+        let both = headers(&[
+            ("x-ryu-buyer-token", "  buyer-tok  "),
+            ("authorization", "Bearer auth-tok"),
+        ]);
+        assert_eq!(buyer_bearer_from_headers(&both).as_deref(), Some("buyer-tok"));
+
+        // Only Authorization ⇒ strip the Bearer prefix.
+        let auth_only = headers(&[("authorization", "Bearer auth-tok")]);
+        assert_eq!(
+            buyer_bearer_from_headers(&auth_only).as_deref(),
+            Some("auth-tok")
+        );
+
+        // A blank dedicated header falls through to Authorization.
+        let blank_buyer = headers(&[
+            ("x-ryu-buyer-token", "   "),
+            ("authorization", "Bearer auth-tok"),
+        ]);
+        assert_eq!(
+            buyer_bearer_from_headers(&blank_buyer).as_deref(),
+            Some("auth-tok")
+        );
+
+        // Neither ⇒ None; a non-Bearer Authorization ⇒ None.
+        assert_eq!(buyer_bearer_from_headers(&HeaderMap::new()), None);
+        assert_eq!(
+            buyer_bearer_from_headers(&headers(&[("authorization", "Basic abc")])),
+            None
+        );
+    }
+
+    // ── parse_catalog_kind ───────────────────────────────────────────────────
+    #[test]
+    fn parse_catalog_kind_accepts_known_kinds_case_insensitively() {
+        use crate::catalog_source::CatalogKind;
+        assert_eq!(parse_catalog_kind(Some("model")), Ok(CatalogKind::Model));
+        // FromStr lowercases, so an upper-case token still resolves.
+        assert_eq!(parse_catalog_kind(Some("PLUGIN")), Ok(CatalogKind::Plugin));
+        assert_eq!(parse_catalog_kind(Some("knowledge")), Ok(CatalogKind::Knowledge));
+        // Unknown ⇒ 400; absent ⇒ 400.
+        assert_eq!(parse_catalog_kind(Some("bogus")), Err(StatusCode::BAD_REQUEST));
+        assert_eq!(parse_catalog_kind(None), Err(StatusCode::BAD_REQUEST));
+    }
+
+    // ── urlencoding_simple ───────────────────────────────────────────────────
+    #[test]
+    fn urlencoding_simple_encodes_reserved_and_multibyte() {
+        assert_eq!(urlencoding_simple("a b"), "a%20b");
+        // RFC3986 unreserved chars pass through untouched.
+        assert_eq!(urlencoding_simple("A-z0_9.~"), "A-z0_9.~");
+        assert_eq!(urlencoding_simple("/"), "%2F");
+        // Multibyte UTF-8 is percent-encoded byte-by-byte (é = C3 A9).
+        assert_eq!(urlencoding_simple("é"), "%C3%A9");
+    }
+
+    // ── plugin_entry_matches_query ───────────────────────────────────────────
+    #[test]
+    fn plugin_entry_matches_query_searches_name_desc_id() {
+        let entry = json!({
+            "name": "Weather",
+            "description": "Forecasts and radar",
+            "id": "com.acme.weather"
+        });
+        // Empty needle ⇒ always matches (no filter).
+        assert!(plugin_entry_matches_query(&entry, ""));
+        // Name (entry is lowercased internally; callers pass a lowercased needle).
+        assert!(plugin_entry_matches_query(&entry, "weath"));
+        // Description.
+        assert!(plugin_entry_matches_query(&entry, "radar"));
+        // Id.
+        assert!(plugin_entry_matches_query(&entry, "acme"));
+        // No hit anywhere.
+        assert!(!plugin_entry_matches_query(&entry, "zzz"));
+    }
+
+    // ── app_space_name ───────────────────────────────────────────────────────
+    #[test]
+    fn app_space_name_maps_only_the_seeded_apps() {
+        assert_eq!(app_space_name("com.ryu.canvas"), Some("Canvas"));
+        assert_eq!(app_space_name("com.ryu.whiteboard"), Some("Whiteboard"));
+        assert_eq!(app_space_name("com.ryu.meetings"), None);
+        assert_eq!(app_space_name(""), None);
+    }
+
+    // ── unbound-node tenancy invariants ──────────────────────────────────────
+    //
+    // In tests `node_org_id()` is `None` (no managed-node registration), so these
+    // resolvers MUST reproduce the pre-ACL local-first behavior byte-for-byte:
+    // one principal, no restriction, the `local` sentinel. This is the regression
+    // guard that stops the ACL from locking a personal install out of its own data.
+    #[test]
+    fn caller_tenancy_is_unattributed_on_an_unbound_node() {
+        assert_eq!(
+            caller_tenancy(&Some(caller("alice", Some("org1")))),
+            conversations::Tenancy::Unattributed
+        );
+        assert_eq!(caller_tenancy(&None), conversations::Tenancy::Unattributed);
+    }
+
+    #[test]
+    fn memory_owner_is_local_sentinel_on_an_unbound_node() {
+        assert_eq!(
+            memory_owner_user_id(&Some(caller("alice", Some("org1")))),
+            memory::LOCAL_USER
+        );
+        assert_eq!(memory_owner_user_id(&None), memory::LOCAL_USER);
+    }
+
+    #[test]
+    fn memory_access_is_unrestricted_on_an_unbound_node() {
+        // Even a user-scoped fact owned by someone else is readable — an unbound
+        // node has exactly one principal, so the per-user gate does not apply.
+        let entry: memory::LongTermEntry = serde_json::from_value(json!({
+            "id": "m1",
+            "content": "secret",
+            "created_at": 0,
+            "scope": "user",
+            "owner_user_id": "someone-else"
+        }))
+        .expect("entry deserializes");
+        assert!(memory_access_ok(&None, &entry));
+        assert!(memory_access_ok(&Some(caller("alice", Some("org1"))), &entry));
+    }
+
+    #[test]
+    fn tenancy_filter_args_extracts_ids_and_flags_unbound() {
+        // The caller's ids are always extracted; the bool is the node-bound flag,
+        // which is false in tests.
+        let (uid, org, bound) = tenancy_filter_args(&Some(caller("alice", Some("org1"))));
+        assert_eq!(uid.as_deref(), Some("alice"));
+        assert_eq!(org.as_deref(), Some("org1"));
+        assert!(!bound);
+
+        let (uid, org, bound) = tenancy_filter_args(&None);
+        assert_eq!(uid, None);
+        assert_eq!(org, None);
+        assert!(!bound);
     }
 }

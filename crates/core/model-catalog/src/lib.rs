@@ -40,8 +40,8 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result};
 use serde::Serialize;
 
-use ryu_model_format::ModelFormat;
 use device::{estimate_fit, human_bytes, DeviceInfo};
+use ryu_model_format::ModelFormat;
 
 /// The bundled default chat/embed/reranker model repos, as `(id, weight_url)`.
 /// Used only to derive a Hugging Face repo fallback for origin-less pre-existing
@@ -97,10 +97,9 @@ pub fn set_global_host(host: Arc<dyn ModelCatalogHost>) {
 /// Fetch the installed host. Strict by design: panics if [`set_global_host`] was
 /// never called, rather than silently defaulting to a wrong data dir.
 fn host() -> Arc<dyn ModelCatalogHost> {
-    host_slot()
-        .get()
-        .cloned()
-        .expect("ryu-model-catalog host not installed — call ryu_model_catalog::set_global_host at boot")
+    host_slot().get().cloned().expect(
+        "ryu-model-catalog host not installed — call ryu_model_catalog::set_global_host at boot",
+    )
 }
 
 /// The active Ryu data dir, via the installed host.
@@ -119,7 +118,8 @@ pub(crate) fn ensure_test_host() {
     static TMP: OnceLock<PathBuf> = OnceLock::new();
     let dir = TMP
         .get_or_init(|| {
-            let d = std::env::temp_dir().join(format!("ryu-model-catalog-test-{}", std::process::id()));
+            let d =
+                std::env::temp_dir().join(format!("ryu-model-catalog-test-{}", std::process::id()));
             let _ = std::fs::create_dir_all(&d);
             d
         })
@@ -1092,9 +1092,7 @@ pub fn uninstall_file(repo_id: &str, filename: &str) -> Result<()> {
     // The filename becomes the on-disk stem; reject traversal before touching FS.
     validate_gguf_filename(filename)?;
     let stem = local_stem(filename);
-    let path = ryu_dir()
-        .join("models")
-        .join(format!("{stem}.gguf"));
+    let path = ryu_dir().join("models").join(format!("{stem}.gguf"));
     if path.exists() {
         std::fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
     }
@@ -2090,5 +2088,726 @@ mod tests {
             Some("unsloth/gemma-4-E2B-it-GGUF")
         );
         assert_eq!(repo_from_hf_url("https://example.com/foo.gguf"), None);
+    }
+
+    // ── HfEndpoint / sort / sanitizers (pure) ────────────────────────────────
+
+    #[test]
+    fn hf_endpoint_variants_and_cache_tag() {
+        let hf = HfEndpoint::huggingface();
+        assert_eq!(hf.api_base, "https://huggingface.co/api");
+        assert_eq!(hf.host, "https://huggingface.co");
+        assert_eq!(hf.cache_tag(), "huggingface.co");
+
+        let ms = HfEndpoint::modelscope();
+        assert!(ms.api_base.contains("modelscope"));
+        assert_eq!(ms.cache_tag(), "modelscope.cn");
+
+        // A base ending in `/api/v2/` keeps the api root and strips to the host.
+        let custom = HfEndpoint::from_base_url("https://mirror.example.com/api/v2/");
+        assert_eq!(custom.api_base, "https://mirror.example.com/api/v2");
+        assert_eq!(custom.host, "https://mirror.example.com");
+
+        // A base with no `/api` segment reuses itself as the content host.
+        let plain = HfEndpoint::from_base_url("https://plain.example.com");
+        assert_eq!(plain.api_base, "https://plain.example.com");
+        assert_eq!(plain.host, "https://plain.example.com");
+
+        assert_eq!(HfEndpoint::default(), HfEndpoint::huggingface());
+    }
+
+    #[test]
+    fn catalog_sort_parse_and_hf_key() {
+        assert!(matches!(CatalogSort::parse("downloads"), CatalogSort::Downloads));
+        assert!(matches!(CatalogSort::parse("likes"), CatalogSort::Likes));
+        assert!(matches!(CatalogSort::parse("recent"), CatalogSort::Recent));
+        assert!(matches!(
+            CatalogSort::parse("lastModified"),
+            CatalogSort::Recent
+        ));
+        assert!(matches!(CatalogSort::parse("anything"), CatalogSort::Trending));
+        assert_eq!(CatalogSort::Trending.hf_key(), "trendingScore");
+        assert_eq!(CatalogSort::Downloads.hf_key(), "downloads");
+        assert_eq!(CatalogSort::Likes.hf_key(), "likes");
+        assert_eq!(CatalogSort::Recent.hf_key(), "lastModified");
+    }
+
+    #[test]
+    fn diffusion_pipeline_tag_detection() {
+        assert!(is_diffusion_pipeline_tag("text-to-image"));
+        assert!(is_diffusion_pipeline_tag("image-to-image"));
+        assert!(is_diffusion_pipeline_tag("text-to-video"));
+        assert!(!is_diffusion_pipeline_tag("text-generation"));
+    }
+
+    #[test]
+    fn gguf_fields_extracts_or_defaults() {
+        let block = Some(HfGguf {
+            context_length: Some(8192),
+            architecture: Some("llama".into()),
+            total: Some(7_000_000_000),
+        });
+        assert_eq!(
+            gguf_fields(&block),
+            (Some(8192), Some("llama".to_string()), Some(7_000_000_000))
+        );
+        assert_eq!(gguf_fields(&None), (None, None, None));
+    }
+
+    #[test]
+    fn sanitize_task_and_author_reject_unsafe() {
+        assert_eq!(sanitize_task(" text-generation "), Some("text-generation".into()));
+        assert_eq!(sanitize_task("speech2text"), Some("speech2text".into()));
+        assert_eq!(sanitize_task(""), None);
+        assert_eq!(sanitize_task("Has Spaces!"), None);
+        assert_eq!(sanitize_task("inject&param=1"), None);
+
+        assert_eq!(sanitize_author(" google "), Some("google".into()));
+        assert_eq!(sanitize_author("mlx-community"), Some("mlx-community".into()));
+        assert_eq!(sanitize_author(""), None);
+        assert_eq!(sanitize_author("bad/author"), None);
+    }
+
+    #[test]
+    fn parse_next_cursor_extracts_only_the_cursor() {
+        use reqwest::header::HeaderValue;
+        let link = HeaderValue::from_str(
+            "<https://huggingface.co/api/models?sort=x&cursor=ABC123&limit=20>; rel=\"next\"",
+        )
+        .unwrap();
+        assert_eq!(parse_next_cursor(Some(&link)).as_deref(), Some("ABC123"));
+        assert_eq!(parse_next_cursor(None), None);
+        let only_prev =
+            HeaderValue::from_str("<https://x/api/models?cursor=Z>; rel=\"prev\"").unwrap();
+        assert_eq!(parse_next_cursor(Some(&only_prev)), None);
+    }
+
+    // ── snapshot fit + snapshot path validation ──────────────────────────────
+
+    fn dev(ram: Option<u64>, vram: Option<u64>) -> device::DeviceInfo {
+        device::DeviceInfo {
+            total_ram_bytes: ram,
+            ram_human: String::new(),
+            vram_bytes: vram,
+            vram_human: String::new(),
+            gpu_name: None,
+            unified_memory: false,
+            os: "test".into(),
+        }
+    }
+
+    #[test]
+    fn snapshot_fit_conservative_labels() {
+        let gib = 1024u64 * 1024 * 1024;
+        let big = dev(Some(64 * gib), Some(48 * gib));
+
+        // Unknown total → "size unknown".
+        let (fit, label) = snapshot_fit(None, &big);
+        assert_eq!(fit, "unknown");
+        assert!(label.to_lowercase().contains("unknown"));
+
+        // A tiny repo fits comfortably → great/ok passes through verbatim.
+        let (fit, _) = snapshot_fit(Some(gib), &big);
+        assert!(fit == "great" || fit == "ok");
+
+        // A repo far larger than any memory → conservative too_big copy.
+        let (fit, label) = snapshot_fit(Some(500 * gib), &big);
+        assert_eq!(fit, "too_big");
+        assert!(label.contains("may not fit"));
+
+        // No device memory at all → estimate is Unknown → conservative unknown.
+        let (fit, _) = snapshot_fit(Some(gib), &dev(None, None));
+        assert_eq!(fit, "unknown");
+    }
+
+    #[test]
+    fn validate_snapshot_path_guards_traversal() {
+        use ModelFormat::Safetensors as ST;
+        assert!(validate_snapshot_path("model.safetensors", ST).is_ok());
+        assert!(validate_snapshot_path("sub/dir/model.safetensors", ST).is_ok());
+        assert!(validate_snapshot_path("config.json", ST).is_ok());
+        assert!(validate_snapshot_path("tokenizer.model", ST).is_ok());
+
+        assert!(validate_snapshot_path("../evil.safetensors", ST).is_err());
+        assert!(validate_snapshot_path("dir\\evil.safetensors", ST).is_err());
+        assert!(validate_snapshot_path("/abs/model.safetensors", ST).is_err());
+        assert!(validate_snapshot_path(".hidden/model.safetensors", ST).is_err());
+        assert!(validate_snapshot_path("weights.gguf", ST).is_err()); // wrong ext
+        assert!(validate_snapshot_path("", ST).is_err());
+    }
+
+    // ── in-process cache ─────────────────────────────────────────────────────
+
+    #[test]
+    fn cache_put_get_invalidate() {
+        let key = "list:unit-test-cache-unique-1".to_string();
+        assert!(cache_get(&key, LIST_TTL).is_none());
+        cache_put(key.clone(), serde_json::json!({ "a": 1 }));
+        assert_eq!(cache_get(&key, LIST_TTL), Some(serde_json::json!({ "a": 1 })));
+        cache_invalidate("unit-test-cache-unique-1");
+        assert!(cache_get(&key, LIST_TTL).is_none());
+    }
+
+    #[test]
+    fn gguf_download_spec_shape() {
+        ensure_test_host();
+        let spec = gguf_download_spec("my-stem", "https://hf/x.gguf", "deadbeef", "a label");
+        assert_eq!(spec.url, "https://hf/x.gguf");
+        assert_eq!(spec.sha256.as_deref(), Some("deadbeef"));
+        assert!(spec
+            .dest
+            .ends_with(std::path::Path::new("models/my-stem.gguf")));
+        assert_eq!(spec.version_record.as_ref().unwrap().store_key, "gguf:my-stem");
+        // Empty sha → no checksum on the spec.
+        let spec2 = gguf_download_spec("s2", "u", "", "l");
+        assert!(spec2.sha256.is_none());
+    }
+
+    // ── on-disk stems / uninstall / default-download provenance ──────────────
+
+    #[test]
+    fn on_disk_stems_exclude_mmproj_and_models_dir_has() {
+        ensure_test_host();
+        let stem = "ondisk-unique-f1";
+        let models = ryu_dir().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(models.join(format!("{stem}.gguf")), b"x").unwrap();
+        std::fs::write(models.join(format!("{stem}.mmproj.gguf")), b"p").unwrap();
+
+        assert!(models_dir_has(stem));
+        assert!(!models_dir_has("ondisk-nope-f1"));
+
+        let stems = on_disk_gguf_stems();
+        assert!(stems.contains(&stem.to_string()));
+        assert!(
+            !stems.contains(&format!("{stem}.mmproj")),
+            "the vision adapter must never surface as its own stem"
+        );
+
+        let _ = std::fs::remove_file(models.join(format!("{stem}.gguf")));
+        let _ = std::fs::remove_file(models.join(format!("{stem}.mmproj.gguf")));
+    }
+
+    #[test]
+    fn record_default_download_derives_repo_and_filename() {
+        ensure_test_host();
+        let stem = "default-dl-unique-d1";
+        let models = ryu_dir().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(models.join(format!("{stem}.gguf")), b"x").unwrap();
+        record_default_download(
+            stem,
+            "https://huggingface.co/acme/default-dl-repo/resolve/main/default-dl-unique-d1.gguf?download=true",
+            Some(1),
+            None,
+        )
+        .unwrap();
+        // Provenance resolves the on-disk stem back to the derived HF repo.
+        assert_eq!(
+            installed::repo_for_stem(stem).as_deref(),
+            Some("acme/default-dl-repo")
+        );
+
+        let _ = installed::remove(stem);
+        let _ = std::fs::remove_file(models.join(format!("{stem}.gguf")));
+    }
+
+    #[tokio::test]
+    async fn installed_only_search_lists_local_cards_offline() {
+        ensure_test_host();
+        let stem = "installed-only-unique-g1";
+        let models = ryu_dir().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(models.join(format!("{stem}.gguf")), b"x").unwrap();
+        installed::record(installed::InstalledModel {
+            repo_id: "acme/installed-only-repo".into(),
+            filename: format!("{stem}.gguf"),
+            stem: stem.into(),
+            size_bytes: Some(1),
+            format: ModelFormat::Gguf,
+            mmproj: None,
+            finetune_base: None,
+        })
+        .unwrap();
+
+        // Point enrichment at a server that 404s every info request, so each card
+        // keeps its local values (proves the offline fallback path).
+        let addr = spawn_http(|_path| (404, vec![], b"nope".to_vec()));
+        let endpoint = HfEndpoint {
+            api_base: format!("http://{addr}/api"),
+            host: format!("http://{addr}"),
+        };
+        let page = search_models(
+            &test_client(),
+            &endpoint,
+            "",
+            CatalogSort::Trending,
+            ModelFormat::Gguf,
+            20,
+            true,
+            "",
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(page.next_cursor.is_none());
+        let card = page
+            .models
+            .iter()
+            .find(|c| c.id == "acme/installed-only-repo")
+            .expect("the recorded install shows as a card");
+        assert!(card.installed);
+
+        let _ = installed::remove(stem);
+        let _ = std::fs::remove_file(models.join(format!("{stem}.gguf")));
+    }
+
+    #[tokio::test]
+    async fn uninstall_file_removes_weights_adapter_and_record() {
+        ensure_test_host();
+        let stem = "uninstall-unique-e1";
+        let filename = "uninstall-unique-e1.gguf";
+        let models = ryu_dir().join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        let path = models.join(format!("{stem}.gguf"));
+        std::fs::write(&path, b"x").unwrap();
+        let mm = installed::mmproj_file_path(stem);
+        std::fs::write(&mm, b"p").unwrap();
+        installed::record(installed::InstalledModel {
+            repo_id: "acme/uninst".into(),
+            filename: filename.into(),
+            stem: stem.into(),
+            size_bytes: Some(1),
+            format: ModelFormat::Gguf,
+            mmproj: Some("mmproj-f16.gguf".into()),
+            finetune_base: None,
+        })
+        .unwrap();
+
+        uninstall_file("acme/uninst", filename).unwrap();
+        assert!(!path.exists(), "weights removed");
+        assert!(!mm.exists(), "bound vision adapter removed too");
+        assert!(installed::load_present().iter().all(|m| m.stem != stem));
+
+        // Idempotent: uninstalling an already-gone file still succeeds.
+        uninstall_file("acme/uninst", filename).unwrap();
+        // Path traversal is rejected before touching the filesystem.
+        assert!(uninstall_file("acme/uninst", "../evil.gguf").is_err());
+    }
+
+    // ── HTTP-backed search / detail / install via a std-only mock server ─────
+
+    /// A reqwest client that ignores any ambient proxy (localhost must be direct).
+    fn test_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
+    /// Spawn a throwaway HTTP/1.1 server on an ephemeral loopback port. `handler`
+    /// maps a request path to `(status, extra_headers, body)`. Zero dependencies —
+    /// good enough to exercise the catalog's fetch/parse logic hermetically.
+    fn spawn_http<F>(handler: F) -> String
+    where
+        F: Fn(&str) -> (u16, Vec<(&'static str, String)>, Vec<u8>) + Send + Sync + 'static,
+    {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handler = std::sync::Arc::new(handler);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let handler = handler.clone();
+                std::thread::spawn(move || {
+                    let mut data = Vec::new();
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                data.extend_from_slice(&buf[..n]);
+                                if data.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                            Err(_) => return,
+                        }
+                    }
+                    let req = String::from_utf8_lossy(&data);
+                    let path = req
+                        .lines()
+                        .next()
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .unwrap_or("/")
+                        .to_string();
+                    let (status, headers, body) = handler(&path);
+                    let mut resp = format!(
+                        "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\nConnection: close\r\n",
+                        body.len()
+                    );
+                    for (k, v) in headers {
+                        resp.push_str(&format!("{k}: {v}\r\n"));
+                    }
+                    resp.push_str("\r\n");
+                    let _ = stream.write_all(resp.as_bytes());
+                    let _ = stream.write_all(&body);
+                    let _ = stream.flush();
+                });
+            }
+        });
+        format!("127.0.0.1:{}", addr.port())
+    }
+
+    /// Install a downloads host (once) so `DownloadCenter` can write under a temp dir.
+    fn ensure_downloads_host() {
+        use std::sync::Once;
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            struct DlHost {
+                dir: PathBuf,
+            }
+            impl ryu_downloads::DownloadsHost for DlHost {
+                fn ryu_dir(&self) -> PathBuf {
+                    self.dir.clone()
+                }
+                fn installed_checksum(&self, _store_key: &str) -> Option<String> {
+                    None
+                }
+                fn record_version(&self, _store_key: &str, _version: &str, _checksum: &str) {}
+                fn authorize(
+                    &self,
+                    _url: &str,
+                    req: reqwest::RequestBuilder,
+                ) -> reqwest::RequestBuilder {
+                    req
+                }
+            }
+            let dir =
+                std::env::temp_dir().join(format!("ryu-mc-downloads-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            ryu_downloads::set_global_host(std::sync::Arc::new(DlHost { dir }));
+        });
+    }
+
+    #[tokio::test]
+    async fn search_models_parses_list_and_next_cursor() {
+        ensure_test_host();
+        let addr = spawn_http(|path| {
+            if path.contains("/api/models?") {
+                let body = serde_json::json!([
+                    {
+                        "id": "unsloth/gemma-3-GGUF",
+                        "downloads": 10, "likes": 2,
+                        "tags": ["text-generation"],
+                        "pipeline_tag": "text-generation",
+                        "gated": false,
+                        "createdAt": "2024-01-01", "lastModified": "2024-02-01",
+                        "gguf": { "context_length": 8192, "architecture": "gemma3", "total": 4_000_000_000u64 }
+                    },
+                    {
+                        "id": "flux-org/flux-GGUF",
+                        "pipeline_tag": "text-to-image",
+                        "gated": "manual",
+                        "gguf": { "architecture": "flux" }
+                    }
+                ])
+                .to_string()
+                .into_bytes();
+                (
+                    200,
+                    vec![(
+                        "Link",
+                        "<https://huggingface.co/api/models?cursor=NEXT123&x=1>; rel=\"next\""
+                            .to_string(),
+                    )],
+                    body,
+                )
+            } else {
+                (404, vec![], b"no".to_vec())
+            }
+        });
+        let endpoint = HfEndpoint {
+            api_base: format!("http://{addr}/api"),
+            host: format!("http://{addr}"),
+        };
+        let page = search_models(
+            &test_client(),
+            &endpoint,
+            "gemma",
+            CatalogSort::Trending,
+            ModelFormat::Gguf,
+            20,
+            false,
+            "",
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(page.models.len(), 2);
+        assert_eq!(page.next_cursor.as_deref(), Some("NEXT123"));
+
+        let g = &page.models[0];
+        assert_eq!(g.id, "unsloth/gemma-3-GGUF");
+        assert_eq!(g.author, "unsloth");
+        assert_eq!(g.name, "gemma-3-GGUF");
+        assert_eq!(g.context_length, Some(8192));
+        assert_eq!(g.architecture.as_deref(), Some("gemma3"));
+        assert_eq!(g.downloads, 10);
+        // The TestHost supports no engines → shown but flagged incompatible.
+        assert!(!g.compatible);
+        assert!(g.needs_engine.is_some());
+        assert!(!g.diffusion);
+
+        let f = &page.models[1];
+        assert!(f.diffusion, "flux pipeline tag ⇒ diffusion");
+        assert!(f.gated, "\"manual\" gated string normalizes to true");
+    }
+
+    #[tokio::test]
+    async fn model_detail_builds_gguf_file_list_and_readme() {
+        ensure_test_host();
+        let addr = spawn_http(|path| {
+            if path.contains("/tree/") {
+                let body = serde_json::json!([
+                    { "path": "model-Q4_K_M.gguf", "size": 0, "lfs": { "oid": "abc", "size": 4000 } },
+                    { "path": "model-Q8_0.gguf", "size": 8000 },
+                    { "path": "mmproj-f16.gguf", "size": 500 },
+                    { "path": "README.md", "size": 10 }
+                ])
+                .to_string()
+                .into_bytes();
+                (200, vec![], body)
+            } else if path.contains("/raw/") && path.contains("README") {
+                (200, vec![], b"---\nlicense: mit\n---\n# Hello\nBody text".to_vec())
+            } else if path.contains("/api/models/") {
+                let body = serde_json::json!({
+                    "id": "acme/widget-detail-model",
+                    "downloads": 5, "likes": 1,
+                    "tags": ["text-generation"],
+                    "pipeline_tag": "text-generation",
+                    "gated": false,
+                    "createdAt": "2024-01-01", "lastModified": "2024-02-01",
+                    "gguf": { "context_length": 4096, "architecture": "llama", "total": 4_000_000_000u64 },
+                    "siblings": [
+                        { "rfilename": "model-Q4_K_M.gguf" },
+                        { "rfilename": "model-Q8_0.gguf" },
+                        { "rfilename": "mmproj-f16.gguf" },
+                        { "rfilename": "README.md" }
+                    ]
+                })
+                .to_string()
+                .into_bytes();
+                (200, vec![], body)
+            } else {
+                (404, vec![], b"no".to_vec())
+            }
+        });
+        let endpoint = HfEndpoint {
+            api_base: format!("http://{addr}/api"),
+            host: format!("http://{addr}"),
+        };
+        let detail = model_detail(
+            &test_client(),
+            &endpoint,
+            "acme/widget-detail-model",
+            ModelFormat::Gguf,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(detail.card.id, "acme/widget-detail-model");
+        assert_eq!(detail.card.context_length, Some(4096));
+        assert!(detail.vision, "repo ships an mmproj projector ⇒ vision");
+        // mmproj + README excluded → exactly the two selectable quants.
+        assert_eq!(detail.files.len(), 2);
+        // Smallest-first (both un-installed): Q4 (4000) before Q8 (8000).
+        assert_eq!(detail.files[0].filename, "model-Q4_K_M.gguf");
+        assert_eq!(detail.files[0].quant.as_deref(), Some("Q4_K_M"));
+        assert_eq!(detail.files[0].size_bytes, Some(4000));
+        assert_eq!(detail.files[0].sha256.as_deref(), Some("abc"));
+        assert_eq!(detail.files[1].filename, "model-Q8_0.gguf");
+        assert_eq!(detail.files[1].sha256, None);
+        // Front-matter stripped from the README.
+        assert_eq!(detail.readme.as_deref(), Some("# Hello\nBody text"));
+        // GGUF leaves the snapshot repo-level fields empty.
+        assert!(detail.repo_fit.is_empty());
+        assert!(detail.repo_size_bytes.is_none());
+    }
+
+    #[tokio::test]
+    async fn cached_json_wrappers_serve_from_cache() {
+        ensure_test_host();
+        let addr = spawn_http(|path| {
+            if path.contains("/api/models?") {
+                (200, vec![], b"[]".to_vec())
+            } else {
+                (404, vec![], b"no".to_vec())
+            }
+        });
+        let endpoint = HfEndpoint {
+            api_base: format!("http://{addr}/api"),
+            host: format!("http://{addr}"),
+        };
+        let first = search_models_json(
+            &test_client(),
+            &endpoint,
+            "cache-probe-unique-h1",
+            CatalogSort::Recent,
+            ModelFormat::Gguf,
+            20,
+            false,
+            "",
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(first.get("models").is_some());
+        // Second call with the same key is served from the in-process cache.
+        let second = search_models_json(
+            &test_client(),
+            &endpoint,
+            "cache-probe-unique-h1",
+            CatalogSort::Recent,
+            ModelFormat::Gguf,
+            20,
+            false,
+            "",
+            "",
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn install_from_descriptor_downloads_and_records() {
+        ensure_test_host();
+        ensure_downloads_host();
+        let addr = spawn_http(|path| {
+            if path.contains("/resolve/") {
+                (200, vec![], b"FAKE-GGUF-DESCRIPTOR-BYTES".to_vec())
+            } else {
+                (404, vec![], b"no".to_vec())
+            }
+        });
+        let dc = ryu_downloads::DownloadCenter::with_default_client();
+        std::fs::create_dir_all(ryu_dir().join("models")).unwrap();
+        let stem = "install-desc-unique-c1";
+        let url = format!("http://{addr}/acme/desc-repo/resolve/main/{stem}.gguf");
+        let res = install_from_descriptor(
+            "acme/desc-repo",
+            &url,
+            None,
+            &format!("{stem}.gguf"),
+            &dc,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.repo_id, "acme/desc-repo");
+        assert_eq!(res.filename, format!("{stem}.gguf"));
+        assert!(ryu_dir()
+            .join("models")
+            .join(format!("{stem}.gguf"))
+            .exists());
+        assert!(installed::load_present().iter().any(|m| m.stem == stem));
+
+        let _ = installed::remove(stem);
+        let _ = std::fs::remove_file(ryu_dir().join("models").join(format!("{stem}.gguf")));
+    }
+
+    #[tokio::test]
+    async fn install_file_downloads_from_repo_and_records() {
+        ensure_test_host();
+        ensure_downloads_host();
+        let addr = spawn_http(|path| {
+            if path.contains("/tree/") {
+                (200, vec![], b"[]".to_vec()) // empty tree → no sha, no mmproj
+            } else if path.contains("/resolve/") {
+                (200, vec![], b"FAKE-GGUF-INSTALL-FILE".to_vec())
+            } else {
+                (404, vec![], b"no".to_vec())
+            }
+        });
+        let endpoint = HfEndpoint {
+            api_base: format!("http://{addr}/api"),
+            host: format!("http://{addr}"),
+        };
+        let dc = ryu_downloads::DownloadCenter::with_default_client();
+        std::fs::create_dir_all(ryu_dir().join("models")).unwrap();
+        let stem = "install-file-unique-c2";
+        let res = install_file(
+            &test_client(),
+            &endpoint,
+            "acme/inst-file-c2",
+            &format!("{stem}.gguf"),
+            &dc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.repo_id, "acme/inst-file-c2");
+        assert!(installed::load_present().iter().any(|m| m.stem == stem));
+
+        // Path-traversal + bad-repo guards fire before any network.
+        assert!(install_file(&test_client(), &endpoint, "acme/x", "../evil.gguf", &dc)
+            .await
+            .is_err());
+        assert!(install_file(&test_client(), &endpoint, "no-slash", "ok.gguf", &dc)
+            .await
+            .is_err());
+
+        let _ = installed::remove(stem);
+        let _ = std::fs::remove_file(ryu_dir().join("models").join(format!("{stem}.gguf")));
+    }
+
+    #[tokio::test]
+    async fn install_snapshot_mirrors_tree_and_records() {
+        ensure_test_host();
+        ensure_downloads_host();
+        let addr = spawn_http(|path| {
+            if path.contains("/tree/") {
+                let body = serde_json::json!([
+                    { "path": "model.safetensors", "size": 100 },
+                    { "path": "config.json", "size": 20 }
+                ])
+                .to_string()
+                .into_bytes();
+                (200, vec![], body)
+            } else if path.contains("/resolve/") {
+                (200, vec![], b"SNAPSHOT-SHARD-BYTES".to_vec())
+            } else {
+                (404, vec![], b"no".to_vec())
+            }
+        });
+        let endpoint = HfEndpoint {
+            api_base: format!("http://{addr}/api"),
+            host: format!("http://{addr}"),
+        };
+        let dc = ryu_downloads::DownloadCenter::with_default_client();
+        let repo = "acme/snap-c3";
+        let res = install_snapshot(&test_client(), &endpoint, repo, ModelFormat::Safetensors, &dc)
+            .await
+            .unwrap();
+        let slug = installed::slugify_repo(repo);
+        assert_eq!(res.repo_id, repo);
+        assert!(installed::load_present().iter().any(|m| m.stem == slug));
+        assert!(installed::model_snapshot_dir(&slug)
+            .join("model.safetensors")
+            .exists());
+
+        // A single-file format is rejected by install_snapshot.
+        assert!(
+            install_snapshot(&test_client(), &endpoint, repo, ModelFormat::Gguf, &dc)
+                .await
+                .is_err()
+        );
+
+        let _ = installed::remove(&slug);
+        let _ = std::fs::remove_dir_all(installed::model_snapshot_dir(&slug));
     }
 }

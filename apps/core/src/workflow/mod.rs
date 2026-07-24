@@ -23,9 +23,9 @@
 //! restart and resumes from the last completed node. See [`durable`] for the
 //! engine seam and [`executor`] for the loop/HITL semantics.
 
+pub mod channel_send;
 pub mod delegation;
 pub mod durable;
-pub mod channel_send;
 pub mod executor;
 pub mod notify_user;
 pub mod store;

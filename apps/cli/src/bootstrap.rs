@@ -79,7 +79,11 @@ pub fn is_local(url: &str) -> bool {
 /// Strip scheme and any path, leaving `host:port` for `--bind=`.
 fn host_port(url: &str) -> String {
     let after_scheme = url.split("://").nth(1).unwrap_or(url);
-    after_scheme.split('/').next().unwrap_or(after_scheme).to_string()
+    after_scheme
+        .split('/')
+        .next()
+        .unwrap_or(after_scheme)
+        .to_string()
 }
 
 /// Probe `GET {url}/api/health`; `true` on a 2xx within the timeout.
@@ -94,7 +98,10 @@ async fn is_healthy(url: &str, token: Option<&str>) -> bool {
     if let Some(t) = token {
         req = req.header("Authorization", format!("Bearer {t}"));
     }
-    req.send().await.map(|r| r.status().is_success()).unwrap_or(false)
+    req.send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 /// Auto-detect an already-installed binary: `$RYU_*_BIN` → `~/.ryu/bin` → `$PATH`.
@@ -171,7 +178,11 @@ fn spawn_core(bin: &Path, bind: &str) -> anyhow::Result<()> {
     use std::process::{Command, Stdio};
 
     let (out, err) = match home_dir().map(|h| h.join(".ryu").join("ryu-core.log")) {
-        Some(log) => match std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        Some(log) => match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+        {
             Ok(f) => match f.try_clone() {
                 Ok(f2) => (Stdio::from(f), Stdio::from(f2)),
                 Err(_) => (Stdio::null(), Stdio::null()),

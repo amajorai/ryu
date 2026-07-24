@@ -85,6 +85,24 @@ export const APPROVED_ROLE = "user";
 export const ADMIN_ROLE = "admin";
 
 /**
+ * True when the user is an admin. Two independent designations both count:
+ *   - the `ADMIN_EMAILS` allowlist (the bootstrap authority; the first admin,
+ *     before any DB row is stamped), and
+ *   - the Better Auth admin-plugin `role` of ADMIN_ROLE ("admin"), delegated by
+ *     an existing admin.
+ * The env allowlist is server-only, so on the client this resolves to the role
+ * check alone. The route guard (`requireAdminSession`) and every client-side
+ * admin affordance MUST use this single predicate — otherwise a role-only admin
+ * is shown an Admin entry that the guard then bounces back to /dashboard.
+ */
+export function isAdmin(user: {
+	role?: string | null;
+	email?: string | null;
+}): boolean {
+	return user.role === ADMIN_ROLE || isAdminEmail(user.email);
+}
+
+/**
  * True when this user is still in the queue. Admins (env allowlist) never are,
  * and nobody is when the waitlist is bypassed (no admins configured — see
  * `isWaitlistBypassed`), which also unblocks accounts stamped `WAITLIST_ROLE`

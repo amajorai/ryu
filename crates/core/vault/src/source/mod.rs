@@ -469,9 +469,10 @@ mod tests {
             });
             assert!(flow.flow_id.starts_with("flow_"));
 
-            backend.poll(&flow.flow_id).await.unwrap_or_else(|e| {
-                panic!("selectable backend `{id}` bails on poll: {e}")
-            });
+            backend
+                .poll(&flow.flow_id)
+                .await
+                .unwrap_or_else(|e| panic!("selectable backend `{id}` bails on poll: {e}"));
         }
     }
 

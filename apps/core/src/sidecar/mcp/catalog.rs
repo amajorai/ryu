@@ -6,8 +6,8 @@
 //!
 //! - the `RegistryTool` → [`ToolDescriptor`] ingest adapter ([`descriptor_from`]),
 //! - the built-in server inventory classification ([`classify_kind`]), which
-//!   depends on Core's concrete sidecar server modules (`apps::owns`,
-//!   `SELF_BUILD_SERVER`) and so cannot live in the crate,
+//!   depends on Core's concrete sidecar server inventory (`SELF_BUILD_SERVER`,
+//!   the built-in server list) and so cannot live in the crate,
 //! - the live, key-gated Composio fetch ([`composio_candidates`]), and
 //! - the two [`McpRegistry`] methods ([`McpRegistry::search`] /
 //!   [`McpRegistry::describe`]) that gather kernel state and delegate the pure
@@ -27,13 +27,10 @@ pub use ryu_tool_registry::{
     DescribedArg, DescribedTool, ToolDescriptor, ToolKind, ToolRanker, RANKER_PREF_KEY,
 };
 
-use super::{McpRegistry, RegistryTool};
+use super::{AppToolBackendTag, McpRegistry, RegistryTool};
 
 /// Built-in server names — their tools are classified [`ToolKind::Builtin`].
 const BUILTIN_SERVERS: &[&str] = &[
-    super::shadow::SERVER_NAME,
-    super::spider::SERVER_NAME,
-    super::exa::SERVER_NAME,
     super::sandbox::SERVER_NAME,
     super::notify_tool::SERVER_NAME,
     super::artifact_tool::SERVER_NAME,
@@ -42,7 +39,6 @@ const BUILTIN_SERVERS: &[&str] = &[
     super::threads::SERVER_NAME,
     super::delegate::SERVER_NAME,
     super::skills_tool::SERVER_NAME,
-    super::advisor::SERVER_NAME,
     super::ui_tool::SERVER_NAME,
 ];
 
@@ -57,13 +53,26 @@ pub fn classify_kind(id: &str, server: &str) -> ToolKind {
         return ToolKind::Composio;
     }
     let _ = id;
-    if server == "app" || super::apps::owns(server) {
+    if server == "app" {
         return ToolKind::App;
     }
     if server == super::SELF_BUILD_SERVER || BUILTIN_SERVERS.contains(&server) {
         return ToolKind::Builtin;
     }
     ToolKind::Mcp
+}
+
+/// Resolve a registry row's [`ToolKind`], honoring its `app_backend` tag: a
+/// `command`-tagged app tool surfaces as [`ToolKind::Command`] (so `?kind=command`
+/// selects it); every other row — including http/inline_deno/alias app tools —
+/// falls back to inventory-based [`classify_kind`]. This is the ONE place the
+/// deliberate command-vs-App asymmetry lives; `classify_kind`'s signature (and its
+/// tests) are untouched.
+fn kind_for(tool: &RegistryTool) -> ToolKind {
+    if tool.app_backend == Some(AppToolBackendTag::Command) {
+        return ToolKind::Command;
+    }
+    classify_kind(&tool.id, &tool.server)
 }
 
 /// Build a descriptor from a registry tool (`Option<String>` → `String`). The
@@ -76,7 +85,7 @@ fn descriptor_from(tool: &RegistryTool) -> ToolDescriptor {
         id: tool.id.clone(),
         name: tool.name.clone(),
         description: tool.description.clone().unwrap_or_default(),
-        kind: classify_kind(&tool.id, &tool.server),
+        kind: kind_for(tool),
         arg_names,
         arg_descriptions,
         score: None,
@@ -101,8 +110,12 @@ impl McpRegistry {
         kind: Option<ToolKind>,
         limit: usize,
     ) -> Vec<ToolDescriptor> {
-        let mut builtins: Vec<ToolDescriptor> =
-            self.list_all_tools().await.iter().map(descriptor_from).collect();
+        let mut builtins: Vec<ToolDescriptor> = self
+            .list_all_tools()
+            .await
+            .iter()
+            .map(descriptor_from)
+            .collect();
         // Core self-API tools (agents driving Ryu itself): OpenAPI-derived, always
         // present, merged HERE so they rank through the same BM25/semantic pass as
         // everything else rather than being appended after truncation. Kind-filtered
@@ -148,12 +161,16 @@ impl McpRegistry {
             return crate::self_api::describe(id);
         }
 
-        let tool = self.list_all_tools().await.into_iter().find(|t| t.id == id)?;
+        let tool = self
+            .list_all_tools()
+            .await
+            .into_iter()
+            .find(|t| t.id == id)?;
         Some(ryu_tool_registry::describe_from_parts(
             &tool.id,
             &tool.name,
             tool.description.as_deref().unwrap_or_default(),
-            classify_kind(&tool.id, &tool.server),
+            kind_for(&tool),
             tool.input_schema.as_ref(),
         ))
     }
@@ -224,7 +241,7 @@ mod tests {
     #[test]
     fn classify_kind_by_server() {
         assert_eq!(
-            classify_kind("exa__search", super::super::exa::SERVER_NAME),
+            classify_kind("sandbox__run", super::super::sandbox::SERVER_NAME),
             ToolKind::Builtin
         );
         assert_eq!(classify_kind("foo__bar", "foo"), ToolKind::Mcp);
@@ -232,9 +249,11 @@ mod tests {
             classify_kind("composio__slack", "composio"),
             ToolKind::Composio
         );
+        // `shadow`/`advisor` are now declarative `app`-registered plugin tools
+        // (server "app"), not built-in servers — they classify as App like exa.
         assert_eq!(classify_kind("app__thing", "app"), ToolKind::App);
         assert_eq!(
-            classify_kind("spider__crawl", super::super::spider::SERVER_NAME),
+            classify_kind("skills__load", super::super::skills_tool::SERVER_NAME),
             ToolKind::Builtin
         );
     }
@@ -245,6 +264,45 @@ mod tests {
         let d = descriptor_from(&tool);
         assert_eq!(d.description, "");
         assert_eq!(d.kind, ToolKind::Mcp);
+    }
+
+    #[tokio::test]
+    async fn command_tagged_tool_classifies_and_searches_as_command() {
+        let reg = McpRegistry::empty();
+        // A command-tagged app tool …
+        reg.register_app_tool_tagged(
+            "app__exa_search".into(),
+            "exa_search".into(),
+            Some("Search the web".into()),
+            Some(AppToolBackendTag::Command),
+        );
+        // … and an http-tagged one (which must stay classified as App).
+        reg.register_app_tool_tagged(
+            "app__other".into(),
+            "other".into(),
+            None,
+            Some(AppToolBackendTag::Http),
+        );
+
+        // descriptor_from → Command, and search(kind=Command) selects it.
+        let results = reg.search("exa_search", Some(ToolKind::Command), 25).await;
+        assert!(
+            results
+                .iter()
+                .any(|d| d.id == "app__exa_search" && d.kind == ToolKind::Command),
+            "command tool must be surfaced + selected by kind=command"
+        );
+        // The http app tool is NOT a command (asymmetry) — absent from kind=Command.
+        assert!(
+            results.iter().all(|d| d.id != "app__other"),
+            "http app tool must not appear under kind=command"
+        );
+
+        // describe honors the tag on both sites.
+        let described = reg.describe("app__exa_search").await.expect("described");
+        assert_eq!(described.kind, ToolKind::Command);
+        let http_desc = reg.describe("app__other").await.expect("described");
+        assert_eq!(http_desc.kind, ToolKind::App);
     }
 
     #[tokio::test]

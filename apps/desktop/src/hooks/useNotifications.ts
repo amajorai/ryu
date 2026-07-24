@@ -1,14 +1,14 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { sileo } from "sileo";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
+import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
-	ackNotification,
 	type AppNotification,
+	ackNotification,
 	listNotifications,
 	markNotificationRead,
 } from "@/src/lib/api/notifications.ts";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 export interface UseNotificationsResult {
@@ -16,9 +16,9 @@ export interface UseNotificationsResult {
 	acking: string | null;
 	error: string | null;
 	loading: boolean;
+	markRead: (id: string) => Promise<void>;
 	/** The signed-in user id used for the feed, or null when signed out. */
 	meId: string | null;
-	markRead: (id: string) => Promise<void>;
 	notifications: AppNotification[];
 }
 
@@ -50,7 +50,7 @@ export function useNotifications(): UseNotificationsResult {
 
 	const onError = useCallback((error: unknown) => {
 		const message = error instanceof Error ? error.message : "request failed";
-		sileo.error({ title: "Notifications", description: message });
+		toast.error({ title: "Notifications", description: message });
 	}, []);
 
 	const readMutation = useMutation({

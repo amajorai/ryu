@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	listMeetings,
@@ -47,7 +47,7 @@ export function useMeetingStream(): void {
 			applyEvent(event);
 			switch (event.type) {
 				case "detected":
-					sileo.info({
+					toast.info({
 						title: "Meeting detected",
 						description: `${event.title} — open Meetings to start notes.`,
 					});

@@ -66,9 +66,14 @@ impl PolicyAlert {
             return Self::wallet_empty(&d.key, enforcement_label(d.action), tier, org_id);
         }
         match d.scope {
-            BudgetScope::Session => {
-                Self::session(&d.key, enforcement_label(d.action), tier, d.used, d.limit, org_id)
-            }
+            BudgetScope::Session => Self::session(
+                &d.key,
+                enforcement_label(d.action),
+                tier,
+                d.used,
+                d.limit,
+                org_id,
+            ),
             BudgetScope::User | BudgetScope::Agent => Self::budget(
                 scope_label(d.scope),
                 &d.key,
@@ -91,7 +96,16 @@ impl PolicyAlert {
         limit: u64,
         org_id: &str,
     ) -> Self {
-        Self::new("budget", enforcement, tier, scope, subject_key, used, limit, org_id)
+        Self::new(
+            "budget",
+            enforcement,
+            tier,
+            scope,
+            subject_key,
+            used,
+            limit,
+            org_id,
+        )
     }
 
     /// A per-session running-cap alert.
@@ -116,7 +130,12 @@ impl PolicyAlert {
     }
 
     /// An org wallet-empty alert.
-    pub fn wallet_empty(subject_key: &str, enforcement: &str, tier: AlertTier, org_id: &str) -> Self {
+    pub fn wallet_empty(
+        subject_key: &str,
+        enforcement: &str,
+        tier: AlertTier,
+        org_id: &str,
+    ) -> Self {
         Self::new(
             "wallet_empty",
             enforcement,
@@ -225,7 +244,8 @@ mod tests {
 
     #[test]
     fn round_trips_base64_header() {
-        let alert = PolicyAlert::budget("user", "u123", "stop", AlertTier::Email, 1200, 1000, "org1");
+        let alert =
+            PolicyAlert::budget("user", "u123", "stop", AlertTier::Email, 1200, 1000, "org1");
         let header = alert.to_header();
         let decoded = PolicyAlert::from_header(&header).expect("header should decode");
         assert_eq!(alert, decoded);
@@ -274,8 +294,10 @@ mod tests {
     #[test]
     fn firewall_block_error_response_carries_header() {
         let alert = PolicyAlert::firewall("block", AlertTier::Fanout, "org1");
-        let err =
-            crate::error::GatewayError::FirewallBlocked("blocked: ssn".to_string(), Some(alert.clone()));
+        let err = crate::error::GatewayError::FirewallBlocked(
+            "blocked: ssn".to_string(),
+            Some(alert.clone()),
+        );
         let resp = err.into_response();
         assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
         let header = resp

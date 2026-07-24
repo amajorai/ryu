@@ -42,6 +42,37 @@ export interface CapabilityReport {
 }
 
 /**
+ * Normalize a raw capability report so every field the UI dereferences is always
+ * present. Mirrors the defensive `toAgent`/`toTool` convention the rest of this
+ * domain uses: Core may omit `overrides` (or nested flags) when empty, and the
+ * capabilities panel reads `report.detected[key]` / `report.overrides[key]`
+ * directly — an absent nested object would throw "Cannot read properties of
+ * undefined" and crash the whole agent-edit page. Defaulting here (rather than
+ * guarding at every deref) keeps the boundary the single source of truth.
+ */
+function toReport(raw: CapabilityReport): CapabilityReport {
+	const r = (raw ?? {}) as Partial<CapabilityReport>;
+	const detected = (r.detected ?? {}) as Partial<DetectedCaps>;
+	const overrides = (r.overrides ?? {}) as CapabilityOverrides;
+	return {
+		detected: {
+			reasoning: detected.reasoning ?? false,
+			tools: detected.tools ?? false,
+			vision: detected.vision ?? false,
+		},
+		overrides: {
+			reasoning: overrides.reasoning ?? null,
+			tools: overrides.tools ?? null,
+			vision: overrides.vision ?? null,
+		},
+		reasoning: r.reasoning ?? false,
+		source: r.source ?? "default",
+		tools: r.tools ?? false,
+		vision: r.vision ?? false,
+	};
+}
+
+/**
  * Fetch an agent's effective capabilities. Cheap to call on agent selection —
  * Core caches ACP probes per agent and a GGUF read only touches the file header.
  */
@@ -54,9 +85,11 @@ export async function fetchAgentCapabilities(
 		modelId && modelId.trim().length > 0
 			? `?model=${encodeURIComponent(modelId)}`
 			: "";
-	return await request<CapabilityReport>(
-		target,
-		`/api/agents/${encodeURIComponent(agentId)}/capabilities${query}`
+	return toReport(
+		await request<CapabilityReport>(
+			target,
+			`/api/agents/${encodeURIComponent(agentId)}/capabilities${query}`
+		)
 	);
 }
 
@@ -69,9 +102,11 @@ export async function setAgentCapabilities(
 	agentId: string,
 	overrides: CapabilityOverrides
 ): Promise<CapabilityReport> {
-	return await request<CapabilityReport>(
-		target,
-		`/api/agents/${encodeURIComponent(agentId)}/capabilities`,
-		{ method: "PUT", body: overrides }
+	return toReport(
+		await request<CapabilityReport>(
+			target,
+			`/api/agents/${encodeURIComponent(agentId)}/capabilities`,
+			{ method: "PUT", body: overrides }
+		)
 	);
 }

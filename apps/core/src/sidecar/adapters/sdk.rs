@@ -436,6 +436,50 @@ mod tests {
         assert_eq!(sdk_app_package("sdk:"), Some(""));
     }
 
+    // ── Health check (loopback) ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn health_check_true_on_2xx_false_on_5xx() {
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use axum::Router;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral loopback");
+        let port = listener.local_addr().unwrap().port();
+        let app = Router::new()
+            .route("/health", get(|| async { "OK" }))
+            .route(
+                "/broken/health",
+                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            );
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                })
+                .await
+                .expect("stub server runs");
+        });
+
+        let base = format!("http://127.0.0.1:{port}");
+        // 2xx on /health → healthy. A trailing slash is trimmed by the helper.
+        assert!(sdk_health_check(&base).await);
+        assert!(sdk_health_check(&format!("{base}/")).await);
+        // 5xx → not healthy.
+        assert!(!sdk_health_check(&format!("{base}/broken")).await);
+
+        let _ = tx.send(());
+    }
+
+    #[tokio::test]
+    async fn health_check_false_when_unreachable() {
+        // Nothing is listening → the request fails and health is false (no panic).
+        assert!(!sdk_health_check("http://127.0.0.1:1").await);
+    }
+
     #[test]
     fn sdk_entry_spawn_cmd_matches_standalone_fn() {
         let entry = SdkAppEntry::new("sdk:test", "Test App", "test-sdk-app");

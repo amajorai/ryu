@@ -470,6 +470,37 @@ fn inject_ext_env(env: &mut BTreeMap<String, String>, plugin_id: &str, token: &s
         .or_insert_with(crate::sidecar::cli_shims::core_port_string);
 }
 
+/// Inject the Shadow API bearer (`SHADOW_API_TOKEN`) so a sidecar that dials the
+/// device-local Shadow directly (`ryu-clips`, `ryu-meetings` — they read
+/// `RYU_SHADOW_URL` themselves) can pass Shadow's bearer gate
+/// (`apps/shadow/src/server.rs`: everything except `/health` requires it). The
+/// value is the SAME read-or-create token `ShadowProcess::start` injects into
+/// Shadow itself ([`crate::sidecar::tools::shadow::ensure_api_token`] /
+/// `api_token`), so spawn and clients always agree. An operator-exported
+/// `SHADOW_API_TOKEN` is inherited by the child anyway (these spawn paths layer
+/// over Core's env) and `api_token()` prefers it too, so explicit wins.
+///
+/// Only called on the INHERIT-env spawn paths (Binary/Local/Python). The node
+/// extension host spawns with a minimal clean env precisely so third-party JS
+/// cannot read Core's secrets — the Shadow token (full screen history) must not
+/// ride into that lane.
+fn inject_shadow_env(env: &mut BTreeMap<String, String>) {
+    if env.contains_key("SHADOW_API_TOKEN") {
+        return;
+    }
+    match crate::sidecar::tools::shadow::api_token()
+        .ok_or_else(|| anyhow::anyhow!("no token resolved"))
+        .or_else(|_| crate::sidecar::tools::shadow::ensure_api_token())
+    {
+        Ok(token) => {
+            env.insert("SHADOW_API_TOKEN".to_owned(), token);
+        }
+        Err(e) => tracing::warn!(
+            "manifest sidecar: could not prepare the Shadow API token (direct Shadow calls will fail closed): {e}"
+        ),
+    }
+}
+
 /// This plugin's DECLARED capability edges (`requires.capabilities` names), read
 /// from the installed manifest — the set the capability CLI shims generate
 /// convenience aliases for. Empty when the plugin declares none (the `ryu-cap`
@@ -585,13 +616,30 @@ async fn screen_https(url: &str) -> anyhow::Result<()> {
 /// Download (checksum-verified, idempotent) the binary — raw executable or archive
 /// — into its versioned install dir, extract if archived, make the executable
 /// runnable, and return the path to run.
+///
+/// **Integrity gate (fail-closed):** a Community-tier plugin's binary sidecar MUST
+/// declare a non-empty `sha256` — an arbitrary https URL with no checksum is
+/// unverifiable native code, so the spawn is refused, mirroring how
+/// [`prepare_node_backend`] refuses a `backend_sha256` mismatch. Core-tier
+/// (first-party built-in) manifests keep the historical optional-checksum
+/// behavior — they are compiled into this binary and reviewed in-repo.
 async fn ensure_binary(
+    plugin_id: &str,
     bin: &BinarySpec,
     plugin_dir: &Path,
     downloads: &crate::downloads::DownloadCenter,
 ) -> anyhow::Result<PathBuf> {
     let dir = version_dir(plugin_dir, bin);
     let sha = bin.sha256.clone().filter(|s| !s.is_empty());
+    let community = crate::plugins::builtins::tier_for(plugin_id)
+        == crate::plugin_manifest::PluginTier::Community;
+    if community && sha.is_none() {
+        return Err(anyhow::anyhow!(
+            "binary sidecar for community plugin '{plugin_id}' declares no sha256 for '{}'; \
+             refusing to download/run an unverifiable binary (add a sha256 to the manifest)",
+            bin.url
+        ));
+    }
 
     let exe = match &bin.archive {
         // ── Raw executable ────────────────────────────────────────────────────
@@ -619,9 +667,10 @@ async fn ensure_binary(
             let root = dir.join("root");
             // `binary_name` is required + validated for archives; unwrap is safe
             // post-validation but guard anyway (fail-closed, no panic).
-            let binary_name = bin.binary_name.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("archive sidecar is missing 'binary_name'")
-            })?;
+            let binary_name = bin
+                .binary_name
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("archive sidecar is missing 'binary_name'"))?;
             let exe = root.join(binary_name);
             // Idempotency: once extracted, reuse it — re-reading a multi-hundred-MB
             // archive on every start is not worth it. The checksum guarantee is
@@ -699,6 +748,202 @@ async fn make_executable(path: &Path) {
     }
 }
 
+/// Best-effort fetch of a release asset's sibling `<url>.sha256` (the release
+/// workflow emits one next to every published binary, format `<hex>  <filename>`).
+/// Returns the 64-char hex digest for `DownloadCenter` to verify against, or `None`
+/// when the checksum is absent/unreachable/malformed — the caller then downloads
+/// unverified with a warning. Only invoked in release builds (behind the same gate as
+/// the download it guards), so `reqwest` here never runs in dev.
+#[cfg(not(debug_assertions))]
+async fn fetch_release_sha256(url: &str) -> Option<String> {
+    let sha_url = format!("{url}.sha256");
+    if screen_https(&sha_url).await.is_err() {
+        return None;
+    }
+    let body = reqwest::get(&sha_url)
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    // The checksum file is `<hex>  <filename>`; take the first whitespace token and
+    // accept it only when it is a well-formed SHA-256 (64 hex chars).
+    let hex = body.split_whitespace().next()?;
+    if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Some(hex.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// Download-on-enable for a `Local`-kind managed sidecar (the apps-store app bins:
+/// `ryu-mail`, `ryu-meetings`, …). A `Local` sidecar declares only a bare
+/// `command` and assumes the binary is already on the host — historically the
+/// **desktop** prefetched all app bins into `~/.ryu/bin` at boot, unconditionally,
+/// for every app whether enabled or not. This ties the binary to the app lifecycle
+/// instead: the bin is fetched the first time its app is enabled (or, for a `lazy`
+/// sidecar, first woken), so a disabled app costs nothing and an uninstall can
+/// remove it (see `remove_local_sidecar_binaries` on the uninstall path).
+///
+/// Resolution order (mirrors how the child is later spawned + how Core resolves a
+/// bin elsewhere — env override, then `~/.ryu/bin`):
+///   1. `command_env` (e.g. `RYU_MAIL_BIN`) pointing at an existing file → use it
+///      verbatim (a user- or dev-managed binary; `bun dev` sets these, which is
+///      also why the download below is release-only — dev never pulls release bins).
+///   2. `~/.ryu/bin/<command>[.exe]` already present → use it (installed earlier).
+///   3. Otherwise, in a release build, download
+///      `<base>/<command>-<os>-<arch>[.exe]` from the release hub into
+///      `~/.ryu/bin/<command>[.exe]` and use that. `<base>` defaults to this repo's
+///      `releases/latest/download` and is overridable via `RYU_SIDECAR_RELEASE_BASE`
+///      (mirrors the ghost/shadow `RYU_*_RELEASE_URL` seam). The `<os>-<arch>` slug
+///      is `update::platform_tag()`, byte-identical to the release workflow's asset
+///      suffix (`macos-aarch64` / `linux-x86_64` / `windows-x86_64`).
+///
+/// Best-effort: any failure returns the originally-resolved program unchanged so the
+/// spawn proceeds and fails loudly exactly as it did before this hook existed (a
+/// manifest sidecar is optional and never aborts boot). Idempotent via the
+/// `dest.exists()` skip, so enable + boot-reconcile + lazy-wake all converge without
+/// re-downloading.
+///
+/// Integrity: verified best-effort against the sibling `<asset>.sha256` the release
+/// publishes (see `fetch_release_sha256`) — present ⇒ `DownloadCenter` fails the
+/// transfer on a mismatch; absent ⇒ download proceeds unverified with a warning
+/// (first-party bins over https, same posture as the old desktop prefetch).
+async fn ensure_local_sidecar_present(
+    resolved_program: String,
+    command: &str,
+    downloads: &crate::downloads::DownloadCenter,
+) -> String {
+    // 1. An env override (or any resolved program) that points at a real file wins.
+    if std::path::Path::new(&resolved_program).exists() {
+        return resolved_program;
+    }
+
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let dest = crate::sidecar::download_manager::bin_dir().join(format!("{command}{ext}"));
+    // Version marker written next to the bin (`ryu-mail.version`) recording the Core
+    // version that installed it — the single release train keeps Core + every app bin
+    // in lockstep, so a marker that doesn't match the running Core means a self-update
+    // left an older bin behind and it must be re-fetched.
+    let marker = dest.with_extension("version");
+    let current = crate::update::current_version();
+
+    // 2. Already installed under ~/.ryu/bin AND stamped with the running Core's
+    //    version — reuse it. A missing or mismatched marker is treated as absent so a
+    //    post-update stale bin is replaced (mirrors the desktop installer's
+    //    `installed_version_matches` staleness check the old prefetch relied on).
+    if dest.exists()
+        && tokio::fs::read_to_string(&marker)
+            .await
+            .ok()
+            .is_some_and(|s| s.trim() == current)
+    {
+        return dest.to_string_lossy().into_owned();
+    }
+
+    // 3. Fetch it — release builds only. In a debug build the bins are owned by
+    //    turbo (`bun dev`) and resolved via `RYU_*_BIN`/PATH, so never auto-download
+    //    a release artifact over a locally-built one; fall through to the bare
+    //    command and let the spawn surface a missing-binary error as it always has.
+    #[cfg(not(debug_assertions))]
+    {
+        let base = std::env::var("RYU_SIDECAR_RELEASE_BASE").unwrap_or_else(|| {
+            format!(
+                "https://github.com/{}/releases/latest/download",
+                crate::update::RYU_REPO
+            )
+        });
+        let asset = format!("{command}-{}{ext}", crate::update::platform_tag());
+        let url = format!("{base}/{asset}");
+        if let Err(e) = screen_https(&url).await {
+            tracing::warn!("app sidecar '{command}': refusing download url {url}: {e}");
+            return resolved_program;
+        }
+        // Integrity: verify against the sibling `<asset>.sha256` the release publishes.
+        // Best-effort — a missing/unreadable checksum downloads unverified (warned),
+        // matching the old desktop prefetch's warn-and-continue posture; when present,
+        // DownloadCenter fails the transfer on a mismatch.
+        let sha256 = fetch_release_sha256(&url).await;
+        if sha256.is_none() {
+            tracing::warn!(
+                "app sidecar '{command}': no .sha256 published for {asset}; downloading unverified"
+            );
+        }
+        match downloads
+            .download_blocking(crate::downloads::DownloadSpec {
+                kind: crate::downloads::DownloadKind::Other,
+                label: format!("app sidecar: {command}"),
+                url: url.clone(),
+                dest: dest.clone(),
+                sha256,
+                version_record: None,
+            })
+            .await
+        {
+            Ok(path) => {
+                make_executable(&path).await;
+                // Stamp the version so a later Core self-update re-fetches a stale bin.
+                let _ = tokio::fs::write(&marker, &current).await;
+                return path.to_string_lossy().into_owned();
+            }
+            Err(e) => {
+                tracing::warn!("app sidecar '{command}': download from {url} failed: {e}");
+            }
+        }
+    }
+
+    resolved_program
+}
+
+/// Remove the `~/.ryu/bin` binaries of a manifest's `Local`-kind sidecars — the
+/// uninstall counterpart to [`ensure_local_sidecar_present`]. Called only from the
+/// **uninstall** path (never plain disable, which keeps the bin so a re-enable is
+/// instant), after the process is already stopped. Best-effort: a failed removal
+/// warns and is otherwise ignored (leftover bytes are harmless and re-verified on
+/// the next enable). A `command_env`-overridden bin is left alone — that path points
+/// at a user/dev-managed file Core did not install and must not delete. `Binary`-kind
+/// sidecars are skipped here: their bytes live under `<plugin_dir>/bin` and are
+/// removed when the plugin directory is torn down.
+pub(crate) async fn remove_local_sidecar_binaries(manifest: &crate::plugin_manifest::PluginManifest) {
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    for spec in &manifest.sidecars {
+        let SidecarProcess::Local(local) = &spec.process else {
+            continue;
+        };
+        // Respect an env override — that binary is not ours to remove.
+        let env_override = local
+            .command_env
+            .as_ref()
+            .and_then(|k| std::env::var(k).ok())
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+        if env_override.is_some() {
+            continue;
+        }
+        let dest =
+            crate::sidecar::download_manager::bin_dir().join(format!("{}{ext}", local.command));
+        // Drop the version marker alongside the bin (best-effort; harmless if absent).
+        let _ = tokio::fs::remove_file(dest.with_extension("version")).await;
+        if !dest.exists() {
+            continue;
+        }
+        match tokio::fs::remove_file(&dest).await {
+            Ok(()) => tracing::info!(
+                plugin = %manifest.id,
+                "uninstall: removed app sidecar binary {}",
+                dest.display()
+            ),
+            Err(e) => tracing::warn!(
+                plugin = %manifest.id,
+                "uninstall: failed to remove app sidecar binary {}: {e}",
+                dest.display()
+            ),
+        }
+    }
+}
+
 /// Spawn a program (absolute path) with owned args + env layered on the inherited
 /// environment, storing the child in `handle`.
 async fn spawn(
@@ -753,17 +998,17 @@ impl Sidecar for ManifestSidecar {
             record_native_permissions(&name, &plugin_id);
             match &spec.process {
                 SidecarProcess::Binary(bin) => {
-                    let exe = ensure_binary(bin, &plugin_dir, &downloads).await?;
+                    let exe = ensure_binary(&plugin_id, bin, &plugin_dir, &downloads).await?;
                     // Layer the reserved ext-loader env over the manifest's own env
                     // (applied last so a manifest can't override the injected secret).
                     let mut env = bin.env.clone();
                     inject_ext_env(&mut env, &plugin_id, &ext_token);
+                    inject_shadow_env(&mut env);
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
                     spawn(&handle, &exe.to_string_lossy(), &bin.args, &env).await?;
                 }
                 SidecarProcess::Local(local) => {
-                    // A binary already on the host (a sibling Ryu ships, e.g.
-                    // `ryu-mail`) — spawn directly, no download. An optional
+                    // A sibling-Ryu binary (e.g. `ryu-mail`). An optional
                     // `command_env` (e.g. RYU_MAIL_BIN) overrides the program path.
                     let program = local
                         .command_env
@@ -772,6 +1017,12 @@ impl Sidecar for ManifestSidecar {
                         .map(|s| s.trim().to_owned())
                         .filter(|s| !s.is_empty())
                         .unwrap_or_else(|| local.command.clone());
+                    // Download-on-enable: fetch the bin into `~/.ryu/bin` on first
+                    // enable/wake if it isn't already present (release builds only;
+                    // dev resolves it via RYU_*_BIN/PATH). Ties the binary to the app
+                    // lifecycle instead of the desktop's old blanket boot-prefetch.
+                    let program =
+                        ensure_local_sidecar_present(program, &local.command, &downloads).await;
                     let mut env = local.env.clone();
                     // Tell the child which port to bind, profile-shifted, so it binds
                     // the SAME port Core health-checks + proxies to (effective_port).
@@ -782,6 +1033,7 @@ impl Sidecar for ManifestSidecar {
                         );
                     }
                     inject_ext_env(&mut env, &plugin_id, &ext_token);
+                    inject_shadow_env(&mut env);
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
                     spawn(&handle, &program, &local.args, &env).await?;
                 }
@@ -791,10 +1043,9 @@ impl Sidecar for ManifestSidecar {
                     // per-sidecar dir so two python sidecars in one plugin don't share
                     // a venv.
                     let dir = plugin_dir.join("runtime").join(&spec.name);
-                    let python =
-                        crate::sidecar::external_runtime::provision(rt, &dir, &downloads)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("python provisioning failed: {e}"))?;
+                    let python = crate::sidecar::external_runtime::provision(rt, &dir, &downloads)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("python provisioning failed: {e}"))?;
                     let args = vec!["-m".to_owned(), rt.entry.clone()];
                     // Layer the manifest-declared env, expanding `${RYU_DIR}` so a
                     // runtime can target Core-owned cache/output paths portably.
@@ -814,6 +1065,7 @@ impl Sidecar for ManifestSidecar {
                         );
                     }
                     inject_ext_env(&mut env, &plugin_id, &ext_token);
+                    inject_shadow_env(&mut env);
                     inject_cap_shims(&mut env, &plugin_id, &plugin_dir).await;
                     spawn(&handle, &python.to_string_lossy(), &args, &env).await?;
                 }
@@ -1006,9 +1258,32 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn ensure_binary_refuses_community_sidecar_without_sha256() {
+        // A Community-tier plugin (anything not in CORE_PLUGINS) with a Binary
+        // sidecar and no sha256 must fail closed BEFORE any network/disk work.
+        let SidecarProcess::Binary(bin) = &binary_spec().process else {
+            panic!("binary_spec is a Binary process");
+        };
+        assert!(bin.sha256.is_none());
+        let downloads = crate::downloads::DownloadCenter::with_default_client();
+        let err = ensure_binary(
+            "com.example.community-tool",
+            bin,
+            Path::new("/nonexistent/plugins/com.example.community-tool"),
+            &downloads,
+        )
+        .await
+        .expect_err("must refuse an unverifiable community binary");
+        assert!(err.to_string().contains("no sha256"), "got: {err}");
+    }
+
     #[test]
     fn namespaced_name_joins_plugin_and_local() {
-        assert_eq!(namespaced_name("com.acme.tool", "engine"), "com.acme.tool/engine");
+        assert_eq!(
+            namespaced_name("com.acme.tool", "engine"),
+            "com.acme.tool/engine"
+        );
     }
 
     /// The `provides_provider` block a bridge manifest ships (see
@@ -1065,7 +1340,10 @@ mod tests {
     #[test]
     fn health_url_is_loopback() {
         assert_eq!(health_url(9099, "/health"), "http://127.0.0.1:9099/health");
-        assert_eq!(health_url(8080, "/v1/ping"), "http://127.0.0.1:8080/v1/ping");
+        assert_eq!(
+            health_url(8080, "/v1/ping"),
+            "http://127.0.0.1:8080/v1/ping"
+        );
     }
 
     #[test]
@@ -1094,20 +1372,29 @@ mod tests {
         assert_eq!(dir, Path::new("/plugins/acme").join("bin").join("1.2.3"));
         assert_eq!(
             dir.join(url_filename(&bin.url).unwrap()),
-            Path::new("/plugins/acme").join("bin").join("1.2.3").join("my-engine")
+            Path::new("/plugins/acme")
+                .join("bin")
+                .join("1.2.3")
+                .join("my-engine")
         );
     }
 
     #[test]
     fn url_filename_rejects_url_without_filename() {
         assert!(url_filename("https://example.com/dl/").is_err());
-        assert_eq!(url_filename("https://example.com/a/b/tool").unwrap(), "tool");
+        assert_eq!(
+            url_filename("https://example.com/a/b/tool").unwrap(),
+            "tool"
+        );
     }
 
     #[test]
     fn core_tier_always_runs() {
         assert!(may_run_sidecar(PluginTier::Core, &[]));
-        assert!(may_run_sidecar(PluginTier::Core, &["unrelated:grant".to_owned()]));
+        assert!(may_run_sidecar(
+            PluginTier::Core,
+            &["unrelated:grant".to_owned()]
+        ));
     }
 
     #[test]
@@ -1181,7 +1468,10 @@ mod tests {
         dir
     }
 
-    fn manifest_with_backend(code: &str, sha: Option<&str>) -> crate::plugin_manifest::PluginManifest {
+    fn manifest_with_backend(
+        code: &str,
+        sha: Option<&str>,
+    ) -> crate::plugin_manifest::PluginManifest {
         crate::plugin_manifest::PluginManifest {
             id: "com.test.node".to_owned(),
             name: "Node".to_owned(),
@@ -1246,7 +1536,10 @@ mod tests {
         // The bootstrap must stay importable on stock node AND bun — node builtins only.
         assert!(src.contains("node:http"));
         assert!(src.contains("activate"));
-        assert!(!src.contains("require("), "bootstrap must be ESM, no CJS require");
+        assert!(
+            !src.contains("require("),
+            "bootstrap must be ESM, no CJS require"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1264,7 +1557,10 @@ mod tests {
             .find(|r| r.name == name)
             .expect("recorded sidecar appears in the report");
         assert_eq!(found.plugin_id, "com.test.perm");
-        assert!(!found.enforced, "native sidecars are never OS-enforced in v1");
+        assert!(
+            !found.enforced,
+            "native sidecars are never OS-enforced in v1"
+        );
         // Serializes for the future status wire.
         let value = serde_json::to_value(found).unwrap();
         assert_eq!(value["enforced"], serde_json::json!(false));

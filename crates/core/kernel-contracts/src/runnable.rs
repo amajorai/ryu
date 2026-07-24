@@ -27,9 +27,7 @@ use serde::{Deserialize, Serialize};
 /// The design intentionally avoids `_` / wildcard arms in every `match` so the
 /// compiler flags every site that must be updated — the "nothing hardcoded"
 /// guarantee is enforced at compile time.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunnableKind {
     /// A configured agent (system prompt + tools + model/engine binding).

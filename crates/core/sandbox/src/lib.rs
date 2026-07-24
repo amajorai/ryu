@@ -438,8 +438,13 @@ pub fn configured_backend() -> SandboxBackend {
 
 /// The sandbox backends Ryu knows how to select, in display order. `wasmtime` is
 /// the built-in default; the rest are detect-only external CLIs.
-pub const KNOWN_BACKENDS: &[&str] =
-    &["wasmtime", "docker", "microsandbox", "opensandbox", "daytona"];
+pub const KNOWN_BACKENDS: &[&str] = &[
+    "wasmtime",
+    "docker",
+    "microsandbox",
+    "opensandbox",
+    "daytona",
+];
 
 /// Human-facing label for a known backend (`name` for anything unknown).
 pub fn backend_display_name(name: &str) -> &str {

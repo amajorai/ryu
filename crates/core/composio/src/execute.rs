@@ -351,4 +351,142 @@ mod tests {
         clear_key_env();
         assert!(!is_configured());
     }
+
+    #[test]
+    fn resolve_entity_reads_env_fallback() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var(ENTITY_ENV).ok();
+        std::env::set_var(ENTITY_ENV, "  ent-77  ");
+        // No user id → the (trimmed) env entity is used.
+        assert_eq!(resolve_entity(None), "ent-77");
+        // A present user id still wins over the env.
+        assert_eq!(resolve_entity(Some("u-1")), "u-1");
+        // A blank env value is filtered → "default".
+        std::env::set_var(ENTITY_ENV, "   ");
+        assert_eq!(resolve_entity(None), "default");
+        match prev {
+            Some(v) => std::env::set_var(ENTITY_ENV, v),
+            None => std::env::remove_var(ENTITY_ENV),
+        }
+    }
+
+    #[test]
+    fn execute_base_url_validates_override() {
+        let _lock = crate::auth::test_env_lock();
+        let prev = std::env::var("COMPOSIO_BASE_URL").ok();
+        std::env::remove_var("COMPOSIO_BASE_URL");
+        assert_eq!(
+            execute_base_url().unwrap(),
+            "https://backend.composio.dev/api/v3.1"
+        );
+        // An off-policy override is rejected before the key is sent.
+        std::env::set_var("COMPOSIO_BASE_URL", "https://evil.example.com");
+        assert!(execute_base_url().is_err());
+        std::env::set_var("COMPOSIO_BASE_URL", "http://backend.composio.dev");
+        assert!(execute_base_url().is_err());
+        match prev {
+            Some(v) => std::env::set_var("COMPOSIO_BASE_URL", v),
+            None => std::env::remove_var("COMPOSIO_BASE_URL"),
+        }
+    }
+
+    #[test]
+    fn find_connect_url_scans_nested_scopes_and_requires_http() {
+        // Top-level camelCase key.
+        assert_eq!(
+            find_connect_url(&json!({ "redirectUrl": "https://c/1" })).as_deref(),
+            Some("https://c/1")
+        );
+        // Nested under data.connection.
+        assert_eq!(
+            find_connect_url(&json!({
+                "data": { "connection": { "auth_url": "https://c/2" } }
+            }))
+            .as_deref(),
+            Some("https://c/2")
+        );
+        // A non-http value is ignored (must start with "http").
+        assert!(find_connect_url(&json!({ "connect_url": "ftp://x" })).is_none());
+        // Nothing anywhere → None.
+        assert!(find_connect_url(&json!({ "unrelated": true })).is_none());
+    }
+
+    #[test]
+    fn error_text_first_nonempty_key() {
+        assert_eq!(
+            error_text(&json!({ "error": "boom" })).as_deref(),
+            Some("boom")
+        );
+        // Empty `error` is skipped in favour of `message`.
+        assert_eq!(
+            error_text(&json!({ "error": "", "message": "second" })).as_deref(),
+            Some("second")
+        );
+        assert_eq!(
+            error_text(&json!({ "detail": "d" })).as_deref(),
+            Some("d")
+        );
+        assert!(error_text(&json!({ "nope": 1 })).is_none());
+    }
+
+    #[test]
+    fn detect_elicitation_url_alone_triggers_on_success_status() {
+        // A URL present is sufficient even on a 2xx with no error text.
+        let body = json!({ "connection": { "redirect_url": "https://connect/x" } });
+        match detect_elicitation(200, &body).expect("elicitation") {
+            ExecOutcome::NeedsConnection { message, url } => {
+                assert_eq!(url.as_deref(), Some("https://connect/x"));
+                // No message in the body → the default guidance is used.
+                assert!(message.contains("requires connecting"));
+            }
+            other => panic!("expected NeedsConnection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_elicitation_failure_flag_with_phrase() {
+        // successful:false + a connection phrase, no explicit URL.
+        let body = json!({
+            "successful": false,
+            "message": "No active connection for Gmail",
+        });
+        match detect_elicitation(200, &body).expect("elicitation") {
+            ExecOutcome::NeedsConnection { message, url } => {
+                assert!(url.is_none());
+                // Original casing is preserved in the surfaced message.
+                assert!(message.contains("No active connection"));
+            }
+            other => panic!("expected NeedsConnection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_elicitation_none_when_failure_but_unrelated() {
+        // 4xx / error present but the phrase does not match and no URL → None.
+        assert!(detect_elicitation(500, &json!({ "error": "internal" })).is_none());
+        // successful:true with no url and no phrase → None.
+        assert!(detect_elicitation(200, &json!({ "successful": true })).is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatch_errors_without_key() {
+        let _lock = crate::auth::test_env_lock();
+        let prev_r = std::env::var("RYU_COMPOSIO_API_KEY").ok();
+        let prev_c = std::env::var("COMPOSIO_API_KEY").ok();
+        crate::auth::set_key("");
+        clear_key_env();
+        let http = Client::new();
+        let err = dispatch(&http, "GITHUB_CREATE_ISSUE", json!({}), None)
+            .await
+            .expect_err("must error without a key");
+        assert!(err.to_string().contains("Composio API key not set"));
+        match prev_r {
+            Some(v) => std::env::set_var("RYU_COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("RYU_COMPOSIO_API_KEY"),
+        }
+        match prev_c {
+            Some(v) => std::env::set_var("COMPOSIO_API_KEY", v),
+            None => std::env::remove_var("COMPOSIO_API_KEY"),
+        }
+    }
 }

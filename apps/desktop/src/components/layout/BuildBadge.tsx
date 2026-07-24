@@ -7,7 +7,7 @@
 
 import { useBuildProfile } from "@/src/lib/build-profile.ts";
 import { useReleaseChannel } from "@/src/lib/release-channel.ts";
-import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
+import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
 const CHANNEL_LABELS: Record<string, string> = {
 	canary: "Canary",
@@ -56,14 +56,15 @@ function Pill({
 export function BuildBadge({ className }: { className?: string } = {}) {
 	const { dev } = useBuildProfile();
 	const [channel] = useReleaseChannel();
-	const openSettings = useSettingsDialog((s) => s.openSettings);
+	// Updates settings moved to the node-scoped Gateway dialog.
+	const openGateway = useGatewayDialog((s) => s.openGateway);
 
 	const showChannel = channel !== "stable";
 	if (!(dev || showChannel)) {
 		return null;
 	}
 
-	const open = () => openSettings("updates");
+	const open = () => openGateway("updates");
 
 	return (
 		<div className={`flex items-center gap-1 ${className ?? ""}`}>

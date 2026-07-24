@@ -20,7 +20,7 @@
 //!   theirs removed.
 //! - **Spider fetch** (`POST /api/host/monitors/spider`) — the sidecar's Spider fetch
 //!   backend needs Core's `McpRegistry`, which it cannot host; [`host_spider_crawl`]
-//!   runs `spider__crawl` on its behalf.
+//!   runs `spider__crawl` (the declarative command plugin) on its behalf.
 //! - **alert fan-out** (`POST /api/host/monitors/alert`) — the sidecar posts each fired
 //!   alert back; [`host_monitor_alert`] fans it out through the kernel notification
 //!   store AND records it on the unified activity feed (the two independent consumers
@@ -294,8 +294,8 @@ pub fn spawn(client: MonitorsClient) {
 
 // ── Host callbacks (sidecar → Core) ───────────────────────────────────────────────
 
-/// `POST /api/host/monitors/spider` — run `spider__crawl` (or any MCP tool the monitor
-/// engine requests) through Core's [`McpRegistry`](crate::sidecar::mcp::McpRegistry) on
+/// `POST /api/host/monitors/spider` — run `spider__crawl` (or any MCP tool the
+/// monitor engine requests) through Core's [`McpRegistry`](crate::sidecar::mcp::McpRegistry) on
 /// the sidecar's behalf. Registered on the PUBLIC router (the sidecar holds only its
 /// minted ext token, not the node bearer); [`authenticate_sidecar`] does the token +
 /// enabled check in-handler, and we additionally assert the caller IS the monitors app.
@@ -309,13 +309,20 @@ pub(crate) async fn host_spider_crawl(
         Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
     };
     if plugin_id != MONITORS_PLUGIN_ID {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "not the monitors app" })))
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "not the monitors app" })),
+        )
             .into_response();
     }
 
     let tool = body.get("tool").and_then(Value::as_str).unwrap_or("");
     if tool.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing tool" }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "missing tool" })),
+        )
+            .into_response();
     }
     let args = body.get("args").cloned().unwrap_or(Value::Null);
 
@@ -355,14 +362,28 @@ pub(crate) async fn host_monitor_alert(
         Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
     };
     if plugin_id != MONITORS_PLUGIN_ID {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "not the monitors app" })))
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "not the monitors app" })),
+        )
             .into_response();
     }
 
     let alert = &body.alert;
-    let title = alert.get("title").and_then(Value::as_str).unwrap_or("").to_string();
-    let message = alert.get("message").and_then(Value::as_str).unwrap_or("").to_string();
-    let monitor_id = alert.get("monitor_id").and_then(Value::as_str).unwrap_or("");
+    let title = alert
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let message = alert
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let monitor_id = alert
+        .get("monitor_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let kind = alert.get("kind").and_then(Value::as_str).unwrap_or("");
 
     // (1) Fan out through the kernel notify store, exactly as the old
@@ -392,12 +413,29 @@ pub(crate) async fn host_monitor_alert(
 /// the old `activity::ingest::from_monitor_alert`, preserving the
 /// `uptime_down`→Warning level.
 fn activity_item_from_alert(alert: &Value) -> ActivityItem {
-    let title = alert.get("title").and_then(Value::as_str).unwrap_or("").to_string();
-    let message = alert.get("message").and_then(Value::as_str).unwrap_or("").to_string();
-    let monitor_id = alert.get("monitor_id").and_then(Value::as_str).unwrap_or("");
-    let monitor_name = alert.get("monitor_name").and_then(Value::as_str).unwrap_or("");
+    let title = alert
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let message = alert
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let monitor_id = alert
+        .get("monitor_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let monitor_name = alert
+        .get("monitor_name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let kind = alert.get("kind").and_then(Value::as_str).unwrap_or("");
-    let created_at = alert.get("created_at").and_then(Value::as_str).unwrap_or("");
+    let created_at = alert
+        .get("created_at")
+        .and_then(Value::as_str)
+        .unwrap_or("");
 
     let level = if kind == "uptime_down" {
         ActivityLevel::Warning

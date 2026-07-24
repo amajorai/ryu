@@ -94,7 +94,15 @@ pub fn drag(
     conn.xtest_fake_input(MOTION_NOTIFY, 0, 0, root, from_x as i16, from_y as i16, 0)?;
     conn.flush()?;
     std::thread::sleep(std::time::Duration::from_millis(50));
-    conn.xtest_fake_input(BUTTON_PRESS, BTN_LEFT, 0, root, from_x as i16, from_y as i16, 0)?;
+    conn.xtest_fake_input(
+        BUTTON_PRESS,
+        BTN_LEFT,
+        0,
+        root,
+        from_x as i16,
+        from_y as i16,
+        0,
+    )?;
     conn.flush()?;
     std::thread::sleep(std::time::Duration::from_millis(hold_duration_ms));
 
@@ -108,7 +116,15 @@ pub fn drag(
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    conn.xtest_fake_input(BUTTON_RELEASE, BTN_LEFT, 0, root, to_x as i16, to_y as i16, 0)?;
+    conn.xtest_fake_input(
+        BUTTON_RELEASE,
+        BTN_LEFT,
+        0,
+        root,
+        to_x as i16,
+        to_y as i16,
+        0,
+    )?;
     conn.flush()?;
     Ok(())
 }
@@ -142,12 +158,7 @@ pub fn scroll(x: i32, y: i32, direction: &str, amount: i32) -> Result<()> {
 /// Resolve an X11 keysym to (keycode, needs_shift) using the live keyboard map.
 /// X11 keysyms for Latin-1 equal the Unicode/ASCII codepoint, so a char maps to
 /// its keysym directly. Column 0 of each keycode is unshifted, column 1 shifted.
-fn find_keycode(
-    setup_min: u8,
-    per: usize,
-    keysyms: &[u32],
-    keysym: u32,
-) -> Option<(u8, bool)> {
+fn find_keycode(setup_min: u8, per: usize, keysyms: &[u32], keysym: u32) -> Option<(u8, bool)> {
     for (i, chunk) in keysyms.chunks(per).enumerate() {
         if chunk.first().copied() == Some(keysym) {
             return Some((setup_min + i as u8, false));

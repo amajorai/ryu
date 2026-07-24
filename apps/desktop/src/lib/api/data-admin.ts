@@ -49,3 +49,27 @@ export async function clearDataCategory(
 	});
 	return json?.removed ?? 0;
 }
+
+/**
+ * Wipe this ENTIRE node back to a fresh, just-installed state — every store DB,
+ * session, download, and preference (only the encryption key is preserved so the
+ * node can still boot). The wipe can't run live, so Core only arms it and reports
+ * `restart_required`; the caller must restart Core for the wipe to happen on the
+ * next boot. `confirm` is the node name the user typed to arm the action.
+ *
+ * Rejected by Core (400) if `confirm` is empty, or (403) on a shared org-bound node.
+ */
+export async function resetNode(
+	target: ApiTarget,
+	confirm: string
+): Promise<{ ok: boolean; restartRequired: boolean }> {
+	const json = await request<{ ok?: boolean; restart_required?: boolean }>(
+		target,
+		"/api/node/reset",
+		{ method: "POST", body: { confirm } }
+	);
+	return {
+		ok: json?.ok ?? false,
+		restartRequired: json?.restart_required ?? false,
+	};
+}

@@ -283,8 +283,11 @@ impl ApprovalRequest {
     /// Build a request for a skill the continual-learning loop synthesized. The
     /// full validated `skill_md` rides in the action so approve materializes it
     /// and reject discards it — the library is untouched until the user says yes.
-    /// The `auto` tag mirrors Hermes' `[auto]` origin marker (an autonomously
-    /// proposed skill, not a user-requested one).
+    /// The `auto` tag mirrors Hermes' `[auto]` origin marker (proposed by the
+    /// learning loop rather than installed by hand); every synthesis — including
+    /// a user-requested `force` synth — now flows through this gate, and the
+    /// `skill_md` front-matter carries the precise provenance (source
+    /// conversation/agent, requester, `origin: user-requested|auto`).
     pub fn for_skill_synthesis(
         slug: &str,
         name: &str,
@@ -442,7 +445,8 @@ impl ApprovalEngine {
     }
 
     /// Attach the preferences store so the global approval mode (Layer B) is
-    /// readable. Builder-style; without it the mode resolves to `Off`.
+    /// readable. Builder-style; without it the mode resolves to the fail-safe
+    /// `Smart` default (only an explicit `off` pref disables Layer B).
     pub fn with_preferences(
         mut self,
         preferences: crate::server::preferences::PreferencesStore,
@@ -469,7 +473,8 @@ impl ApprovalEngine {
     }
 
     /// The current global approval mode (Layer B), read from the `approval-mode`
-    /// preference. Resolves to `Off` when unset or no preferences store attached.
+    /// preference. Resolves to the `Smart` default when unset or no preferences
+    /// store attached; only an explicit `off` disables Layer B.
     pub async fn approval_mode(&self) -> policy::ApprovalMode {
         let raw = self.approval_mode_pref().await;
         policy::ApprovalMode::from_pref(raw.as_deref().unwrap_or_default())
@@ -691,8 +696,7 @@ impl ApprovalEngine {
                 workflow_id,
                 payload_json,
             } => {
-                crate::composio_host::run_workflow_for_trigger(workflow_id, payload_json)
-                    .await?;
+                crate::composio_host::run_workflow_for_trigger(workflow_id, payload_json).await?;
                 Ok(None)
             }
             PendingAction::TriggerAgent { agent_id, prompt } => {
@@ -794,33 +798,39 @@ async fn reject_action(action: &PendingAction) {
 /// the chat/ACP model sees "approval required"). The engine runs the tool for
 /// real on approve.
 ///
-/// Returns `None` when nothing gates the call — the default `off` mode ⇒ every
-/// call is `None` ⇒ zero behavior change.
+/// Returns `None` when nothing gates the call (e.g. a non-risky tool under the
+/// default `smart` mode, or an explicit operator `approval-mode=off`).
 ///
 /// **Fail-closed:** if the approval cannot be persisted, this still returns
 /// `Some(err)` so the risky action is NOT run when its required approval could
 /// not be recorded.
 ///
-/// Layer A (per-agent `approval_tools`) is not fed here yet — the chokepoint has
-/// no agent record — so this is Layer B only for now; the policy composes A too
-/// once agent context is threaded.
+/// `agent_approval_tools` is Layer A — the calling agent's configured
+/// `approval_tools` list (pass `&[]` for agent-less callers). Composio tools are
+/// NOT exempt: the connection flow is authentication, not approval, so a risky
+/// `composio__*` action (send/delete/pay across 250+ SaaS apps) gates like any
+/// other tool; only its connect/consent elicitation runs ungated (that path
+/// returns an `__ryu_elicitation__` envelope instead of executing).
+#[allow(clippy::too_many_arguments)]
 pub async fn gate_tool_call(
     tool_id: &str,
     arguments: &serde_json::Value,
+    agent_approval_tools: &[String],
     allowlist: Option<&[String]>,
     user_id: Option<&str>,
     profile_ids: &[String],
     session_id: Option<String>,
     host_conversation_id: Option<&str>,
 ) -> Option<anyhow::Error> {
-    // Composio owns its own connection-required path; leave it to that flow.
-    if tool_id.starts_with("composio__") {
-        return None;
-    }
     let engine = global_engine()?;
     let raw_pref = engine.approval_mode_pref().await;
     let mode = policy::ApprovalMode::from_pref(raw_pref.as_deref().unwrap_or_default());
-    let tags = policy::should_require_approval_local(&[], tool_id, mode, raw_pref.as_deref())?;
+    let tags = policy::should_require_approval_local(
+        agent_approval_tools,
+        tool_id,
+        mode,
+        raw_pref.as_deref(),
+    )?;
 
     let action = PendingAction::ToolCall {
         tool_id: tool_id.to_owned(),
@@ -858,10 +868,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn approval_mode_defaults_off_without_preferences() {
+    async fn approval_mode_defaults_smart_without_preferences() {
         let store = ApprovalStore::open_in_memory().unwrap();
         let engine = ApprovalEngine::new(store, reqwest::Client::new());
-        assert_eq!(engine.approval_mode().await, policy::ApprovalMode::Off);
+        // Fail-safe: no preferences store ⇒ Smart, never Off.
+        assert_eq!(engine.approval_mode().await, policy::ApprovalMode::Smart);
     }
 
     #[test]
@@ -924,7 +935,10 @@ mod tests {
         assert_eq!(req.source_ref.as_deref(), Some("conv_42"));
         assert_eq!(req.conversation_id.as_deref(), Some("conv_42"));
         match req.action {
-            Some(PendingAction::HealRerun { ref agent_id, ref prompt }) => {
+            Some(PendingAction::HealRerun {
+                ref agent_id,
+                ref prompt,
+            }) => {
                 assert_eq!(agent_id.as_deref(), Some("ryu"));
                 assert!(prompt.contains("absolute path"));
             }

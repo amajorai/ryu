@@ -62,8 +62,11 @@ pub trait WebhookIngressHost: Send + Sync {
     /// number of agent runs fired. `None` when the store is not initialised.
     async fn composio_handle_webhook(&self, payload: &Value) -> Option<usize>;
     /// Start a workflow run seeded with the trigger payload; returns the run id.
-    async fn run_workflow_for_trigger(&self, workflow_id: &str, payload_json: &str)
-        -> Result<String>;
+    async fn run_workflow_for_trigger(
+        &self,
+        workflow_id: &str,
+        payload_json: &str,
+    ) -> Result<String>;
     /// Raw lookup of a workflow's webhook-trigger secret (no decisions applied).
     fn workflow_webhook_secret(&self, workflow_id: &str) -> WorkflowWebhookSecret;
 

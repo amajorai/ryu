@@ -183,10 +183,9 @@ mod tests {
         assert!(m.supports_surface(Surface::Desktop));
         assert!(!m.supports_surface(Surface::Gateway));
 
-        let round = PluginManifest::parse_and_validate(
-            &serde_json::to_string(&m).expect("serialize"),
-        )
-        .expect("roundtrip");
+        let round =
+            PluginManifest::parse_and_validate(&serde_json::to_string(&m).expect("serialize"))
+                .expect("roundtrip");
         assert_eq!(m, round);
     }
 

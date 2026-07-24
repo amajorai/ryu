@@ -204,24 +204,38 @@ mod tests {
     #[tokio::test]
     async fn missing_query_is_an_error() {
         let store = ConversationStore::open_in_memory().expect("store");
-        assert!(dispatch("search", json!({}), &store, &ToolPrincipal::Unrestricted).await.is_err());
+        assert!(
+            dispatch("search", json!({}), &store, &ToolPrincipal::Unrestricted)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
     async fn unknown_tool_is_an_error() {
         let store = ConversationStore::open_in_memory().expect("store");
-        assert!(dispatch("nope", json!({ "query": "x" }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .is_err());
+        assert!(dispatch(
+            "nope",
+            json!({ "query": "x" }),
+            &store,
+            &ToolPrincipal::Unrestricted
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
     async fn unavailable_index_returns_graceful_envelope() {
         // open_in_memory wires no message index, so search reports unavailable.
         let store = ConversationStore::open_in_memory().expect("store");
-        let out = dispatch("search", json!({ "query": "hello" }), &store, &ToolPrincipal::Unrestricted)
-            .await
-            .expect("dispatch ok");
+        let out = dispatch(
+            "search",
+            json!({ "query": "hello" }),
+            &store,
+            &ToolPrincipal::Unrestricted,
+        )
+        .await
+        .expect("dispatch ok");
         assert_eq!(out["ok"], json!(false));
         assert_eq!(out["available"], json!(false));
     }

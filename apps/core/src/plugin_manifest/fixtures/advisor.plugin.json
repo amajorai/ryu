@@ -2,8 +2,45 @@
   "id": "com.ryuhq.advisor",
   "name": "Advisor",
   "version": "1.0.0",
-  "runnables": [],
-  "permission_grants": ["hook:side-model"],
+  "description": "Consult a stronger reviewer model for a second opinion — as an auto-review turn hook (toggle / `/advisor`) and as the model-callable `advisor__consult` tool, a declarative HTTP tool routed through Core's `/api/advisor/consult` bridge.",
+  "runnables": [
+    {
+      "id": "tool-advisor-consult",
+      "name": "Advisor Consult",
+      "kind": "tool",
+      "config": {
+        "slug": "advisor__consult",
+        "backend": "http",
+        "method": "POST",
+        "url": "http://127.0.0.1:7980/api/advisor/consult",
+        "secret_headers": {
+          "Authorization": "Bearer env:RYU_TOKEN"
+        },
+        "fail_open": true,
+        "unwrap_body": true,
+        "description": "Consult a stronger advisor model for a second opinion. Call this BEFORE substantive work (before committing to an approach), when you are stuck, or before declaring a task done. The advisor reviews the question and context you provide and returns concrete, actionable advice. Give its advice serious weight. Returns { ok, model, advice }.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "What you want advice on — your plan, the approach you are about to take, the bug you are stuck on, or the answer you are about to commit to."
+            },
+            "context": {
+              "type": "string",
+              "description": "Optional. The relevant details the advisor should review: your current plan, the code or answer in question, key constraints, and anything you have already tried. The advisor only sees what you put here, so include enough to judge."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional explicit advisor model id. Defaults to the configured 'advisor-model' preference, else the node default."
+            }
+          },
+          "required": ["question"]
+        }
+      }
+    }
+  ],
+  "permission_grants": ["hook:side-model", "tool:http-egress:127.0.0.1"],
   "activation_events": ["*"],
   "contributes": {
     "composer_controls": [

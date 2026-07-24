@@ -32,7 +32,9 @@ use std::sync::{Arc, RwLock};
 
 use tracing::warn;
 
-use crate::config::{FirewallConfig, FirewallOverlay, FirewallPolicy, InspectorConfig, InspectorMode};
+use crate::config::{
+    FirewallConfig, FirewallOverlay, FirewallPolicy, InspectorConfig, InspectorMode,
+};
 use crate::evaluators::EvaluatorBinding;
 use crate::firewall::FirewallScanner;
 
@@ -121,10 +123,7 @@ impl FirewallResolver {
 
     /// Snapshot the node base config (poison-safe; falls back to default).
     pub fn node_base(&self) -> FirewallConfig {
-        self.node_base
-            .read()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        self.node_base.read().map(|g| g.clone()).unwrap_or_default()
     }
 
     /// Replace the node base config (called by `PUT /v1/config`). Invalidates the
@@ -302,8 +301,18 @@ impl FirewallResolver {
 /// `None` fields inherit. `custom_patterns` always append.
 fn apply_overlay(cfg: &mut FirewallConfig, ov: &FirewallOverlay, locked: &HashSet<String>) {
     apply_bool(&mut cfg.enabled, ov.enabled, "enabled", locked);
-    apply_bool(&mut cfg.scan_inbound, ov.scan_inbound, "scan_inbound", locked);
-    apply_bool(&mut cfg.scan_outbound, ov.scan_outbound, "scan_outbound", locked);
+    apply_bool(
+        &mut cfg.scan_inbound,
+        ov.scan_inbound,
+        "scan_inbound",
+        locked,
+    );
+    apply_bool(
+        &mut cfg.scan_outbound,
+        ov.scan_outbound,
+        "scan_outbound",
+        locked,
+    );
     apply_bool(
         &mut cfg.log_detections,
         ov.log_detections,
@@ -341,7 +350,8 @@ fn apply_overlay(cfg: &mut FirewallConfig, ov: &FirewallOverlay, locked: &HashSe
     }
 
     // Custom patterns are a strict union (append), regardless of any lock.
-    cfg.custom_patterns.extend(ov.custom_patterns.iter().cloned());
+    cfg.custom_patterns
+        .extend(ov.custom_patterns.iter().cloned());
 
     // Evaluator bindings merge by id (union + per-binding lock). `None` inherits
     // the accumulated set; `Some` merges. The merged Vec is assigned back so the
@@ -549,19 +559,30 @@ mod tests {
         FirewallConfig::default()
     }
 
+    /// A node base with the default lock set removed, for tests exercising
+    /// unlocked-field precedence (the default locks `enabled`/`scan_inbound`/
+    /// `policy` so overlays cannot loosen them).
+    fn unlocked_base() -> FirewallConfig {
+        FirewallConfig {
+            locked_fields: Vec::new(),
+            ..FirewallConfig::default()
+        }
+    }
+
     #[test]
     fn node_only_resolves_to_base() {
         let r = FirewallResolver::new(base());
         let cfg = r.resolve(None, None, None);
         assert!(cfg.enabled);
-        assert_eq!(cfg.policy, FirewallPolicy::Sanitize);
+        assert_eq!(cfg.policy, FirewallPolicy::Block);
         assert!(cfg.custom_patterns.is_empty());
-        assert!(cfg.locked_fields.is_empty());
+        // The default lock set survives resolution (already sorted).
+        assert_eq!(cfg.locked_fields, vec!["enabled", "policy", "scan_inbound"]);
     }
 
     #[test]
     fn org_some_overrides_none_inherits() {
-        let r = FirewallResolver::new(base());
+        let r = FirewallResolver::new(unlocked_base());
         let bundle = PolicyBundle {
             firewall: Some(FirewallOverlay {
                 policy: Some(FirewallPolicy::Block),
@@ -579,7 +600,9 @@ mod tests {
 
     #[test]
     fn agent_overrides_org() {
-        let r = FirewallResolver::new(base());
+        // `policy` is locked by default; unlock it here to prove plain
+        // agent-over-org precedence for an UNLOCKED field.
+        let r = FirewallResolver::new(unlocked_base());
         let mut agent_overlays = HashMap::new();
         agent_overlays.insert(
             "a1".to_string(),
@@ -639,7 +662,11 @@ mod tests {
             .iter()
             .map(|p| p.name.as_str())
             .collect();
-        assert_eq!(names, vec!["node_pat", "org_pat", "agent_pat"], "union/append");
+        assert_eq!(
+            names,
+            vec!["node_pat", "org_pat", "agent_pat"],
+            "union/append"
+        );
     }
 
     #[test]
@@ -701,9 +728,10 @@ mod tests {
 
     #[test]
     fn lock_added_at_org_binds_the_agent_leaf() {
-        // Node does NOT lock; org locks `enabled` = true; the agent leaf cannot
-        // then disable it. This proves locks bind scopes narrower than the locker.
-        let r = FirewallResolver::new(base());
+        // Node does NOT lock (default locks removed); org locks `enabled` = true;
+        // the agent leaf cannot then disable it. This proves locks bind scopes
+        // narrower than the locker.
+        let r = FirewallResolver::new(unlocked_base());
         let mut agent_overlays = HashMap::new();
         agent_overlays.insert(
             "a1".to_string(),
@@ -722,6 +750,67 @@ mod tests {
         };
         let cfg = r.resolve(Some("o1"), Some("a1"), Some(&bundle));
         assert!(cfg.enabled, "org lock binds the agent leaf");
+    }
+
+    #[test]
+    fn default_locks_prevent_overlay_from_disabling_firewall() {
+        // With NO explicit lock config, an org/agent overlay must not be able to
+        // switch the inbound firewall off for its scope: `enabled`,
+        // `scan_inbound`, and `policy` are locked by default, so every loosening
+        // attempt is refused (stricter/ON wins).
+        let r = FirewallResolver::new(base());
+        let mut agent_overlays = HashMap::new();
+        agent_overlays.insert(
+            "a1".to_string(),
+            FirewallOverlay {
+                scan_inbound: Some(false), // attempt: skip the inbound scan
+                ..Default::default()
+            },
+        );
+        let bundle = PolicyBundle {
+            firewall: Some(FirewallOverlay {
+                enabled: Some(false),                            // attempt: disable
+                scan_inbound: Some(false),                       // attempt: skip scan
+                policy: Some(FirewallPolicy::WarnAndContinue),   // attempt: downgrade
+                ..Default::default()
+            }),
+            agent_overlays,
+        };
+        let cfg = r.resolve(Some("o1"), Some("a1"), Some(&bundle));
+        assert!(cfg.enabled, "default lock keeps the firewall enabled");
+        assert!(cfg.scan_inbound, "default lock keeps inbound scanning on");
+        assert_eq!(
+            cfg.policy,
+            FirewallPolicy::Block,
+            "default lock refuses a policy downgrade"
+        );
+    }
+
+    #[test]
+    fn default_locks_still_allow_tightening() {
+        // The dual: on a node explicitly loosened to Sanitize (locks left at the
+        // default), a narrower scope may still TIGHTEN a locked field.
+        let mut node = base();
+        node.policy = FirewallPolicy::Sanitize;
+        let r = FirewallResolver::new(node);
+        let bundle = PolicyBundle {
+            firewall: Some(FirewallOverlay {
+                policy: Some(FirewallPolicy::Block),
+                scan_outbound: Some(false), // unlocked by default: may loosen
+                ..Default::default()
+            }),
+            agent_overlays: HashMap::new(),
+        };
+        let cfg = r.resolve(Some("o1"), None, Some(&bundle));
+        assert_eq!(
+            cfg.policy,
+            FirewallPolicy::Block,
+            "a locked field may still be tightened"
+        );
+        assert!(
+            !cfg.scan_outbound,
+            "an unlocked field is still freely overridable"
+        );
     }
 
     #[test]
@@ -785,9 +874,11 @@ mod tests {
     fn different_configs_get_different_scanners() {
         let r = FirewallResolver::new(base());
         let s1 = r.scanner_for(None, None, None);
+        // `redact_pii` is unlocked by default, so this overlay genuinely changes
+        // the resolved config (a locked field's no-op would dedupe the scanner).
         let bundle = PolicyBundle {
             firewall: Some(FirewallOverlay {
-                policy: Some(FirewallPolicy::Block),
+                redact_pii: Some(false),
                 ..Default::default()
             }),
             agent_overlays: HashMap::new(),
@@ -834,7 +925,10 @@ mod tests {
         let ins = r.resolve(Some("o1"), None, Some(&bundle)).inspector;
         assert!(ins.enabled, "locked inspector cannot be disabled");
         assert_eq!(ins.mode, InspectorMode::Both, "Both cannot be narrowed");
-        assert_eq!(ins.min_chars, 20, "min_chars cannot be raised (smaller wins)");
+        assert_eq!(
+            ins.min_chars, 20,
+            "min_chars cannot be raised (smaller wins)"
+        );
         assert_eq!(
             ins.timeout_ms, 3000,
             "timeout cannot be shortened (larger wins)"
@@ -875,8 +969,15 @@ mod tests {
             agent_overlays: HashMap::new(),
         };
         let ins = r.resolve(Some("o1"), None, Some(&bundle)).inspector;
-        assert!(ins.enabled, "narrower scope may enable a locked-off inspector");
-        assert_eq!(ins.action, FirewallPolicy::Block, "narrower scope may tighten");
+        assert!(
+            ins.enabled,
+            "narrower scope may enable a locked-off inspector"
+        );
+        assert_eq!(
+            ins.action,
+            FirewallPolicy::Block,
+            "narrower scope may tighten"
+        );
     }
 
     #[test]
@@ -1005,7 +1106,10 @@ mod tests {
         // Node base has A (off) + B (off). Org overrides A (on/Block) and adds C.
         // Agent overrides B (on/Sanitize). Resolved: A(org), B(agent), C(org).
         let mut node = base();
-        node.evaluators = vec![binding("a", false, None, false), binding("b", false, None, false)];
+        node.evaluators = vec![
+            binding("a", false, None, false),
+            binding("b", false, None, false),
+        ];
         let r = FirewallResolver::new(node);
 
         let mut agent_overlays = HashMap::new();
@@ -1034,7 +1138,10 @@ mod tests {
         let cfg = r.resolve(Some("o1"), Some("ag"), Some(&bundle));
         assert_eq!(cfg.evaluators.len(), 3, "A, B, C");
         let a = find(&cfg.evaluators, "a");
-        assert!(a.enabled && a.inline_action == Some(FirewallPolicy::Block), "A from org");
+        assert!(
+            a.enabled && a.inline_action == Some(FirewallPolicy::Block),
+            "A from org"
+        );
         let b = find(&cfg.evaluators, "b");
         assert!(
             b.enabled && b.inline_action == Some(FirewallPolicy::Sanitize),
@@ -1070,7 +1177,10 @@ mod tests {
         };
         let cfg = r.resolve(Some("o1"), Some("ag"), Some(&bundle));
         let a = find(&cfg.evaluators, "a");
-        assert!(a.enabled, "org lock keeps A enabled against the agent's false");
+        assert!(
+            a.enabled,
+            "org lock keeps A enabled against the agent's false"
+        );
         assert_eq!(
             a.inline_action,
             Some(FirewallPolicy::Block),
@@ -1086,8 +1196,7 @@ mod tests {
         let cfg: FirewallConfig = serde_json::from_str("{}").expect("config deserializes");
         assert!(cfg.evaluators.is_empty(), "missing field → empty Vec");
 
-        let ov: FirewallOverlay =
-            serde_json::from_str("{}").expect("overlay deserializes");
+        let ov: FirewallOverlay = serde_json::from_str("{}").expect("overlay deserializes");
         assert!(ov.evaluators.is_none(), "missing field → None");
     }
 }

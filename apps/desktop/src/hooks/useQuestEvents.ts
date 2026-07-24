@@ -1,6 +1,6 @@
+import { toast } from "@ryu/ui/components/sileo";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { sileo } from "sileo";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { type QuestEvent, streamQuestEvents } from "@/src/lib/api/quests.ts";
 import { useActiveNode } from "./useActiveNode.ts";
@@ -54,7 +54,7 @@ export function useQuestEvents(): void {
 
 		const onEvent = (event: QuestEvent) => {
 			if (event.type === "suggested") {
-				sileo.info({
+				toast.info({
 					title: `Looks done: ${event.quest.title}`,
 					description: event.reason,
 				});
@@ -64,7 +64,7 @@ export function useQuestEvents(): void {
 					`quest-${event.quest.id}`
 				);
 			} else if (event.type === "completed" && event.auto) {
-				sileo.success({
+				toast.success({
 					title: `Auto-completed: ${event.quest.title}`,
 					description:
 						event.quest.suggestion?.reason ?? "Detected from your activity.",

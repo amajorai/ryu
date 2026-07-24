@@ -128,3 +128,37 @@ mod engine {
         Ok(result.text.trim().to_string())
     }
 }
+
+// The default `cargo test` build compiles WITHOUT `voice-parakeet` (ONNX Runtime
+// is a heavy native dep — see Cargo.toml). These tests pin the feature-off
+// fallbacks: `transcribe` returns a clear, actionable error; `preload`/`unload`
+// are safe no-ops. The real-inference path is deliberately not exercised here —
+// it would require downloading and loading a real ONNX model.
+#[cfg(all(test, not(feature = "voice-parakeet")))]
+mod tests {
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn transcribe_without_feature_returns_actionable_error() {
+        let err = super::transcribe(b"audio".to_vec(), PathBuf::from("/nope/model"))
+            .await
+            .expect_err("feature-off build must not silently succeed");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("not built"), "got: {msg}");
+        assert!(msg.contains("voice-parakeet"), "got: {msg}");
+        assert!(msg.contains("whisper.cpp"), "should suggest the fallback: {msg}");
+    }
+
+    #[test]
+    fn preload_without_feature_is_ok_noop() {
+        // No model is on disk; the feature-off path must still return Ok(()).
+        super::preload(&PathBuf::from("/definitely/missing")).expect("no-op preload");
+    }
+
+    #[test]
+    fn unload_without_feature_does_not_panic() {
+        super::unload();
+        // Idempotent.
+        super::unload();
+    }
+}

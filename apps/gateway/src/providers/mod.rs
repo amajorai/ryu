@@ -167,3 +167,150 @@ fn build_client() -> reqwest::Client {
         .build()
         .expect("failed to build HTTP client")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        AnthropicProviderConfig, LocalProviderConfig, OpenAiProviderConfig, ProvidersConfig,
+    };
+    use serde_json::Value;
+    use std::pin::Pin;
+
+    fn quota() -> Arc<ProviderQuotas> {
+        Arc::new(ProviderQuotas::new())
+    }
+
+    /// A no-op provider used to exercise registry mechanics (register / replace /
+    /// order) without any network.
+    struct StubProvider(&'static str);
+    impl Provider for StubProvider {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn complete<'a>(
+            &'a self,
+            _model: &'a str,
+            _body: &'a Value,
+        ) -> Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Value, ryu_gw_providers::ProviderError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move { Err(ryu_gw_providers::ProviderError::Provider("stub".into())) })
+        }
+        fn complete_stream<'a>(
+            &'a self,
+            _model: &'a str,
+            _body: &'a Value,
+        ) -> Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<axum::body::Body, ryu_gw_providers::ProviderError>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                Err(ryu_gw_providers::ProviderError::Provider("stub".into()))
+            })
+        }
+    }
+
+    #[test]
+    fn empty_config_registers_no_providers() {
+        let reg = ProviderRegistry::new(&ProvidersConfig::default(), quota());
+        assert!(reg.available_providers().is_empty());
+        assert!(reg.get("openai").is_none());
+    }
+
+    #[test]
+    fn providers_register_in_deterministic_order_and_skip_absent() {
+        // openai + anthropic present, everything else absent.
+        let config = ProvidersConfig {
+            openai: Some(OpenAiProviderConfig {
+                api_key: "sk-openai".to_string(),
+                api_keys: vec![],
+                base_url: "https://api.openai.com/v1".to_string(),
+            }),
+            anthropic: Some(AnthropicProviderConfig {
+                api_key: "sk-anthropic".to_string(),
+                api_keys: vec![],
+                base_url: "https://api.anthropic.com".to_string(),
+            }),
+            ..ProvidersConfig::default()
+        };
+        let reg = ProviderRegistry::new(&config, quota());
+        // Registration order is openai-before-anthropic (matches `new`).
+        assert_eq!(reg.available_providers(), vec!["openai", "anthropic"]);
+        assert!(reg.get("openai").is_some());
+        assert!(reg.get("anthropic").is_some());
+        // A provider whose config is absent never enters the map.
+        assert!(reg.get("local").is_none());
+        assert!(reg.get("unknown").is_none());
+    }
+
+    #[test]
+    fn get_resolves_provider_by_stable_id() {
+        let config = ProvidersConfig {
+            local: Some(LocalProviderConfig {
+                base_url: "http://127.0.0.1:1234".to_string(),
+            }),
+            ..ProvidersConfig::default()
+        };
+        let reg = ProviderRegistry::new(&config, quota());
+        assert_eq!(reg.get("local").map(Provider::name), Some("local"));
+    }
+
+    #[test]
+    fn every_configured_builtin_registers_in_deterministic_order() {
+        // A config with EVERY built-in present exercises each registration branch
+        // and pins the deterministic order the /v1/models discovery merge relies on.
+        let config: ProvidersConfig = serde_json::from_value(serde_json::json!({
+            "openai": { "api_key": "sk-o" },
+            "anthropic": { "api_key": "sk-a" },
+            "local": { "base_url": "http://127.0.0.1:1234" },
+            "openrouter": { "api_key": "sk-or" },
+            "core": { "base_url": "http://127.0.0.1:7979", "token": "t" },
+            "modal": { "api_key": "sk-m", "base_url": "https://modal.example" },
+            "genai": { "keys": { "gemini": "sk-g" } },
+            "replicate": { "api_key": "sk-r" },
+            "fal": { "api_key": "sk-f" }
+        }))
+        .expect("full providers config parses");
+        let reg = ProviderRegistry::new(&config, quota());
+        assert_eq!(
+            reg.available_providers(),
+            vec![
+                "openai",
+                "anthropic",
+                "local",
+                "openrouter",
+                "core",
+                "modal",
+                "genai",
+                "replicate",
+                "fal",
+            ]
+        );
+    }
+
+    #[test]
+    fn register_appends_new_id_and_replaces_existing_in_place() {
+        let mut reg = ProviderRegistry::new(&ProvidersConfig::default(), quota());
+        reg.register(Arc::new(StubProvider("alpha")));
+        reg.register(Arc::new(StubProvider("beta")));
+        assert_eq!(reg.available_providers(), vec!["alpha", "beta"]);
+
+        // Re-registering an existing id replaces the provider WITHOUT changing its
+        // position in the iteration order (the open extension point for plugins).
+        reg.register(Arc::new(StubProvider("alpha")));
+        assert_eq!(
+            reg.available_providers(),
+            vec!["alpha", "beta"],
+            "re-registering must not duplicate or reorder"
+        );
+    }
+}

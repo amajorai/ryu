@@ -396,7 +396,7 @@ export function AddWidgetDialog({
 				</div>
 
 				<DialogFooter>
-					<Button onClick={() => onOpenChange(false)} variant="outline">
+					<Button onClick={() => onOpenChange(false)} variant="ghost">
 						Cancel
 					</Button>
 					<Button

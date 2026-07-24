@@ -67,8 +67,8 @@ use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 
 use super::ServerState;
-use ryu_collab::{classify_doc_sync, DocSyncAction, DocSyncMessage};
 use crate::identity_verify::{can_access, Access, ResourceTenancy, VerifiedCaller};
+use ryu_collab::{classify_doc_sync, DocSyncAction, DocSyncMessage};
 use ryu_realtime::Frame;
 
 /// Bounded buffer for the per-socket send task. Frames over this lag a slow
@@ -840,9 +840,82 @@ mod tests {
         let value = json!({"legacy": true, "id": 7});
         match frame_to_message(Frame::Event(value.clone())) {
             Message::Text(text) => {
-                assert_eq!(text, json!({"channel": "events", "data": value}).to_string());
+                assert_eq!(
+                    text,
+                    json!({"channel": "events", "data": value}).to_string()
+                );
             }
             _ => panic!("expected a text frame"),
         }
+    }
+
+    /// A presence frame is tagged onto the `presence` channel (distinct from
+    /// `events`) so the client routes awareness updates separately.
+    #[test]
+    fn presence_frame_is_tagged_presence_channel() {
+        let value = json!({"member": "mem_1", "cursor": 3});
+        match frame_to_message(Frame::Presence(value.clone())) {
+            Message::Text(text) => assert_eq!(
+                text,
+                json!({"channel": "presence", "data": value}).to_string()
+            ),
+            _ => panic!("expected a text frame"),
+        }
+    }
+
+    /// A CRDT `DocSync` frame is opaque binary, passed through byte-for-byte — the
+    /// server must never re-encode a Y.Doc update.
+    #[test]
+    fn docsync_frame_is_opaque_binary() {
+        let bytes = vec![0u8, 1, 2, 255, 128];
+        match frame_to_message(Frame::DocSync(bytes.clone())) {
+            Message::Binary(out) => assert_eq!(out, bytes),
+            _ => panic!("expected a binary frame"),
+        }
+    }
+
+    /// `close` builds a WS Close with the given policy code + reason — the shape the
+    /// handshake sends on every rejection (`malformed join`, `forbidden`, …).
+    #[test]
+    fn close_carries_code_and_reason() {
+        match close(CLOSE_POLICY, "anonymous-on-scoped-resource".to_owned()) {
+            Message::Close(Some(frame)) => {
+                assert_eq!(frame.code, CLOSE_POLICY);
+                assert_eq!(frame.reason.as_ref(), "anonymous-on-scoped-resource");
+            }
+            _ => panic!("expected a Close frame with a body"),
+        }
+    }
+
+    /// `bearer_token` extracts a well-formed `Bearer <t>` from the upgrade headers and
+    /// rejects a wrong scheme / empty token — the node-admittance fallback path.
+    #[test]
+    fn bearer_token_parses_authorization_header() {
+        use axum::http::HeaderValue;
+        let mut h = HeaderMap::new();
+        h.insert("authorization", HeaderValue::from_static("Bearer node-tok"));
+        assert_eq!(bearer_token(&h).as_deref(), Some("node-tok"));
+
+        let mut bad = HeaderMap::new();
+        bad.insert("authorization", HeaderValue::from_static("Bearer   "));
+        assert_eq!(bearer_token(&bad), None);
+        assert_eq!(bearer_token(&HeaderMap::new()), None);
+    }
+
+    /// The `join` frame deserializes the room id + kind (lowercase-tagged), so a
+    /// `conversation` vs `document` room routes to the right access-meta store.
+    #[test]
+    fn join_frame_deserializes_kind() {
+        let conv: JoinFrame =
+            serde_json::from_value(json!({"room_id": "c1", "kind": "conversation"})).unwrap();
+        assert_eq!(conv.room_id, "c1");
+        assert!(matches!(conv.kind, RoomKind::Conversation));
+
+        let doc: JoinFrame =
+            serde_json::from_value(json!({"room_id": "d1", "kind": "document"})).unwrap();
+        assert!(matches!(doc.kind, RoomKind::Document));
+
+        // An unknown kind is rejected (fail-closed on the handshake).
+        assert!(serde_json::from_value::<JoinFrame>(json!({"room_id": "x", "kind": "bogus"})).is_err());
     }
 }

@@ -228,7 +228,10 @@ fn activity_from_meeting_json(event: &Value) -> Option<ActivityItem> {
         "detected" => {
             let title = event.get("title").and_then(Value::as_str).unwrap_or("");
             let app = event.get("app").and_then(Value::as_str).unwrap_or("");
-            let detected_at = event.get("detected_at").and_then(Value::as_str).unwrap_or("");
+            let detected_at = event
+                .get("detected_at")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             ActivityItem::new("meeting", "meetings", format!("Meeting detected: {title}"))
                 .with_metadata(json!({ "app": app }))
                 .with_created_at(epoch_secs(detected_at))
@@ -237,7 +240,10 @@ fn activity_from_meeting_json(event: &Value) -> Option<ActivityItem> {
             let meeting = event.get("meeting")?;
             let title = meeting.get("title").and_then(Value::as_str).unwrap_or("");
             let id = meeting.get("id").and_then(Value::as_str).unwrap_or("");
-            let started_at = meeting.get("started_at").and_then(Value::as_str).unwrap_or("");
+            let started_at = meeting
+                .get("started_at")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             ActivityItem::new("meeting", "meetings", format!("Meeting started: {title}"))
                 .with_metadata(json!({ "meeting_id": id }))
                 .with_created_at(epoch_secs(started_at))
@@ -247,11 +253,18 @@ fn activity_from_meeting_json(event: &Value) -> Option<ActivityItem> {
             let title = meeting.get("title").and_then(Value::as_str).unwrap_or("");
             let id = meeting.get("id").and_then(Value::as_str).unwrap_or("");
             let space_id = meeting.get("space_id").cloned().unwrap_or(Value::Null);
-            let updated_at = meeting.get("updated_at").and_then(Value::as_str).unwrap_or("");
-            ActivityItem::new("meeting", "meetings", format!("Meeting notes ready: {title}"))
-                .with_level(ActivityLevel::Success)
-                .with_metadata(json!({ "meeting_id": id, "space_id": space_id }))
-                .with_created_at(epoch_secs(updated_at))
+            let updated_at = meeting
+                .get("updated_at")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            ActivityItem::new(
+                "meeting",
+                "meetings",
+                format!("Meeting notes ready: {title}"),
+            )
+            .with_level(ActivityLevel::Success)
+            .with_metadata(json!({ "meeting_id": id, "space_id": space_id }))
+            .with_created_at(epoch_secs(updated_at))
         }
         // `segment` / `status` churn does not make the feed.
         _ => return None,
@@ -383,25 +396,19 @@ async fn save_notes_to_space(
 /// Find the "Meetings" Space, creating it on first use. Returns its id, or `None` if
 /// the spaces store is unavailable.
 async fn ensure_meetings_space(spaces: &SpaceStore) -> Option<String> {
-    match spaces.list_spaces(spaces::DocFilter::unrestricted()).await {
-        Ok(list) => {
-            if let Some(space) = list.iter().find(|s| s.name == MEETINGS_SPACE_NAME) {
-                return Some(space.id.clone());
-            }
-        }
-        Err(e) => tracing::warn!("meetings: listing spaces failed: {e:#}"),
-    }
+    // Get-or-create the "Meetings" space as a SYSTEM space (system=1) so it is
+    // undeletable, matching Artifacts/Canvas/Whiteboard/Clips. `ensure_system_space`
+    // also re-asserts system=1 on an already-existing row, so a Meetings space
+    // created before this change (system=0, individually deletable) is upgraded in
+    // place on the next note-save. It replaces the previous list-then-create_space
+    // path, which produced a background-owned, deletable space.
     match spaces
-        .create_space(
-            MEETINGS_SPACE_NAME,
-            Some("Auto-saved meeting notes"),
-            &spaces::background_owner(),
-        )
+        .ensure_system_space(MEETINGS_SPACE_NAME, Some("Auto-saved meeting notes"))
         .await
     {
         Ok(id) => Some(id),
         Err(e) => {
-            tracing::warn!("meetings: creating Meetings space failed: {e:#}");
+            tracing::warn!("meetings: ensuring Meetings space failed: {e:#}");
             None
         }
     }

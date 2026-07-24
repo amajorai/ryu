@@ -78,11 +78,7 @@ async fn load_config(ctx: &PredictCtx) -> PredictConfig {
 /// Resolve the model that answers predictions: an explicit `agent_id`'s bound
 /// model → `config.model` → env `RYU_PREDICT_MODEL`/`RYU_DEFAULT_LLM_MODEL` →
 /// the built-in default. Nothing hardcoded.
-async fn resolve_model(
-    ctx: &PredictCtx,
-    config: &PredictConfig,
-    agent_id: Option<&str>,
-) -> String {
+async fn resolve_model(ctx: &PredictCtx, config: &PredictConfig, agent_id: Option<&str>) -> String {
     // An explicit agent's bound chat model wins — it makes the prediction agent
     // a real, swappable card.
     if let Some(id) = agent_id.filter(|s| !s.is_empty()) {

@@ -171,7 +171,11 @@ mod tests {
         let mut ovr = custom("toxicity");
         ovr.description = "overridden".to_string();
         let reg = EvaluatorRegistry::from_custom(&[ovr]);
-        assert_eq!(reg.all().len(), base, "override replaces in place, no growth");
+        assert_eq!(
+            reg.all().len(),
+            base,
+            "override replaces in place, no growth"
+        );
         let e = reg.get("toxicity").expect("overridden entry present");
         assert_eq!(e.description, "overridden");
         assert!(!e.builtin, "override is a custom entry (builtin=false)");

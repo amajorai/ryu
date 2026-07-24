@@ -26,5 +26,44 @@
 	"companion": {
 		"label": "Whiteboard",
 		"icon": "shapes"
+	},
+	"contributes": {
+		"sidebar_sections": [
+			{
+				"id": "whiteboard",
+				"title": "Whiteboard",
+				"icon": "shapes",
+				"spec": {
+					"source": {
+						"http": {
+							"method": "GET",
+							"path": "/api/apps/com.ryu.whiteboard/docs"
+						},
+						"items": "documents"
+					},
+					"itemTarget": "/spaces/{{item.space_id}}/app/com.ryu.whiteboard/{{item.id}}",
+					"create": {
+						"http": {
+							"method": "POST",
+							"path": "/api/apps/com.ryu.whiteboard/docs"
+						},
+						"targetFrom": "id",
+						"label": "New whiteboard"
+					},
+					"itemActions": [
+						{
+							"id": "delete",
+							"label": "Delete",
+							"icon": "lucide:trash-2",
+							"style": "danger",
+							"http": {
+								"method": "DELETE",
+								"path": "/api/spaces/{{item.space_id}}/documents/{{item.id}}"
+							}
+						}
+					]
+				}
+			}
+		]
 	}
 }

@@ -124,4 +124,29 @@ mod tests {
         let mut acc = SentenceAccumulator::new();
         assert_eq!(acc.push("One. Two! Three?"), vec!["One.", "Two!", "Three?"]);
     }
+
+    #[test]
+    fn accumulator_treats_newline_as_a_terminator() {
+        let mut acc = SentenceAccumulator::new();
+        assert_eq!(acc.push("bullet one\n"), vec!["bullet one"]);
+        // A whitespace-only delta yields nothing and leaves the buffer drainable-empty.
+        assert!(acc.push("   ").is_empty());
+        assert!(acc.flush().is_none());
+    }
+
+    #[test]
+    fn accumulator_preserves_multibyte_across_delta_boundaries() {
+        let mut acc = SentenceAccumulator::new();
+        // A multibyte char split across two pushes must not corrupt the sentence.
+        assert!(acc.push("café ").is_empty());
+        assert_eq!(acc.push("☃ done."), vec!["café ☃ done."]);
+    }
+
+    #[test]
+    fn sentence_chunks_splits_on_newline() {
+        assert_eq!(
+            sentence_chunks("a\nb\nc"),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
 }

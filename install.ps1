@@ -9,7 +9,7 @@
 # Environment overrides:
 #   $env:RYU_INSTALL_DIR    install location   (default: $HOME\.ryu\bin)
 #   $env:RYU_VERSION        release tag e.g. v0.0.4   (default: latest)
-#   $env:RYU_SKIP_CHECKSUM  1 to skip sha256 verify   (default: verify when available)
+#   $env:RYU_SKIP_CHECKSUM  1 to skip sha256 verify   (default: verify, abort on failure)
 
 $ErrorActionPreference = 'Stop'
 
@@ -30,11 +30,6 @@ $base = if ($env:RYU_VERSION) {
   "https://github.com/$repo/releases/latest/download"
 }
 
-function Test-Url([string]$url) {
-  try { Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing | Out-Null; return $true }
-  catch { return $false }
-}
-
 Write-Host "Installing Ryu ($suffix) into $installDir"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
@@ -45,10 +40,24 @@ foreach ($bin in $binaries) {
   Write-Host "  $bin"
   Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
 
-  # checksum (best-effort; the binaries job may not publish .sha256)
-  if ($env:RYU_SKIP_CHECKSUM -ne '1' -and (Test-Url "$url.sha256")) {
-    $want = ((Invoke-WebRequest -Uri "$url.sha256" -UseBasicParsing).Content -split '\s+')[0].Trim()
-    $got  = (Get-FileHash -Algorithm SHA256 -Path $out).Hash.ToLower()
+  # Checksum verification — fail closed. Releases publish a .sha256 next to
+  # every binary, so a missing/failed checksum download aborts the install
+  # instead of silently skipping verification. Emergency escape hatch:
+  # $env:RYU_SKIP_CHECKSUM = '1'.
+  if ($env:RYU_SKIP_CHECKSUM -eq '1') {
+    Write-Host '  RYU_SKIP_CHECKSUM=1 — skipping checksum verification (not recommended)'
+  } else {
+    try {
+      $shaContent = (Invoke-WebRequest -Uri "$url.sha256" -UseBasicParsing).Content
+    } catch {
+      throw "could not download checksum $url.sha256 — refusing to install an unverified binary (set `$env:RYU_SKIP_CHECKSUM = '1' to bypass): $_"
+    }
+    if ($shaContent -is [byte[]]) { $shaContent = [System.Text.Encoding]::ASCII.GetString($shaContent) }
+    $want = ([string]$shaContent -split '\s+')[0].Trim()
+    if ($want -notmatch '^[0-9a-fA-F]{64}$') {
+      throw "malformed checksum file at $url.sha256 — refusing to install (set `$env:RYU_SKIP_CHECKSUM = '1' to bypass)"
+    }
+    $got = (Get-FileHash -Algorithm SHA256 -Path $out).Hash.ToLower()
     if ($want.ToLower() -ne $got) { throw "checksum mismatch for $asset (want $want, got $got)" }
   }
 }

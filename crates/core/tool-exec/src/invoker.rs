@@ -24,7 +24,8 @@ use super::{Elicitation, InvokeOutcome, ToolInvocation, ToolInvokeResult};
 /// from Core's MCP registry (`McpRegistry::call_tool_with_identity`). Core
 /// implements this for `McpRegistry` in its host shim, so this crate stays free
 /// of any `apps/core` dependency — the `tool_registry`/`ToolEmbedder` precedent.
-/// The full 7-arg signature is kept byte-identical so behavior does not change.
+/// `agent_id` names the CALLING agent so the host's approval policy can apply
+/// the agent's configured per-tool approval list (Layer A); `None` skips it.
 #[async_trait]
 pub trait ToolCaller: Send + Sync {
     /// Route one tool call through the host registry under the agent's resolved
@@ -33,6 +34,7 @@ pub trait ToolCaller: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn call_tool_with_identity(
         &self,
+        agent_id: Option<&str>,
         tool_id: &str,
         arguments: Value,
         allowlist: Option<&[String]>,
@@ -132,12 +134,9 @@ impl SandboxToolInvoker {
         user_id: Option<String>,
         identity_profile_ids: Vec<String>,
     ) -> Self {
-        // `agent_id` is retained only for audit attribution / debugging; the
-        // gate that matters is `allowlist`, which travels unchanged into
-        // `call_tool_with_identity` (no escalation).
-        let _ = agent_id;
         SandboxToolInvoker::Registry(RegistryToolInvoker {
             caller,
+            agent_id,
             allowlist,
             user_id,
             identity_profile_ids,
@@ -171,6 +170,9 @@ impl SandboxToolInvoker {
 /// allowlist.
 pub struct RegistryToolInvoker {
     caller: Arc<dyn ToolCaller>,
+    /// The calling agent — feeds the host approval policy's per-agent
+    /// `approval_tools` (Layer A), in addition to audit attribution.
+    agent_id: String,
     allowlist: Option<Vec<String>>,
     user_id: Option<String>,
     /// Agent's bound Identity Vault profiles (epic #517). Empty = no vault consult.
@@ -183,6 +185,7 @@ impl RegistryToolInvoker {
         match self
             .caller
             .call_tool_with_identity(
+                Some(self.agent_id.as_str()).filter(|s| !s.is_empty()),
                 &tool_id,
                 call.args,
                 self.allowlist.as_deref(),

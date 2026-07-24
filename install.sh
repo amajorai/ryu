@@ -10,7 +10,7 @@
 # Environment overrides:
 #   RYU_INSTALL_DIR   install location            (default: $HOME/.ryu/bin)
 #   RYU_VERSION       release tag e.g. v0.0.4      (default: latest)
-#   RYU_SKIP_CHECKSUM 1 to skip sha256 verify      (default: verify when available)
+#   RYU_SKIP_CHECKSUM 1 to skip sha256 verify      (default: verify, abort on failure)
 #   RYU_NO_MODIFY_PATH 1 to leave shell rc untouched
 set -eu
 
@@ -44,10 +44,8 @@ esac
 # --- pick a downloader ------------------------------------------------------
 if command -v curl >/dev/null 2>&1; then
   dl() { curl -fsSL "$1" -o "$2"; }
-  dl_ok() { curl -fsSLI "$1" >/dev/null 2>&1; }
 elif command -v wget >/dev/null 2>&1; then
   dl() { wget -qO "$2" "$1"; }
-  dl_ok() { wget -q --spider "$1" >/dev/null 2>&1; }
 else
   err "need curl or wget on PATH"
 fi
@@ -58,21 +56,28 @@ else
   base="https://github.com/$REPO/releases/latest/download"
 fi
 
-# --- sha256 helper (best-effort; binaries job may not emit .sha256) ----------
+# --- sha256 verification (fail closed) ---------------------------------------
+# Releases publish a .sha256 next to every binary, so a missing/failed checksum
+# is treated as an error, not a shrug — otherwise a network hiccup (or an
+# attacker stripping the checksum) silently disables verification. Emergency
+# escape hatch: RYU_SKIP_CHECKSUM=1.
 sha_cmd=""
 if command -v sha256sum >/dev/null 2>&1; then sha_cmd="sha256sum";
 elif command -v shasum >/dev/null 2>&1; then sha_cmd="shasum -a 256"; fi
 
 verify() { # <file> <sha_url>
   file="$1"; sha_url="$2"
-  [ "${RYU_SKIP_CHECKSUM:-0}" = "1" ] && return 0
-  [ -z "$sha_cmd" ] && { info "no sha256 tool found — skipping checksum"; return 0; }
-  dl_ok "$sha_url" || { info "no published checksum — skipping verify"; return 0; }
+  if [ "${RYU_SKIP_CHECKSUM:-0}" = "1" ]; then
+    info "RYU_SKIP_CHECKSUM=1 — skipping checksum verification (not recommended)"
+    return 0
+  fi
+  [ -z "$sha_cmd" ] && err "no sha256 tool (sha256sum/shasum) on PATH — install one, or set RYU_SKIP_CHECKSUM=1 to bypass verification (not recommended)"
   tmp_sha="$file.sha256"
-  dl "$sha_url" "$tmp_sha" || { info "checksum download failed — skipping verify"; return 0; }
-  want="$(awk '{print $1}' "$tmp_sha")"
+  dl "$sha_url" "$tmp_sha" || err "could not download checksum $sha_url — refusing to install an unverified binary (set RYU_SKIP_CHECKSUM=1 to bypass)"
+  want="$(awk '{print $1; exit}' "$tmp_sha")"
   got="$($sha_cmd "$file" | awk '{print $1}')"
   rm -f "$tmp_sha"
+  [ "${#want}" -eq 64 ] || err "malformed checksum file at $sha_url — refusing to install (set RYU_SKIP_CHECKSUM=1 to bypass)"
   [ "$want" = "$got" ] || err "checksum mismatch for $(basename "$file") (want $want, got $got)"
 }
 

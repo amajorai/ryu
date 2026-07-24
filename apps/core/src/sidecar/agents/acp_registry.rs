@@ -200,7 +200,10 @@ pub fn load_registry_agents() -> Vec<RegistryAgent> {
                         Ok(file) => {
                             let agents = file.agents.clone();
                             if write_cache(&file).is_ok() {
-                                tracing::info!(count = agents.len(), "refreshed ACP registry from CDN");
+                                tracing::info!(
+                                    count = agents.len(),
+                                    "refreshed ACP registry from CDN"
+                                );
                             }
                             return agents;
                         }
@@ -485,5 +488,214 @@ mod tests {
         );
         assert_eq!(npm_package_name("cline@3.0.37"), "cline");
         assert_eq!(npm_package_name("fast-agent-acp==0.9.1"), "fast-agent-acp");
+    }
+
+    fn agent_with(id: &str, dist: RegistryDistribution) -> RegistryAgent {
+        RegistryAgent {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            description: String::new(),
+            icon: None,
+            distribution: dist,
+        }
+    }
+
+    #[test]
+    fn canonical_ids_cover_every_curated_mapping_and_fallthrough() {
+        assert_eq!(canonical_agent_id("codex-acp"), "acp:codex");
+        assert_eq!(canonical_agent_id("gemini"), "acp:gemini");
+        assert_eq!(canonical_agent_id("pi-acp"), "acp:pi");
+        assert_eq!(canonical_agent_id("github-copilot-cli"), "acp:copilot");
+        assert_eq!(canonical_agent_id("codebuddy-code"), "acp:codebuddy");
+        assert_eq!(canonical_agent_id("grok-build"), "acp:grok");
+        assert_eq!(canonical_agent_id("factory-droid"), "acp:droid");
+        assert_eq!(canonical_agent_id("glm-acp-agent"), "acp:glm");
+        assert_eq!(canonical_agent_id("agoragentic-acp"), "acp:agoragentic");
+        assert_eq!(canonical_agent_id("minion-code"), "acp:minion");
+        // Unknown id → generic acp: prefix.
+        assert_eq!(canonical_agent_id("brand-new-agent"), "acp:brand-new-agent");
+    }
+
+    #[test]
+    fn npm_package_name_edge_cases() {
+        // Scoped package with NO version: leading '@' at index 0 is not a version sep.
+        assert_eq!(npm_package_name("@scope/pkg"), "@scope/pkg");
+        // Bare package, no version.
+        assert_eq!(npm_package_name("goose"), "goose");
+        // Surrounding whitespace is trimmed.
+        assert_eq!(npm_package_name("  cline@1.2.3  "), "cline");
+        // `==` takes precedence and wins even if an '@' is also present.
+        assert_eq!(npm_package_name("pkg==1.0.0"), "pkg");
+    }
+
+    #[test]
+    fn default_and_resolved_icon_urls() {
+        assert_eq!(
+            default_icon_url("claude-acp"),
+            "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg"
+        );
+        // No explicit icon → CDN default derived from id.
+        let plain = agent_with("goose", RegistryDistribution::default());
+        assert_eq!(icon_url_for_agent(&plain), default_icon_url("goose"));
+        // Explicit icon field wins verbatim.
+        let mut branded = agent_with("goose", RegistryDistribution::default());
+        branded.icon = Some("https://example.com/x.png".to_owned());
+        assert_eq!(icon_url_for_agent(&branded), "https://example.com/x.png");
+    }
+
+    #[test]
+    fn npx_and_uvx_spawn_commands_include_package_and_args() {
+        let args = vec!["--acp".to_owned(), "--verbose".to_owned()];
+        let npx = npx_spawn_from_registry("cline@latest", &args);
+        assert!(npx.contains("npx"));
+        assert!(npx.contains("-y"));
+        assert!(npx.contains("cline@latest"));
+        assert!(npx.contains("--acp") && npx.contains("--verbose"));
+
+        let uvx = uvx_spawn_from_registry("fast-agent-acp", &args);
+        assert!(uvx.starts_with("uvx "));
+        assert!(uvx.contains("fast-agent-acp"));
+        assert!(uvx.contains("--acp"));
+    }
+
+    #[test]
+    fn spawn_plan_prefers_npx_then_uvx_then_binary_then_none() {
+        // npx present → npx plan with unpinned bridge package.
+        let npx_agent = agent_with(
+            "cline",
+            RegistryDistribution {
+                npx: Some(RegistryNpx {
+                    package: "cline@3.0.0".to_owned(),
+                    args: vec!["--acp".to_owned()],
+                    env: HashMap::new(),
+                }),
+                ..Default::default()
+            },
+        );
+        let plan = spawn_plan_for(&npx_agent).expect("npx plan");
+        assert_eq!(plan.bridge_npm_package.as_deref(), Some("cline"));
+        assert!(plan.spawn_cmd.contains("cline@latest"));
+        assert!(plan.direct_archive.is_none());
+
+        // uvx present (no npx) → uvx plan, no bridge package.
+        let uvx_agent = agent_with(
+            "fast",
+            RegistryDistribution {
+                uvx: Some(RegistryUvx {
+                    package: "fast-agent-acp==0.9.1".to_owned(),
+                    args: vec![],
+                }),
+                ..Default::default()
+            },
+        );
+        let plan = spawn_plan_for(&uvx_agent).expect("uvx plan");
+        assert!(plan.bridge_npm_package.is_none());
+        assert!(plan.spawn_cmd.contains("fast-agent-acp"));
+
+        // No distribution at all → no plan.
+        assert!(spawn_plan_for(&agent_with("empty", RegistryDistribution::default())).is_none());
+    }
+
+    #[test]
+    fn direct_archive_resolves_only_for_the_host_platform() {
+        // A binary map covering every platform key resolves on any host.
+        let mut all_platforms = HashMap::new();
+        for key in [
+            "darwin-aarch64",
+            "darwin-x86_64",
+            "linux-aarch64",
+            "linux-x86_64",
+            "windows-x86_64",
+        ] {
+            all_platforms.insert(
+                key.to_owned(),
+                RegistryBinaryPlatform {
+                    archive: format!("https://dl.example.com/{key}.tar.gz"),
+                    cmd: "./goose".to_owned(),
+                    args: vec!["--acp".to_owned()],
+                },
+            );
+        }
+        let agent = agent_with(
+            "goose",
+            RegistryDistribution {
+                binary: Some(all_platforms),
+                ..Default::default()
+            },
+        );
+        let dist = direct_archive_for_agent(&agent).expect("host platform present");
+        assert_eq!(dist.registry_id, "goose");
+        assert!(dist.archive_url.ends_with(".tar.gz"));
+        assert!(dist.install_dir.ends_with("agents/goose"));
+
+        // The spawn command joins the resolved binary path with its args, and the
+        // relative "./goose" is stripped of the leading "./".
+        let cmd = spawn_cmd_for_direct_archive(&dist);
+        assert!(cmd.contains("goose"));
+        assert!(!cmd.contains("./goose"));
+        assert!(cmd.contains("--acp"));
+
+        // An empty binary map (no host key) → no direct archive.
+        let none_agent = agent_with(
+            "nobin",
+            RegistryDistribution {
+                binary: Some(HashMap::new()),
+                ..Default::default()
+            },
+        );
+        assert!(direct_archive_for_agent(&none_agent).is_none());
+        // No binary block at all → no direct archive.
+        assert!(direct_archive_for_agent(&agent_with("x", RegistryDistribution::default())).is_none());
+    }
+
+    #[test]
+    fn gateway_bypass_only_false_for_codex_and_pi() {
+        assert!(!registry_gateway_bypass("codex-acp"));
+        assert!(!registry_gateway_bypass("pi-acp"));
+        assert!(registry_gateway_bypass("gemini"));
+        assert!(registry_gateway_bypass("claude-acp"));
+        assert!(registry_gateway_bypass("goose"));
+    }
+
+    #[test]
+    fn underlying_cli_probe_maps_known_agents_only() {
+        assert_eq!(
+            underlying_cli_probe("claude-acp"),
+            Some(("claude", "@anthropic-ai/claude-code"))
+        );
+        assert_eq!(underlying_cli_probe("goose"), Some(("goose", "goose")));
+        assert_eq!(
+            underlying_cli_probe("cursor"),
+            Some(("cursor-agent", "cursor-agent"))
+        );
+        assert_eq!(underlying_cli_probe("unknown-agent"), None);
+    }
+
+    #[test]
+    fn registry_file_serde_round_trips_with_defaults() {
+        // A minimal agent row with no icon/distribution deserializes (serde default).
+        let raw = r#"{
+            "version": "1",
+            "agents": [
+                { "id": "goose", "name": "Goose", "version": "1.0", "description": "d" }
+            ]
+        }"#;
+        let file: RegistryFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(file.agents.len(), 1);
+        let a = &file.agents[0];
+        assert!(a.icon.is_none());
+        assert!(a.distribution.npx.is_none());
+        // Re-serialize and re-parse to confirm the round trip is stable.
+        let back = serde_json::to_string(&file).unwrap();
+        let again: RegistryFile = serde_json::from_str(&back).unwrap();
+        assert_eq!(again.agents[0].id, "goose");
+    }
+
+    #[test]
+    fn curated_override_ids_are_the_first_class_four() {
+        assert!(CURATED_OVERRIDE_IDS.contains(&"claude-acp"));
+        assert!(CURATED_OVERRIDE_IDS.contains(&"pi-acp"));
+        assert_eq!(CURATED_OVERRIDE_IDS.len(), 4);
     }
 }

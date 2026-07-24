@@ -151,7 +151,10 @@ pub fn apply_env_defaults() {
             .into_owned(),
     );
     set_if_unset("RYU_BIND", format!("127.0.0.1:{}", port(7980)));
-    set_if_unset("RYU_GATEWAY_URL", format!("http://127.0.0.1:{}", port(7981)));
+    set_if_unset(
+        "RYU_GATEWAY_URL",
+        format!("http://127.0.0.1:{}", port(7981)),
+    );
     if let Some(cfg) = default_gateway_config() {
         set_if_unset("GATEWAY_CONFIG", cfg.to_string_lossy().into_owned());
     }
