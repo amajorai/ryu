@@ -90,6 +90,15 @@ fn default_grant_allowlist() -> Vec<String> {
         // declares an egress grant, not an `mcp:<name>` server grant — its enable
         // path validates this exact scope instead.
         "tool:http-egress:api.exa.ai",
+        // `spider` and `rtk` were decoupled from Core into declarative `command`
+        // tool plugins, so each declares a `tool:command:<bin>` grant instead of
+        // its old in-Core provider. Same re-enable rationale as the scopes above.
+        "tool:command:spider",
+        "tool:command:rtk",
+        // `advisor` and `shadow` were decoupled into declarative `http` tools that
+        // call Core-local bridges (/api/advisor/consult and the shadow proxy), so
+        // both declare loopback egress rather than an `mcp:<name>` grant.
+        "tool:http-egress:127.0.0.1",
         "mcp:ghost",
         "mcp:shadow",
         // data scopes
