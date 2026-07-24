@@ -40,7 +40,7 @@ The Rust core of the developer SDK.
 |---|---|---|
 | `ModelClient` | struct | Gateway-mandatory model client |
 | `assertAllowedEgressUrl()` | fn | Reject direct-provider URLs at construction |
-| Manifest validation | fn | Validate `plugin.json` against schema |
+| Manifest validation | fn | Validate `manifest.json` against schema |
 | Gateway egress blocklist | const | Known direct-provider URLs |
 
 **Key invariant:** `ModelClient` validates egress in the Rust core, so a direct-provider base URL
@@ -100,7 +100,7 @@ The TypeScript SDK wraps `ryu-sdk-napi` and adds typed factories.
 | `defineWorkflow()` | Create a workflow that orchestrates other Runnables |
 | `defineTool()` | Create a tool with JSON Schema validation |
 | `defineSkill()` | Create a reusable skill |
-| `definePlugin()` | Assemble a complete `plugin.json` manifest |
+| `definePlugin()` | Assemble a complete `manifest.json` manifest |
 | `defineApp()` | Assemble a manifest for a Ryu App (widget tools) |
 | `defineTurnHook()` | Create a turn hook that runs after assistant turns |
 | `defineModel()` | Create a gateway-mandatory model client |

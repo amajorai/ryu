@@ -30,7 +30,7 @@ export function ExamplePluginPanel() {
 	const srcdoc = useMemo(() => examplePluginSrcdoc(nonce), [nonce]);
 
 	// The capabilities the host grants this example. MVP: host-provided config
-	// (reading from plugin.json grants is #443).
+	// (reading from manifest.json grants is #443).
 	const granted = useMemo<ReadonlySet<Capability>>(
 		() => new Set<Capability>(["core.listAgents"]),
 		[]

@@ -6,12 +6,12 @@
 /** Validate a plugin id (reverse-domain, path-traversal-safe). Throws on invalid. */
 export declare function validatePluginId(id: string): void
 /**
- * Parse and fully validate a `plugin.json` string (id, semver, per-kind
+ * Parse and fully validate a `manifest.json` string (id, semver, per-kind
  * runnable contracts). Returns the normalized manifest JSON, or throws.
  */
 export declare function parseAndValidateManifest(json: string): string
 /**
- * The JSON Schema for a `plugin.json`, as a JSON string. Derived from the Rust
+ * The JSON Schema for a `manifest.json`, as a JSON string. Derived from the Rust
  * types, so it never drifts from what the core validates.
  */
 export declare function pluginManifestJsonSchema(): string

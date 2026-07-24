@@ -51,7 +51,20 @@ export interface CatalogEntry {
 	integration_kind?: string | null;
 	integration_url?: string | null;
 	kinds: string[];
+	/** SPDX licence id, when the source reports one. */
+	license?: string | null;
 	name: string;
+	/** Who listed this and how much vetting it had. `"community"` = discovered
+	 *  automatically from a public GitHub topic and NOT reviewed by Ryu; absent or
+	 *  null = first-party. Deliberately snake_case (it rides on the card, not the
+	 *  detail) and deliberately fail-safe: an older wire never gains a scary label,
+	 *  so a discovery source must opt in explicitly. Drives both the Community
+	 *  store section and its trust notice — see `isCommunityEntry`. */
+	origin?: "community" | "first_party" | null;
+	/** Which discovery source produced the listing (e.g. `"github-topic"`). */
+	provenance?: string | null;
+	/** The repository this listing was discovered from (community listings). */
+	repo_url?: string | null;
 	/** Plugin-to-plugin dependencies this app needs enabled first (the manifest's
 	 *  `requires`). Emitted by Core's catalog source when non-empty; absent = none.
 	 *  Powers the "Requires these apps" section so the dependency chain is clear
@@ -61,10 +74,15 @@ export interface CatalogEntry {
 		apps?: { id: string; min_version?: string | null }[];
 		grants?: string[];
 	} | null;
+	/** False when nobody at Ryu has vetted this listing. Absent = not applicable
+	 *  (first-party). Never treat absent as "reviewed". */
+	reviewed?: boolean;
 	/** The bundled sub-items this item ships (agents/workflows/tools/skills/
 	 *  companions/mcp) — the manifest runnables. Powers "What's included". */
 	runnables?: { id: string; kind: string; name?: string }[];
 	source?: string;
+	/** Upstream popularity signal (GitHub stars) for ranking unmoderated listings. */
+	stars?: number | null;
 	tagline?: string | null;
 	tags: string[];
 	/** Explicit app-vs-plugin discriminator from the catalog. Preferred over the
@@ -89,6 +107,10 @@ export interface PluginCatalogDetail {
 	category?: string | null;
 	descriptor?: { url?: string | null } | null;
 	developer?: string | null;
+	/** Provenance of a community listing: which GitHub topic surfaced it, and the
+	 *  repository it came from. camelCase because it rides on the DETAIL payload
+	 *  (the card is snake_case — see the casing note on `CatalogEntry`). */
+	discoveredFrom?: { repositoryUrl?: string | null; topic: string } | null;
 	domain?: string | null;
 	examplePrompts?: string[];
 	feeds?: string[] | null;
@@ -96,9 +118,17 @@ export interface PluginCatalogDetail {
 	iconUrl?: string | null;
 	keywords?: string[];
 	license?: string | null;
+	/** The plugin id the discovered repo's own manifest CLAIMS. Surfaced separately
+	 *  from the entry id on purpose, so an id-squatting repo can never masquerade
+	 *  as a plugin you already have installed. */
+	manifestId?: string | null;
 	privacyPolicyUrl?: string | null;
+	repositoryUrl?: string | null;
+	/** False when nobody at Ryu vetted this listing. */
+	reviewed?: boolean;
 	runnables?: { id: string; kind: string; name?: string }[];
 	screenshots?: string[];
+	stars?: number | null;
 	tagline?: string | null;
 	termsOfServiceUrl?: string | null;
 	url?: string | null;

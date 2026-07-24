@@ -153,7 +153,7 @@ macro_rules! boot_fail {
 }
 
 /// Seed the profile-aware env vars the Ghost MCP server needs, which its plugin
-/// manifest (`fixtures/ghost.plugin.json`) can't express statically. Called once,
+/// manifest (`fixtures/ghost.manifest.json`) can't express statically. Called once,
 /// early in `main` (before threads spawn), so the values are present when the
 /// manifest decl is lowered and when the Ghost child is later spawned:
 /// - `RYU_GHOST_BIN` → the profile-scoped `~/.ryu{profile}/bin/ghost` path,
@@ -234,7 +234,7 @@ async fn main() {
     crate::profile::apply_env_defaults();
 
     // Ghost sidecar env: the Ghost MCP server moved from a hardcoded built-in to
-    // its plugin manifest's `mcp_servers` (fixtures/ghost.plugin.json). A static
+    // its plugin manifest's `mcp_servers` (fixtures/ghost.manifest.json). A static
     // manifest can't express Ghost's three profile-aware values, so Core seeds
     // them into its own process env HERE — early, before threads spawn and before
     // `fire_activation_event` lowers the manifest decl — and the child inherits
@@ -477,7 +477,7 @@ async fn main() {
         // worker HTTP client, and the `/api/finetune/*` surface; Core reaches only its
         // `host.finetune_*` bridge over loopback via `finetune_client`.)
         // Tools
-        // (Spider is now a declarative `command` plugin — fixtures/spider.plugin.json —
+        // (Spider is now a declarative `command` plugin — fixtures/spider.manifest.json —
         // with no in-process manager; the `spider` CLI is user-installed and reached
         // via the command-tool allowlist, so there is no SpiderManager sidecar here.)
         // Autoresearch experiment runner (Python stdlib HTTP service). Opt-in;

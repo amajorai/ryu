@@ -157,7 +157,7 @@ export async function runCli(
 // ── Extension seam: app-contributed subcommands (`ryu <app> <cmd>`) ─────────────
 //
 // An installed, ENABLED app contributes terminal subcommands by declaring them in
-// its plugin.json under `surfaces.cli` with `support: "commands"` +
+// its manifest.json under `surfaces.cli` with `support: "commands"` +
 // `commands: [{ name, method, path, summary }]`. Core serializes the whole manifest
 // on `GET /api/plugins` (already surface-filtered to `cli` by the X-Ryu-Surface
 // header the tui sends), core-client maps it into `AppInfo.commands`, and this

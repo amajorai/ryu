@@ -44,11 +44,11 @@ use crate::server::conversations::ConversationSummary;
 use crate::server::ServerState;
 use crate::sidecar::ext_proxy::{ext_token, node_token};
 
-/// The built-in Self-Healing app id (matches the `healing.plugin.json` fixture id
+/// The built-in Self-Healing app id (matches the `healing.manifest.json` fixture id
 /// and `plugins::builtins::HEALING_PLUGIN_ID`).
 const HEALING_PLUGIN_ID: &str = "com.ryu.healing";
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `healing.plugin.json` fixture `port`. Core injects this as `RYU_HEALING_PORT` at
+/// `healing.manifest.json` fixture `port`. Core injects this as `RYU_HEALING_PORT` at
 /// spawn.
 const HEALING_FALLBACK_PORT: u16 = 8001;
 

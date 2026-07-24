@@ -73,7 +73,7 @@ Every value is env-overridable; nothing is hardcoded.
 
 ## Build
 
-`plugin.json` is generated. The manifest carries `backend.js` inline as
+`manifest.json` is generated. The manifest carries `backend.js` inline as
 `backend_code` plus its `backend_sha256`, and Core refuses a mismatch at the install
 door, so the two must be produced together.
 
@@ -81,7 +81,7 @@ door, so the two must be produced together.
 bun examples/auth-bridge/build.mjs
 ```
 
-Never hand-edit `plugin.json`.
+Never hand-edit `manifest.json`.
 
 ## Install and run
 
@@ -89,7 +89,7 @@ Never hand-edit `plugin.json`.
    Toggle `ryu:experimental-plugin-runtime`, or set
    `RYU_EXPERIMENTAL_PLUGIN_RUNTIME=1` for a headless Core.
 
-2. **Install the plugin** from the generated `plugin.json`.
+2. **Install the plugin** from the generated `manifest.json`.
 
 3. **Select it** as the active provider and send a message. Registration is automatic:
    the sidecar's `provides_provider` declaration tells Core to register

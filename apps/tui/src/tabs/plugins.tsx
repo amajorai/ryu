@@ -1,6 +1,6 @@
 /* @jsxImportSource @opentui/react */
 // Plugins tab — the REAL plugin lifecycle surface, backed by Core's `/api/plugins`
-// (a plugin.json bundle + its installed/enabled record), NOT the sidecar catalog
+// (a manifest.json bundle + its installed/enabled record), NOT the sidecar catalog
 // that `apps.tsx` browses (`/api/catalog` + `/api/setup`). It mirrors apps/desktop's
 // Extensions page (useApps) over the terminal:
 //   - data:      GET /api/plugins -> AppInfo[] (manifests merged with lifecycle state;

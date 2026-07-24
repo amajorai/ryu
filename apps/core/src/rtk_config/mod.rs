@@ -2,7 +2,7 @@
 //!
 //! Phase 1 exposes RTK as an explicit `rtk__run` tool — now a fully declarative
 //! `command`-backend plugin (`plugins-store/rtk`, mirrored as the built-in
-//! fixture `plugin_manifest/fixtures/rtk.plugin.json`); its native provider
+//! fixture `plugin_manifest/fixtures/rtk.manifest.json`); its native provider
 //! (`sidecar/mcp/rtk.rs`) was deleted. Phase 2, below, is NOT a tool and cannot be
 //! declarative, so it stays as Rust — including [`rtk_bin_path`]/[`is_available`],
 //! relocated here from the deleted provider (Phase 2 is their only consumer).

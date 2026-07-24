@@ -184,7 +184,7 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             recommended: true,
         },
         // Spider is no longer a Ryu-managed sidecar: it became a declarative
-        // `command` plugin (fixtures/spider.plugin.json) backed by a BYO `spider`
+        // `command` plugin (fixtures/spider.manifest.json) backed by a BYO `spider`
         // CLI (`cargo install spider_cli`) reached via the command-tool allowlist,
         // so it is not listed in the managed-sidecar install catalog.
         CatalogEntry {

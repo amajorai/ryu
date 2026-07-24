@@ -237,7 +237,7 @@ rebrand. See [`TRADEMARK.md`](./TRADEMARK.md). Build instructions:
 
 | Unit | What it is |
 |---|---|
-| [`crates/ryu-kernel-contracts`](./crates/ryu-kernel-contracts) | Pure-data `plugin.json` manifest model shared by Core + SDK |
+| [`crates/ryu-kernel-contracts`](./crates/ryu-kernel-contracts) | Pure-data `manifest.json` manifest model shared by Core + SDK |
 | [`crates/ryu-crypto`](./crates/ryu-crypto) | Encryption-at-rest `FieldCipher` + swappable master-key custody |
 | [`crates/ryu-vault`](./crates/ryu-vault) | Identity Vault — crypto-sealed per-domain credential store |
 | [`crates/ryu-downloads`](./crates/ryu-downloads) | `DownloadCenter` — resumable, checksum-verified artifact fetch |
@@ -383,7 +383,7 @@ Shared TS surface: SDK, clients, design system, protocol.
 | [`@ryu/ui`](./packages/ui) | TypeScript | 53,385 | 1406 KB | — |
 | [`@ryu/blocks`](./packages/blocks) | TypeScript | 52,445 | 1459 KB | — |
 | [`@ryu/api`](./packages/api) | TypeScript | 30,168 | 985 KB | — |
-| [`@ryuhq/sdk`](./packages/sdk) | TypeScript | 9,665 | 326 KB | Ryu developer SDK: typed builders and CLI for authoring plugin.json Plugin bundles |
+| [`@ryuhq/sdk`](./packages/sdk) | TypeScript | 9,665 | 326 KB | Ryu developer SDK: typed builders and CLI for authoring manifest.json Plugin bundles |
 | [`@ryuhq/core-client`](./packages/core-client) | TypeScript | 9,428 | 278 KB | — |
 | [`@ryu/app-host`](./packages/app-host) | TypeScript | 8,961 | 331 KB | — |
 | [`@ryu/marketplace`](./packages/marketplace) | TypeScript | 8,552 | 246 KB | — |
@@ -392,7 +392,7 @@ Shared TS surface: SDK, clients, design system, protocol.
 | [`@ryu/settings`](./packages/settings) | TypeScript | 2,262 | 59 KB | — |
 | [`@ryu/mail`](./packages/mail) | TypeScript | 1,594 | 48 KB | — |
 | [`@ryuhq/protocol`](./packages/protocol) | TypeScript | 1,330 | 40 KB | — |
-| [`create-ryu-app`](./packages/create-ryu-app) | TypeScript | 1,089 | 36 KB | Scaffold a starter Ryu SDK project with a Runnable, gateway-pointed model config, and plugin.json manifest |
+| [`create-ryu-app`](./packages/create-ryu-app) | TypeScript | 1,089 | 36 KB | Scaffold a starter Ryu SDK project with a Runnable, gateway-pointed model config, and manifest.json manifest |
 | [`@ryu/email`](./packages/email) | TypeScript | 927 | 25 KB | — |
 | [`@ryu/hotkeys`](./packages/hotkeys) | TypeScript | 760 | 21 KB | — |
 | [`@ryuhq/client`](./packages/client) | TypeScript | 631 | 17 KB | TypeScript client SDK for embedding a Ryu Core agent in any app |

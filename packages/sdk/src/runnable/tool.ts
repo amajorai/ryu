@@ -232,7 +232,7 @@ export function defineTool<
 }
 
 /**
- * Convert a {@link ToolRunnable} into a `plugin.json` `kind:"tool"` runnable that
+ * Convert a {@link ToolRunnable} into a `manifest.json` `kind:"tool"` runnable that
  * ships its `run` body as Core's `inline_deno` backend. The emitted config
  * mirrors Core's `ToolConfig` (`apps/core/src/plugin_manifest/schema.rs`):
  * `{ slug, backend:"inline_deno", code, description?, input_schema }`. Core

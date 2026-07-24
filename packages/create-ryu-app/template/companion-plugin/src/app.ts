@@ -13,7 +13,7 @@
  * can never impersonate first-party Ryu/system chrome.
  *
  *   bun run src/app.ts     # prints the assembled manifest
- *   bunx ryu pack .        # bundles src/widget.tsx into ui_code + writes plugin.json
+ *   bunx ryu pack .        # bundles src/widget.tsx into ui_code + writes manifest.json
  *
  * v1 boundary: DECLARATIVE PASS-THROUGH only — there is no `run` handler for the
  * tools. The render widget draws from `window.openai.toolInput` / `toolOutput`;

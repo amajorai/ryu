@@ -5,7 +5,7 @@ description: "Server-side installable plugins that run plugin-authored JS in a D
 
 The plugin runtime is the code-execution layer that turns features like double-check, goal, and
 advisor from hardcoded Core endpoints into real, installable, enable/disable-able plugins an outside
-developer can ship. A plugin declares a **turn hook** in its `plugin.json`; the hook is
+developer can ship. A plugin declares a **turn hook** in its `manifest.json`; the hook is
 plugin-authored JS that runs in the same deny-by-default Deno sandbox that backs
 [programmatic tool calling](/docs/core/programmatic-tool-calling), and it reaches Core only through
 capability-gated host functions.
@@ -13,7 +13,7 @@ capability-gated host functions.
 It lives in `apps/core/src/plugin_host/` (`mod.rs`, `bridge.rs`) and is wired into the chat path once,
 at the top-level handler, so the CLI and bots get hooks too, not just the desktop. The declarative
 manifest that carries a hook is described in
-[Bundle Runnables with plugin.json](/docs/develop/extensions/plugin-json-manifest); this page covers
+[Bundle Runnables with manifest.json](/docs/develop/extensions/plugin-json-manifest); this page covers
 the runtime that executes it.
 
 <Callout type="warn">
@@ -215,16 +215,16 @@ VS Code split.
 
 ## Building one
 
-1. Write a `plugin.json` with `id` (reverse-domain), `version` (semver), the `permission_grants` your
+1. Write a `manifest.json` with `id` (reverse-domain), `version` (semver), the `permission_grants` your
    hook needs (for example `hook:side-model`), and a `contributes.turn_hooks` entry whose `code` is
    your self-contained JS hook body.
-2. Drop it at `~/.ryu/plugins/<id>/plugin.json`, or host it and install by URL.
+2. Drop it at `~/.ryu/plugins/<id>/manifest.json`, or host it and install by URL.
 3. Enable it (`POST /api/plugins/:id/enable`, or via the desktop store).
 4. Your hook runs after each assistant turn, provided `deno` is on PATH.
 
 The bundled fixtures in `apps/core/src/plugin_manifest/fixtures/` are the worked reference:
-`double-check.plugin.json` returns a `note`, `goal.plugin.json` returns a `continue`, and
-`advisor.plugin.json` consults a stronger model and returns either, depending on the composer toggle or
+`double-check.manifest.json` returns a `note`, `goal.manifest.json` returns a `continue`, and
+`advisor.manifest.json` consults a stronger model and returns either, depending on the composer toggle or
 a `/advisor` slash command. Each was built as a manifest plus inline JS, with no Core or desktop edits
 to add the plugin itself.
 

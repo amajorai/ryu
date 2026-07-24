@@ -144,7 +144,7 @@ export interface DefinePluginOptions {
 }
 
 /**
- * Assemble a `plugin.json` manifest for a turn-hook plugin. The result matches
+ * Assemble a `manifest.json` manifest for a turn-hook plugin. The result matches
  * Core's `PluginManifest` serde shape and can be written to disk or validated via
  * `validateManifestStrict`.
  */

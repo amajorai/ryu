@@ -3,10 +3,10 @@
  *
  * A Ryu App bundles a "render" tool whose result mounts a self-contained widget
  * inline in the chat reply. This module is the AUTHORING source of truth: it uses
- * `defineApp` to assemble the `plugin.json` manifest that ships alongside it.
+ * `defineApp` to assemble the `manifest.json` manifest that ships alongside it.
  *
  *   bun run src/app.ts     # prints the assembled manifest
- *   bunx ryu pack .        # bundles src/widget.tsx into ui_code + writes plugin.json
+ *   bunx ryu pack .        # bundles src/widget.tsx into ui_code + writes manifest.json
  *
  * v1 boundary: this is DECLARATIVE PASS-THROUGH only. There is no `run` handler —
  * the widget renders from `window.openai.toolInput` / `toolOutput` (the arguments

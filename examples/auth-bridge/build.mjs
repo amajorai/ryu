@@ -3,7 +3,7 @@
 //
 // Core integrity-checks the bundle against that hash at spawn, and the install door
 // refuses a mismatch (422), so the two must be generated together. Never hand-edit
-// plugin.json.
+// manifest.json.
 //
 //   bun examples/auth-bridge/build.mjs
 //   node examples/auth-bridge/build.mjs
@@ -66,7 +66,7 @@ const manifest = {
 	],
 };
 
-const out = join(here, "plugin.json");
+const out = join(here, "manifest.json");
 await writeFile(out, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
 process.stdout.write(

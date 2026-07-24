@@ -173,7 +173,7 @@ export interface RyuPlugin {
  *  `subscriptions`; the host disposes them all on `deactivate`. */
 export interface PluginContext {
 	readonly plugin: RyuPlugin;
-	/** The plugin's own id (from `plugin.json`). */
+	/** The plugin's own id (from `manifest.json`). */
 	readonly pluginId: string;
 	/** Disposables auto-cleaned on deactivate. */
 	readonly subscriptions: Disposable[];

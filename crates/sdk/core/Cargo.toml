@@ -20,7 +20,7 @@ default = []
 codegen = ["dep:progenitor", "dep:prettyplease", "dep:syn", "dep:openapiv3"]
 
 [dependencies]
-# The single, pure-data definition of the plugin.json manifest contract. The SDK
+# The single, pure-data definition of the manifest.json manifest contract. The SDK
 # re-exports these types from `manifest`/`runnable` instead of maintaining a
 # drifting copy — apps/core depends on the same crate, so the SDK and Core now
 # validate against one identical definition.

@@ -21,7 +21,7 @@ The optional `codegen` feature regenerates an OpenAPI client from the vendored s
 ## What it provides
 
 - **Runnable contract** (`runnable.rs`): the unified input → run → output trait.
-- **Manifest model** (`manifest.rs`): `plugin.json` types, semver/id validation, and a derived JSON Schema.
+- **Manifest model** (`manifest.rs`): `manifest.json` types, semver/id validation, and a derived JSON Schema.
 - **Gateway egress rules + clients** (`gateway.rs`, `model.rs`, `embedding.rs`): direct-provider URLs are blocked at construction; every model and embedding call routes through the Ryu Gateway.
 - A vendored OpenAPI contract (`specs/`) exercised by the `spec_conformance` test.
 

@@ -59,13 +59,13 @@ pub const SYSTEM_PLUGINS: &[SystemPlugin] = &[
         local_only: true,
     },
     // (Spider is NO LONGER a system plugin: it became a declarative `command`
-    // tool — fixtures/spider.plugin.json — that shells out to a user-installed
+    // tool — fixtures/spider.manifest.json — that shells out to a user-installed
     // `spider` CLI via the command-tool allowlist, with no Core-managed sidecar
     // lifecycle. It stays Core-tier + default-on via CORE_PLUGINS / CORE_DEFAULT_ON
     // so its record seeds enabled and the tool is available out of the box.)
     // Agent Browser is the default web-browsing tool: an npx-launched MCP server
     // (npm `agentbrowser`), declared under `mcp_servers` in its plugin manifest
-    // (fixtures/agentbrowser.plugin.json) and registered on activation.
+    // (fixtures/agentbrowser.manifest.json) and registered on activation.
     // Cross-platform (Node) and reaches the web, so neither Windows-first nor
     // local-only.
     SystemPlugin {

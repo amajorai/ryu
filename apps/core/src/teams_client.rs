@@ -21,10 +21,10 @@ use ryu_teams::{CreateTeam, TeamRecord};
 use crate::sidecar::ext_proxy::{ext_token, node_token};
 
 /// The built-in Teams app id (matches `plugins::builtins::TEAMS_PLUGIN_ID` and the
-/// `teams.plugin.json` fixture).
+/// `teams.manifest.json` fixture).
 const TEAMS_PLUGIN_ID: &str = "com.ryu.teams";
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `teams.plugin.json` fixture `port` (7994; distinct from research's 7995 so the two
+/// `teams.manifest.json` fixture `port` (7994; distinct from research's 7995 so the two
 /// sidecars never contend for a port). Core injects this as `RYU_TEAMS_PORT` at spawn.
 const TEAMS_FALLBACK_PORT: u16 = 7994;
 

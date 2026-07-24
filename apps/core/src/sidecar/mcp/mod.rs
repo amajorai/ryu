@@ -219,9 +219,59 @@ async fn run_pre_tool_hooks(
     })
 }
 
+/// How long the `tool_result` hooks may run before the ORIGINAL result is used
+/// anyway. Fail-open, mirroring [`PRE_TOOL_HOOK_TIMEOUT`]: a stuck rewriting hook
+/// must never wedge tool dispatch, and must never lose the real result.
+const TOOL_RESULT_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Run `tool_result` hooks for a completed tool call and return a rewritten result
+/// if a hook asked for one (Pi's `tool_result`, Eve's `toolResultFrom`).
+///
+/// Returns `None` to mean "use the original output" — on no subscriber, on
+/// timeout, on error, and on an absent code-exec backend. The DB-free
+/// `any_manifest_declares` gate inside `dispatch_phase` makes the no-plugin case
+/// free, so tool dispatch is unchanged for anyone without a rewriting plugin.
+async fn run_tool_result_hooks(
+    tool_id: &str,
+    arguments: &Value,
+    output: &Value,
+    session_id: Option<&str>,
+) -> Option<Value> {
+    if in_tool_hook() {
+        return None;
+    }
+    let ctx = crate::plugin_host::HookContext {
+        conversation_id: session_id.map(str::to_string),
+        tool_name: Some(tool_id.to_string()),
+        tool_input: Some(arguments.clone()),
+        tool_output: Some(output.clone()),
+        ..Default::default()
+    };
+    let fut = IN_TOOL_HOOK.scope(
+        (),
+        crate::plugin_host::dispatch_global(crate::plugin_host::ON_TOOL_RESULT, ctx),
+    );
+    let directives = match tokio::time::timeout(TOOL_RESULT_HOOK_TIMEOUT, fut).await {
+        Ok(d) => d,
+        Err(_) => {
+            tracing::warn!(
+                "plugin_host: tool_result hook timed out for '{tool_id}'; using the original result"
+            );
+            return None;
+        }
+    };
+    // First writer wins: a rewrite is never fed to another plugin's hook, so what
+    // a hook observes is always the real tool's output.
+    directives.into_iter().find_map(|d| match d {
+        crate::plugin_host::HookDirective::Transform { output } => Some(output),
+        _ => None,
+    })
+}
+
 /// Fire `post_tool_use` hooks (Claude's PostToolUse) DETACHED — observation-only,
 /// so it never adds latency or blocks the caller, and cannot fail the tool call.
-/// Directives are ignored in v1.
+/// Directives are ignored: a plugin that needs to change the result declares
+/// `tool_result` ([`run_tool_result_hooks`]) instead.
 fn fire_post_tool_hooks(tool_id: String, arguments: Value, output: Value) {
     if in_tool_hook() {
         return;
@@ -628,7 +678,7 @@ pub struct ServerSummary {
 
 /// Name under which the Ghost desktop-automation MCP server (U14) is registered.
 /// Ghost declares this server under `mcp_servers` in its plugin manifest
-/// (fixtures/ghost.plugin.json) and it registers on activation. Ghost is
+/// (fixtures/ghost.manifest.json) and it registers on activation. Ghost is
 /// Windows-first; on other OSes the binary may be absent and the registry degrades
 /// gracefully (a failed spawn is logged-and-skipped, never hiding other servers).
 ///
@@ -640,7 +690,7 @@ pub const GHOST_SERVER: &str = "ghost";
 /// Name under which the Agent Browser MCP server is registered. Agent Browser is
 /// the default web-browsing tool (npm `agentbrowser`, launched via `npx`),
 /// declared under `mcp_servers` in its plugin manifest
-/// (fixtures/agentbrowser.plugin.json) and registered on activation. Like Ghost,
+/// (fixtures/agentbrowser.manifest.json) and registered on activation. Like Ghost,
 /// the registry degrades gracefully when the package can't be spawned (not
 /// installed / no Node).
 ///
@@ -901,7 +951,7 @@ impl McpRegistry {
     /// **Empty by design.** The two former hardcoded built-ins — **Ghost** (U14,
     /// desktop automation) and **Agent Browser** (`npx agentbrowser`) — moved to
     /// the manifest-owned path: they are declared under `mcp_servers` in their
-    /// plugin fixtures (`fixtures/{ghost,agentbrowser}.plugin.json`) and register
+    /// plugin fixtures (`fixtures/{ghost,agentbrowser}.manifest.json`) and register
     /// via [`register_manifest_mcp_servers`] on plugin activation (both are
     /// default-on, so the boot `fire_activation_event("onStartup")` loop re-adds
     /// them on every start). Ghost's profile-aware values that a static manifest
@@ -1848,8 +1898,11 @@ impl McpRegistry {
                 "tool '{tool_id}' blocked by a plugin hook: {reason}"
             ));
         }
-        // Keep a copy for the (detached) post-hook before `arguments` is consumed.
+        // Keep a copy for the post-hooks before `arguments` is consumed.
         let tool_input = arguments.clone();
+        // `session_id` is moved into the dispatch core below, so keep the id the
+        // `tool_result` hooks need for their conversation-scoped storage.
+        let hook_session_id = session_id.clone();
 
         let result = self
             .call_tool_with_identity_no_gate(
@@ -1863,12 +1916,25 @@ impl McpRegistry {
             )
             .await;
 
-        // PostToolUse hooks: observe-only, fired detached so they add no latency
-        // and cannot fail the call. Only on a successful result.
-        if let Ok(ref output) = result {
-            fire_post_tool_hooks(tool_id.to_string(), tool_input, output.clone());
+        match result {
+            Ok(output) => {
+                // `tool_result` hooks: AWAITED, and may rewrite the result before the
+                // model ever sees it (redaction / narrowing). Fail-open — on timeout,
+                // error, or no subscriber the original output is used unchanged.
+                let output =
+                    run_tool_result_hooks(tool_id, &tool_input, &output, hook_session_id.as_deref())
+                        .await
+                        .unwrap_or(output);
+                // PostToolUse hooks: observe-only, fired detached so they add no
+                // latency and cannot fail the call. They observe the FINAL output —
+                // the same bytes the model got. Deliberate: a `tool_result` hook that
+                // redacts a secret is a security boundary, and handing the raw value
+                // to every other installed plugin afterwards would defeat it.
+                fire_post_tool_hooks(tool_id.to_string(), tool_input, output.clone());
+                Ok(output)
+            }
+            Err(e) => Err(e),
         }
-        result
     }
 
     /// The ungated tool-dispatch core: identity consult + provider dispatch, with
@@ -2950,7 +3016,7 @@ mod tests {
     }
 
     /// Ghost moved from a hardcoded `builtin_servers()` entry to its plugin
-    /// manifest's `mcp_servers` (fixtures/ghost.plugin.json). Installing/activating
+    /// manifest's `mcp_servers` (fixtures/ghost.manifest.json). Installing/activating
     /// the plugin registers the MCP server via `register_manifest_mcp_servers`, and
     /// its `command_env` (RYU_GHOST_BIN) resolves the bare `ghost` command to the
     /// absolute `~/.ryu/bin/ghost` path at lowering time. This is the task's
@@ -2989,7 +3055,7 @@ mod tests {
     }
 
     /// Agent Browser also moved from `builtin_servers()` to its plugin manifest's
-    /// `mcp_servers` (fixtures/agentbrowser.plugin.json). Activating the plugin
+    /// `mcp_servers` (fixtures/agentbrowser.manifest.json). Activating the plugin
     /// registers the `npx agentbrowser` stdio server.
     #[test]
     fn agentbrowser_manifest_registers_via_npx() {
@@ -3062,10 +3128,10 @@ mod tests {
         // listed by `server_summaries`. `research` (the autoresearch experiment
         // runner) was added in 94060a75 alongside the research sidecar. `exa`,
         // `spider` and `rtk` were retired from the built-in registry when they
-        // became declarative plugins (see fixtures/exa.plugin.json,
-        // fixtures/spider.plugin.json, fixtures/rtk.plugin.json — spider and rtk
+        // became declarative plugins (see fixtures/exa.manifest.json,
+        // fixtures/spider.manifest.json, fixtures/rtk.manifest.json — spider and rtk
         // are `command` tools); `shadow` and `advisor` were retired the same way
-        // (see fixtures/shadow.plugin.json + fixtures/advisor.plugin.json — both
+        // (see fixtures/shadow.manifest.json + fixtures/advisor.manifest.json — both
         // declarative `http` tools reaching a Core loopback bridge).
         let summaries = reg.server_summaries();
         assert_eq!(summaries.len(), 13);

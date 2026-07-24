@@ -8,7 +8,7 @@ Once you have Runnables, you bundle them into an **App** (also called a plugin).
 
 ## The manifest
 
-The manifest file is `ryu.json`. The canonical newer path uses `plugin.json`, and both are read, so either name works.
+The manifest file is `ryu.json`. The canonical newer path uses `manifest.json`, and both are read, so either name works.
 
 ```json
 {
@@ -21,7 +21,7 @@ The manifest file is `ryu.json`. The canonical newer path uses `plugin.json`, an
 }
 ```
 
-The manifest is modeled on the convergent plugin shape that Claude Code and Codex also use - a `plugin.json` plus a `marketplace.json`, with git or npm sources copied to a local cache. If you know that shape, this will feel familiar.
+The manifest is modeled on the convergent plugin shape that Claude Code and Codex also use - a `manifest.json` plus a `marketplace.json`, with git or npm sources copied to a local cache. If you know that shape, this will feel familiar.
 
 Each manifest is validated per-kind against a schema, so an agent entry is checked differently from a tool entry.
 
@@ -74,13 +74,13 @@ Then confirm the details with a quick self-test.
     {
       q: "What two file names can a Ryu app manifest use?",
       options: [
-        "ryu.json or plugin.json, since both are read",
+        "ryu.json or manifest.json, since both are read",
         "manifest.json or marketplace.json",
         "app.json or package.json",
       ],
       answer: 0,
       explain:
-        "The manifest file is ryu.json, and the canonical newer path uses plugin.json. Both are read, so either name works.",
+        "The manifest file is ryu.json, and the canonical newer path uses manifest.json. Both are read, so either name works.",
     },
     {
       q: "What are the four lifecycle states of an app?",

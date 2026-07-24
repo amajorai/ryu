@@ -1,13 +1,13 @@
 ---
-title: "Bundle Runnables with plugin.json"
-description: "Declare agents, workflows, tools, and skills in a plugin.json and install it to Core"
-tags: ["plugin", "manifest", "plugin.json", "runnable", "install", "extension", "packaging"]
+title: "Bundle Runnables with manifest.json"
+description: "Declare agents, workflows, tools, and skills in a manifest.json and install it to Core"
+tags: ["plugin", "manifest", "manifest.json", "runnable", "install", "extension", "packaging"]
 ---
 
 A Ryu **Plugin** is a bundle of one or more [Runnables](/docs/start-here/architecture/runnable-model)
-plus the permission grants they need, described by a single declarative `plugin.json`. This page
+plus the permission grants they need, described by a single declarative `manifest.json`. This page
 walks you through assembling that file and installing it to Core. It is modeled on Codex's
-`plugin.json` pattern: a thin descriptor naming everything the plugin contributes.
+`manifest.json` pattern: a thin descriptor naming everything the plugin contributes.
 
 The full field-by-field schema (all eight Runnable kinds, per-kind `config`, `contributes`,
 `activation_events`, `engines.ryu`) lives in the reference. This page does not re-state it.
@@ -19,7 +19,7 @@ The full field-by-field schema (all eight Runnable kinds, per-kind `config`, `co
 
 ## 1. Write the manifest skeleton
 
-Create a `plugin.json` with the three required top-level fields plus an empty `runnables` array.
+Create a `manifest.json` with the three required top-level fields plus an empty `runnables` array.
 The `id` is a reverse-domain identifier, `version` must be valid semver, and `name` is the display
 label shown in the plugin store.
 
@@ -34,7 +34,7 @@ label shown in the plugin store.
 ```
 
 The loader (`apps/core/src/plugin_manifest/mod.rs`) rejects a manifest whose `version` is not valid
-semver. The canonical file name is `plugin.json`; the legacy `ryu.json` is still read for plugins
+semver. The canonical file name is `manifest.json`; the legacy `ryu.json` is still read for plugins
 installed before the apps-to-plugins rename.
 
 ## 2. Add your Runnables
@@ -42,7 +42,7 @@ installed before the apps-to-plugins rename.
 Each entry in `runnables` carries an `id`, a `name`, a `kind`, and an optional per-kind `config`.
 The TypeScript SDK's `RunnableKindSchema` enumerates five kinds — `agent`, `workflow`, `tool`,
 `skill`, and `companion` — of Core's eight (`channel`, `engine`, and `policy` are the three it does
-not yet type). The example below is taken from the built-in `sample.plugin.json` fixture.
+not yet type). The example below is taken from the built-in `sample.manifest.json` fixture.
 
 ```json
 {
@@ -127,7 +127,7 @@ manifests keep activating on enable.
   a follow-on (`apps/core/src/runnable/mod.rs`). The TypeScript SDK's `RunnableKindSchema`
   (`packages/sdk/src/manifest.ts`) enums five kinds (`agent`, `workflow`, `tool`, `skill`,
   `companion`); if you author `channel`, `engine`, or `policy` entries — the three Core kinds it
-  does not type — write the `plugin.json` directly rather than relying on the SDK type for those.
+  does not type — write the `manifest.json` directly rather than relying on the SDK type for those.
 </Callout>
 
 ## Declare a managed sidecar
@@ -170,14 +170,14 @@ This page only declares the field.
 
 ## 5. Install and enable
 
-Host the `plugin.json` at a URL, then install it by URL and enable it.
+Host the `manifest.json` at a URL, then install it by URL and enable it.
 
 ```bash
 # Install: Core fetches the manifest, validates the schema, writes it under
 # ~/.ryu/plugins/, and hot-reloads (no restart needed).
 curl -X POST http://localhost:7980/api/plugins/install \
   -H 'content-type: application/json' \
-  -d '{"url": "https://example.com/research-assistant/plugin.json"}'
+  -d '{"url": "https://example.com/research-assistant/manifest.json"}'
 
 # Enable: validate grants via the Gateway, then activate the Runnables.
 curl -X POST http://localhost:7980/api/plugins/com.example.research-assistant/enable
@@ -194,7 +194,7 @@ Gateway. The `/api/apps*` aliases still resolve to the same handlers but are dep
 
 ```mermaid
 flowchart LR
-  A[plugin.json] -->|POST /api/plugins/install| B[Core loader<br/>validate + write to disk]
+  A[manifest.json] -->|POST /api/plugins/install| B[Core loader<br/>validate + write to disk]
   B -->|POST /api/plugins/:id/enable| C[Gateway<br/>POST /v1/grants/validate]
   C -->|all approved| D[build_runnable_registry<br/>activate agent / workflow / tool]
   C -->|denied| E[fail closed<br/>stays disabled]

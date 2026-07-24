@@ -7,7 +7,7 @@ A **Channel** is one of the eight [Runnable kinds](/docs/start-here/architecture
 It binds a messaging platform - Telegram, Slack, WhatsApp, or Discord - to a Core session, so an
 inbound chat message becomes one agent (or [team](/docs/core/agent-teams)) turn and the reply is
 delivered back to the originating chat. The platform listeners ship in the Gateway
-(`apps/gateway/src/channels/`); a plugin declares the channel as a Runnable in `plugin.json`.
+(`apps/gateway/src/channels/`); a plugin declares the channel as a Runnable in `manifest.json`.
 
 This page is the developer reference for the Channel Runnable kind. To configure and route a bot
 from the desktop UI, see [Channels](/docs/gateway/channels) instead.
@@ -63,7 +63,7 @@ The response is plain JSON `{ "reply": "..." }`. Internally a non-empty `team_id
 `run_team_reply_text` and otherwise to `run_reply_text` (`apps/core/src/server/mod.rs`) - the same
 ACP path, memory, and Gateway routing the desktop chat uses.
 
-## Declaring a channel in plugin.json
+## Declaring a channel in manifest.json
 
 A plugin bundles a channel as a Runnable entry. Each entry carries its identity fields plus a
 per-kind `config`; for `kind: "channel"` the only required field is `platform`
@@ -89,7 +89,7 @@ per-kind `config`; for `kind: "channel"` the only required field is `platform`
 
 `validate_runnable` rejects a channel entry with no `config` or a missing `platform`
 (error `runnable '...' (kind=channel): missing required 'config' (needs 'platform')`). See the
-[plugin.json manifest reference](/docs/develop/extensions/plugin-json-manifest) for the full
+[manifest.json manifest reference](/docs/develop/extensions/plugin-json-manifest) for the full
 manifest shape and the [Runnable model](/docs/start-here/architecture/runnable-model) for the
 other seven kinds.
 

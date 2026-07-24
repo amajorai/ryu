@@ -1,7 +1,7 @@
 //! The **Runnable** data model — the kind discriminant, identity metadata, and
 //! per-kind manifest config shapes shared by every Ryu language binding.
 //!
-//! These are the *pure data* shapes a `plugin.json` author needs. Their single
+//! These are the *pure data* shapes a `manifest.json` author needs. Their single
 //! definition lives in the `ryu-kernel-contracts` crate (which `apps/core` also
 //! depends on), so this module is now a thin re-export — ending the historical
 //! drift where the SDK carried a hand-maintained subset copy (e.g. a `ToolConfig`

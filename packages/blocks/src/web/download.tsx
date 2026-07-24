@@ -212,6 +212,33 @@ export function findReleaseAsset(
 	return null;
 }
 
+/**
+ * Newest release that actually CARRIES the asset for this platform/arch.
+ *
+ * A GitHub release exists the moment it is tagged, but its binaries are uploaded
+ * by a build that can take many minutes — so "latest release" is routinely a
+ * release with no desktop assets yet, and linking to it hands the user a dead
+ * download. Walk newest-to-oldest and return the first release that really has
+ * the file, so a still-building version transparently falls back to the last
+ * good one. Returns null only when no release in the list has it.
+ */
+export function findReleaseWithAsset(
+	releases: Release[],
+	platformId: string,
+	arch: DownloadArch
+): { release: Release; asset: ReleaseAsset } | null {
+	for (const release of releases) {
+		if (release.draft) {
+			continue;
+		}
+		const asset = findReleaseAsset(release, platformId, arch);
+		if (asset) {
+			return { release, asset };
+		}
+	}
+	return null;
+}
+
 export function getAssetUrl(
 	release: Release,
 	platformId: string,
@@ -359,6 +386,10 @@ export default function DownloadBlock({
 }: DownloadProps) {
 	const latestRelease = releases[0];
 	const previousReleases = releases.slice(1);
+	// The newest release that actually HAS this platform's binary. A freshly
+	// tagged release has no assets until its build finishes, so pointing the CTA
+	// at `releases[0]` hands the user a dead link during every release window.
+	const downloadable = findReleaseWithAsset(releases, os, arch);
 
 	return (
 		<div className="pb-8">
@@ -383,8 +414,11 @@ export default function DownloadBlock({
 									nativeButton={false}
 									render={
 										<a
-											download={findReleaseAsset(latestRelease, os, arch)?.name}
-											href={getAssetUrl(latestRelease, os, arch)}
+											download={downloadable?.asset.name}
+											href={
+												downloadable?.asset.browser_download_url ??
+												latestRelease.html_url
+											}
 											rel="noopener noreferrer"
 										/>
 									}
@@ -402,7 +436,11 @@ export default function DownloadBlock({
 								</a>
 							</div>
 							<p className="text-muted-foreground/60 text-xs">
-								{latestRelease.tag_name} · Free and open to use locally
+								{/* Show the version actually being downloaded — during a
+								    release window that is the last one with binaries, not
+								    the just-tagged one still building. */}
+								{(downloadable?.release ?? latestRelease).tag_name} · Free and
+								open to use locally
 							</p>
 						</div>
 					)}

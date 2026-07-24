@@ -494,6 +494,14 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
             // Browse every publicly documented integration surface
             // (MCP/OpenAPI/GraphQL/CLI) as descriptor-only marketplace entries.
             Source::IntegrationsSh(IntegrationsShSource::builtin()),
+            // Community discovery: any public GitHub repo tagged `ryu-app` /
+            // `ryu-plugin`. Registered here so it is addressable (`source_by_id`)
+            // and listed in the source picker, but it is deliberately NOT folded
+            // into `merged_plugin_catalog_entries` — unreviewed third-party
+            // listings must not appear in the default browse, and the GitHub
+            // Search API's 10 req/min budget can't take a fan-out per store open.
+            // The store reaches it explicitly via `?origin=community`.
+            Source::GithubTopic(super::github_topic::GithubTopicSource::builtin()),
             Source::Stub(StubSource {
                 id: "ryu-apps".to_string(),
                 display_name: "Ryu App Catalog".to_string(),
@@ -518,6 +526,26 @@ fn builtin_sources() -> HashMap<CatalogKind, Vec<Source>> {
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    /// Community discovery is registered and addressable, but must NOT be the
+    /// default: `builtin_primary` is the first entry, and if a reorder ever made
+    /// GitHub primary, every store would open on unreviewed third-party listings.
+    #[test]
+    fn github_topic_is_registered_for_plugins_but_never_primary() {
+        let builtins = builtin_sources();
+        let plugins = builtins.get(&CatalogKind::Plugin).expect("plugin sources");
+        assert!(
+            plugins
+                .iter()
+                .any(|s| s.id() == super::super::GITHUB_TOPIC_SOURCE_ID),
+            "the github-topic source must be registered under the Plugin kind"
+        );
+        assert_eq!(
+            plugins.first().map(super::Source::id),
+            Some("ryu-catalog"),
+            "the first-party catalog must stay the default active plugin source"
+        );
+    }
 
     fn temp_path(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();

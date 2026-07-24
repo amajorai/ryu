@@ -104,7 +104,16 @@ const PAGE_LIMIT = 40;
 /** Stub catalog source — no real feed behind it yet. */
 const HIDDEN_PLUGIN_SOURCES = new Set(["ryu-apps"]);
 
-export function useAppsCatalog(initialQuery = ""): UseAppsCatalogResult {
+export function useAppsCatalog(
+	initialQuery = "",
+	options?: { origin?: "community" }
+): UseAppsCatalogResult {
+	// Community (GitHub topic-discovered) listings are a SEPARATE fetch, not a
+	// filter over the first-party pages: Core keeps unreviewed third-party
+	// listings out of the default merged catalog, and `?origin=community`
+	// addresses the discovery source per-request — without touching the global
+	// active-source preference, which would otherwise blank Apps/Plugins.
+	const origin = options?.origin;
 	const activeNode = useActiveNode();
 	const target: ApiTarget = {
 		url: activeNode.url,
@@ -174,12 +183,12 @@ export function useAppsCatalog(initialQuery = ""): UseAppsCatalogResult {
 			"plugins",
 			"catalog",
 			url,
-			{ q: debouncedQuery, source: activeSource },
+			{ q: debouncedQuery, source: activeSource, origin: origin ?? null },
 		],
 		queryFn: ({ pageParam }) =>
 			searchPluginCatalog(
 				{ url, token },
-				{ query: debouncedQuery, limit: PAGE_LIMIT, cursor: pageParam }
+				{ query: debouncedQuery, limit: PAGE_LIMIT, cursor: pageParam, origin }
 			),
 		initialPageParam: undefined as string | undefined,
 		getNextPageParam: (last) => last.nextCursor ?? undefined,
@@ -229,12 +238,20 @@ export function useAppsCatalog(initialQuery = ""): UseAppsCatalogResult {
 	);
 
 	const isDescriptorSource =
-		activeSource !== "" && activeSource !== PLUGIN_MARKETPLACE_SOURCE_ID;
+		origin === "community" ||
+		(activeSource !== "" && activeSource !== PLUGIN_MARKETPLACE_SOURCE_ID);
 
 	const detailQuery = useQuery({
-		queryKey: ["plugins", "detail", url, selectedId, activeSource],
+		queryKey: [
+			"plugins",
+			"detail",
+			url,
+			selectedId,
+			activeSource,
+			origin ?? null,
+		],
 		queryFn: () =>
-			fetchPluginCatalogDetail({ url, token }, selectedId as string),
+			fetchPluginCatalogDetail({ url, token }, selectedId as string, origin),
 		enabled: selectedId !== null && isDescriptorSource,
 	});
 
@@ -254,6 +271,15 @@ export function useAppsCatalog(initialQuery = ""): UseAppsCatalogResult {
 
 	const installMutation = useMutation({
 		mutationFn: async (item: AppCatalogItem): Promise<void> => {
+			// Community listings are unsigned and unreviewed, so Core's
+			// install-by-id path is fail-closed for them by design (its descriptor
+			// carries no manifest). Refuse here too, with copy that says why —
+			// installing one is an explicit per-repo act, not a catalog install.
+			if (item.entry.origin === "community") {
+				throw new Error(
+					"Community listings are browse-only — open the repository to review it before installing."
+				);
+			}
 			if (item.entry.descriptor_only) {
 				throw new Error(
 					"Integration descriptors are browse-only — open the link to configure."

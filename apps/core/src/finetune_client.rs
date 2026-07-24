@@ -26,11 +26,11 @@ use serde_json::{json, Value};
 
 use crate::sidecar::ext_proxy::{ext_token, node_token};
 
-/// The built-in Fine-tuning app id (matches the `finetune.plugin.json` fixture id
+/// The built-in Fine-tuning app id (matches the `finetune.manifest.json` fixture id
 /// and `plugins::builtins`).
 const FINETUNE_PLUGIN_ID: &str = "com.ryu.finetune";
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `finetune.plugin.json` fixture `port` (7990; distinct from clips 7992, quests
+/// `finetune.manifest.json` fixture `port` (7990; distinct from clips 7992, quests
 /// 7991, browser 7993, teams 7994, research 7995, mail 7996, dashboards 7997, and
 /// the Python unsloth worker 8086). Core injects this as `RYU_FINETUNE_PORT` at spawn.
 const FINETUNE_FALLBACK_PORT: u16 = 7990;

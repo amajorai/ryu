@@ -82,11 +82,11 @@ fn default_grant_allowlist() -> Vec<String> {
         // without them a runtime disable→re-enable (which re-runs
         // `/v1/grants/validate` with the app's full declared grant set) is denied
         // with GrantsDenied. Swappable via the `RYU_MARKETPLACE_GRANT_ALLOWLIST`
-        // env override. (Test-only `sample.plugin.json` is not seeded, so its
+        // env override. (Test-only `sample.manifest.json` is not seeded, so its
         // `mcp:web_search`/`mcp:file_read` are intentionally NOT here.)
         "mcp:spider",
         "mcp:agentbrowser",
-        // `exa` is a declarative `http` plugin (fixtures/exa.plugin.json), so it
+        // `exa` is a declarative `http` plugin (fixtures/exa.manifest.json), so it
         // declares an egress grant, not an `mcp:<name>` server grant — its enable
         // path validates this exact scope instead.
         "tool:http-egress:api.exa.ai",
@@ -520,11 +520,11 @@ mod tests {
     /// Rather than restate the grant set (which would silently pass when a NEW
     /// fixture adds an unlisted grant — the exact drift this guards), the test
     /// READS the fixtures Core compiles in (`apps/core/src/plugin_manifest/
-    /// fixtures/*.plugin.json`) and asserts `validate_grants` approves each
+    /// fixtures/*.manifest.json`) and asserts `validate_grants` approves each
     /// declared grant. This also enforces handoff §8 automatically: a fixture that
     /// declared `sidecar:process` (or any other unlisted scope) would fail here.
     ///
-    /// `sample.plugin.json` is excluded: it is a test-only demo, not in
+    /// `sample.manifest.json` is excluded: it is a test-only demo, not in
     /// `SEED_MANIFESTS`, so it is never enabled at runtime and its file-read/
     /// web-search scopes must NOT loosen the marketplace-publish allowlist.
     ///
@@ -552,10 +552,10 @@ mod tests {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            if !name.ends_with(".plugin.json") {
+            if !name.ends_with(".manifest.json") {
                 continue; // skip .ui.html and anything else
             }
-            if name == "sample.plugin.json" {
+            if name == "sample.manifest.json" {
                 continue; // test-only demo, not seeded (see doc comment)
             }
             let raw = std::fs::read_to_string(&path)

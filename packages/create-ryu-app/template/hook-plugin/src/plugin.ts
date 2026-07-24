@@ -15,7 +15,7 @@
  * variables — reference only `ctx`, `host`, and language built-ins.
  *
  *   bun run src/plugin.ts   # prints the assembled manifest
- *   bunx ryu pack .         # serializes the hook + writes plugin.json
+ *   bunx ryu pack .         # serializes the hook + writes manifest.json
  */
 
 import { definePlugin, defineTurnHook } from "@ryuhq/sdk";

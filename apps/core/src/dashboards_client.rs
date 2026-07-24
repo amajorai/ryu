@@ -40,10 +40,10 @@ use ryu_hardware::feed::{
 use crate::sidecar::ext_proxy::{ext_token, node_token};
 
 /// The built-in Dashboards app id (matches `plugins::builtins::DASHBOARDS_PLUGIN_ID`
-/// and the `dashboards.plugin.json` fixture).
+/// and the `dashboards.manifest.json` fixture).
 const DASHBOARDS_PLUGIN_ID: &str = "com.ryu.dashboards";
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `dashboards.plugin.json` fixture `port`. Core injects this as
+/// `dashboards.manifest.json` fixture `port`. Core injects this as
 /// `RYU_DASHBOARDS_PORT` at spawn.
 const DASHBOARDS_FALLBACK_PORT: u16 = 7997;
 /// Backoff between SSE reconnect attempts for the nudge subscription.

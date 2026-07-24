@@ -16,7 +16,7 @@ Create a starter project with the `create-ryu-app` CLI:
 create-ryu-app my-app
 ```
 
-This generates a project with a `plugin.json` manifest that is validated against the plugin manifest schema, so you start from something that already passes the rules.
+This generates a project with a `manifest.json` manifest that is validated against the plugin manifest schema, so you start from something that already passes the rules.
 
 ## Define a tool
 
@@ -87,7 +87,7 @@ Then confirm the details with a quick self-test.
       options: ["ryu init my-app", "create-ryu-app my-app", "ryu dev my-app"],
       answer: 1,
       explain:
-        "create-ryu-app my-app generates a starter project with a plugin.json manifest that already passes the schema rules.",
+        "create-ryu-app my-app generates a starter project with a manifest.json manifest that already passes the schema rules.",
     },
     {
       q: "What does the gateway-mandatory model client mean for your code?",

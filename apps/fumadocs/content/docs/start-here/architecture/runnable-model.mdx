@@ -11,7 +11,7 @@ of the system reads cleanly.
 
 ```mermaid
 flowchart TB
-  subgraph Plugin["Plugin (plugin.json)"]
+  subgraph Plugin["Plugin (manifest.json)"]
     direction TB
     P_META["Manifest\nid · version · permissions"]
     P_RUN["Runnables\nwhat the plugin contributes"]
@@ -115,7 +115,7 @@ flowchart LR
 
 <Callout type="info">
   The TypeScript SDK authors only the four most common kinds (`agent`, `workflow`, `tool`, `skill`);
-  the other four are declared directly in `plugin.json`.
+  the other four are declared directly in `manifest.json`.
 </Callout>
 
 ## Session
@@ -140,7 +140,7 @@ list. See [Conversations and sessions](/docs/core/conversations-sessions).
 
 ## Plugin
 
-A **Plugin** is a `plugin.json` manifest that bundles one or more Runnables plus the permission grants
+A **Plugin** is a `manifest.json` manifest that bundles one or more Runnables plus the permission grants
 they need, packaged so Core can install, enable, disable, and update it as a unit. It is modeled on
 the plugin-manifest pattern: one declarative file describing everything the plugin contributes.
 
@@ -169,7 +169,7 @@ See [Plugin manifests](/docs/develop/extensions/plugin-json-manifest) for the fu
 ## How they connect
 
 ```
-Plugin (plugin.json)
+Plugin (manifest.json)
   bundles -> Runnables (agent, workflow, tool, skill, ...)
                  runs in -> Session (history + status, in Core)
                                 model calls -> Gateway -> engine

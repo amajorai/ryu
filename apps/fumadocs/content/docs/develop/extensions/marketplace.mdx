@@ -3,13 +3,13 @@ title: "Publish to the Marketplace"
 description: "Publish, sign, and monetize a plugin on the Ryu Marketplace"
 ---
 
-You have built a plugin (`plugin.json` bundling runnables) and want others to install it. This
+You have built a plugin (`manifest.json` bundling runnables) and want others to install it. This
 page walks the publish path end to end: package the bundle, publish it to the Ryu-hosted
 marketplace, let the Gateway sign it, and (optionally) price it. Everything here is the author
 side. For the buyer experience see [The Marketplace](/docs/desktop/user-guide/marketplace).
 
 If you have not built a plugin yet, start at
-[plugin.json manifest](/docs/develop/extensions/plugin-json-manifest) and the
+[manifest.json manifest](/docs/develop/extensions/plugin-json-manifest) and the
 [TypeScript SDK](/docs/develop/extensions/typescript-sdk).
 
 ## How distribution works
@@ -18,7 +18,7 @@ Every catalog in Ryu (models, skills, MCP servers, plugins) is browsed and insta
 swappable seam, the `CatalogSource` (`apps/core/src/catalog_source/`). The Ryu-hosted marketplace is
 just one source behind that trait, served by the identity server
 (`packages/api/src/routers/marketplace.ts`) over a `MarketplaceItem` collection. The SDK publishes a
-`plugin.json` bundle to that source as a `plugin` kind item.
+`manifest.json` bundle to that source as a `plugin` kind item.
 
 ```mermaid
 flowchart LR
@@ -40,7 +40,7 @@ Two rules shape the flow:
 
 ## Step 1 - pack the bundle
 
-`ryu pack` validates your `plugin.json` against the manifest schema and emits a publish-ready bundle
+`ryu pack` validates your `manifest.json` against the manifest schema and emits a publish-ready bundle
 at `<dir>/dist/plugin.bundle.json` (`packages/sdk/src/cli.ts`).
 
 ```bash
@@ -77,7 +77,7 @@ bunx ryu publish ./my-plugin
 
 `ryu publish` re-validates the manifest, then POSTs to `POST /api/marketplace/publish` with the
 manifest, its descriptor, and the `permission_grants` it requests. The SDK always publishes as the
-`plugin` kind: a `plugin.json` bundle has no from-source `install_source`, so a `skill`-kind publish
+`plugin` kind: a `manifest.json` bundle has no from-source `install_source`, so a `skill`-kind publish
 would be uninstallable (models and MCP servers publish through their own tools).
 
 On the server (`packages/api/src/routers/marketplace.ts`) the request goes through, in order:

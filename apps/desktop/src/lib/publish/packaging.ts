@@ -5,11 +5,11 @@
 // their own agent to the marketplace from inside the desktop app.
 //
 // Ryu's object model: an Agent/Workflow is a Runnable; an App/Plugin is a
-// plugin.json bundling Runnables. So "publish my agent" == package the agent's
+// manifest.json bundling Runnables. So "publish my agent" == package the agent's
 // portable card into a plugin manifest whose `runnables` declare that agent
 // (kind="agent"), then POST it to POST /api/marketplace/publish. This mirrors
 // the SDK CLI's `ryu publish` body shape (packages/sdk/src/cli.ts) but is built
-// from a live agent record instead of a plugin.json on disk.
+// from a live agent record instead of a manifest.json on disk.
 //
 // SECURITY — never package secrets. This module serializes ONLY agent-record
 // fields, and the agent record carries no keys: BYOK/gateway keys live behind

@@ -7,10 +7,10 @@
  *   bunx ryu publish <dir>
  *
  * Commands:
- *   pack <dir>      Validate the plugin.json in <dir> and emit a publish-ready
+ *   pack <dir>      Validate the manifest.json in <dir> and emit a publish-ready
  *                   Plugin bundle at <dir>/dist/plugin.bundle.json.
  *                   Exits 0 on success; exits 1 with the failing field on error.
- *   publish <dir>   Validate the plugin.json and POST it to the Ryu Marketplace
+ *   publish <dir>   Validate the manifest.json and POST it to the Ryu Marketplace
  *                   publish endpoint with the author's auth token. The item is
  *                   stored as `pending` until a moderator approves it.
  */
@@ -38,8 +38,8 @@ function printUsage(): void {
 			"Ryu dev SDK",
 			"",
 			"Usage:",
-			"  bunx ryu pack <dir>      Validate and bundle a plugin.json Plugin",
-			"  bunx ryu publish <dir>   Validate and publish a plugin.json Plugin to the Ryu Marketplace",
+			"  bunx ryu pack <dir>      Validate and bundle a manifest.json Plugin",
+			"  bunx ryu publish <dir>   Validate and publish a manifest.json Plugin to the Ryu Marketplace",
 			"  bunx ryu dev <entry>     Run a Runnable locally with an interactive chat loop",
 			"",
 		].join("\n")
@@ -55,12 +55,20 @@ function exitError(message: string): never {
 
 type LoadedManifest = ReturnType<typeof PluginManifestSchema.parse>;
 
-// Read + parse + validate the plugin.json in `dir`. Exits with the failing
+// Manifest file names, in preference order — mirrors Core's resolver
+// (`plugin_manifest::MANIFEST_FILE_NAMES`). `manifest.json` is canonical; the
+// legacy `plugin.json` / `ryu.json` are still accepted so an author's existing
+// project directory keeps packing without a rename.
+const MANIFEST_FILE_NAMES = ["manifest.json", "plugin.json", "ryu.json"] as const;
+
+// Read + parse + validate the manifest in `dir`. Exits with the failing
 // field on any error. Shared by pack and publish so both validate identically.
 function loadManifest(dir: string): LoadedManifest {
-	const manifestPath = join(dir, "plugin.json");
-	if (!existsSync(manifestPath)) {
-		exitError(`plugin.json not found in: ${dir}`);
+	const manifestPath = MANIFEST_FILE_NAMES.map((name) => join(dir, name)).find(
+		(candidate) => existsSync(candidate)
+	);
+	if (!manifestPath) {
+		exitError(`manifest.json not found in: ${dir}`);
 	}
 
 	let raw: string;
@@ -74,7 +82,7 @@ function loadManifest(dir: string): LoadedManifest {
 	try {
 		parsed = JSON.parse(raw);
 	} catch {
-		exitError(`plugin.json is not valid JSON: ${manifestPath}`);
+		exitError(`manifest.json is not valid JSON: ${manifestPath}`);
 	}
 
 	const result = PluginManifestSchema.safeParse(parsed);
@@ -82,7 +90,7 @@ function loadManifest(dir: string): LoadedManifest {
 		const first = result.error.issues[0];
 		const field = first?.path.join(".") ?? "unknown";
 		const message = first?.message ?? "validation failed";
-		exitError(`plugin.json validation failed at '${field}': ${message}`);
+		exitError(`manifest.json validation failed at '${field}': ${message}`);
 	}
 	return result.data;
 }
@@ -236,10 +244,10 @@ function authToken(): string {
 	return token;
 }
 
-// An SDK-authored Plugin always publishes as a `plugin` (a plugin.json bundle of
+// An SDK-authored Plugin always publishes as a `plugin` (a manifest.json bundle of
 // runnables). It is deliberately NOT published as `skill`: Core's skill install
 // path needs a `descriptor.raw.install_source` (a from-source owner/repo), which
-// a plugin.json manifest does not carry, so a skill-kind publish would be
+// a manifest.json manifest does not carry, so a skill-kind publish would be
 // uninstallable. Model / mcp items are published through their own tools.
 const SDK_PUBLISH_KIND = "plugin" as const;
 

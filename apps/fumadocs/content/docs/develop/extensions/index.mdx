@@ -1,6 +1,6 @@
 ---
 title: Extensions Overview
-description: Three ways to extend Ryu — MCP servers, plugin.json manifests, and the TypeScript SDK.
+description: Three ways to extend Ryu — MCP servers, manifest.json manifests, and the TypeScript SDK.
 ---
 
 Ryu is built so that **nothing is hardcoded and everything is swappable**. Extending it means
@@ -17,7 +17,7 @@ flowchart TD
     C --> D[Tools callable from chat]
   end
 
-  subgraph "Path 2: plugin.json"
+  subgraph "Path 2: manifest.json"
     E[Declare Runnables] --> F[Add permission grants]
     F --> G[Install via API]
     G --> H[Gateway validates grants]
@@ -48,7 +48,7 @@ Best for: wrapping an existing process in any language (Python, Go, stdio), quic
 
 See [Register an MCP Server](/docs/develop/extensions/mcp-server).
 
-### 2. `plugin.json` manifest (installable)
+### 2. `manifest.json` manifest (installable)
 
 Bundle one or more Runnables (tools, agents, workflows, skills) plus the permission grants they need
 into a single installable plugin. Core validates the manifest, writes it to disk, and hot-reloads it
@@ -69,12 +69,12 @@ with no restart.
 Best for: shipping a named, versioned bundle; declaring permission grants the Gateway enforces;
 contributing hooks, composer controls, or desktop UI.
 
-See [Bundle Runnables with plugin.json](/docs/develop/extensions/plugin-json-manifest).
+See [Bundle Runnables with manifest.json](/docs/develop/extensions/plugin-json-manifest).
 
 ### 3. TypeScript SDK (typed)
 
 Define agents, workflows, tools, and skills as typed Runnables in code, with the Gateway mandatory
-on every model call. Pack into a `plugin.json` with `bunx ryu pack`.
+on every model call. Pack into a `manifest.json` with `bunx ryu pack`.
 
 ```typescript
 import { defineAgent } from "@ryuhq/sdk";
@@ -100,14 +100,14 @@ See [TypeScript SDK](/docs/develop/extensions/typescript-sdk).
 |---|---|
 | Expose a single tool or small toolset quickly | MCP server |
 | Wrap an existing process in any language (Python, Go, stdio) | MCP server |
-| Ship a named, versioned, installable bundle of Runnables | `plugin.json` manifest |
-| Declare permission grants the Gateway should enforce | `plugin.json` manifest |
-| React to chat events (turn hooks, tool gates) | `plugin.json` + turn hooks |
-| Contribute desktop UI | `plugin.json` + companion |
+| Ship a named, versioned, installable bundle of Runnables | `manifest.json` manifest |
+| Declare permission grants the Gateway should enforce | `manifest.json` manifest |
+| React to chat events (turn hooks, tool gates) | `manifest.json` + turn hooks |
+| Contribute desktop UI | `manifest.json` + companion |
 | Author agents/workflows in typed TypeScript with Gateway-routed model calls | TypeScript SDK |
 | Validate and package a plugin for distribution | TypeScript SDK (`bunx ryu pack`) |
 
-An MCP server and a `plugin.json` manifest are not mutually exclusive. The MCP server is the
+An MCP server and a `manifest.json` manifest are not mutually exclusive. The MCP server is the
 executable that exposes the tools; the manifest is the install and lifecycle wrapper.
 
 ## Quick start
@@ -116,11 +116,11 @@ executable that exposes the tools; the manifest is the install and lifecycle wra
 bunx create-ryu-app my-plugin
 cd my-plugin
 bun install
-bunx ryu pack   # produces plugin.json
+bunx ryu pack   # produces manifest.json
 ```
 
 The scaffolded project includes a starter Runnable, a gateway-pointed model config, and a
-`plugin.json` manifest ready to load into Core.
+`manifest.json` manifest ready to load into Core.
 
 ## Explore further
 

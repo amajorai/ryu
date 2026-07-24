@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ryuhq.com/schemas/plugin.json",
   "title": "Ryu Plugin Manifest",
-  "description": "The plugin.json schema for Ryu apps. Defines runnables, permissions, activation events, and marketplace metadata.",
+  "description": "The manifest.json schema for Ryu apps. Defines runnables, permissions, activation events, and marketplace metadata.",
   "type": "object",
   "required": ["id", "name", "version"],
   "properties": {

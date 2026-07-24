@@ -32,7 +32,7 @@ import {
 	BROWSERS,
 	type DownloadArch,
 	type DownloadOS,
-	findReleaseAsset,
+	findReleaseWithAsset,
 	GITHUB_REPO,
 	osName,
 	PLATFORMS,
@@ -108,29 +108,29 @@ async function copySetupSkill() {
 }
 
 function downloadAnchorProps(
-	release: Release | undefined,
+	releases: Release[],
 	platformId: DownloadOS,
 	arch: DownloadArch
 ) {
-	if (!release) {
-		return { href: RELEASES_PAGE };
-	}
-	const asset = findReleaseAsset(release, platformId, arch);
-	if (!asset) {
-		return { href: release.html_url };
+	// Resolve per platform+arch: a release window can have macOS arm published
+	// while Windows is still building, so each row independently falls back to
+	// the newest release that actually carries ITS binary.
+	const found = findReleaseWithAsset(releases, platformId, arch);
+	if (!found) {
+		return { href: releases[0]?.html_url ?? RELEASES_PAGE };
 	}
 	return {
-		href: asset.browser_download_url,
-		download: asset.name,
+		href: found.asset.browser_download_url,
+		download: found.asset.name,
 	};
 }
 
 function PlatformArchItems({
 	platformId,
-	release,
+	releases,
 }: {
 	platformId: DownloadOS;
-	release: Release | undefined;
+	releases: Release[];
 }) {
 	return (
 		<>
@@ -139,7 +139,7 @@ function PlatformArchItems({
 					key={arch}
 					render={
 						<a
-							{...downloadAnchorProps(release, platformId, arch)}
+							{...downloadAnchorProps(releases, platformId, arch)}
 							rel="noopener noreferrer"
 						/>
 					}
@@ -182,7 +182,10 @@ export function DownloadDropdownContent({
 			.then((res) => res.json())
 			.then((data) => {
 				if (Array.isArray(data)) {
-					setReleases(data.filter((r: Release) => !r.draft).slice(0, 1));
+					// Keep several: the newest release often has no binaries yet (they
+					// upload when its build finishes), so we need older ones to fall
+					// back to instead of linking the user at a dead download.
+					setReleases(data.filter((r: Release) => !r.draft).slice(0, 8));
 				}
 			})
 			.catch(() => {
@@ -200,9 +203,10 @@ export function DownloadDropdownContent({
 		[arch]
 	);
 
-	const desktopAsset = latestRelease
-		? findReleaseAsset(latestRelease, os, arch)
-		: null;
+	// Newest release that actually carries this platform's binary (falls back past
+	// a just-tagged, still-building release rather than linking to nothing).
+	const downloadable = findReleaseWithAsset(releases, os, arch);
+	const desktopAsset = downloadable?.asset ?? null;
 
 	return (
 		<DropdownMenuContent
@@ -288,7 +292,7 @@ export function DownloadDropdownContent({
 						key={`${os}-${altArch}`}
 						render={
 							<a
-								{...downloadAnchorProps(latestRelease, os, altArch)}
+								{...downloadAnchorProps(releases, os, altArch)}
 								rel="noopener noreferrer"
 							/>
 						}
@@ -309,7 +313,7 @@ export function DownloadDropdownContent({
 						<DropdownMenuSubContent>
 							<PlatformArchItems
 								platformId={platform.id}
-								release={latestRelease}
+								releases={releases}
 							/>
 						</DropdownMenuSubContent>
 					</DropdownMenuSub>

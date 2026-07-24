@@ -8,7 +8,7 @@
  * that the SDK's deliberately simpler zod authoring schema, the blessed JSON
  * Schema, and the generated types stay describing the same manifest:
  *
- * 1. a known-good repo manifest (apps-store/mail/plugin.json — the first
+ * 1. a known-good repo manifest (apps-store/mail/manifest.json — the first
  *    fully manifest-driven app) parses with the zod `PluginManifestSchema`;
  * 2. every key the schema marks required exists in the schema, the generated
  *    TS, and the fixture;
@@ -24,7 +24,7 @@ import { PluginManifestSchema } from "./manifest";
 
 const FIXTURE_PATH = join(
 	import.meta.dir,
-	"../../../apps-store/mail/plugin.json"
+	"../../../apps-store/mail/manifest.json"
 );
 const SCHEMA_PATH = join(
 	import.meta.dir,
@@ -44,7 +44,7 @@ const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")) as {
 const generatedSource = readFileSync(GENERATED_PATH, "utf8");
 
 describe("contracts lockstep (zod ↔ blessed JSON Schema ↔ generated TS)", () => {
-	test("the known-good mail plugin.json parses with the zod authoring schema", () => {
+	test("the known-good mail manifest.json parses with the zod authoring schema", () => {
 		const parsed = PluginManifestSchema.parse(fixture);
 		expect(parsed.id).toBe("com.ryu.mail");
 		expect(parsed.runnables.length).toBeGreaterThan(0);

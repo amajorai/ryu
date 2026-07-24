@@ -44,7 +44,7 @@ cd my-first-agent
 bun install
 ```
 
-`create-ryu-app` writes a valid `plugin.json`, a starter `src/agent.ts`, and a `package.json` that
+`create-ryu-app` writes a valid `manifest.json`, a starter `src/agent.ts`, and a `package.json` that
 depends on `@ryuhq/sdk`. See [Quickstart](/docs/develop/quickstart) for what each file is.
 
 </Step>
@@ -149,7 +149,7 @@ When the agent works, bundle the plugin so the desktop plugin store can install 
 bun run pack
 ```
 
-This runs `bunx ryu pack .`, validates `plugin.json` against the same schema the store reads, and
+This runs `bunx ryu pack .`, validates `manifest.json` against the same schema the store reads, and
 writes `dist/plugin.bundle.json`. An invalid manifest exits non-zero and names the failing field.
 
 </Step>
@@ -164,7 +164,7 @@ writes `dist/plugin.bundle.json`. An invalid manifest exits non-zero and names t
   appearing in one block when the turn finishes.
 - If the gateway cannot resolve the model, the turn fails with a routing error instead of hanging,
   point it at a model your gateway can route (see the callout above).
-- `bun run pack` exits `0` and writes `dist/plugin.bundle.json`. A broken `plugin.json` exits
+- `bun run pack` exits `0` and writes `dist/plugin.bundle.json`. A broken `manifest.json` exits
   non-zero and names the failing field, so a bad manifest never reaches the store.
 
 ## Going further

@@ -5,12 +5,12 @@ description: "Scaffold, author, and install your first Ryu plugin in a few minut
 
 This tutorial walks the golden path: scaffold a plugin with `create-ryu-app`, run its starter
 Runnable against your local gateway, then bundle it for the plugin store. By the end you will
-have a valid `plugin.json` and an agent whose every model call routes through the Ryu gateway.
+have a valid `manifest.json` and an agent whose every model call routes through the Ryu gateway.
 
 You write plugins with `@ryuhq/sdk` (the Ryu developer SDK) and scaffold them with
 `create-ryu-app`. This page is the single entry point. For the full SDK surface see
 [the SDK reference](/docs/develop/sdk), and for every manifest field see
-[the plugin.json manifest](/docs/develop/sdk/plugin-api).
+[the manifest.json manifest](/docs/develop/sdk/plugin-api).
 
 <Callout type="info">
   Ryu uses [Bun](https://bun.sh) across the monorepo. The commands below assume `bun` and `bunx`
@@ -22,7 +22,7 @@ You write plugins with `@ryuhq/sdk` (the Ryu developer SDK) and scaffold them wi
 
 ```mermaid
 flowchart LR
-  A[bunx create-ryu-app] --> B[plugin.json + src/agent.ts]
+  A[bunx create-ryu-app] --> B[manifest.json + src/agent.ts]
   B --> C[bun dev — stream via Gateway]
   C --> D[bun run pack — validate + bundle]
   D --> E[Install in Ryu]
@@ -32,7 +32,7 @@ The scaffold emits a directory with three files that matter:
 
 | File | What it is |
 |---|---|
-| `plugin.json` | The plugin manifest, validated against `PluginManifestSchema` so the desktop plugin store can install it |
+| `manifest.json` | The plugin manifest, validated against `PluginManifestSchema` so the desktop plugin store can install it |
 | `src/agent.ts` | A starter Runnable that streams one turn through the gateway-mandatory model client |
 | `package.json` | A minimal project with a `@ryuhq/sdk` dependency plus `dev` and `pack` scripts |
 
@@ -46,7 +46,7 @@ bunx create-ryu-app my-first-plugin
 ```
 
 `create-ryu-app` (`packages/create-ryu-app/index.ts`) copies the template, stamps your name into
-`plugin.json`, validates the result against `PluginManifestSchema`, and writes `package.json`. On
+`manifest.json`, validates the result against `PluginManifestSchema`, and writes `package.json`. On
 success it prints the next steps:
 
 ```text
@@ -56,10 +56,10 @@ success it prints the next steps:
     cd my-first-plugin
     bun install
     bun dev        # streams one turn via local gateway
-    bun run pack   # validate and bundle plugin.json
+    bun run pack   # validate and bundle manifest.json
 ```
 
-The generated `plugin.json` looks like this (your name is stamped into the `id` and `name`):
+The generated `manifest.json` looks like this (your name is stamped into the `id` and `name`):
 
 ```json
 {
@@ -147,7 +147,7 @@ When the agent works, bundle the plugin for the store:
 bun run pack
 ```
 
-This calls `bunx ryu pack .`. The `ryu` CLI (`packages/sdk/src/cli.ts`) validates `plugin.json`
+This calls `bunx ryu pack .`. The `ryu` CLI (`packages/sdk/src/cli.ts`) validates `manifest.json`
 against the same `PluginManifestSchema` and, on success, writes a publish-ready bundle to
 `dist/plugin.bundle.json`. If the manifest is invalid it exits non-zero and names the failing
 field, so a broken manifest never reaches the store.
@@ -156,13 +156,13 @@ The CLI also offers:
 
 | Command | What it does |
 |---|---|
-| `bunx ryu pack <dir>` | Validate `plugin.json` and emit `dist/plugin.bundle.json` |
+| `bunx ryu pack <dir>` | Validate `manifest.json` and emit `dist/plugin.bundle.json` |
 | `bunx ryu dev <entry>` | Run a Runnable locally with an interactive chat loop |
 | `bunx ryu publish <dir>` | Validate and POST the plugin to the Ryu Marketplace (stored as `pending` until a moderator approves it) |
 
 ## Step 6: Install it in Ryu
 
-Because `plugin.json` validates against the schema the desktop plugin store reads, your bundle
+Because `manifest.json` validates against the schema the desktop plugin store reads, your bundle
 installs immediately. Open the store and add it from your local bundle.
 
 <TryInRyu page="store" />

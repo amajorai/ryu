@@ -3,7 +3,7 @@ title: "TypeScript SDK (Extensions)"
 description: "Use @ryuhq/sdk to define agents, tools, skills, and workflows, then pack them into a plugin"
 ---
 
-This is the path for shipping an extension in TypeScript: scaffold a project, define one or more **Runnables** (agents, tools, skills, workflows), pack them into a `plugin.json` plugin, and install it. For the manifest fields see the [plugin.json reference](/docs/develop/extensions/plugin-json-manifest).
+This is the path for shipping an extension in TypeScript: scaffold a project, define one or more **Runnables** (agents, tools, skills, workflows), pack them into a `manifest.json` plugin, and install it. For the manifest fields see the [manifest.json reference](/docs/develop/extensions/plugin-json-manifest).
 
 `@ryuhq/sdk` (`packages/sdk/src/`) is Ryu's own SDK. It references patterns from Mastra, the Vercel AI SDK, and ACP but depends on none of them. Every model call routes through the Gateway (Core then Gateway then engine) - there are no first-party provider bindings. See [why that matters](/docs/start-here/architecture/core-vs-gateway).
 
@@ -14,7 +14,7 @@ npx create-ryu-app my-extension
 cd my-extension
 ```
 
-`create-ryu-app` (`packages/create-ryu-app/`) generates a starter project with a `plugin.json` already validated against the manifest schema plus a working starter agent.
+`create-ryu-app` (`packages/create-ryu-app/`) generates a starter project with a `manifest.json` already validated against the manifest schema plus a working starter agent.
 
 <Callout type="warn">
   npm publish of `@ryuhq/sdk` and `create-ryu-app` is in progress. Inside the Ryu monorepo both
@@ -87,7 +87,7 @@ The dev server probes the Gateway before starting. If the Gateway is unreachable
 
 ## 4. Declare it in the manifest
 
-List your Runnables in `plugin.json` so Core knows what the plugin contributes and what Gateway grants it needs. The schema, the per-kind fields, and the `contributes` / `activation_events` blocks are documented in the [plugin.json reference](/docs/develop/extensions/plugin-json-manifest).
+List your Runnables in `manifest.json` so Core knows what the plugin contributes and what Gateway grants it needs. The schema, the per-kind fields, and the `contributes` / `activation_events` blocks are documented in the [manifest.json reference](/docs/develop/extensions/plugin-json-manifest).
 
 ## 5. Pack and publish
 
@@ -96,7 +96,7 @@ The `ryu` CLI (`packages/sdk/src/cli.ts`) has three commands:
 | Command | What it does |
 |---|---|
 | `bunx ryu dev <entry>` | Run a Runnable locally with an interactive chat loop |
-| `bunx ryu pack <dir>` | Validate the `plugin.json` and emit `<dir>/dist/plugin.bundle.json` |
+| `bunx ryu pack <dir>` | Validate the `manifest.json` and emit `<dir>/dist/plugin.bundle.json` |
 | `bunx ryu publish <dir>` | Validate, then POST the bundle to the Ryu Marketplace publish endpoint |
 
 ```bash
@@ -106,9 +106,9 @@ bunx ryu pack .
 `pack` validates against the manifest schema and exits non-zero with the failing field if the manifest is invalid. `publish` (`POST /api/marketplace/publish`) requires an auth token in `RYU_AUTH_TOKEN` and submits the bundle for moderation (`status: pending`). See the [marketplace publishing guide](/docs/develop/extensions/marketplace).
 
 <Callout type="warn">
-  An SDK-authored extension always publishes as a `plugin` (a `plugin.json` bundle of Runnables),
+  An SDK-authored extension always publishes as a `plugin` (a `manifest.json` bundle of Runnables),
   never as a `skill`: a skill install expects the Agent Skills layout
-  (`~/.claude/skills/<slug>/SKILL.md`), which a `plugin.json` manifest does not carry. To ship a
+  (`~/.claude/skills/<slug>/SKILL.md`), which a `manifest.json` manifest does not carry. To ship a
   standalone skill instead, follow the [Agent Skills guide](/docs/develop/extensions/agent-skills).
 </Callout>
 

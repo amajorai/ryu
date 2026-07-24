@@ -407,7 +407,7 @@ export type Surface = z.infer<typeof SurfaceSchema>;
 // ── PluginManifest ───────────────────────────────────────────────────────────
 
 /**
- * Full schema for a `plugin.json` Plugin manifest. Mirrors `PluginManifest` in
+ * Full schema for a `manifest.json` Plugin manifest. Mirrors `PluginManifest` in
  * `apps/core/src/plugin_manifest/mod.rs`.
  *
  * Validation rules (matching Core's `PluginManifestLoader`):
@@ -607,7 +607,7 @@ export type PluginManifest = z.infer<typeof PluginManifestSchema>;
 // `PluginManifestSchema` above models the SDK's simpler authoring shape
 // (runnables = identity metadata only). Until those shapes are reconciled
 // (follow-up), use the zod schema for SDK authoring and these helpers when you
-// need Core-strict validation of a full `plugin.json`.
+// need Core-strict validation of a full `manifest.json`.
 
 /**
  * Validate a plugin id with Core's strict reverse-domain, path-traversal-safe
@@ -618,7 +618,7 @@ export function validatePluginId(id: string): void {
 }
 
 /**
- * Validate a full `plugin.json` string against Core's authoritative rules
+ * Validate a full `manifest.json` string against Core's authoritative rules
  * (id, semver, per-kind runnable config contracts). Returns the normalized
  * manifest JSON string, or throws.
  */
@@ -627,7 +627,7 @@ export function validateManifestStrict(manifestJson: string): string {
 }
 
 /**
- * The Core-derived JSON Schema for a `plugin.json`, as a parsed object. Stays in
+ * The Core-derived JSON Schema for a `manifest.json`, as a parsed object. Stays in
  * lockstep with the Rust types because it is emitted from them.
  */
 export function coreManifestJsonSchema(): unknown {

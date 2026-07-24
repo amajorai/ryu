@@ -38,7 +38,7 @@ int ryu_validate_plugin_id(const char *id);
 /* Normalized manifest JSON on success (caller frees), NULL on error. */
 char *ryu_parse_and_validate_manifest(const char *json);
 
-/* The plugin.json JSON Schema (caller frees). */
+/* The manifest.json JSON Schema (caller frees). */
 char *ryu_plugin_manifest_json_schema(void);
 
 /* ── Gateway ────────────────────────────────────────────────────────────── */

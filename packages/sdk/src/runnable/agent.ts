@@ -117,7 +117,7 @@ export interface AgentRunnable<TInput = unknown, TOutput = unknown>
 	/** The lowered slot card (empty edges when no slots were declared). */
 	readonly card: AgentCard;
 	/**
-	 * Lower this agent (card + run identity) to a single-agent `plugin.json`
+	 * Lower this agent (card + run identity) to a single-agent `manifest.json`
 	 * `PluginManifest`: the agent `RunnableMeta` carries the persona/model
 	 * config; `requires.capabilities` carries the slot edges. Throws if the
 	 * assembled manifest is invalid.
@@ -242,7 +242,7 @@ function cardConfig(card: AgentCard): Record<string, unknown> {
 	return config;
 }
 
-/** Lower an agent to a single-agent `plugin.json` `PluginManifest`. */
+/** Lower an agent to a single-agent `manifest.json` `PluginManifest`. */
 function agentToManifest(
 	agent: Runnable & { card: AgentCard },
 	options: AgentManifestOptions
@@ -288,7 +288,7 @@ function agentToManifest(
  *
  * The returned value satisfies `Runnable<TInput, TOutput>` with `kind = "agent"`
  * and additionally exposes the lowered {@link AgentCard} + a `toManifest()`
- * lowering, so a slot-composed agent round-trips to a valid `plugin.json`.
+ * lowering, so a slot-composed agent round-trips to a valid `manifest.json`.
  *
  * @example Classic (unchanged, back-compat):
  * ```ts

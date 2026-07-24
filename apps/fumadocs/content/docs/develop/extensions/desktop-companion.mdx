@@ -10,9 +10,9 @@ walks the contribution path end to end, using the built-in example plugin
 (`apps/desktop/src/contributions/host/example-plugin.ts`) as the worked example.
 
 `Companion` is one of the eight `RunnableKind` variants
-(`apps/core/src/runnable/mod.rs`), so a Companion is declared in a `plugin.json` manifest like any
+(`apps/core/src/runnable/mod.rs`), so a Companion is declared in a `manifest.json` manifest like any
 other Runnable. For the manifest schema and grant strings, see
-[the plugin.json manifest reference](/docs/develop/extensions/plugin-json-manifest).
+[the manifest.json manifest reference](/docs/develop/extensions/plugin-json-manifest).
 
 <Callout type="warn">
 The desktop extension host is an **MVP** (#446). The pure RPC dispatch and the handshake protocol
@@ -178,9 +178,9 @@ ships one method:
 
 <Callout type="warn">
 For the MVP the granted-capability set is **host-provided config** passed in at mount time. Reading
-it from the plugin's `plugin.json` grants is the manifest activation work (#443). The gate itself
+it from the plugin's `manifest.json` grants is the manifest activation work (#443). The gate itself
 is real and enforced today; what is still wired is sourcing the grant set from your manifest. See
-[the plugin.json manifest reference](/docs/develop/extensions/plugin-json-manifest) for how grants
+[the manifest.json manifest reference](/docs/develop/extensions/plugin-json-manifest) for how grants
 are declared.
 </Callout>
 

@@ -56,7 +56,7 @@ Every unit in the monorepo carries its own `LICENSE` file and maps to one of the
 
 The closed desktop stays extensible **only** if the plugin/extension runtime lives in OSS Core
 (the VS Code / Codex model). Third parties author plugins at every layer via one manifest
-(`plugin.json`) and the dev SDK; the runtime that loads and registers those plugins is in
+(`manifest.json`) and the dev SDK; the runtime that loads and registers those plugins is in
 `apps/core`, not in `apps/desktop`. This keeps the plugin store extensible without requiring the
 closed desktop to be open-sourced.
 

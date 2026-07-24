@@ -1,4 +1,4 @@
-//! Blessed-file guard for the checked-in `plugin.json` JSON Schema.
+//! Blessed-file guard for the checked-in `manifest.json` JSON Schema.
 //!
 //! The crate itself stays pure data (no I/O — the runtime charter); tests are
 //! allowed I/O, so this integration test is where the schema file lives its

@@ -28,7 +28,7 @@ is for developers who want a clickable surface in chat instead of a wall of tool
 ### Scaffold the project skeleton
 
 Start from `create-ryu-app` for the skeleton (a `package.json` with the `@ryuhq/sdk` dependency and a
-`pack` script, plus a valid `plugin.json`):
+`pack` script, plus a valid `manifest.json`):
 
 ```bash
 bunx create-ryu-app my-first-app
@@ -45,7 +45,7 @@ skeleton and its `pack` script, then author the app manifest yourself in the nex
 
 ### Author the app manifest with `defineApp`
 
-`defineApp` (`packages/sdk/src/runnable/app.ts`) assembles a `plugin.json` from a declarative
+`defineApp` (`packages/sdk/src/runnable/app.ts`) assembles a `manifest.json` from a declarative
 description. A **render** tool (`accessible` unset) produces the widget; a **companion** tool
 (`accessible: true`) is a call target a mounted widget may invoke. Write a small build script that
 calls `defineApp` and writes the manifest to disk:
@@ -66,7 +66,7 @@ const manifest = defineApp({
   ],
 });
 
-writeFileSync("plugin.json", JSON.stringify(manifest, null, 2));
+writeFileSync("manifest.json", JSON.stringify(manifest, null, 2));
 ```
 
 The render tool gets a `contributes.widgets[]` entry binding it to `ui://widget/checklist.html`;

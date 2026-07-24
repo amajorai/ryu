@@ -2,7 +2,7 @@
 //! [`RunnableEntry`] manifest record, the managed-sidecar/external-runtime specs,
 //! and the pure validation + capability-labelling functions.
 //!
-//! Every Runnable in a `plugin.json` manifest carries an optional `config` field
+//! Every Runnable in a `manifest.json` manifest carries an optional `config` field
 //! whose shape depends on `kind`. This module defines those shapes and the
 //! [`validate_runnable`] function that checks a [`RunnableEntry`] for required
 //! fields. It is pure data + validation — no I/O, no runtime coupling.
@@ -1418,7 +1418,7 @@ pub fn validate_sidecar_spec(spec: &SidecarSpec) -> Result<(), String> {
 
 // ── RunnableEntry (manifest-level Runnable record) ────────────────────────────
 
-/// A single Runnable entry inside a `plugin.json` manifest.
+/// A single Runnable entry inside a `manifest.json` manifest.
 ///
 /// Each entry carries the identity fields from [`crate::runnable::RunnableMeta`]
 /// plus an optional typed config blob. The `kind` field drives which config shape

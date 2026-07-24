@@ -7,13 +7,13 @@ description: "The shared Rust kernel - manifest validation, the RunnableKind mod
 is not a Rust-only SDK; it is the one implementation of the parts that must never drift across
 languages:
 
-- **Shared local logic** (bound out via FFI): the `plugin.json` manifest / Runnable model + its
+- **Shared local logic** (bound out via FFI): the `manifest.json` manifest / Runnable model + its
   validation (`manifest.rs`, `runnable.rs`) and the gateway egress rules (`gateway.rs`).
 - **Transport** (per-language, contract from OpenAPI): the gateway-mandatory model and embedding
   clients (`model.rs`, `embedding.rs`) speaking the gateway's OpenAI-compat API.
 
 For the manifest *format* and the full Runnable kind table, see
-[plugin.json manifest](/docs/develop/extensions/plugin-json-manifest) and
+[manifest.json manifest](/docs/develop/extensions/plugin-json-manifest) and
 [Plugin API](/docs/develop/sdk/plugin-api). For the Runnable *concept*, see
 [the Runnable model](/docs/start-here/architecture/runnable-model). This page documents the Rust
 surface only.
@@ -69,7 +69,7 @@ validate_runnable(&entry)?; // Ok(()) - tool has a non-empty slug
 
 ## Manifest validation
 
-`PluginManifest` (`crates/sdk/core/src/manifest.rs`) is the in-memory model of a `plugin.json`,
+`PluginManifest` (`crates/sdk/core/src/manifest.rs`) is the in-memory model of a `manifest.json`,
 mirroring `PluginManifest` in `apps/core/src/plugin_manifest/mod.rs`.
 
 ```rust
@@ -103,7 +103,7 @@ the `semver` crate, and `validate_runnable` for every entry.
 
 `plugins_dir()` resolves the scan directory exactly as Core does (`RYU_PLUGINS_DIR`, then legacy
 `RYU_APPS_DIR`, then `~/.ryu/plugins`, with a legacy `~/.ryu/apps` fallback). `load_user_plugins()`
-scans it for `plugin.json` (or legacy `ryu.json`) manifests and returns only those that pass
+scans it for `manifest.json` (or legacy `ryu.json`) manifests and returns only those that pass
 id/semver/duplicate validation:
 
 ```rust
@@ -118,7 +118,7 @@ for manifest in load_user_plugins() {
 
 `ryu_sdk::json_schema::plugin_manifest_schema()` emits the JSON Schema for `PluginManifest` (derived
 from the Rust types via `schemars`). This is the "validate everywhere, bind only where it pays" path:
-any language can validate a `plugin.json` against this schema without a Rust FFI binding, and the
+any language can validate a `manifest.json` against this schema without a Rust FFI binding, and the
 schema stays in lockstep with the Rust types.
 
 ## The gateway-mandatory model client

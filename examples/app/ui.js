@@ -13,7 +13,7 @@
 // (`POST /api/plugins/:id/host`). This module never sees a token and cannot reach
 // the network directly (CSP `connect-src 'none'`).
 //
-// Grants this app requests (plugin.json `permission_grants`):
+// Grants this app requests (manifest.json `permission_grants`):
 //   - `hook:side-model` → host.sideModel(...)   (a tool-less completion)
 //   - `hook:run-agent`  → host.runAgent(...)     (a clean-context tool-using agent)
 //   - `storage:kv`      → host.storage.*         (durable per-app key/value)

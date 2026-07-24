@@ -62,7 +62,7 @@ use ryu_healing::{routes, HealEngine, HealingCtx, HealingHost};
 /// Default loopback port for the healing sidecar (overridable via `RYU_HEALING_PORT`).
 /// 8001 is free (7990 finetune · 7991 quests · 7992 clips · 7993 browser · 7994
 /// teams · 7995 research · 7996 mail · 7997 dashboards · 7998 meetings · 7999
-/// recipes are taken). Kept identical in `healing.plugin.json`.
+/// recipes are taken). Kept identical in `healing.manifest.json`.
 const DEFAULT_PORT: u16 = 8001;
 
 /// The bundled local default diagnosis model when no pref/env is set — mirrors

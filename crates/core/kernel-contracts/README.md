@@ -1,6 +1,6 @@
 # ryu-kernel-contracts
 
-The single, pure-data definition of the `plugin.json` manifest model — the types
+The single, pure-data definition of the `manifest.json` manifest model — the types
 an app/plugin author declares, plus their validation and capability-labelling
 logic. Shared verbatim by `apps/core` and the Ryu SDK so the two can never drift.
 
@@ -12,7 +12,7 @@ historical drift between Core's old `plugin_manifest`/`runnable` modules and the
 SDK's hand-maintained copy; both now re-export these one definitions.
 
 Every serde-facing shape reachable from `PluginManifest` also derives
-`schemars::JsonSchema`, so a JSON Schema for `plugin.json` can be emitted for
+`schemars::JsonSchema`, so a JSON Schema for `manifest.json` can be emitted for
 non-Rust manifest validators (see `schemas/`).
 
 ## Key modules

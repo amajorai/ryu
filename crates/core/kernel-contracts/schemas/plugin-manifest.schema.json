@@ -819,7 +819,7 @@
       "type": "object"
     },
     "RunnableEntry": {
-      "description": "A single Runnable entry inside a `plugin.json` manifest.\n\nEach entry carries the identity fields from [`crate::runnable::RunnableMeta`]\nplus an optional typed config blob. The `kind` field drives which config shape\nis expected; validation via [`validate_runnable`] checks that\nrequired-per-kind fields are present.",
+      "description": "A single Runnable entry inside a `manifest.json` manifest.\n\nEach entry carries the identity fields from [`crate::runnable::RunnableMeta`]\nplus an optional typed config blob. The `kind` field drives which config shape\nis expected; validation via [`validate_runnable`] checks that\nrequired-per-kind fields are present.",
       "properties": {
         "config": {
           "default": null,
@@ -1326,7 +1326,7 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "An installable Ryu App manifest (`plugin.json`).\n\nModelled on Codex's `plugin.json` pattern: a thin descriptor that bundles one or\nmore [`RunnableEntry`] items (agents, workflows, tools, skills, companions,\nchannels, engines, policies), lists the permission grants the app requires, and\noptionally declares a Companion surface (an in-desktop overlay or sidebar panel).\n\n# Per-kind config\n\nEach Runnable entry carries an optional `config` blob whose schema is\ndetermined by its `kind`. See [`crate::schema`] for the per-kind structs and the\n[`crate::schema::validate_runnable`] function.",
+  "description": "An installable Ryu App manifest (`manifest.json`).\n\nModelled on Codex's `manifest.json` pattern: a thin descriptor that bundles one or\nmore [`RunnableEntry`] items (agents, workflows, tools, skills, companions,\nchannels, engines, policies), lists the permission grants the app requires, and\noptionally declares a Companion surface (an in-desktop overlay or sidebar panel).\n\n# Per-kind config\n\nEach Runnable entry carries an optional `config` blob whose schema is\ndetermined by its `kind`. See [`crate::schema`] for the per-kind structs and the\n[`crate::schema::validate_runnable`] function.",
   "properties": {
     "accentColor": {
       "description": "Primary brand accent color, hex (Ryu extension: `accentColor`).",

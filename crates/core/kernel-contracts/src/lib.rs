@@ -1,6 +1,6 @@
 //! # ryu-kernel-contracts — the pure-data manifest contract
 //!
-//! The single source of truth for the `plugin.json` manifest model: the types an
+//! The single source of truth for the `manifest.json` manifest model: the types an
 //! app/plugin author declares, the [`runnable`] kind discriminant, the per-kind
 //! [`schema`] config shapes, and the validation + capability-labelling functions.
 //!
@@ -10,7 +10,7 @@
 //! hand-maintained copy — both now re-export these one definitions.
 //!
 //! Every serde-facing shape reachable from [`manifest::PluginManifest`] also
-//! derives [`schemars::JsonSchema`], so a JSON Schema for `plugin.json` can be
+//! derives [`schemars::JsonSchema`], so a JSON Schema for `manifest.json` can be
 //! emitted for languages that validate manifests without a Rust FFI binding.
 
 pub mod host_api;

@@ -4,6 +4,7 @@ import {
 	GridIcon,
 	Home01Icon,
 	Link01Icon,
+	UserGroupIcon,
 	Wallet01Icon,
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
@@ -47,6 +48,7 @@ type StoreSection =
 	| "agents"
 	| "workflows"
 	| "engines"
+	| "community"
 	| "tools"
 	| "installed"
 	| "account";
@@ -113,6 +115,16 @@ const SECTIONS: {
 	// Engines = all local inference runtimes, grouped inside by modality
 	// (Text · Image · Speech · Embeddings). Voice lives here now, not its own tab.
 	{ value: "engines", label: "Engines", icon: CpuIcon, group: "catalog" },
+	// Community: third-party apps + plugins discovered from the public GitHub
+	// topics `ryu-app` / `ryu-plugin`. Its OWN group, so the nav rail draws a
+	// divider before it — unreviewed listings must read as a separate cluster,
+	// not as a peer of the first-party catalogs above.
+	{
+		value: "community",
+		label: "Community",
+		icon: UserGroupIcon,
+		group: "community",
+	},
 	// Manage — what you already have installed, and the nodes running it.
 	// Tools = the MCP servers registered on this node and the tools they expose
 	// (browse the catalog under "MCP"; manage + invoke the registered ones here).
@@ -184,6 +196,11 @@ const SECTION_HEADERS: Record<
 		subtitle:
 			"Local inference runtimes for text, image, speech, and embeddings.",
 	},
+	community: {
+		title: "Community",
+		subtitle:
+			"Third-party apps and plugins discovered from GitHub. Not reviewed by Ryu.",
+	},
 	tools: {
 		title: "Tools",
 		subtitle: "Manage and invoke the MCP tools registered on this node.",
@@ -219,6 +236,10 @@ const CATALOG_SECTIONS = new Set<StoreSection>([
 	"mcp",
 	"agents",
 	"workflows",
+	// Community renders the same card/preview shape as Apps/Plugins, so its header
+	// belongs INSIDE the centered layout column — omitting it here would render the
+	// title twice (see the note below).
+	"community",
 	// Manage sections converted to the same App Store card/preview shape — their
 	// header lives inside the centered layout column too, so it must NOT also get
 	// the outer full-width StoreSectionHeader (that would render the title twice).
@@ -377,6 +398,11 @@ function StoreContent({
 	}
 	if (section === "plugins") {
 		return <AppsCatalogSection initialQuery={initialQuery} variant="plugins" />;
+	}
+	if (section === "community") {
+		return (
+			<AppsCatalogSection initialQuery={initialQuery} variant="community" />
+		);
 	}
 	if (section === "models") {
 		return <ModelsCatalogSection initialQuery={initialQuery} />;

@@ -8,7 +8,7 @@ import type { ApiTarget } from "@ryuhq/core-client/client";
 import { featureListLoader, type ListRow } from "../../core/featureList.ts";
 
 /** One entry in the store tab-row. Order matches apps/desktop StorePage.
- *  `plugins` = the REAL plugin.json lifecycle surface (`/api/plugins`, PluginsTab);
+ *  `plugins` = the REAL manifest.json lifecycle surface (`/api/plugins`, PluginsTab);
  *  `apps` = the SIDECAR catalog (`/api/catalog`, AppsTab), labelled "Sidecars" so
  *  it stops claiming to be plugins. These are two distinct Core registries. */
 export type StoreSection =

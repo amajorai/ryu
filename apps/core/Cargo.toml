@@ -121,7 +121,7 @@ ghost-core = { path = "../../crates/ghost/core" }
 # Shared automation-permission gates. Core detects & reports (never prompts — it
 # is a background service); the desktop app / `ghost setup` do the prompting.
 ghost-permissions = { path = "../../crates/ghost/permissions" }
-# The single, pure-data definition of the `plugin.json` manifest contract
+# The single, pure-data definition of the `manifest.json` manifest contract
 # (PluginManifest + Runnable/schema types + validation). Core re-exports these
 # from `plugin_manifest`/`runnable` so every existing call site is unchanged; the
 # Ryu SDK depends on the same crate, ending the historical manifest drift.

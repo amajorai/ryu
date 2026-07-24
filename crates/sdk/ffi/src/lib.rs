@@ -111,7 +111,7 @@ pub unsafe extern "C" fn ryu_validate_plugin_id(id: *const c_char) -> c_int {
     }
 }
 
-/// Parse and fully validate a `plugin.json` string. Returns the normalized
+/// Parse and fully validate a `manifest.json` string. Returns the normalized
 /// manifest JSON (caller frees), or `NULL` on error.
 ///
 /// # Safety
@@ -137,7 +137,7 @@ pub unsafe extern "C" fn ryu_parse_and_validate_manifest(json: *const c_char) ->
     }
 }
 
-/// Return the `plugin.json` JSON Schema as a string (caller frees).
+/// Return the `manifest.json` JSON Schema as a string (caller frees).
 #[no_mangle]
 pub extern "C" fn ryu_plugin_manifest_json_schema() -> *mut c_char {
     clear_error();

@@ -167,7 +167,7 @@ describe("round-trip: SDK build → JSON → Core schema parse", () => {
 		}
 	});
 
-	it("emitted plugin.json satisfies PluginManifestSchema (Core compat proof)", () => {
+	it("emitted manifest.json satisfies PluginManifestSchema (Core compat proof)", () => {
 		// 1. Build a manifest using the SDK.
 		const manifest = new PluginBuilder()
 			.id("com.example.research-assistant")
@@ -188,8 +188,8 @@ describe("round-trip: SDK build → JSON → Core schema parse", () => {
 			})
 			.build();
 
-		// 2. Emit to a temp plugin.json (simulating what `ryu pack` writes).
-		const manifestPath = join(tmpDir, "plugin.json");
+		// 2. Emit to a temp manifest.json (simulating what `ryu pack` writes).
+		const manifestPath = join(tmpDir, "manifest.json");
 		writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
 
 		// 3. Read it back and parse through `PluginManifestSchema` — the same
@@ -213,7 +213,7 @@ describe("round-trip: SDK build → JSON → Core schema parse", () => {
 		expect(loaded.companion?.shortcut).toBe("ctrl+shift+r");
 	});
 
-	it("matches the Core fixture (sample.plugin.json)", () => {
+	it("matches the Core fixture (sample.manifest.json)", () => {
 		// The Core Rust test (`sample_fixture_deserializes_into_app_manifest`)
 		// asserts the same values — this verifies TS schema parity.
 		const fixture = {

@@ -18,7 +18,7 @@ flowchart TD
   HOST -->|"dispatched via PluginHookBridge"| BRIDGE[Grant-gated bridge]
 ```
 
-1. A plugin declares `sidecars: [{ process: { kind: "node" } }]` in its `plugin.json`
+1. A plugin declares `sidecars: [{ process: { kind: "node" } }]` in its `manifest.json`
 2. Core spawns a managed Node/Bun subprocess for the plugin
 3. The subprocess calls `activate(context)` to initialize
 4. The plugin communicates with Core via `POST /api/host/rpc`
@@ -102,7 +102,7 @@ When disabled, plugins with `SidecarProcess::Node` are loaded but their subproce
 
 ## Building an extension host plugin
 
-### 1. Declare the sidecar in plugin.json
+### 1. Declare the sidecar in manifest.json
 
 ```json
 {
@@ -153,7 +153,7 @@ export function activate(context: ExtensionContext) {
 bunx ryu pack .
 curl -X POST http://localhost:7980/api/plugins/install \
   -H 'content-type: application/json' \
-  -d '{"url": "https://example.com/my-plugin/plugin.json"}'
+  -d '{"url": "https://example.com/my-plugin/manifest.json"}'
 curl -X POST http://localhost:7980/api/plugins/com.example.my-plugin/enable
 ```
 

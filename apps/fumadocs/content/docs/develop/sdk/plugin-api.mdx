@@ -1,9 +1,9 @@
 ---
 title: "Plugin API Reference"
-description: "The canonical plugin.json schema, the install/enable lifecycle, grant validation, signing, and activation"
+description: "The canonical manifest.json schema, the install/enable lifecycle, grant validation, signing, and activation"
 ---
 
-This is the canonical reference for the `plugin.json` manifest: every field, the **eight**
+This is the canonical reference for the `manifest.json` manifest: every field, the **eight**
 Runnable kinds and their required config, the install/enable lifecycle and its endpoints, Gateway
 grant validation, ed25519 manifest signing, and the activation runtime.
 
@@ -25,7 +25,7 @@ example see the [Plugin manifests tutorial](/docs/develop/extensions/plugin-json
 
 A **plugin** is a bundle of one or more **Runnables** plus the **permission grants** they need,
 packaged so Core can install, enable, disable, and update it as a unit. The canonical manifest file
-name is `plugin.json`; the legacy `ryu.json` name is still read for back-compat (the apps -> plugins
+name is `manifest.json`; the legacy `ryu.json` name is still read for back-compat (the apps -> plugins
 rename, #457). The SDK's bundled output is `plugin.bundle.json`.
 
 The authoritative schema lives in Core at `apps/core/src/plugin_manifest/{mod.rs,schema.rs}`, mirrored
@@ -90,7 +90,7 @@ contract enforced by `validate_runnable` (`apps/core/src/plugin_manifest/schema.
 <Callout type="warn">
   The TypeScript SDK's `RunnableKindSchema` (`packages/sdk/src/manifest.ts`) enums only the four most
   common kinds (`agent`, `workflow`, `tool`, `skill`). Core validates all eight. To author the other
-  four (companion / channel / engine / policy), write the `plugin.json` directly rather than relying
+  four (companion / channel / engine / policy), write the `manifest.json` directly rather than relying
   on the TS type. The Rust kernel (`sdk/core`) covers all eight.
 </Callout>
 
@@ -127,8 +127,8 @@ aliases point at the same handlers for one release of back-compat.
 |---|---|
 | `GET /api/plugins` | List loaded manifests (built-ins + user-installed). |
 | `GET /api/plugins/catalog` | Browse installable plugins from the remote registry. |
-| `POST /api/plugins/install` | Install by fetching a `plugin.json` from a URL, validate, write to `~/.ryu/plugins/`, hot-reload. |
-| `POST /api/plugins/reload` | Re-scan built-ins + `~/.ryu/plugins/*/plugin.json`. |
+| `POST /api/plugins/install` | Install by fetching a `manifest.json` from a URL, validate, write to `~/.ryu/plugins/`, hot-reload. |
+| `POST /api/plugins/reload` | Re-scan built-ins + `~/.ryu/plugins/*/manifest.json`. |
 | `POST /api/plugins/:id/install` | Record an already-known plugin as installed (disabled). |
 | `POST /api/plugins/:id/enable` | Validate grants via the Gateway, then enable. |
 | `POST /api/plugins/:id/disable` | Disable and clear approved grants. |
@@ -318,7 +318,7 @@ are design-only; do not build against them as if they exist. The RFC is `docs/rf
   of third-party code).
 - **Firing `onChat` / `onCommand` / `onRunnable`.** Only `onStartup` fires today.
 
-What exists today is the install-time and activation layer: a validated `plugin.json`, the lifecycle
+What exists today is the install-time and activation layer: a validated `manifest.json`, the lifecycle
 above, Gateway grant validation, signing/verification, the `onStartup` activation runtime, and Gateway
 policy runnables. A plugin that wants to govern egress declares a `policy` Runnable that the Gateway
 activates on install; every model call a plugin causes still routes through the Gateway. The runtime

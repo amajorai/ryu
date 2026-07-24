@@ -10,6 +10,7 @@ use anyhow::{bail, Result};
 use serde_json::Value;
 use std::sync::OnceLock;
 
+use super::github_topic::GithubTopicSource;
 use super::{CatalogKind, CatalogQuery, CatalogSource, DescriptorFile, InstallDescriptor};
 use crate::model_catalog::HfEndpoint;
 
@@ -662,7 +663,7 @@ struct MarketplacePlugin {
     /// `Requires` / `Surface`: a git marketplace is untrusted third-party data, and
     /// one entry with a typo'd surface token must not fail the parse of the WHOLE
     /// marketplace. The typed contract is enforced where it is load-bearing — on
-    /// the real `plugin.json` at install time, by the manifest loader and the
+    /// the real `manifest.json` at install time, by the manifest loader and the
     /// install-closure resolver.
     #[serde(default)]
     requires: Option<serde_json::Value>,
@@ -3601,6 +3602,9 @@ pub enum Source {
     RyuHostedMcp(RyuHostedMcpSource),
     RyuMarketplace(RyuMarketplaceSource),
     IntegrationsSh(IntegrationsShSource),
+    /// GitHub-topic discovery (`ryu-app` / `ryu-plugin`) — unreviewed,
+    /// descriptor-only community listings. See `github_topic.rs`.
+    GithubTopic(GithubTopicSource),
     OkfBundle(OkfBundleSource),
     Stub(StubSource),
 }
@@ -3617,6 +3621,7 @@ impl Source {
             Source::RyuHostedMcp(s) => s.id(),
             Source::RyuMarketplace(s) => s.id(),
             Source::IntegrationsSh(s) => s.id(),
+            Source::GithubTopic(s) => s.id(),
             Source::OkfBundle(s) => s.id(),
             Source::Stub(s) => s.id(),
         }
@@ -3632,6 +3637,7 @@ impl Source {
             Source::RyuHostedMcp(s) => s.display_name(),
             Source::RyuMarketplace(s) => s.display_name(),
             Source::IntegrationsSh(s) => s.display_name(),
+            Source::GithubTopic(s) => s.display_name(),
             Source::OkfBundle(s) => s.display_name(),
             Source::Stub(s) => s.display_name(),
         }
@@ -3647,6 +3653,7 @@ impl Source {
             Source::RyuHostedMcp(s) => s.kind(),
             Source::RyuMarketplace(s) => s.kind(),
             Source::IntegrationsSh(s) => s.kind(),
+            Source::GithubTopic(s) => s.kind(),
             Source::OkfBundle(s) => s.kind(),
             Source::Stub(s) => s.kind(),
         }
@@ -3669,6 +3676,8 @@ impl Source {
             // integrations.sh uses its public API by default, with optional env
             // overrides. Builtin listing keeps the base implicit.
             Source::IntegrationsSh(s) => s.api_url.as_deref(),
+            // GitHub-topic discovery surfaces its (optional) API base override.
+            Source::GithubTopic(s) => s.api_base.as_deref(),
             // A knowledge bundle surfaces its OKF source URL (git/local).
             Source::OkfBundle(s) => Some(&s.source_url),
             Source::Smithery(_) | Source::SkillsSh(_) | Source::Stub(_) => None,
@@ -3697,6 +3706,7 @@ impl Source {
             Source::RyuHostedMcp(s) => s.search(client, q).await,
             Source::RyuMarketplace(s) => s.search(client, q).await,
             Source::IntegrationsSh(s) => s.search(client, q).await,
+            Source::GithubTopic(s) => s.search(client, q).await,
             Source::OkfBundle(s) => s.search(client, q).await,
             Source::Stub(s) => s.search(client, q).await,
         }
@@ -3712,6 +3722,7 @@ impl Source {
             Source::RyuHostedMcp(s) => s.detail(client, id).await,
             Source::RyuMarketplace(s) => s.detail(client, id).await,
             Source::IntegrationsSh(s) => s.detail(client, id).await,
+            Source::GithubTopic(s) => s.detail(client, id).await,
             Source::OkfBundle(s) => s.detail(client, id).await,
             Source::Stub(s) => s.detail(client, id).await,
         }
@@ -3731,6 +3742,7 @@ impl Source {
             Source::RyuHostedMcp(s) => s.install_descriptor(client, id).await,
             Source::RyuMarketplace(s) => s.install_descriptor(client, id).await,
             Source::IntegrationsSh(s) => s.install_descriptor(client, id).await,
+            Source::GithubTopic(s) => s.install_descriptor(client, id).await,
             Source::OkfBundle(s) => s.install_descriptor(client, id).await,
             Source::Stub(s) => s.install_descriptor(client, id).await,
         }

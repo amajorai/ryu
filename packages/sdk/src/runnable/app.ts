@@ -3,7 +3,7 @@
  *
  * A "Ryu App" bundles one or more tools whose results render an interactive
  * widget inline in chat (the ChatGPT-Apps-style surface). `defineApp` assembles a
- * complete `plugin.json` `PluginManifest` from a declarative description, deriving
+ * complete `manifest.json` `PluginManifest` from a declarative description, deriving
  * the render-vs-companion split exactly the way Core's in-process provider does
  * (`apps/core/src/sidecar/mcp/apps/mod.rs` `tools()`):
  *
@@ -123,7 +123,7 @@ export function appToolId(server: string, name: string): string {
 }
 
 /**
- * Assemble a `plugin.json` manifest for a Ryu App. The result matches Core's
+ * Assemble a `manifest.json` manifest for a Ryu App. The result matches Core's
  * `PluginManifest` serde shape (validated through `PluginManifestSchema`) and can
  * be written to disk, packed with `ryu pack`, or published with `ryu publish`.
  *
@@ -229,7 +229,7 @@ export function defineApp(options: DefineAppOptions): PluginManifest {
 		const first = result.error.issues[0];
 		const field = first?.path.join(".") ?? "unknown";
 		const message = first?.message ?? "validation failed";
-		throw new Error(`plugin.json validation failed at '${field}': ${message}`);
+		throw new Error(`manifest.json validation failed at '${field}': ${message}`);
 	}
 	return result.data;
 }

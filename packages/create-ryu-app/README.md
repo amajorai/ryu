@@ -5,7 +5,7 @@
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
 [![Stack](https://shieldcn.dev/badge/TypeScript-CLI-3178C6.svg?logo=typescript&logoColor=white)](../../README.md)
 
-`create-ryu-app` is the project scaffolder for the Ryu SDK. Running it generates a starter project with a Runnable, a gateway-pointed model config, and a `plugin.json` (legacy `ryu.json`) manifest validated against the PluginManifest schema, so a new plugin compiles and packs out of the box. It depends on `@ryuhq/sdk` by semver.
+`create-ryu-app` is the project scaffolder for the Ryu SDK. Running it generates a starter project with a Runnable, a gateway-pointed model config, and a `manifest.json` (legacy `ryu.json`) manifest validated against the PluginManifest schema, so a new plugin compiles and packs out of the box. It depends on `@ryuhq/sdk` by semver.
 
 Pick a starter with `--template` (default `agent`):
 
@@ -36,7 +36,7 @@ bun test
 
 - A one-command scaffolder (`create-ryu-app <name> [--template <t>]`) bundled with a `template/<name>/` tree per starter.
 - A generated starter Runnable plus a gateway-pointed model config.
-- A `plugin.json` / `ryu.json` manifest validated against the PluginManifest schema, ready for `ryu pack`.
+- A `manifest.json` / `ryu.json` manifest validated against the PluginManifest schema, ready for `ryu pack`.
 
 ## License
 

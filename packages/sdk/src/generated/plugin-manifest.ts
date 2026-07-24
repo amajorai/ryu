@@ -22,9 +22,9 @@
 export type Surface = "gateway" | "core" | "desktop" | "island" | "mobile" | "extension" | "web" | "cli";
 
 /**
- * An installable Ryu App manifest (`plugin.json`).
+ * An installable Ryu App manifest (`manifest.json`).
  *
- * Modelled on Codex's `plugin.json` pattern: a thin descriptor that bundles one or
+ * Modelled on Codex's `manifest.json` pattern: a thin descriptor that bundles one or
  * more [`RunnableEntry`] items (agents, workflows, tools, skills, companions,
  * channels, engines, policies), lists the permission grants the app requires, and
  * optionally declares a Companion surface (an in-desktop overlay or sidebar panel).
@@ -899,7 +899,7 @@ export interface CapabilityReq {
 	min_version?: string | null;
 }
 /**
- * A single Runnable entry inside a `plugin.json` manifest.
+ * A single Runnable entry inside a `manifest.json` manifest.
  *
  * Each entry carries the identity fields from [`crate::runnable::RunnableMeta`]
  * plus an optional typed config blob. The `kind` field drives which config shape

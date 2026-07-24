@@ -37,11 +37,11 @@ use ryu_activity::{ActivityItem, ActivityLevel, ActivityStore};
 use crate::scheduler::store::{self as job_store, JobTarget, Schedule, ScheduledJob};
 use crate::sidecar::ext_proxy::{ext_token, node_token};
 
-/// The built-in Quests app id (matches the `quests.plugin.json` fixture id and
+/// The built-in Quests app id (matches the `quests.manifest.json` fixture id and
 /// `plugins::builtins`).
 const QUESTS_PLUGIN_ID: &str = "com.ryu.quests";
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `quests.plugin.json` fixture `port`. Core injects this as `RYU_QUESTS_PORT` at
+/// `quests.manifest.json` fixture `port`. Core injects this as `RYU_QUESTS_PORT` at
 /// spawn.
 const QUESTS_FALLBACK_PORT: u16 = 7991;
 

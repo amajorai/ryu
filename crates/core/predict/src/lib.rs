@@ -22,7 +22,7 @@
 //! persisted state and flipped live from the plugin enable/disable path
 //! (`apply_policy`) — stays in `apps/core`: it is the plugin's on/off switch, part
 //! of the AppGate/plugin wiring, not the completion engine. This crate reads it
-//! through [`PredictHost::is_enabled`]. The plugin id const + the `predict.plugin.json`
+//! through [`PredictHost::is_enabled`]. The plugin id const + the `predict.manifest.json`
 //! fixture likewise stay in Core.
 //!
 //! The shared in-editor copilot (PlateJS ghost text) routes through the Gateway

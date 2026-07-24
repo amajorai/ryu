@@ -5,7 +5,7 @@
 //! that names every executable thing in Ryu and the kind-agnostic metadata view.
 //! The executable `Runnable` trait and its impls (on `AgentRecord`,
 //! `SkillRecord`, `Workflow`) stay in Core because they are coupled to Core's
-//! execution types; only the serde shapes a `plugin.json` author needs live here
+//! execution types; only the serde shapes a `manifest.json` author needs live here
 //! so they have exactly one definition every consumer (Core and the SDK) shares.
 //!
 //! Every shape derives [`schemars::JsonSchema`] so the manifest schema can be

@@ -42,7 +42,7 @@ abstraction.
 
 ### App / Plugin
 
-A manifest (`plugin.json`) bundling Runnables + an optional Companion surface. Apps are
+A manifest (`manifest.json`) bundling Runnables + an optional Companion surface. Apps are
 installable and enableable on-the-fly with permission grants. The legacy name "plugin" is still
 used in code (`apps/core/src/plugins/`), but the user-facing term is "app."
 
@@ -291,7 +291,7 @@ See [Side questions](/docs/core/side-questions).
 
 ## Plugin terms
 
-### plugin.json
+### manifest.json
 
 The manifest format for Ryu apps. Contains: `id` (reverse-domain), `name`, `version`,
 `runnables[]`, `permission_grants[]`, `companion`, `activation_events[]`, `contributes`,
@@ -301,7 +301,7 @@ See [Plugin manifests](/docs/develop/extensions/plugin-json-manifest).
 
 ### Permission grants
 
-Declarations in `plugin.json` that a plugin needs to function (e.g., `memory:read`,
+Declarations in `manifest.json` that a plugin needs to function (e.g., `memory:read`,
 `spaces:write`, `gateway:budget`). Grants are validated at enable-time and routed to the Gateway.
 
 ### Activation events
@@ -385,7 +385,7 @@ For agents parsing this glossary, here is the term-to-definition mapping in a co
 Runnable = unified execution contract (input → run → output); 8 kinds
 Session = backend conversation state owner; lives in Core
 Conversation = user-visible message thread
-App/Plugin = installable manifest (plugin.json) bundling Runnables
+App/Plugin = installable manifest (manifest.json) bundling Runnables
 Core = local Rust backend; owns "what runs" (:7980)
 Gateway = LLM control layer; owns "what is allowed" (:7981)
 Sidecar = child process managed by Core
@@ -413,7 +413,7 @@ Identity Vault = per-domain encrypted credential storage
 Delegation = agent-to-agent subtask fanout
 Goals = persistent agent objectives (/goal)
 Side questions = synchronous inline questions (/btw)
-plugin.json = app manifest format
+manifest.json = app manifest format
 Permission grants = plugin capability declarations
 Activation events = plugin load triggers
 Companion = in-desktop overlay panel

@@ -50,7 +50,7 @@ use crate::server::ServerState;
 use crate::sidecar::ext_proxy::{authenticate_sidecar, ext_token, node_token};
 
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `monitors.plugin.json` fixture `port`. Core injects this as `RYU_MONITORS_PORT`
+/// `monitors.manifest.json` fixture `port`. Core injects this as `RYU_MONITORS_PORT`
 /// at spawn.
 const MONITORS_FALLBACK_PORT: u16 = 8003;
 

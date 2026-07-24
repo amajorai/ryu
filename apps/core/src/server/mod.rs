@@ -2531,7 +2531,7 @@ pub fn create_router(state: ServerState, auth_token: Option<String>, bind_addr: 
         .route("/api/conversations/:id/btw", get(list_btw_handler))
         // ── Advisor consult bridge ────────────────────────────────────────────
         //    The loopback endpoint the declarative `advisor__consult` plugin tool
-        //    (fixtures/advisor.plugin.json, an `http`-backend runnable) proxies to.
+        //    (fixtures/advisor.manifest.json, an `http`-backend runnable) proxies to.
         //    Lives in Core because it resolves the `advisor-model` preference and
         //    routes a high-effort completion through the Gateway (`call_side_model`)
         //    — the model-resolution the former native `sidecar/mcp/advisor` provider
@@ -5246,11 +5246,17 @@ async fn run_chat_with_hooks(
                             next_text = Some(text);
                         }
                     }
-                    // Pre-turn / tool-phase directives are no-ops post-turn (no
-                    // outgoing message to rewrite, no tool call to block here).
+                    // Pre-turn / context-phase / tool-phase directives are no-ops
+                    // post-turn: there is no outgoing prompt or message array left
+                    // to rewrite, and no tool call to block or transform here.
+                    // `Rewrite` is an ON_CONTEXT directive ("ignored elsewhere") and
+                    // `Transform` rewrites a tool RESULT, so both are inert at this
+                    // point in the turn.
                     crate::plugin_host::HookDirective::Replace { .. }
                     | crate::plugin_host::HookDirective::Inject { .. }
-                    | crate::plugin_host::HookDirective::Deny { .. } => {}
+                    | crate::plugin_host::HookDirective::Deny { .. }
+                    | crate::plugin_host::HookDirective::Transform { .. }
+                    | crate::plugin_host::HookDirective::Rewrite { .. } => {}
                     crate::plugin_host::HookDirective::None => {}
                 }
             }
@@ -6882,13 +6888,52 @@ async fn list_apps_catalog(State(state): State<ServerState>) -> Json<serde_json:
 /// The active Plugin catalog source (Ryu Marketplace by default, or integrations.sh
 /// / a custom mirror). See [`crate::catalog_source`].
 async fn active_plugin_source(state: &ServerState) -> Option<crate::catalog_source::Source> {
-    state
+    let source = state
         .catalog_sources
         .get_active(
             crate::catalog_source::CatalogKind::Plugin,
             &state.preferences,
         )
+        .await?;
+    Some(with_github_token(state, source).await)
+}
+
+/// The community (GitHub-topic) Plugin source, with the BYOK token injected.
+/// Addressed directly by `?origin=community` rather than through the active-source
+/// preference: the active source is a single global setting, so selecting the
+/// community feed there would blank the first-party Apps/Plugins sections. A
+/// per-request selector lets Community coexist as its own store section.
+async fn community_plugin_source(state: &ServerState) -> Option<crate::catalog_source::Source> {
+    let source = state.catalog_sources.source_by_id(
+        crate::catalog_source::CatalogKind::Plugin,
+        crate::catalog_source::GITHUB_TOPIC_SOURCE_ID,
+    )?;
+    Some(with_github_token(state, source).await)
+}
+
+/// Inject the BYOK GitHub personal access token from preferences into a
+/// [`crate::catalog_source::Source::GithubTopic`]. Mirrors the Smithery key
+/// injection in [`active_mcp_source`]: the token is read at the route (never
+/// persisted in the source registry) and the source itself scopes it to the
+/// default `api.github.com` host, so a custom base can never harvest it.
+async fn with_github_token(
+    state: &ServerState,
+    source: crate::catalog_source::Source,
+) -> crate::catalog_source::Source {
+    let crate::catalog_source::Source::GithubTopic(mut s) = source.clone() else {
+        return source;
+    };
+    if let Ok(Some(token)) = state
+        .preferences
+        .get(crate::catalog_source::GITHUB_TOKEN_PREF)
         .await
+    {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() {
+            s.token = Some(trimmed.to_string());
+        }
+    }
+    crate::catalog_source::Source::GithubTopic(s)
 }
 
 /// Merged Ryu Marketplace plugin catalog: built-in manifests + marketplace items +
@@ -7030,6 +7075,54 @@ async fn plugin_catalog_browse(
         .map(String::as_str)
         .filter(|s| !s.is_empty());
 
+    // `?origin=community` browses the GitHub-topic feed WITHOUT changing the
+    // active-source preference, so the Community store section coexists with
+    // Apps/Plugins instead of replacing them. Unreviewed listings are reachable
+    // only through this explicit opt-in — never in the default merged view.
+    if params.get("origin").map(String::as_str) == Some(crate::catalog_source::COMMUNITY_ORIGIN) {
+        let q = crate::catalog_source::CatalogQuery {
+            query: query.to_string(),
+            limit,
+            cursor: cursor.map(str::to_string),
+            ..Default::default()
+        };
+        let Some(source) = community_plugin_source(&state).await else {
+            return (
+                StatusCode::OK,
+                Json(json!({ "entries": [], "next_cursor": serde_json::Value::Null })),
+            );
+        };
+        // The source never errors on search (it degrades to empty-with-note or a
+        // stale cache), so a rate-limited or offline GitHub renders an explained
+        // empty section rather than a failed page.
+        return match source.search(&state.client, &q).await {
+            Ok(val) => {
+                let entries: Vec<serde_json::Value> = val
+                    .get("items")
+                    .and_then(|v| v.as_array())
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|it| plugin_marketplace_item_to_entry(it, source.id()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (
+                    StatusCode::OK,
+                    Json(json!({
+                        "entries": entries,
+                        "next_cursor": val.get("next_cursor").cloned().unwrap_or(serde_json::Value::Null),
+                        "note": val.get("note").cloned().unwrap_or(serde_json::Value::Null),
+                    })),
+                )
+            }
+            Err(e) => (
+                StatusCode::OK,
+                Json(json!({ "entries": [], "next_cursor": serde_json::Value::Null, "note": e.to_string() })),
+            ),
+        };
+    }
+
     let active_id = state
         .catalog_sources
         .active_id(
@@ -7114,7 +7207,16 @@ async fn plugin_catalog_detail(
             Json(json!({ "error": "missing required `id` query parameter" })),
         );
     };
-    match active_plugin_source(&state).await {
+    // Mirror the browse route's per-request community selector, so opening a
+    // community listing's detail doesn't require flipping the active source.
+    let selected = if params.get("origin").map(String::as_str)
+        == Some(crate::catalog_source::COMMUNITY_ORIGIN)
+    {
+        community_plugin_source(&state).await
+    } else {
+        active_plugin_source(&state).await
+    };
+    match selected {
         Some(source) => match source.detail(&state.client, id).await {
             Ok(value) => (StatusCode::OK, Json(value)),
             Err(e) => (
@@ -7343,7 +7445,13 @@ fn plugin_marketplace_item_to_entry(
     if let Some(d) = &domain {
         tags.push(d.clone());
     }
-    let descriptor_only = source_id == "integrations-sh";
+    // Browse-but-don't-install. The card may declare it itself (the GitHub-topic
+    // source stamps `descriptor_only: true` on every unreviewed listing); the
+    // legacy integrations.sh source predates the field, so its id is the fallback.
+    let descriptor_only = it
+        .get("descriptor_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(source_id == "integrations-sh");
     // Explicit app-vs-plugin type for a REMOTE card. Precedence: the card's own
     // `type` (the publisher's explicit declaration) → `has_companion`. A card
     // lacking both is a plugin. (Builtin apps that the remote repo lists without
@@ -7400,10 +7508,26 @@ fn plugin_marketplace_item_to_entry(
             "accent_color",
             "developer",
             "tagline",
+            // Community/provenance disclosure. `origin` is THE discriminator the
+            // store's Community section and its "not reviewed by Ryu" notice key
+            // on — it must stay snake_case end-to-end (a camelCase `origin` reads
+            // as undefined on the client, i.e. an unreviewed listing rendered
+            // without its notice). `repo_url` backs the link-out CTA.
+            "origin",
+            "provenance",
+            "repo_url",
+            "license",
         ] {
             if let Some(v) = it.get(key).and_then(|v| v.as_str()) {
                 obj.insert(key.to_owned(), json!(v));
             }
+        }
+        // Non-string passthroughs (the loop above copies strings only).
+        if let Some(reviewed) = it.get("reviewed").and_then(|v| v.as_bool()) {
+            obj.insert("reviewed".to_owned(), json!(reviewed));
+        }
+        if let Some(stars) = it.get("stars").and_then(serde_json::Value::as_u64) {
+            obj.insert("stars".to_owned(), json!(stars));
         }
         if let Some(dither) = it.get("icon_dither").filter(|v| v.is_object()) {
             obj.insert("icon_dither".to_owned(), dither.clone());
@@ -7754,7 +7878,7 @@ async fn install_app_from_url(
             format!("Failed to create plugin directory: {e}"),
         );
     }
-    let manifest_path = app_dir.join("plugin.json");
+    let manifest_path = app_dir.join(crate::plugin_manifest::MANIFEST_FILE_NAME);
     if let Err(e) = tokio::fs::write(&manifest_path, &manifest_json).await {
         return json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -8009,7 +8133,7 @@ async fn persist_installed_plugin(
     }))
 }
 
-/// Write a plugin's manifest to its on-disk `plugin.json` (the resolver the loader
+/// Write a plugin's manifest to its on-disk `manifest.json` (the resolver the loader
 /// reads), creating the directory if needed. The `PluginManifest` struct carries no
 /// `ui_code` field, so the bundle is never written here — it lives on the lifecycle
 /// record. Shared by the install sink ([`persist_installed_plugin`]) and the update
@@ -8030,7 +8154,10 @@ async fn write_plugin_manifest_to_disk(
             format!("Failed to serialize manifest: {e}"),
         )
     })?;
-    tokio::fs::write(plugin_dir.join("plugin.json"), &manifest_json)
+    tokio::fs::write(
+        plugin_dir.join(crate::plugin_manifest::MANIFEST_FILE_NAME),
+        &manifest_json,
+    )
         .await
         .map_err(|e| {
             (
@@ -10409,9 +10536,9 @@ async fn uninstall_app_handler(
             // Complete the on-disk teardown for the removed target. `uninstall_app`
             // dropped only the lifecycle row; the disk-backed Community plugins that
             // are the ONLY things this path reaches (built-ins are refused earlier)
-            // still have their `<plugins_dir>/<id>/plugin.json` on disk and their
+            // still have their `<plugins_dir>/<id>/manifest.json` on disk and their
             // manifest in `state.app_manifests`. Without this, `list_apps` keeps
-            // showing the plugin (installed:false), the orphan `plugin.json` survives
+            // showing the plugin (installed:false), the orphan `manifest.json` survives
             // reboot, and a reinstall hits the `app_manifests` duplicate guard and
             // 409s. Mirror `rollback_plugin_install`'s dir-removal + reload (the
             // store row is already gone, so we skip its `store.remove`). The id is
@@ -13172,7 +13299,7 @@ async fn resolve_advisor_model(state: &ServerState, explicit: Option<&str>) -> S
 }
 
 /// `POST /api/advisor/consult` request body — mirrors the `advisor__consult`
-/// tool's `input_schema` (fixtures/advisor.plugin.json). The agent supplies the
+/// tool's `input_schema` (fixtures/advisor.manifest.json). The agent supplies the
 /// context it wants reviewed (the transcript is not reachable at tool dispatch).
 #[derive(serde::Deserialize)]
 struct AdvisorConsultBody {
@@ -24232,6 +24359,65 @@ mod plugin_catalog_tests {
 
         // No id → dropped.
         assert!(plugin_marketplace_item_to_entry(&json!({ "name": "x" }), "s").is_none());
+    }
+
+    /// The community trust contract, end to end through the projector. `origin`
+    /// must survive as **snake_case** — the store's notice keys on
+    /// `entry.origin === "community"`, and a dropped/renamed field would render an
+    /// unreviewed third-party listing with no warning at all.
+    #[test]
+    fn community_card_projects_its_unreviewed_trust_fields() {
+        let card = crate::catalog_source::COMMUNITY_ORIGIN;
+        let item = json!({
+            "id": "gh:acme/ryu-thing",
+            "name": "ryu-thing",
+            "description": "a community thing",
+            "type": "app",
+            "has_companion": true,
+            "origin": card,
+            "reviewed": false,
+            "provenance": "github-topic",
+            "descriptor_only": true,
+            "repo_url": "https://github.com/acme/ryu-thing",
+            "developer": "acme",
+            "stars": 42,
+            "license": "MIT",
+        });
+        let e = plugin_marketplace_item_to_entry(&item, "github-topic").unwrap();
+        assert_eq!(e["origin"], card);
+        assert_eq!(e["reviewed"], false);
+        assert_eq!(e["provenance"], "github-topic");
+        assert_eq!(e["stars"], 42);
+        assert_eq!(e["repo_url"], "https://github.com/acme/ryu-thing");
+        assert_eq!(e["developer"], "acme");
+        assert_eq!(e["license"], "MIT");
+        // Declared descriptor-only → browse-only, no install CTA.
+        assert_eq!(e["descriptor_only"], true);
+        assert_eq!(e["type"], "app");
+        assert_eq!(e["built_in"], false);
+    }
+
+    /// `descriptor_only` is now card-declared, with the legacy integrations.sh id
+    /// as the fallback — a first-party card must NOT become browse-only by accident.
+    #[test]
+    fn descriptor_only_prefers_the_card_then_falls_back_to_the_source_id() {
+        let plain = json!({ "id": "acme/widget" });
+        assert_eq!(
+            plugin_marketplace_item_to_entry(&plain, "ryu-catalog").unwrap()["descriptor_only"],
+            false
+        );
+        assert_eq!(
+            plugin_marketplace_item_to_entry(&plain, "integrations-sh").unwrap()
+                ["descriptor_only"],
+            true,
+            "the legacy integrations.sh source predates the card field"
+        );
+        let declared = json!({ "id": "gh:a/b", "descriptor_only": true });
+        assert_eq!(
+            plugin_marketplace_item_to_entry(&declared, "github-topic").unwrap()
+                ["descriptor_only"],
+            true
+        );
     }
 
     #[test]

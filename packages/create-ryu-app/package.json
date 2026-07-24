@@ -2,7 +2,7 @@
   "name": "create-ryu-app",
   "version": "0.0.9",
   "type": "module",
-  "description": "Scaffold a starter Ryu SDK project with a Runnable, gateway-pointed model config, and plugin.json manifest",
+  "description": "Scaffold a starter Ryu SDK project with a Runnable, gateway-pointed model config, and manifest.json manifest",
   "bin": {
     "create-ryu-app": "./dist/index.js"
   },

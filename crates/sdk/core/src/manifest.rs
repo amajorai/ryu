@@ -1,4 +1,4 @@
-//! The `plugin.json` manifest model + loader — the shared definition every
+//! The `manifest.json` manifest model + loader — the shared definition every
 //! binding uses to author, validate, and load Ryu plugin bundles.
 //!
 //! The manifest **types and validation** (`PluginManifest`, `Surface`,
@@ -18,9 +18,16 @@ pub use ryu_kernel_contracts::manifest::{
 };
 
 /// File names a plugin manifest may use on disk, in preference order. The
-/// canonical name is `plugin.json`; the legacy `ryu.json` is still read so
-/// plugins installed before the apps→plugins rename keep loading.
-const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
+/// canonical name is `manifest.json`; the previous `plugin.json` and the legacy
+/// `ryu.json` are still read so plugins installed before the rename keep
+/// loading. First match wins, so a directory carrying both resolves to
+/// `manifest.json`.
+///
+/// Must stay in lockstep with Core's `plugin_manifest::MANIFEST_FILE_NAMES`.
+pub const MANIFEST_FILE_NAMES: &[&str] = &["manifest.json", "plugin.json", "ryu.json"];
+
+/// The canonical manifest file name — the ONE name a write/scaffold path emits.
+pub const MANIFEST_FILE_NAME: &str = MANIFEST_FILE_NAMES[0];
 
 /// Resolve the plugins scan directory, matching Core's resolution order:
 /// 1. `RYU_PLUGINS_DIR`, 2. legacy `RYU_APPS_DIR`, 3. `~/.ryu/plugins`

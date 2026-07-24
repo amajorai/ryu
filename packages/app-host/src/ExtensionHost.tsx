@@ -100,7 +100,7 @@ export function handshakeHostApiVersion(data: unknown): string | null {
 
 export interface ExtensionHostProps {
 	/** Capabilities the host grants this plugin instance. For the MVP this is
-	 *  host-provided config; reading it from `plugin.json` grants is #443. */
+	 *  host-provided config; reading it from `manifest.json` grants is #443. */
 	granted: ReadonlySet<Capability>;
 	/** The host-generated nonce baked into `srcdoc`. The frame echoes it in its
 	 *  "ready" handshake; the host verifies it before transferring the RPC port. */

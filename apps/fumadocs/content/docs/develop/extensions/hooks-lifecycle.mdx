@@ -59,7 +59,7 @@ When a plugin is enabled, Core runs `build_runnable_registry` (`apps/core/src/se
 
 ## Hook phases
 
-Turn hooks are declared under `contributes.turn_hooks` in `plugin.json`. Each hook fires at a
+Turn hooks are declared under `contributes.turn_hooks` in `manifest.json`. Each hook fires at a
 specific boundary in the chat lifecycle. The `on` field selects the phase:
 
 ```mermaid
@@ -124,7 +124,7 @@ A hook whose gate does not match the current tool never spawns the Deno sandbox.
 
 ## Building a turn hook
 
-### 1. Declare the hook in plugin.json
+### 1. Declare the hook in manifest.json
 
 ```json
 {

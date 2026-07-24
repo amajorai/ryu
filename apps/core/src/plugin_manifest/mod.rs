@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 use schema::validate_runnable;
 
-// The `plugin.json` data model + validation (PluginManifest, Surface, Requires,
+// The `manifest.json` data model + validation (PluginManifest, Surface, Requires,
 // the per-kind schema types, validate_plugin_id, parse_min_version, …) now has a
 // single definition in the `ryu-kernel-contracts` crate. Re-export the whole
 // surface so every `crate::plugin_manifest::<Type>` call site (hundreds of them)
@@ -55,24 +55,34 @@ pub fn core_version() -> semver::Version {
 }
 
 /// File names a plugin manifest may use on disk, in preference order. The new
-/// canonical name is `plugin.json`; the legacy `ryu.json` is still read so that
-/// plugins installed before the apps→plugins rename keep loading.
-const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
+/// canonical name is `manifest.json`; the previous `plugin.json` and the legacy
+/// `ryu.json` are still read so that plugins installed before the rename keep
+/// loading. First match wins, so a directory carrying both resolves to
+/// `manifest.json`.
+///
+/// Shared with [`crate::runnable::self_build`] so there is exactly ONE copy of
+/// this ordering inside Core.
+pub(crate) const MANIFEST_FILE_NAMES: &[&str] = &["manifest.json", "plugin.json", "ryu.json"];
+
+/// The canonical manifest file name — the ONE name every write/scaffold path
+/// emits. Reads accept the legacy names via [`MANIFEST_FILE_NAMES`]; writes must
+/// never re-introduce them, or the migration never completes.
+pub const MANIFEST_FILE_NAME: &str = MANIFEST_FILE_NAMES[0];
 
 /// Built-in plugin manifests compiled into the binary, always present regardless of
 /// whether the user has a `~/.ryu/plugins/` directory.
 ///
-/// (`sample.plugin.json` — the Research Assistant demo — is kept as a test-only
+/// (`sample.manifest.json` — the Research Assistant demo — is kept as a test-only
 /// fixture and is deliberately NOT shipped as a built-in.)
-/// - `spider.plugin.json` — Spider web crawler tool. A fully declarative
+/// - `spider.manifest.json` — Spider web crawler tool. A fully declarative
 ///   `command` plugin (Core-tier, default-on): its single runnable IS the crawl
 ///   tool, backed by a BYO `spider` CLI reached through the command-tool
 ///   allowlist. The native `sidecar/mcp/spider.rs` provider was deleted, so the
 ///   fixture is the SOLE owner of the tool (see the exception note below).
-/// - `agentbrowser.plugin.json` — Agent Browser web-browsing tool (system plugin, npx MCP-backed).
-/// - `exa.plugin.json` — Exa neural search tool plugin (U040, BYOK).
-/// - `ghost.plugin.json` — Ghost desktop-automation MCP tool (system plugin, Windows-first).
-/// - `shadow.plugin.json` — Shadow screen/audio capture + semantic memory (system plugin, Windows-first).
+/// - `agentbrowser.manifest.json` — Agent Browser web-browsing tool (system plugin, npx MCP-backed).
+/// - `exa.manifest.json` — Exa neural search tool plugin (U040, BYOK).
+/// - `ghost.manifest.json` — Ghost desktop-automation MCP tool (system plugin, Windows-first).
+/// - `shadow.manifest.json` — Shadow screen/audio capture + semantic memory (system plugin, Windows-first).
 ///
 /// The two sidecar-backed system tools (`agentbrowser`, `ghost`) declare an
 /// **empty** `runnables` list on purpose: their tools are owned by the stdio MCP
@@ -96,29 +106,29 @@ const MANIFEST_FILE_NAMES: &[&str] = &["plugin.json", "ryu.json"];
 /// bridges (`/api/advisor/consult` and the `/api/shadow/*` proxy). `spider`/`rtk`
 /// are reached through the
 /// command-tool allowlist.
-/// - `headroom.plugin.json` — Headroom gateway egress compression (a `compression` Policy runnable, #425).
-/// - `firewall.plugin.json` — Gateway firewall on/off Policy plugin (#447, Core-tier, opt-in).
-/// - `routing.plugin.json` — Smart (classifier) routing on/off Policy plugin (#447, Core-tier, opt-in).
-/// - `sandbox.plugin.json` — Wasmtime ephemeral sandbox on/off Policy plugin (#448, Core-tier, opt-in).
-/// - `engines.plugin.json` — Local engine bindings (llama.cpp + embeddings) as a default-on Core plugin (#448).
-/// - `durable.plugin.json` — Durable workflow execution engine as a default-on Core plugin (#448 dogfood).
-/// - `predict.plugin.json` — System-wide predictive typing on/off (a `predict` Policy runnable; Core-tier, opt-in). The plugin is the single switch for the `/api/predict/*` brain.
+/// - `headroom.manifest.json` — Headroom gateway egress compression (a `compression` Policy runnable, #425).
+/// - `firewall.manifest.json` — Gateway firewall on/off Policy plugin (#447, Core-tier, opt-in).
+/// - `routing.manifest.json` — Smart (classifier) routing on/off Policy plugin (#447, Core-tier, opt-in).
+/// - `sandbox.manifest.json` — Wasmtime ephemeral sandbox on/off Policy plugin (#448, Core-tier, opt-in).
+/// - `engines.manifest.json` — Local engine bindings (llama.cpp + embeddings) as a default-on Core plugin (#448).
+/// - `durable.manifest.json` — Durable workflow execution engine as a default-on Core plugin (#448 dogfood).
+/// - `predict.manifest.json` — System-wide predictive typing on/off (a `predict` Policy runnable; Core-tier, opt-in). The plugin is the single switch for the `/api/predict/*` brain.
 const BUILTIN_MANIFESTS: &[&str] = &[
-    include_str!("fixtures/spider.plugin.json"),
-    include_str!("fixtures/agentbrowser.plugin.json"),
-    include_str!("fixtures/exa.plugin.json"),
-    include_str!("fixtures/ghost.plugin.json"),
-    include_str!("fixtures/shadow.plugin.json"),
-    include_str!("fixtures/headroom.plugin.json"),
-    include_str!("fixtures/firewall.plugin.json"),
-    include_str!("fixtures/routing.plugin.json"),
-    include_str!("fixtures/sandbox.plugin.json"),
-    include_str!("fixtures/engines.plugin.json"),
-    include_str!("fixtures/durable.plugin.json"),
+    include_str!("fixtures/spider.manifest.json"),
+    include_str!("fixtures/agentbrowser.manifest.json"),
+    include_str!("fixtures/exa.manifest.json"),
+    include_str!("fixtures/ghost.manifest.json"),
+    include_str!("fixtures/shadow.manifest.json"),
+    include_str!("fixtures/headroom.manifest.json"),
+    include_str!("fixtures/firewall.manifest.json"),
+    include_str!("fixtures/routing.manifest.json"),
+    include_str!("fixtures/sandbox.manifest.json"),
+    include_str!("fixtures/engines.manifest.json"),
+    include_str!("fixtures/durable.manifest.json"),
     // System-wide predictive typing on/off (Policy-gated, Core-local). Opt-in like
     // firewall/routing/sandbox: enabling the plugin is the single switch for the
     // /api/predict/* brain — there is no separate config toggle.
-    include_str!("fixtures/predict.plugin.json"),
+    include_str!("fixtures/predict.manifest.json"),
     // Turn-hook plugins (the migrated, formerly-hardcoded features). These ship
     // as built-in fixtures but are built exactly like a third-party plugin would
     // be: a manifest + an inline JS hook reaching Core only through the
@@ -126,13 +136,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // and default-on (see `plugins::builtins::CORE_DEFAULT_ON`) so their features
     // work on every surface with zero setup, gated cheaply by each hook's `match`
     // block; `advisor` stays Community (install-then-enable).
-    include_str!("fixtures/double-check.plugin.json"),
-    include_str!("fixtures/goal.plugin.json"),
-    include_str!("fixtures/advisor.plugin.json"),
+    include_str!("fixtures/double-check.manifest.json"),
+    include_str!("fixtures/goal.manifest.json"),
+    include_str!("fixtures/advisor.manifest.json"),
     // `proof` is `goal`'s stronger sibling: instead of a one-line transcript
     // judge, each round spawns an INDEPENDENT verifier sub-agent (grant
     // `hook:run-agent`) that gathers real evidence with tools before deciding.
-    include_str!("fixtures/proof.plugin.json"),
+    include_str!("fixtures/proof.manifest.json"),
     // `rtk` surfaces the built-in RTK (Rust Token Killer) command-wrapping tool
     // (`rtk__run`) as an installable plugin. Like `spider`, it is a fully
     // declarative `command`-backend tool: the fixture CARRIES its runnable (the
@@ -141,21 +151,21 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // through the command-tool allowlist. The fixture also contributes the Phase-2
     // auto-wrap settings that drive `crate::rtk_config` (NOT a tool). Community-tier,
     // opt-in.
-    include_str!("fixtures/rtk.plugin.json"),
+    include_str!("fixtures/rtk.manifest.json"),
     // `security-guidance` ports Anthropic's security-guidance Claude Code plugin
     // onto Ryu's turn-hook substrate: a flag-gated `post_assistant_turn` hook that
     // (1) runs a ~22-rule regex pattern scan over the last answer and (2) does a
     // second-model diff review via `host.sideModel` (grant `hook:side-model`),
     // surfacing findings as an out-of-band note. Toggle + `/security` command +
     // reviewer-model picker mirror `double-check`. Community-tier, opt-in.
-    include_str!("fixtures/security-guidance.plugin.json"),
+    include_str!("fixtures/security-guidance.manifest.json"),
     // `auto-expand` is the first `pre_user_turn` hook: before a message is sent it
     // calls a configurable model (`hook:side-model`) to rewrite the prompt into a
     // clearer form and returns a `replace` directive, so the improved prompt is
     // what gets sent and persisted. Composer toggle (auto-expand every message) +
     // `/expand` command (one-off). Core-tier, default-on; the flag/command `match`
     // keeps it free when idle.
-    include_str!("fixtures/auto-expand.plugin.json"),
+    include_str!("fixtures/auto-expand.manifest.json"),
     // `session-context` is a reference `session_start` hook: on the first turn of a
     // conversation it injects the current date/time (a common blind spot for local
     // models) via a `replace`/`inject` directive. Community-tier, opt-in; the
@@ -165,18 +175,18 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // reference fixtures (`tool-firewall`, `hook-observers`) are deliberately NOT
     // registered here so those hot paths (esp. per tool call) stay lookup-free
     // until a user installs a plugin that actually uses them.
-    include_str!("fixtures/hook-session-context.plugin.json"),
+    include_str!("fixtures/hook-session-context.manifest.json"),
     // RAG capability: the default in-process embeddings+retrieval provider. Declares
     // `provides: [rag]` + `requires: [engines]` so the capability graph resolves
     // rag→engines for real (disable-safety: engines can't be disabled out from under
     // an enabled rag). A GraphRAG/third-party provider app can bind `rag` to swap it.
-    include_str!("fixtures/rag.plugin.json"),
+    include_str!("fixtures/rag.manifest.json"),
     // Mail (Agent Inboxes): a built-in app whose out-of-process `ryu-mail` sidecar
     // Core spawns (local sibling binary) and proxies `/api/mail/*` to via the
     // generic ext-proxy `public_mount` mechanism — the acceptance test proving the
     // generic loader replaces the retired hand-coded `sidecar/mail.rs`. Default-on,
     // so the externally-committed inbound-webhook URL resolves out of the box.
-    include_str!("fixtures/mail.plugin.json"),
+    include_str!("fixtures/mail.manifest.json"),
     // Browser (W9): a real-Chromium Electron browser Core runs as a `local` sidecar
     // and exposes as the grant-gated `browser.control` capability (list/open/navigate
     // tabs, screenshot, read titles, privileged JS eval). CORE built-in — listed in
@@ -185,7 +195,7 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // the fallback iframe). `lazy` + idle-stop keep the Electron GUI cold until the
     // desktop Browser panel first calls it through the ext-proxy — it does not spawn on
     // boot, only on first use.
-    include_str!("fixtures/browser.plugin.json"),
+    include_str!("fixtures/browser.manifest.json"),
     // Simulators: iOS Simulator (`simctl`, macOS + Xcode) + Android Emulator (`adb`)
     // control Core runs as a dependency-free `local` sidecar, exposing the grant-gated
     // `simulator.control` capability. OPT-IN like the browser — NOT in `CORE_DEFAULT_ON`,
@@ -193,20 +203,20 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // idle-stop keep it cold until the desktop Simulator panel calls it through the
     // ext-proxy. Availability is a RUNTIME probe (`/capabilities`): iOS shows only on a
     // Mac with Xcode; Android wherever the SDK is present.
-    include_str!("fixtures/simulator.plugin.json"),
+    include_str!("fixtures/simulator.manifest.json"),
     // The Whiteboard app — a full-page Companion (`ui_format:"html"`, Path B) that
     // OWNS its Space documents via `spaces:docs`. Ships default-on with a UI bundle
     // + host-bridge grants seeded in `main.rs` (the generic CORE_DEFAULT_ON loop
     // seeds neither, so it has a dedicated seed block). Replaces the built-in
     // whiteboard editor.
-    include_str!("fixtures/whiteboard.plugin.json"),
+    include_str!("fixtures/whiteboard.manifest.json"),
     // The Canvas app — a full-page Companion (`ui_format:"html"`, Path B) that owns
     // its Space documents via `spaces:docs` and runs generation nodes through the
     // window.ryu media/agent bridge (`media:generate` / `media:transcribe` /
     // `hook:run-agent` / `hook:side-model`) + reads catalogs via `core:list_agents`.
     // Ships default-on with a UI bundle + those grants seeded in `main.rs`. Replaces
     // the built-in creative-canvas board.
-    include_str!("fixtures/canvas.plugin.json"),
+    include_str!("fixtures/canvas.manifest.json"),
     // The Fine-tuning app — a full-page Companion (`ui_format:"html"`, Path B) that
     // drives Core's fine-tune orchestration + durable job store via the
     // `finetune:runs` bridge and OWNS its Unsloth training sidecar (a
@@ -214,7 +224,7 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // declares no `sidecar:process` grant — the Gateway denies that grant at enable).
     // Ships default-on with a UI bundle + those grants seeded in `main.rs`. Replaces
     // the built-in fine-tuning page.
-    include_str!("fixtures/finetune.plugin.json"),
+    include_str!("fixtures/finetune.manifest.json"),
     // Spaces + Meetings — the first REAL plugin→plugin dependency edge.
     //
     // Both have zero runnables (like ghost/shadow), so the record governs them —
@@ -228,13 +238,13 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // Order matters only for readability: `plugins::seed` resolves the topological
     // order from `requires`, so the dependency is seeded before its dependent no
     // matter how these are listed.
-    include_str!("fixtures/spaces.plugin.json"),
+    include_str!("fixtures/spaces.manifest.json"),
     // Meetings `requires` Spaces because it genuinely writes its notes into the
     // "Meetings" Space (the sidecar's note-save path lands in `state.spaces` via the
     // Core-side `MeetingIngest`/spaces seam). Disabling Spaces under it would leave that
     // write path pointing at a disabled capability, which is exactly what
     // `plugins::graph` now refuses.
-    include_str!("fixtures/meetings.plugin.json"),
+    include_str!("fixtures/meetings.manifest.json"),
     // Five clean LEAF features turned into out-of-process sidecar Apps (2026-07-18).
     // Each serves its own `/api/<feature>/*` surface OUT-OF-PROCESS via a `public_mount`
     // sidecar bin + the generic ext-proxy loader; no in-process routes remain. The
@@ -248,11 +258,11 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // `ghost` automation app (Ghost owns the RecipeStore) — both real, satisfiable
     // edges (shadow/ghost are default-on), so the graph refuses to disable the
     // dependency out from under them.
-    include_str!("fixtures/research.plugin.json"),
-    include_str!("fixtures/dashboards.plugin.json"),
-    include_str!("fixtures/teams.plugin.json"),
-    include_str!("fixtures/clips.plugin.json"),
-    include_str!("fixtures/recipes.plugin.json"),
+    include_str!("fixtures/research.manifest.json"),
+    include_str!("fixtures/dashboards.manifest.json"),
+    include_str!("fixtures/teams.manifest.json"),
+    include_str!("fixtures/clips.manifest.json"),
+    include_str!("fixtures/recipes.manifest.json"),
     // Wave-2: five more leaf features turned into Apps (toggle via the plugin lifecycle).
     // Of these `quests` + `healing` now serve `/api/<feature>/*` OUT-OF-PROCESS via a
     // `public_mount` sidecar + the generic ext-proxy loader; `approvals`/`skills`/`learning`
@@ -271,11 +281,11 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // surface compiles out behind the `healing` cargo feature; its manifest + id must
     // always be present so the default-on seed never references a missing manifest —
     // exactly like `research`/clips/recipes (feature-gated module, always-on fixture).
-    include_str!("fixtures/quests.plugin.json"),
-    include_str!("fixtures/approvals.plugin.json"),
-    include_str!("fixtures/skills.plugin.json"),
-    include_str!("fixtures/learning.plugin.json"),
-    include_str!("fixtures/healing.plugin.json"),
+    include_str!("fixtures/quests.manifest.json"),
+    include_str!("fixtures/approvals.manifest.json"),
+    include_str!("fixtures/skills.manifest.json"),
+    include_str!("fixtures/learning.manifest.json"),
+    include_str!("fixtures/healing.manifest.json"),
     // Wave-3: two more leaf features turned into Apps (toggle via the plugin lifecycle).
     // `monitors` now serves `/api/monitors/*` OUT-OF-PROCESS via a `public_mount` sidecar
     // + the generic ext-proxy loader; `hardware` stays IN-PROCESS and gates its route
@@ -288,8 +298,8 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // `hardware` gates ONLY the PROTECTED `/api/hardware/devices*` device-registry
     // CRUD; the PUBLIC device channel (`/api/hardware/{ws,pair,display}`) stays ungated
     // because physical ESP32 devices connect there and gating it would break pairing.
-    include_str!("fixtures/monitors.plugin.json"),
-    include_str!("fixtures/hardware.plugin.json"),
+    include_str!("fixtures/monitors.manifest.json"),
+    include_str!("fixtures/hardware.manifest.json"),
     // Wave-4: two more leaf features turned into governance-shell Apps (toggle via
     // the plugin lifecycle + route gate; impl stays in-crate). Both default-on so the
     // gate is transparent on a fresh install (the routes were always-on before).
@@ -305,8 +315,8 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // LOAD-BEARING (see `plugins::builtins::LOAD_BEARING_PLUGINS`): the composer fetches
     // the agent list on boot, so a disabled Agents app would break chat. The ACP
     // routing/execution substrate that serves a chat turn is kernel and stays untouched.
-    include_str!("fixtures/workflows.plugin.json"),
-    include_str!("fixtures/agents.plugin.json"),
+    include_str!("fixtures/workflows.manifest.json"),
+    include_str!("fixtures/agents.manifest.json"),
     // W0 honest-gating baseline: three data-path governance shells whose
     // `/api/{voice,images+video+gifs,memory}/*` routes were mounted RAW before this
     // wave. Each gates its own protected route surface via `require_app_enabled`; the
@@ -319,41 +329,41 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // (`/api/media/:file` + `/api/media/upload`) stays ungated kernel storage (it also
     // serves TTS audio + chat uploads). `memory` gates ONLY the HTTP CRUD surface; the
     // in-process chat auto-recall path is kernel. None declares `requires`.
-    include_str!("fixtures/voice.plugin.json"),
-    include_str!("fixtures/media.plugin.json"),
-    include_str!("fixtures/memory.plugin.json"),
+    include_str!("fixtures/voice.manifest.json"),
+    include_str!("fixtures/media.manifest.json"),
+    include_str!("fixtures/memory.manifest.json"),
     // W7 frontend extraction: the webhooks page moved to a sandboxed companion app
     // (`apps-store/webhooks/ui`). Default-on, no `requires` — its `/api/webhooks` +
     // `/api/webhook-ingress/status` reads stay ungated on the main router (the host
     // calls them directly, monitors pattern), so this manifest exists only to seed
     // the companion's UI bundle + `webhooks:crud` grant, not to gate a route surface.
-    include_str!("fixtures/webhooks.plugin.json"),
+    include_str!("fixtures/webhooks.manifest.json"),
     // W7 frontend extraction: the activity-feed page moved to a sandboxed companion
     // app (`apps-store/activity/ui`). Default-on, no `requires` — its read-only
     // `/api/activity` stays ungated on the main router (the host calls it directly,
     // monitors pattern), so this manifest exists only to seed the companion's UI
     // bundle + `activity:read` grant, not to gate a route surface.
-    include_str!("fixtures/activity.plugin.json"),
+    include_str!("fixtures/activity.manifest.json"),
     // W7 frontend extraction: the timeline page moved to a sandboxed companion app
     // (`apps-store/timeline/ui`). Default-on, no `requires` — Shadow's device-local
     // `/timeline` + `/journal` + `/frame` live on the Shadow sidecar (:3030), not the
     // Core router, and the desktop host calls them directly (monitors pattern), so this
     // manifest exists only to seed the companion's UI bundle + `timeline:read` grant,
     // not to gate a route surface.
-    include_str!("fixtures/timeline.plugin.json"),
+    include_str!("fixtures/timeline.manifest.json"),
     // The Calendar app — a sandboxed companion (`ui_format:"html"`). It was already
     // in the default-on seed set (`plugins::seed` maps CALENDAR_UI_HTML) and routed
     // in the desktop (`/calendar`), but its MANIFEST was never registered here, so
     // the record seeded with no manifest and calendar could not appear in
     // `/api/plugins`, plugin contributions, or the marketplace Apps catalog. Register
     // it so it loads like every other companion.
-    include_str!("fixtures/calendar.plugin.json"),
+    include_str!("fixtures/calendar.manifest.json"),
     // W7 frontend extraction: the SKILL.md authoring editor moved to a sandboxed
     // companion app (`apps-store/skill-editor/ui`). Default-on, no `requires` — the
     // `/api/skills` authoring endpoints stay ungated on the Core router (the desktop host
     // calls them directly, monitors pattern), so this manifest exists only to seed the
     // companion's UI bundle + `skills:crud` grant, not to gate a route surface.
-    include_str!("fixtures/skill-editor.plugin.json"),
+    include_str!("fixtures/skill-editor.manifest.json"),
     // `sample-widget` — the REFERENCE third-party MCP widget plugin (a dev
     // template; source lives at `plugins-store/sample-widget/`). It declares a
     // local Node MCP server (`node server.mjs`) whose `render` tool advertises
@@ -364,7 +374,7 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // is NOT in `plugins::builtins::CORE_DEFAULT_ON`, so it never seeds enabled and
     // its `node` server is never spawned unless a developer installs it. The
     // canonical copy under `plugins-store/` and this fixture are byte-identical.
-    include_str!("fixtures/sample-widget.plugin.json"),
+    include_str!("fixtures/sample-widget.manifest.json"),
 ];
 
 /// The Canvas app's plugin id (its Space documents are `kind = app:<this>`). Shared
@@ -520,8 +530,9 @@ pub const MEETINGS_UI_HTML: &str = include_str!("fixtures/meetings.ui.html");
 pub const APPROVALS_UI_HTML: &str = include_str!("fixtures/approvals.ui.html");
 
 /// Loader that merges built-in manifests with user-installed ones from
-/// `~/.ryu/plugins/*/plugin.json` (the path is overridable via `RYU_PLUGINS_DIR`,
-/// or the legacy `RYU_APPS_DIR`; the legacy `ryu.json` file name is also read).
+/// `~/.ryu/plugins/*/manifest.json` (the path is overridable via `RYU_PLUGINS_DIR`,
+/// or the legacy `RYU_APPS_DIR`; the legacy `plugin.json` and `ryu.json` file names
+/// are also read).
 ///
 /// # Validation
 /// - A manifest whose `version` field is not valid semver is rejected with a logged
@@ -571,7 +582,8 @@ impl PluginManifestLoader {
         }
 
         // 2. User-installed manifests from the plugins directory. Each plugin dir
-        //    may carry `plugin.json` (preferred) or the legacy `ryu.json`.
+        //    may carry `manifest.json` (preferred) or the legacy `plugin.json` /
+        //    `ryu.json`.
         let dir = Self::plugins_dir();
         match std::fs::read_dir(&dir) {
             Ok(entries) => {
@@ -785,16 +797,16 @@ mod tests {
     use super::*;
     use crate::runnable::RunnableKind;
 
-    const SAMPLE_JSON: &str = include_str!("fixtures/sample.plugin.json");
+    const SAMPLE_JSON: &str = include_str!("fixtures/sample.manifest.json");
 
     /// The multi-kind fixture lives in `apps/core/tests/manifest_fixtures/` so it
     /// doubles as the integration-test input and the in-module round-trip fixture.
     const MULTI_KIND_JSON: &str = include_str!("../../tests/manifest_fixtures/multi_kind.ryu.json");
 
     /// Each apps-store app exists as TWO copies of one manifest: the package
-    /// source (`apps-store/<x>/plugin.json`, what the app team edits) and the
+    /// source (`apps-store/<x>/manifest.json`, what the app team edits) and the
     /// fixture Core actually compiles in via `include_str!`
-    /// (`src/plugin_manifest/fixtures/<x>.plugin.json`). Editing only the package
+    /// (`src/plugin_manifest/fixtures/<x>.manifest.json`). Editing only the package
     /// copy is a **dead edit** — Core never reads it — and silently diverges the
     /// two. This test is the guard: the pair must stay byte-identical.
     ///
@@ -808,36 +820,36 @@ mod tests {
         let mut checked = 0;
 
         for (app, fixture) in [
-            ("canvas", "canvas.plugin.json"),
-            ("whiteboard", "whiteboard.plugin.json"),
-            ("finetune", "finetune.plugin.json"),
-            ("workflows", "workflows.plugin.json"),
-            ("monitors", "monitors.plugin.json"),
-            ("webhooks", "webhooks.plugin.json"),
-            ("quests", "quests.plugin.json"),
-            ("activity", "activity.plugin.json"),
-            ("mail", "mail.plugin.json"),
-            ("browser", "browser.plugin.json"),
-            ("calendar", "calendar.plugin.json"),
-            ("learning", "learning.plugin.json"),
-            ("approvals", "approvals.plugin.json"),
-            ("timeline", "timeline.plugin.json"),
-            ("meetings", "meetings.plugin.json"),
-            ("skill-editor", "skill-editor.plugin.json"),
-            ("simulator", "simulator.plugin.json"),
-            ("clips", "clips.plugin.json"),
-            ("dashboards", "dashboards.plugin.json"),
-            ("healing", "healing.plugin.json"),
-            ("predict", "predict.plugin.json"),
-            ("recipes", "recipes.plugin.json"),
-            ("research", "research.plugin.json"),
-            ("teams", "teams.plugin.json"),
-            ("voice", "voice.plugin.json"),
+            ("canvas", "canvas.manifest.json"),
+            ("whiteboard", "whiteboard.manifest.json"),
+            ("finetune", "finetune.manifest.json"),
+            ("workflows", "workflows.manifest.json"),
+            ("monitors", "monitors.manifest.json"),
+            ("webhooks", "webhooks.manifest.json"),
+            ("quests", "quests.manifest.json"),
+            ("activity", "activity.manifest.json"),
+            ("mail", "mail.manifest.json"),
+            ("browser", "browser.manifest.json"),
+            ("calendar", "calendar.manifest.json"),
+            ("learning", "learning.manifest.json"),
+            ("approvals", "approvals.manifest.json"),
+            ("timeline", "timeline.manifest.json"),
+            ("meetings", "meetings.manifest.json"),
+            ("skill-editor", "skill-editor.manifest.json"),
+            ("simulator", "simulator.manifest.json"),
+            ("clips", "clips.manifest.json"),
+            ("dashboards", "dashboards.manifest.json"),
+            ("healing", "healing.manifest.json"),
+            ("predict", "predict.manifest.json"),
+            ("recipes", "recipes.manifest.json"),
+            ("research", "research.manifest.json"),
+            ("teams", "teams.manifest.json"),
+            ("voice", "voice.manifest.json"),
         ] {
             let pkg_path = repo_root
                 .join("apps-store")
                 .join(app)
-                .join("plugin.json");
+                .join("manifest.json");
             let Ok(pkg_json) = std::fs::read_to_string(&pkg_path) else {
                 // OSS mirror (no `packages/`) — nothing to compare against.
                 continue;
@@ -861,10 +873,24 @@ mod tests {
             checked += 1;
         }
 
-        assert!(
-            checked == 0 || checked == 25,
-            "expected all twenty-five apps-store manifests (or none, on the OSS mirror), found {checked}"
-        );
+        // The `continue` above exists so the OSS Core mirror (no `apps-store/`)
+        // stays green. Gate the zero-escape on the DIRECTORY being absent, not on
+        // the reads failing: otherwise "every filename is wrong" (e.g. after a
+        // manifest rename that missed this table) is indistinguishable from
+        // "mirror tree", and this guard passes having compared nothing.
+        if repo_root.join("apps-store").is_dir() {
+            assert_eq!(
+                checked, 25,
+                "apps-store/ is present, so all twenty-five manifests must have been \
+                 compared; found {checked}. A lower count means the table's file names \
+                 no longer match what is on disk — this guard was silently checking nothing."
+            );
+        } else {
+            assert_eq!(
+                checked, 0,
+                "apps-store/ is absent (OSS mirror), so nothing should have been compared"
+            );
+        }
     }
 
     /// Each companion app's UI is embedded at compile time via `include_str!`
@@ -874,7 +900,7 @@ mod tests {
     /// **size-only, not byte-identity**: the bundles are `vite`/`esbuild` output,
     /// which is not guaranteed byte-stable across build hosts, so a byte-identity
     /// check on a built asset (whiteboard is ~7.7 MB) would be flaky. The refresh
-    /// path is `scripts/sync-app-fixtures.sh`; the `*.plugin.json` manifests (hand
+    /// path is `scripts/sync-app-fixtures.sh`; the `*.manifest.json` manifests (hand
     /// authored) keep their byte-identity guard in
     /// `companion_fixtures_match_their_package_manifests`.
     #[test]
@@ -1472,9 +1498,11 @@ mod tests {
 
     #[test]
     fn loader_scans_user_dir() {
-        // Point RYU_PLUGINS_DIR at a temp dir with a `plugin.json` plugin, a
-        // legacy `ryu.json` plugin (proving the dual-read fallback), and one
-        // malformed plugin.
+        // Point RYU_PLUGINS_DIR at a temp dir with a canonical `manifest.json`
+        // plugin, a legacy `plugin.json` plugin, a legacy `ryu.json` plugin
+        // (proving the triple-read fallback), a plugin carrying BOTH
+        // `manifest.json` and `plugin.json` (proving first-match-wins
+        // precedence), and one malformed plugin.
         let tmp = std::env::temp_dir().join(format!(
             "ryu-plugin-manifest-test-{}",
             std::time::SystemTime::now()
@@ -1482,11 +1510,32 @@ mod tests {
                 .unwrap()
                 .subsec_nanos()
         ));
+        let canonical_dir = tmp.join("canonical-plugin");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::write(
+            canonical_dir.join("manifest.json"),
+            r#"{"id":"com.test.canonical-plugin","name":"Canonical Plugin","version":"0.1.0","runnables":[]}"#,
+        )
+        .unwrap();
         let plugin_dir = tmp.join("my-plugin");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         std::fs::write(
             plugin_dir.join("plugin.json"),
             r#"{"id":"com.test.my-plugin","name":"My Plugin","version":"0.1.0","runnables":[]}"#,
+        )
+        .unwrap();
+        // Carries BOTH names: `manifest.json` must win, so the `plugin.json` id
+        // must NOT appear in the loaded set.
+        let both_dir = tmp.join("both-plugin");
+        std::fs::create_dir_all(&both_dir).unwrap();
+        std::fs::write(
+            both_dir.join("manifest.json"),
+            r#"{"id":"com.test.both-new","name":"Both New","version":"0.1.0","runnables":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            both_dir.join("plugin.json"),
+            r#"{"id":"com.test.both-old","name":"Both Old","version":"0.1.0","runnables":[]}"#,
         )
         .unwrap();
         let legacy_dir = tmp.join("legacy-plugin");
@@ -1505,12 +1554,26 @@ mod tests {
         std::env::remove_var("RYU_PLUGINS_DIR");
 
         assert!(
+            manifests.iter().any(|m| m.id == "com.test.canonical-plugin"),
+            "canonical manifest.json plugin should be loaded"
+        );
+        assert!(
             manifests.iter().any(|m| m.id == "com.test.my-plugin"),
-            "plugin.json plugin should be loaded"
+            "legacy plugin.json plugin should still be loaded"
         );
         assert!(
             manifests.iter().any(|m| m.id == "com.test.legacy-plugin"),
             "legacy ryu.json plugin should still be loaded"
+        );
+        // Precedence: `manifest.json` is first in MANIFEST_FILE_NAMES, so a dir
+        // carrying both resolves to it deterministically.
+        assert!(
+            manifests.iter().any(|m| m.id == "com.test.both-new"),
+            "manifest.json must win over plugin.json when both are present"
+        );
+        assert!(
+            !manifests.iter().any(|m| m.id == "com.test.both-old"),
+            "plugin.json must NOT be read when manifest.json is present"
         );
 
         // The legacy `RYU_APPS_DIR` must still be honoured when `RYU_PLUGINS_DIR`
@@ -1812,7 +1875,7 @@ mod tests {
         assert!(parse_min_version("").is_err());
     }
 
-    // ── Every fixture in `fixtures/*.plugin.json` must be well-formed ──────────
+    // ── Every fixture in `fixtures/*.manifest.json` must be well-formed ───────
     //
     // `BUILTIN_MANIFESTS` only `include_str!`s the SHIPPED subset, so `load()` never
     // touches the reference/sample fixtures (`sample`, `tool-firewall`,
@@ -1835,7 +1898,7 @@ mod tests {
             .filter(|p| {
                 p.file_name()
                     .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.ends_with(".plugin.json"))
+                    .is_some_and(|n| n.ends_with(".manifest.json"))
             })
             .collect();
         paths.sort();
@@ -1847,7 +1910,7 @@ mod tests {
         let paths = fixture_plugin_json_paths();
         assert!(
             !paths.is_empty(),
-            "fixtures/*.plugin.json must be present in this tree"
+            "fixtures/*.manifest.json must be present in this tree"
         );
         for path in &paths {
             let raw = std::fs::read_to_string(path)

@@ -10,14 +10,14 @@ model calls through.
 There are **three extension paths**, in increasing order of structure:
 
 1. **MCP servers** — expose tools over the Model Context Protocol. No manifest, no restart.
-2. **`plugin.json` manifests** — bundle Runnables + permission grants into an installable plugin.
+2. **`manifest.json` manifests** — bundle Runnables + permission grants into an installable plugin.
 3. **TypeScript SDK** — define agents, workflows, tools, and skills as typed Runnables with Gateway-mandatory model calls.
 
 ```mermaid
 flowchart LR
   subgraph "Extension Paths"
     A[MCP Server] -->|fastest| B[Expose tools]
-    C[plugin.json] -->|installable| D[Bundle Runnables]
+    C[manifest.json] -->|installable| D[Bundle Runnables]
     E[TypeScript SDK] -->|typed| F[Author agents + tools]
   end
 
@@ -34,7 +34,7 @@ flowchart LR
 
 | Category | What | Guide |
 |---|---|---|
-| **Plugins** | Installable bundles of agents, tools, workflows, skills | [plugin.json](/docs/develop/extensions/plugin-json-manifest) |
+| **Plugins** | Installable bundles of agents, tools, workflows, skills | [manifest.json](/docs/develop/extensions/plugin-json-manifest) |
 | **Turn hooks** | React to chat events (pre/post turn, tool use, sessions) | [Hooks & Lifecycle](/docs/develop/extensions/hooks-lifecycle) |
 | **MCP servers** | Expose any tool over the Model Context Protocol | [MCP Server](/docs/develop/extensions/mcp-server) |
 | **Agent skills** | Reusable prompt patterns as SKILL.md files | [Agent Skills](/docs/develop/extensions/agent-skills) |

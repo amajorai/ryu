@@ -1,7 +1,7 @@
 // apps/desktop/src/lib/api/plugins.ts
 //
 // Typed client for Core's Plugin lifecycle endpoints (`/api/plugins`). A Plugin
-// is a plugin.json bundle descriptor (manifest) with a persisted lifecycle
+// is a manifest.json bundle descriptor (manifest) with a persisted lifecycle
 // record (installed/enabled state). Consumed by the Extensions page via the
 // `useApps` hook.
 //
@@ -693,7 +693,7 @@ export async function fetchAppsCatalog(
 	return data.entries ?? [];
 }
 
-/** `POST /api/plugins/install` — install a plugin from an `https://` plugin.json URL.
+/** `POST /api/plugins/install` — install a plugin from an `https://` manifest.json URL.
  *  Core records it installed+disabled (enable is a separate, grant-gated step). */
 export async function installAppFromUrl(
 	target: ApiTarget,

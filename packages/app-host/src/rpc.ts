@@ -18,7 +18,7 @@
 //     the grant model enforced at the UI boundary.
 //
 // For the MVP the granted-capability set is HOST-PROVIDED CONFIG passed in at
-// mount time. Reading it from the plugin's `plugin.json` grants is #443's job;
+// mount time. Reading it from the plugin's `manifest.json` grants is #443's job;
 // here we prove the gate works given a grant set.
 
 import hostApiContract from "../../../crates/core/kernel-contracts/schemas/host-api.json" with {

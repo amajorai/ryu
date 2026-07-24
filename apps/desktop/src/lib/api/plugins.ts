@@ -1,7 +1,7 @@
 // apps/desktop/src/lib/api/plugins.ts
 //
 // Typed client for Core's Plugin lifecycle endpoints (`/api/plugins`). A Plugin
-// is a plugin.json bundle descriptor (manifest) with a persisted lifecycle
+// is a manifest.json bundle descriptor (manifest) with a persisted lifecycle
 // record (installed/enabled state). Consumed by the Extensions page via the
 // `useApps` hook.
 //
@@ -9,10 +9,7 @@
 // the client-side view exposed to React components. The internal symbol names
 // (App*, fetchApps, etc.) are kept stable to limit churn across importers.
 
-import type {
-	SidebarSectionSpec,
-	ViewContribution,
-} from "@ryu/app-host/views";
+import type { SidebarSectionSpec, ViewContribution } from "@ryu/app-host/views";
 import {
 	type ApiTarget,
 	apiUrl,
@@ -403,16 +400,16 @@ export interface PluginContributions {
 	companions: PluginCompanion[];
 	composer_controls: PluginComposerControl[];
 	settings_tabs: Record<string, unknown>[];
+	/** App-registered sidebar buttons (single nav rows), tagged with `plugin`. */
+	sidebar_buttons: PluginSidebarButton[];
+	/** App-registered sidebar sections (header + live list), tagged with `plugin`. */
+	sidebar_sections: PluginSidebarSection[];
 	slash_commands: Record<string, unknown>[];
 	turn_hooks: Record<string, unknown>[];
 	/** Declarative views (the Raycast tier) contributed by enabled plugins. Each is a
 	 *  {@link ViewContribution} the desktop/island renderer maps to native components,
 	 *  tagged server-side with its owning `plugin` id. */
 	views: PluginView[];
-	/** App-registered sidebar sections (header + live list), tagged with `plugin`. */
-	sidebar_sections: PluginSidebarSection[];
-	/** App-registered sidebar buttons (single nav rows), tagged with `plugin`. */
-	sidebar_buttons: PluginSidebarButton[];
 }
 
 /** An app-registered sidebar SECTION as served by Core (`contributes.sidebar_sections[]`),
@@ -1051,11 +1048,27 @@ export interface CatalogEntry {
 	/** Link to the integration docs, spec, or MCP endpoint. */
 	integration_url?: string | null;
 	kinds: string[];
+	/** SPDX licence id, when the source reports one. */
+	license?: string | null;
 	name: string;
+	/** Who listed this and how vetted it is. `"community"` = discovered
+	 *  automatically from a public GitHub topic and NOT reviewed by Ryu; absent
+	 *  = first-party. MUST stay snake_case — this is the exact key Core's
+	 *  `plugin_marketplace_item_to_entry` emits, and a camelCase spelling would
+	 *  read as undefined, i.e. an unreviewed listing rendered with no notice. */
+	origin?: "community" | "first_party" | null;
 	permission_grants: string[];
+	/** Which discovery source produced this listing (e.g. `"github-topic"`). */
+	provenance?: string | null;
+	/** Repository a community listing was discovered from. */
+	repo_url?: string | null;
+	/** False when nobody at Ryu vetted this listing. Absent ≠ reviewed. */
+	reviewed?: boolean;
 	/** The bundled sub-items this item ships (the manifest runnables). */
 	runnables?: { id: string; kind: string; name?: string }[];
 	source: string;
+	/** Upstream popularity signal (GitHub stars) for unmoderated listings. */
+	stars?: number | null;
 	/** Short one-line pitch shown under the name. */
 	tagline?: string | null;
 	tags: string[];
@@ -1166,6 +1179,11 @@ export async function addMarketplaceSource(
 export interface PluginSearchParams {
 	cursor?: string;
 	limit?: number;
+	/** Browse a non-default catalog slice without changing the active-source
+	 *  preference. `"community"` routes to Core's GitHub topic-discovery source
+	 *  (`?origin=community`), so the Community store section coexists with
+	 *  Apps/Plugins instead of replacing them. */
+	origin?: "community";
 	query?: string;
 }
 
@@ -1189,6 +1207,9 @@ export async function searchPluginCatalog(
 	}
 	if (params.cursor) {
 		q.set("cursor", params.cursor);
+	}
+	if (params.origin) {
+		q.set("origin", params.origin);
 	}
 	const json = await request<{
 		entries?: CatalogEntry[];
@@ -1230,15 +1251,17 @@ export interface PluginCatalogDetail {
 /** Fetch detail for the selected entry from the active plugin catalog source. */
 export async function fetchPluginCatalogDetail(
 	target: ApiTarget,
-	id: string
+	id: string,
+	origin?: "community"
 ): Promise<PluginCatalogDetail> {
+	const suffix = origin ? `&origin=${encodeURIComponent(origin)}` : "";
 	return request<PluginCatalogDetail>(
 		target,
-		`/api/plugins/catalog/detail?id=${encodeURIComponent(id)}`
+		`/api/plugins/catalog/detail?id=${encodeURIComponent(id)}${suffix}`
 	);
 }
 
-/** `POST /api/plugins/install` — install a plugin from an `https://` plugin.json URL.
+/** `POST /api/plugins/install` — install a plugin from an `https://` manifest.json URL.
  *  Core records it installed+disabled (enable is a separate, grant-gated step). */
 export async function installAppFromUrl(
 	target: ApiTarget,

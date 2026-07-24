@@ -1,7 +1,7 @@
 /**
  * Validation coverage for every checked-in Plugin manifest fixture.
  *
- * The authoritative loader for these `plugin.json` files is Core's Rust
+ * The authoritative loader for these `manifest.json` files is Core's Rust
  * `PluginManifestLoader` (`apps/core/src/plugin_manifest/`). This suite is the
  * TypeScript-side guard: it walks the on-disk fixtures Core ships and asserts the
  * properties the SDK layer is responsible for keeping in lockstep with Rust —
@@ -51,7 +51,7 @@ interface RawManifest {
 
 function loadFixtures(): Array<{ file: string; manifest: RawManifest }> {
 	const files = readdirSync(FIXTURES_DIR).filter((f) =>
-		f.endsWith(".plugin.json")
+		f.endsWith(".manifest.json")
 	);
 	return files.map((file) => ({
 		file,
@@ -355,7 +355,7 @@ describe("PluginManifestSchema preserves turn_hook.match", () => {
 	// pins the fix — the gate must survive the parse the CLI applies.
 	it("tool-firewall's match:{tools:['*']} survives the parse", () => {
 		const raw = JSON.parse(
-			readFileSync(join(FIXTURES_DIR, "tool-firewall.plugin.json"), "utf8")
+			readFileSync(join(FIXTURES_DIR, "tool-firewall.manifest.json"), "utf8")
 		);
 		expect(raw.contributes.turn_hooks[0].match).toEqual({ tools: ["*"] });
 

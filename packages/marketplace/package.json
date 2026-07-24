@@ -26,7 +26,8 @@
     "./catalog/chrome/store-list-header": "./src/catalog/chrome/store-list-header.tsx",
     "./catalog/chrome/store-catalog-layout": "./src/catalog/chrome/store-catalog-layout.tsx",
     "./catalog/chrome/store-catalog-card": "./src/catalog/chrome/store-catalog-card.tsx",
-    "./catalog/chrome/store-item-action": "./src/catalog/chrome/store-item-action.tsx"
+    "./catalog/chrome/store-item-action": "./src/catalog/chrome/store-item-action.tsx",
+    "./catalog/chrome/community-trust-notice": "./src/catalog/chrome/community-trust-notice.tsx"
   },
   "scripts": {
     "check-types": "tsc --noEmit",

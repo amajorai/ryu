@@ -1,4 +1,4 @@
-//! The `plugin.json` **manifest model** — the single, pure-data definition of an
+//! The `manifest.json` **manifest model** — the single, pure-data definition of an
 //! installable Ryu App/Plugin descriptor plus its `id`/semver/dependency
 //! validation.
 //!
@@ -66,9 +66,9 @@ pub fn validate_plugin_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// An installable Ryu App manifest (`plugin.json`).
+/// An installable Ryu App manifest (`manifest.json`).
 ///
-/// Modelled on Codex's `plugin.json` pattern: a thin descriptor that bundles one or
+/// Modelled on Codex's `manifest.json` pattern: a thin descriptor that bundles one or
 /// more [`RunnableEntry`] items (agents, workflows, tools, skills, companions,
 /// channels, engines, policies), lists the permission grants the app requires, and
 /// optionally declares a Companion surface (an in-desktop overlay or sidebar panel).

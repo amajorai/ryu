@@ -110,8 +110,15 @@ export interface CatalogHost {
 	 *  the model detail's node-coupled extras (llmfit, fine-tunes, active-model) are
 	 *  gated behind {@link install} anyway, so a stub is never actually dereferenced. */
 	useActiveNode: () => CatalogNode;
-	/** The surface's Apps (plugins) catalog hook (called at component top level). */
-	useAppsCatalog: (initialQuery: string) => AppsCatalogState;
+	/** The surface's Apps (plugins) catalog hook (called at component top level).
+	 *  `options.origin` selects which slice of the catalog to fetch: omitted =
+	 *  the first-party catalog; `"community"` = the GitHub topic-discovered feed.
+	 *  It is a FETCH selector, not a client-side filter — unreviewed listings are
+	 *  never in the first-party pages, so they can't be filtered out of them. */
+	useAppsCatalog: (
+		initialQuery: string,
+		options?: { origin?: "community" }
+	) => AppsCatalogState;
 	/** Installed models by stem (drives the "Your fine-tuned versions" list). */
 	useInstalledModels: () => InstalledModelEntry[];
 	/** The surface's Models catalog hook (called at component top level). */

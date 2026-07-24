@@ -34,7 +34,7 @@ claude plugin marketplace add ./apps/plugins
 claude plugin install ryu@ryu
 ```
 
-On enable, Claude Code prompts for the plugin's two `userConfig` options (`claude-code/.claude-plugin/plugin.json`):
+On enable, Claude Code prompts for the plugin's two `userConfig` options (`claude-code/.claude-plugin/manifest.json`):
 
 - `ryu_core_url` - base URL of your node, default `http://127.0.0.1:7980`.
 - `ryu_core_token` - optional node-admittance bearer (marked sensitive). Leave blank for a local loopback node.
@@ -85,7 +85,7 @@ codex plugin marketplace add ./.agents/plugins
 codex plugin install ryu
 ```
 
-Codex has no slash-command surface, so the Codex plugin (`codex/.codex-plugin/plugin.json`) carries the same flows through its `setup-ryu` and `ryu-tools` skills plus a `defaultPrompt` list of starter suggestions (check status, search and activate a model, ask the node, list and run a workflow, search memory and Spaces). Its `.mcp.json` launches the same bridge:
+Codex has no slash-command surface, so the Codex plugin (`codex/.codex-plugin/manifest.json`) carries the same flows through its `setup-ryu` and `ryu-tools` skills plus a `defaultPrompt` list of starter suggestions (check status, search and activate a model, ask the node, list and run a workflow, search memory and Spaces). Its `.mcp.json` launches the same bridge:
 
 ```json
 {

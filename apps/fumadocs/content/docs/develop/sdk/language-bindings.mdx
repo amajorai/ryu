@@ -3,7 +3,7 @@ title: Language bindings (UniFFI)
 description: One shared Rust kernel bound out to Python, Swift, Kotlin, C#, and Go via UniFFI. What ships today (Python) and what is planned.
 ---
 
-Ryu's SDK is split by **layer, not language**. The shared local logic - the `plugin.json`
+Ryu's SDK is split by **layer, not language**. The shared local logic - the `manifest.json`
 manifest model plus validation, the gateway egress rules, and the gateway-mandatory model and
 embedding clients - lives once in the [`ryu-sdk`](/docs/develop/sdk/rust) Rust kernel. Every
 language binding is a thin marshalling shell over that same kernel, so manifest rules, the egress

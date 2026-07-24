@@ -13,9 +13,13 @@
 //! methods (not object-safe), and heterogeneous storage is done via the closed
 //! [`sources::Source`] enum, match-dispatched. See `sources.rs`.
 
+mod github_topic;
 mod registry;
 mod sources;
 
+pub use github_topic::{
+    GithubTopicSource, COMMUNITY_ORIGIN, GITHUB_TOKEN_PREF, GITHUB_TOPIC_SOURCE_ID,
+};
 pub use registry::{CatalogSourceRegistry, CustomSourceSpec, SourceMeta};
 pub use sources::{
     integration_brand_slug, integrations_sh_brands, with_buyer_token, HfSource, IntegrationBrand,

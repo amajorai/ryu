@@ -3,7 +3,7 @@
 //! This crate is the **shared Rust kernel** that every Ryu language binding
 //! builds on. The architecture splits the SDK by *layer*, not by language:
 //!
-//! - **Shared local logic (this crate, bound out via FFI):** the `plugin.json`
+//! - **Shared local logic (this crate, bound out via FFI):** the `manifest.json`
 //!   manifest/runnable model + validation ([`manifest`], [`runnable`]) and the
 //!   gateway egress rules ([`gateway`]). One implementation, bound to Go/Python/
 //!   Swift/Kotlin via uniffi/cgo so it never drifts across languages.
@@ -48,12 +48,12 @@ pub use runnable::{
     RunnableEntry, RunnableKind, RunnableMeta, SkillConfig, ToolConfig, WorkflowConfig,
 };
 
-/// JSON Schema export — lets any language validate a `plugin.json` without a
+/// JSON Schema export — lets any language validate a `manifest.json` without a
 /// Rust FFI binding (the "validate everywhere, bind only where it pays" path).
 pub mod json_schema {
     use crate::manifest::PluginManifest;
 
-    /// The JSON Schema for a `plugin.json` [`PluginManifest`], as a JSON value.
+    /// The JSON Schema for a `manifest.json` [`PluginManifest`], as a JSON value.
     ///
     /// Emit this to a `.schema.json` your TS/Go/Python tooling consumes; it
     /// stays in lockstep with the Rust types because it is derived from them.

@@ -31,5 +31,5 @@ bun run examples/gateway/openai-compat-smoke.ts
 
 Every model call goes through the Ryu **gateway** (`defineModel` / `ctx.gateway`),
 never a provider base URL directly — that's where routing, firewall, budgets, and
-audit apply. To scaffold a full project with a `plugin.json`, use
+audit apply. To scaffold a full project with a `manifest.json`, use
 [`create-ryu-app`](../packages/create-ryu-app): `bunx create-ryu-app my-app`.

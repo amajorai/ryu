@@ -52,7 +52,7 @@ use crate::server::ServerState;
 use crate::sidecar::ext_proxy::{authenticate_sidecar, ext_token, node_token};
 
 /// Fallback loopback port if the manifest is somehow absent — matches the
-/// `meetings.plugin.json` fixture `port`. Core injects this as `RYU_MEETINGS_PORT`
+/// `meetings.manifest.json` fixture `port`. Core injects this as `RYU_MEETINGS_PORT`
 /// at spawn.
 const MEETINGS_FALLBACK_PORT: u16 = 7998;
 

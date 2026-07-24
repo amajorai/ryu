@@ -11,11 +11,11 @@
  *   companion-plugin — a Ryu App whose widget calls a companion tool + a panel surface
  *
  * Every template emits a directory `<name>/` containing:
- *   plugin.json        — Plugin manifest (validated against PluginManifestSchema)
+ *   manifest.json        — Plugin manifest (validated against PluginManifestSchema)
  *   src/*              — the template's authoring source (uses the matching defineX factory)
  *   package.json       — Project config with a `dev` script and @ryuhq/sdk dep
  *
- * The generated plugin.json validates against the PluginManifest schema so the
+ * The generated manifest.json validates against the PluginManifest schema so the
  * Ryu desktop plugin store can install it immediately.
  */
 
@@ -212,7 +212,7 @@ export function scaffold(
 
 	const displayName = toDisplayName(slug);
 
-	// Copy the full template tree, then stamp every text file (plugin.json + src).
+	// Copy the full template tree, then stamp every text file (manifest.json + src).
 	mkdirSync(projectDir, { recursive: true });
 	cpSync(templateDir, projectDir, { recursive: true });
 	stampTree(projectDir, {
@@ -221,15 +221,15 @@ export function scaffold(
 		__COMPANION_LABEL__: toCompanionLabel(displayName),
 	});
 
-	// Validate the stamped plugin.json against PluginManifestSchema.
-	const manifestPath = join(projectDir, "plugin.json");
+	// Validate the stamped manifest.json against PluginManifestSchema.
+	const manifestPath = join(projectDir, "manifest.json");
 	const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown;
 	const validation = PluginManifestSchema.safeParse(parsed);
 	if (!validation.success) {
 		const first = validation.error.issues[0];
 		const field = first?.path.join(".") ?? "unknown";
 		const msg = first?.message ?? "validation failed";
-		exitError(`generated plugin.json is invalid at '${field}': ${msg}`);
+		exitError(`generated manifest.json is invalid at '${field}': ${msg}`);
 	}
 
 	// Write the project package.json (not in the template so the entry + deps can
@@ -320,7 +320,7 @@ if (import.meta.main) {
 			`    cd ${parsed.name}`,
 			"    bun install",
 			"    bun dev        # runs the template entry",
-			"    bun run pack   # validate and bundle plugin.json",
+			"    bun run pack   # validate and bundle manifest.json",
 			"",
 		].join("\n")
 	);

@@ -67,7 +67,7 @@ All under `crates/core/`. These are the pluggable capability primitives.
 | **ryu-eval-code** | `crates/core/eval-code` | Core-side code evaluators: runs user `(input,output,expected,vars)->{score}` functions in isolated runtimes (JS via Deno sandbox, Python via sandbox backend) to score eval cases |
 | **ryu-hardware** | `crates/core/hardware` | RHP v1 node backend: paired-device registry, pairing nonce verification, Opus/WAV codec, per-connection realtime session state machine, display-nudge loop, device-registry + TRMNL display HTTP surface |
 | **ryu-image** | `crates/core/image` | Image-generation modality: `generate(prompt)->image` with swappable engine seam (local sd.cpp by default; OpenRouter/Replicate/fal cloud providers via Gateway) |
-| **ryu-kernel-contracts** | `crates/core/kernel-contracts` | Pure-data plugin.json manifest model (types + validation) shared by Core and the SDK. No I/O, no runtime deps; serde/schemars only |
+| **ryu-kernel-contracts** | `crates/core/kernel-contracts` | Pure-data manifest.json manifest model (types + validation) shared by Core and the SDK. No I/O, no runtime deps; serde/schemars only |
 | **ryu-knowledge** | `crates/core/knowledge` | Open Knowledge Format (OKF) primitive: in-memory model, permissive parser, and serializer for git-shippable knowledge bundles (Concept/Bundle/IndexDoc/LogDoc) |
 | **ryu-mcp-catalog** | `crates/core/mcp-catalog` | MCP server catalog: browse/install MCP servers from the official registry and Smithery/Ryu-hosted sources, with SSRF-safe pagination and security-hardened install-plan builder |
 | **ryu-memory** | `crates/core/memory` | Long-term memory primitive: SQLite-backed encrypted `MemoryStore` with multi-level scope model (user/node/project), category/importance/tags metadata, scoped recall/CRUD |
@@ -148,7 +148,7 @@ Foundational crates that all others depend on.
 
 | Crate | Path | Purpose |
 |---|---|---|
-| **ryu-kernel-contracts** | `crates/core/kernel-contracts` | Pure-data plugin.json manifest model (types + validation) shared by Core and the SDK. No I/O, no runtime deps |
+| **ryu-kernel-contracts** | `crates/core/kernel-contracts` | Pure-data manifest.json manifest model (types + validation) shared by Core and the SDK. No I/O, no runtime deps |
 | **ryu-crypto** | `crates/core/crypto` | Encryption-at-rest: ChaCha20-Poly1305 AEAD `FieldCipher` with `enc:v1:` envelope + swappable master-key custody |
 | **ryu-storage** | `crates/core/storage` | Plugin-owned KV storage: isolated `(plugin_id,namespace,key)`-namespaced SQLite table |
 | **ryu-realtime** | `crates/core/realtime` | Room-keyed realtime fan-out: transport-agnostic `RoomRegistry` with per-room tokio actors |

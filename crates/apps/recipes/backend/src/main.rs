@@ -75,7 +75,7 @@ use ryu_recipes::{
 /// dashboards (7997).
 const DEFAULT_PORT: u16 = 7999;
 
-/// The built-in Recipes app id (matches the `recipes.plugin.json` fixture id and
+/// The built-in Recipes app id (matches the `recipes.manifest.json` fixture id and
 /// Core's `plugins::builtins::RECIPES_PLUGIN_ID`). Presented on the
 /// `x-ryu-plugin-id` header of every host callback so Core can recompute the
 /// expected ext token.

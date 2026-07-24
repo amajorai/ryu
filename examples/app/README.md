@@ -23,7 +23,7 @@ full contract (endpoint, security model, `window.ryu` SDK alias, Phase-2 backlog
   **Gateway-approved** grants, and forwards it to Core
   `POST /api/plugins/com.ryu.reference-app/host`. The app never sees a token and
   cannot fetch directly.
-- `plugin.json` declares one `kind: "companion"` runnable whose `config.ui_entry`
+- `manifest.json` declares one `kind: "companion"` runnable whose `config.ui_entry`
   points at `ui.js`. `ryu pack` bundles that entry into the manifest's `ui_code`.
 
 ## Install (needs a running Core node)

@@ -4,11 +4,11 @@ description: "The full @ryuhq/sdk surface: the Runnable factories, the gateway-m
 ---
 
 `@ryuhq/sdk` (`packages/sdk/`) is Ryu's developer SDK. You author Runnables (agents, workflows,
-tools, and skills) as typed TypeScript, declare them in a `plugin.json`, and pack the result into a
+tools, and skills) as typed TypeScript, declare them in a `manifest.json`, and pack the result into a
 publish-ready bundle. The one invariant is that **every model call routes through the Gateway**.
 
 This is the API reference. For a guided walkthrough that builds a plugin end to end, see
-[TypeScript SDK](/docs/develop/extensions/typescript-sdk). For the `plugin.json` schema, lifecycle
+[TypeScript SDK](/docs/develop/extensions/typescript-sdk). For the `manifest.json` schema, lifecycle
 endpoints, and signing, see [Plugin manifests](/docs/develop/extensions/plugin-json-manifest) and
 the [Plugin API](/docs/develop/sdk/plugin-api).
 
@@ -228,7 +228,7 @@ and paid for), see [Core vs Gateway](/docs/start-here/architecture/core-vs-gatew
 
 ## Builders and manifest schemas
 
-For declaring a `plugin.json` in code, the SDK exports a fluent `PluginBuilder` plus per-kind
+For declaring a `manifest.json` in code, the SDK exports a fluent `PluginBuilder` plus per-kind
 builders (`agent()`, `workflow()`, `tool()`, `skill()`) and their builder classes
 (`AgentBuilder`, `WorkflowBuilder`, `ToolBuilder`, `SkillBuilder`) from `.`.
 
@@ -246,7 +246,7 @@ The Zod schemas and helpers behind the builders are also exported:
 
 | Export | Purpose |
 |---|---|
-| `PluginManifestSchema` | full `plugin.json` schema (also at `./manifest`) |
+| `PluginManifestSchema` | full `manifest.json` schema (also at `./manifest`) |
 | `RunnableKindSchema` | enums the four authorable kinds (`agent`, `workflow`, `tool`, `skill`) |
 | `RunnableMetaSchema` | per-runnable metadata block |
 | `CompanionSurfaceSchema` | optional Companion surface declaration |
@@ -294,7 +294,7 @@ extract `.content[0].text` for the plain output.
 
 ## definePlugin
 
-`definePlugin` assembles a complete `plugin.json` manifest from typed options
+`definePlugin` assembles a complete `manifest.json` manifest from typed options
 (`packages/sdk/src/runnable/turn-hook.ts`).
 
 ```typescript
@@ -474,7 +474,7 @@ The `ryu` CLI (`packages/sdk/src/cli.ts`) is installed as the `ryu` bin and has 
 
 | Command | Does |
 |---|---|
-| `bunx ryu pack <dir>` | validate `<dir>/plugin.json`, emit `<dir>/dist/plugin.bundle.json` |
+| `bunx ryu pack <dir>` | validate `<dir>/manifest.json`, emit `<dir>/dist/plugin.bundle.json` |
 | `bunx ryu publish <dir>` | validate, then POST the manifest to the Ryu Marketplace as `pending` |
 | `bunx ryu dev <entry>` | run a Runnable module locally with an interactive chat loop |
 
@@ -494,7 +494,7 @@ Publishing is governed by the Gateway (grant validation and manifest signing). S
 npx create-ryu-app my-extension
 ```
 
-`create-ryu-app` (`packages/create-ryu-app/`) generates a starter project: a `plugin.json` validated
+`create-ryu-app` (`packages/create-ryu-app/`) generates a starter project: a `manifest.json` validated
 against the manifest schema, a `package.json` with `dev` and `pack` scripts, and a starter agent in
 `src/agent.ts` that streams one turn through the local Gateway.
 

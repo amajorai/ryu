@@ -66,7 +66,7 @@ func ValidatePluginID(id string) error {
 	return nil
 }
 
-// ParseAndValidateManifest parses and fully validates a plugin.json string,
+// ParseAndValidateManifest parses and fully validates a manifest.json string,
 // returning the normalized manifest JSON.
 func ParseAndValidateManifest(manifestJSON string) (string, error) {
 	cj := C.CString(manifestJSON)
@@ -78,7 +78,7 @@ func ParseAndValidateManifest(manifestJSON string) (string, error) {
 	return takeString(out), nil
 }
 
-// PluginManifestJSONSchema returns the JSON Schema for a plugin.json, derived
+// PluginManifestJSONSchema returns the JSON Schema for a manifest.json, derived
 // from the Rust types (so it never drifts from what the core validates).
 func PluginManifestJSONSchema() string {
 	return takeString(C.ryu_plugin_manifest_json_schema())

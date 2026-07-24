@@ -58,6 +58,7 @@ import {
 	TooltipTrigger,
 } from "@ryu/ui/components/tooltip.tsx";
 import { type ReactNode, useEffect, useId, useState } from "react";
+import CommunityTrustNotice from "./chrome/community-trust-notice.tsx";
 import InfiniteSentinel from "./chrome/infinite-sentinel.tsx";
 import StoreCatalogCard from "./chrome/store-catalog-card.tsx";
 import StoreCatalogLayout, {
@@ -86,7 +87,7 @@ import type {
  *  plugin that bundles a Companion runnable (a full-page UI surface); a "plugin"
  *  is everything else (tools/agents/channels/policies). "all" = the historical
  *  unsplit tab, which web still uses. */
-export type AppsCatalogVariant = "apps" | "plugins" | "all";
+export type AppsCatalogVariant = "apps" | "plugins" | "all" | "community";
 
 /** True when a catalog entry is an "app". Prefers the explicit `type` discriminator
  *  the catalog now emits; falls back to the legacy "ships a Companion runnable"
@@ -98,6 +99,19 @@ export function isCompanionApp(item: AppCatalogItem): boolean {
 		return item.entry.type === "app";
 	}
 	return item.entry.kinds.includes("companion");
+}
+
+/** True when a listing was discovered from a public GitHub topic rather than
+ *  published to a first-party catalog — i.e. nobody at Ryu reviewed it.
+ *
+ *  Keys on the snake_case `origin` the Core projector stamps (see
+ *  `plugin_marketplace_item_to_entry`); `reviewed === false` is accepted as a
+ *  secondary signal so a source that stamps only the trust flag still gets the
+ *  notice. Absent/null ⇒ first-party: deliberately fail-safe in that direction so
+ *  an older wire never gains a scary label, which makes the notice opt-in from the
+ *  producer. Exported for unit tests. */
+export function isCommunityEntry(item: AppCatalogItem): boolean {
+	return item.entry.origin === "community" || item.entry.reviewed === false;
 }
 
 const VARIANT_COPY: Record<
@@ -119,6 +133,11 @@ const VARIANT_COPY: Record<
 		nounPlural: "plugins",
 		searchPlaceholder: "Search plugins…",
 	},
+	community: {
+		noun: "listing",
+		nounPlural: "community listings",
+		searchPlaceholder: "Search community apps and plugins…",
+	},
 };
 
 /**
@@ -128,7 +147,10 @@ const VARIANT_COPY: Record<
  * plugins. Integration descriptors are browse-only with an outbound link.
  *
  * Desktop mounts it twice — variant "apps" (companion-UI apps) and "plugins"
- * (everything else) — while web keeps the unsplit "all" default.
+ * (everything else) — while web keeps the unsplit "all" default. A third mount,
+ * variant "community", browses GitHub topic-discovered third-party listings; it
+ * is a SEPARATE fetch (Core keeps unreviewed listings out of the first-party
+ * catalog) and always renders the "not reviewed by Ryu" notice.
  *
  * Desktop injects its real Core-node catalog hook + install layer through the
  * {@link CatalogHost}; web injects a federated adapter with `install: null`, so
@@ -140,7 +162,9 @@ export default function AppsCatalogSection({
 }: {
 	/** Seed the search box (e.g. carried over from the store-wide search). */
 	initialQuery?: string;
-	/** Catalog slice: companion "apps", non-companion "plugins", or "all". */
+	/** Catalog slice: companion "apps", non-companion "plugins", "all", or
+	 *  "community" (unreviewed GitHub topic-discovered listings — a separate
+	 *  fetch, always rendered with the trust notice). */
 	variant?: AppsCatalogVariant;
 } = {}) {
 	const host = useCatalogHost();
@@ -170,16 +194,31 @@ export default function AppsCatalogSection({
 		selectingSource,
 		addMarketplace,
 		addingMarketplace,
-	} = host.useAppsCatalog(initialQuery);
+	} = host.useAppsCatalog(
+		initialQuery,
+		variant === "community" ? { origin: "community" } : undefined
+	);
 
-	// The split is presentational: one shared catalog fetch, filtered per variant.
-	// Integration descriptors (integrations.sh) stay on the plugins side.
+	// The apps/plugins split is presentational: one shared catalog fetch, filtered
+	// per variant. Integration descriptors (integrations.sh) stay on the plugins side.
+	//
+	// Community is NOT part of that split — it is a separate FETCH (see the
+	// `origin` option above), because unreviewed topic-discovered listings are
+	// deliberately absent from the first-party pages. The extra `isCommunityEntry`
+	// guards below are belt-and-braces: if a community row ever did leak into a
+	// first-party page, it must not render there without its trust notice.
 	const visibleItems =
-		variant === "all"
-			? items
-			: items.filter((it) =>
-					variant === "apps" ? isCompanionApp(it) : !isCompanionApp(it)
-				);
+		variant === "community"
+			? items.filter(isCommunityEntry)
+			: items.filter((it) => {
+					if (isCommunityEntry(it)) {
+						return false;
+					}
+					if (variant === "all") {
+						return true;
+					}
+					return variant === "apps" ? isCompanionApp(it) : !isCompanionApp(it);
+				});
 	const copy = VARIANT_COPY[variant];
 
 	// Per-card lifecycle without a per-id hook: the hook's install()/setEnabled()
@@ -265,6 +304,11 @@ export default function AppsCatalogSection({
 					items={visibleItems}
 					loading={loading}
 					loadingMore={loadingMore}
+					notice={
+						variant === "community" ? (
+							<CommunityTrustNotice tone="banner" />
+						) : null
+					}
 					nounPlural={copy.nounPlural}
 					onDisable={cardDisable}
 					onInstall={cardInstall}
@@ -465,7 +509,7 @@ function InstallFromUrl({
 							submit();
 						}
 					}}
-					placeholder="https://…/plugin.json"
+					placeholder="https://…/manifest.json"
 					value={url}
 				/>
 			</div>
@@ -496,6 +540,7 @@ function AppList({
 	hasNextPage,
 	nounPlural,
 	fallbackIcon,
+	notice,
 }: {
 	items: AppCatalogItem[];
 	loading: boolean;
@@ -513,39 +558,54 @@ function AppList({
 	/** Realm glyph shown when an item has no icon of its own (apps→grid,
 	 *  plugins→puzzle), sourced from the shared REALM_ICONS so it matches the tab. */
 	fallbackIcon: IconSvgElement;
+	/** Rendered above the grid in EVERY state (loading/error/empty/populated), so
+	 *  the community trust disclosure is never hidden by a slow or empty fetch.
+	 *  It lives here rather than in StoreCatalogLayout because that layout is
+	 *  shared by Models/Skills/MCP/Agents and must not grow a notice slot. */
+	notice?: ReactNode;
 }) {
 	const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
 
 	if (loading && items.length === 0) {
 		return (
-			<div className="flex items-center justify-center p-8 text-muted-foreground">
-				<Spinner className="size-5" />
+			<div className="flex flex-col gap-3">
+				{notice}
+				<div className="flex items-center justify-center p-8 text-muted-foreground">
+					<Spinner className="size-5" />
+				</div>
 			</div>
 		);
 	}
 	if (error && items.length === 0) {
 		return (
-			<div className="p-4 text-destructive text-sm">
-				Couldn't load {nounPlural}: {error}
+			<div className="flex flex-col gap-3">
+				{notice}
+				<div className="p-4 text-destructive text-sm">
+					Couldn't load {nounPlural}: {error}
+				</div>
 			</div>
 		);
 	}
 	if (items.length === 0) {
 		return (
-			<Empty className="h-full p-6">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<HugeiconsIcon icon={fallbackIcon} />
-					</EmptyMedia>
-					<EmptyTitle>No {nounPlural} found</EmptyTitle>
-					<EmptyDescription>Try a different search.</EmptyDescription>
-				</EmptyHeader>
-			</Empty>
+			<div className="flex flex-col gap-3">
+				{notice}
+				<Empty className="h-full p-6">
+					<EmptyHeader>
+						<EmptyMedia variant="icon">
+							<HugeiconsIcon icon={fallbackIcon} />
+						</EmptyMedia>
+						<EmptyTitle>No {nounPlural} found</EmptyTitle>
+						<EmptyDescription>Try a different search.</EmptyDescription>
+					</EmptyHeader>
+				</Empty>
+			</div>
 		);
 	}
 
 	return (
 		<div ref={setScrollEl}>
+			{notice ? <div className="mb-3">{notice}</div> : null}
 			<StoreCardGrid>
 				{items.map((it) => (
 					<StoreCatalogCard
@@ -972,6 +1032,14 @@ function AppDetailPanel({
 							Built-in
 						</Badge>
 					)}
+					{isCommunityEntry(item) ? (
+						<Badge
+							className="border-amber-500/40 text-amber-600 text-xs"
+							variant="outline"
+						>
+							Community
+						</Badge>
+					) : null}
 					{entry.kinds.map((k) => (
 						<Badge className="text-xs" key={k} variant="secondary">
 							{k.toUpperCase()}
@@ -984,6 +1052,15 @@ function AppDetailPanel({
 					))}
 				</div>
 			</header>
+
+			{/* Load-bearing placement: unavoidable in the reading path before any
+			    install action, in both the side-pane and the dialog preview. */}
+			{isCommunityEntry(item) ? (
+				<CommunityTrustNotice
+					tone="inline"
+					topic={detail?.discoveredFrom?.topic}
+				/>
+			) : null}
 
 			<AppActions
 				error={error}

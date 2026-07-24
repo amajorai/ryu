@@ -73,7 +73,7 @@ pub fn validate_plugin_id(id: String) -> Result<(), RyuError> {
     ryu_sdk::validate_plugin_id(&id).map_err(RyuError::msg)
 }
 
-/// Parse and fully validate a `plugin.json` string (id, semver, per-kind runnable
+/// Parse and fully validate a `manifest.json` string (id, semver, per-kind runnable
 /// contracts). Returns the normalized manifest JSON string, or errors.
 #[uniffi::export]
 pub fn parse_and_validate_manifest(json: String) -> Result<String, RyuError> {
@@ -81,7 +81,7 @@ pub fn parse_and_validate_manifest(json: String) -> Result<String, RyuError> {
     serde_json::to_string(&manifest).map_err(|e| RyuError::msg(e.to_string()))
 }
 
-/// The `plugin.json` JSON Schema as a string. Derived from the Rust types, so it
+/// The `manifest.json` JSON Schema as a string. Derived from the Rust types, so it
 /// never drifts from what the core validates.
 #[uniffi::export]
 pub fn plugin_manifest_json_schema() -> String {

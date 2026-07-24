@@ -77,17 +77,17 @@ are wired as `npx -y mcp-remote`), so you review it before it runs. Enable it fr
 
 ## Install a plugin
 
-A **plugin** is a `plugin.json` manifest that bundles Runnables (agents, workflows, tools, skills)
+A **plugin** is a `manifest.json` manifest that bundles Runnables (agents, workflows, tools, skills)
 together with the permission grants they need.
 
 - The **Plugins** page lists the plugins Ryu Core has loaded, each showing its status (Installed or
   Enabled) and its **permission grants**. You can also **install from a URL** that points at a
-  `plugin.json`; Core fetches, validates, and hot-reloads it with no restart.
+  `manifest.json`; Core fetches, validates, and hot-reloads it with no restart.
 - **Install** a plugin to validate it and its grants, then **Enable** it to activate its Runnables.
 - Built-in plugins such as **Ghost** (desktop automation) and **Shadow** (capture and search) are
   always available without installation.
 
-To add your own, drop a `plugin.json` into `~/.ryu/plugins/<your-plugin>/` (restart Core, or use
+To add your own, drop a `manifest.json` into `~/.ryu/plugins/<your-plugin>/` (restart Core, or use
 **install from URL** to hot-reload without one). Ryu validates the manifest per Runnable kind on
 load. The manifest format is documented in
 [Plugin manifests](/docs/develop/extensions/plugin-json-manifest).

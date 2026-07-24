@@ -281,13 +281,14 @@ async fn install_app_tool(
         Some(m) => m,
         None => {
             // Try loading from disk as fallback. Prefer the canonical
-            // `plugin.json`, fall back to the legacy `ryu.json`.
+            // `manifest.json`, fall back to the legacy `plugin.json` / `ryu.json`.
+            // The ordering is shared with the loader — do NOT re-spell it here.
             let app_dir = validate_write_target(id)?;
-            let manifest_path = ["plugin.json", "ryu.json"]
+            let manifest_path = crate::plugin_manifest::MANIFEST_FILE_NAMES
                 .iter()
                 .map(|name| app_dir.join(name))
                 .find(|p| p.exists())
-                .unwrap_or_else(|| app_dir.join("plugin.json"));
+                .unwrap_or_else(|| app_dir.join(crate::plugin_manifest::MANIFEST_FILE_NAME));
             let raw = std::fs::read_to_string(&manifest_path).with_context(|| {
                 format!(
                     "plugin '{id}' not found in memory or at {}; scaffold it first",
@@ -424,12 +425,12 @@ pub fn validate_write_target(id: &str) -> Result<PathBuf> {
 
 // ── Disk write ────────────────────────────────────────────────────────────────
 
-/// Write a manifest to `<plugins_dir>/<manifest.id>/plugin.json` atomically.
+/// Write a manifest to `<plugins_dir>/<manifest.id>/manifest.json` atomically.
 /// Creates the directory if it does not exist.
 /// Returns the `<plugins_dir>/<manifest.id>` directory path.
 async fn write_manifest_to_disk(manifest: &PluginManifest) -> Result<PathBuf> {
     let app_dir = validate_write_target(&manifest.id)?;
-    let manifest_path = app_dir.join("plugin.json");
+    let manifest_path = app_dir.join(crate::plugin_manifest::MANIFEST_FILE_NAME);
 
     let json_bytes = serde_json::to_vec_pretty(manifest).context("serializing manifest to JSON")?;
 

@@ -3,7 +3,7 @@
 //! This is the code-execution layer that makes features like double-check and
 //! goal **real installable plugins** rather than hardcoded Core endpoints. A
 //! plugin declares a `post_assistant_turn` hook (`contributes.turn_hooks` in its
-//! `plugin.json`); the hook is plugin-authored JS run in the **same deny-by-default
+//! `manifest.json`); the hook is plugin-authored JS run in the **same deny-by-default
 //! Deno sandbox** the PTC tool-exec uses ([`crate::tool_exec`]). The hook reaches
 //! Core only through capability-gated host functions:
 //!
@@ -95,9 +95,26 @@ pub struct HookContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
     /// A free-form event payload for observation phases (`notification`,
-    /// `session_end`, `subagent_stop`) — e.g. the alert being fanned out.
+    /// `session_end`, `subagent_stop`, `model_select`, `session_tree`) — e.g. the
+    /// alert being fanned out, or `{model, thinking_level, source}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<serde_json::Value>,
+    /// The full outbound message array — set only for [`ON_CONTEXT`] on the
+    /// message-array plane (OpenAI-compat / local engine / SDK app), where a hook
+    /// may return [`HookDirective::Rewrite`] to replace it wholesale.
+    ///
+    /// Raw provider-shaped JSON, not [`HookMessage`]: it carries multimodal parts
+    /// and tool rows that a `{role, content}` struct cannot represent. `None` on
+    /// the ACP plane, which has no array — there the flattened prompt is in
+    /// [`Self::input`] instead. A `context` hook branches on which one is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messages: Option<Vec<serde_json::Value>>,
+    /// The turns about to be dropped by compaction, and the summary that replaced
+    /// them — set for [`ON_SESSION_BEFORE_COMPACT`] and [`ON_SESSION_COMPACT`]
+    /// respectively. A `session_compact` hook may rewrite the summary with
+    /// [`HookDirective::Replace`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<Vec<HookMessage>>,
 }
 
 /// What a hook asks the chat path to do after the assistant turn.
@@ -125,6 +142,38 @@ pub enum HookDirective {
     /// returned to the model as the tool's error result, so it can adapt instead of
     /// treating the call as done — this is the plugin-authored tool firewall.
     Deny { reason: String },
+    /// Replace the tool's result with `output` **before the model sees it** (a
+    /// [`ON_TOOL_RESULT`] directive; ignored on every other phase).
+    ///
+    /// This is the redaction/narrowing primitive: a hook reads `ctx.tool_output`
+    /// and returns a rewritten value, so secrets, PII or an oversized payload
+    /// never enter the transcript. `Deny` blocks a call from happening;
+    /// `Transform` reshapes what a call that already happened reports back.
+    ///
+    /// The first hook (in plugin order) to return `Transform` wins; the rewrite is
+    /// not re-fed through the remaining `tool_result` hooks. Chaining is
+    /// deliberately unsupported in v1 — with it, the value a hook inspects would
+    /// depend on plugin ordering, so a redaction hook could be silently defeated by
+    /// another plugin installed ahead of it.
+    ///
+    /// The downstream detached `post_tool_use` observers DO see the rewritten
+    /// output, not the original: the rewrite is a security boundary, so the raw
+    /// value must not be handed to every other installed plugin after it.
+    Transform { output: serde_json::Value },
+    /// Replace the ENTIRE outbound message array before it reaches the model (an
+    /// [`ON_CONTEXT`] directive on the message-array plane; ignored elsewhere).
+    ///
+    /// Carried as raw JSON rather than [`HookMessage`] on purpose: the outbound
+    /// array holds multimodal content (`image_url` parts) and tool rows that a
+    /// `{role, content}` struct would silently drop, so a hook that rewrote one
+    /// message would destroy every image in the window.
+    ///
+    /// On the ACP plane there is no array to replace — Ryu sends one flattened
+    /// prompt string — so a hook targets that plane with [`Replace`] instead.
+    /// Returning `Rewrite` on the ACP plane is ignored rather than guessed at.
+    ///
+    /// [`Replace`]: HookDirective::Replace
+    Rewrite { messages: Vec<serde_json::Value> },
 }
 
 impl Default for HookDirective {
@@ -182,8 +231,26 @@ pub const ON_STOP: &str = "stop";
 pub const ON_PRE_TOOL_USE: &str = "pre_tool_use";
 
 /// Fires **after** a tool call returns (Claude's `PostToolUse`). Observation-only
-/// (detached, fail-open) — directives are not applied to the result in v1.
+/// (detached, fail-open) — directives are not applied to the result.
+///
+/// Deliberately distinct from [`ON_TOOL_RESULT`]: this phase stays detached so an
+/// observing plugin (logging, telemetry, the tool-firewall's audit half) costs the
+/// hot path exactly nothing. A plugin that needs to *change* the result declares
+/// `tool_result` instead and opts into the awaited path.
 pub const ON_POST_TOOL_USE: &str = "post_tool_use";
+
+/// Fires **after** a tool call returns, **awaited**, and may rewrite the result
+/// before the model sees it via [`HookDirective::Transform`] (Pi's `tool_result`,
+/// Eve's `toolResultFrom`).
+///
+/// Split from [`ON_POST_TOOL_USE`] on purpose. Rewriting requires the tool
+/// dispatch to *wait* for the sandbox, so it costs latency; observation does not.
+/// Keeping them as two phases means the cost is paid only by sessions that
+/// actually installed a rewriting plugin — a plugin declaring only
+/// `post_tool_use` keeps its current zero-latency detached behaviour, and the
+/// DB-free `any_manifest_declares` gate means a node with no `tool_result` plugin
+/// loaded never even looks at the plugin store on the tool hot path.
+pub const ON_TOOL_RESULT: &str = "tool_result";
 
 /// Fires when a delegated sub-agent finishes (Claude's `SubagentStop`).
 /// Observation-only (detached).
@@ -196,6 +263,68 @@ pub const ON_SESSION_END: &str = "session_end";
 /// Fires when a notification is fanned out (Claude's `Notification`).
 /// Observation-only (detached). Node-level: no chat context.
 pub const ON_NOTIFICATION: &str = "notification";
+
+// ── Pi-parity phases (the message plane) ─────────────────────────────────────
+//
+// Mirrors of Pi's own extension lifecycle, but implemented as RYU-NATIVE phases
+// at Ryu's own dispatch sites — deliberately NOT proxied out of Pi. A proxy would
+// only ever fire for Pi-routed turns, silently doing nothing for Claude, Codex,
+// or any other ACP agent. Firing them from Core means one plugin governs every
+// agent.
+
+/// Fires immediately **before** the assembled context leaves Ryu for the model,
+/// and may rewrite it (Pi's `context`). This is the context-engineering phase.
+///
+/// It spans TWO structurally different planes and a hook must handle both:
+///
+/// - **OpenAI-compat / local-engine / SDK plane** — Ryu owns a real message array
+///   (`oai_messages`). [`HookContext::messages`] is populated and a hook returns
+///   [`HookDirective::Rewrite`] to replace the whole array. Multimodal content
+///   survives because the array is carried as raw JSON, not as lossy
+///   [`HookMessage`]s.
+/// - **ACP plane (Claude / Codex / managed Pi)** — there is no array to rewrite.
+///   Ryu flattens the whole window into ONE prompt string (`build_acp_prompt`) and
+///   sends a single text block, so [`HookContext::input`] carries that string and a
+///   hook returns [`HookDirective::Replace`] instead.
+///
+/// A hook that only understands one plane must check which field is set rather
+/// than assume; returning the wrong directive for the plane is ignored.
+pub const ON_CONTEXT: &str = "context";
+
+/// Fires when an assistant message is finalized, **before** it is persisted, and
+/// may replace its text via [`HookDirective::Replace`] (Pi's `message_end`).
+///
+/// Distinct from [`ON_POST_ASSISTANT_TURN`], which runs after persistence and can
+/// only append a note or continue the loop. A `Replace` here must rewrite the
+/// persisted content AND the sealed parts, or a reload would disagree with what
+/// the user saw.
+pub const ON_MESSAGE_END: &str = "message_end";
+
+/// Fires **before** Ryu drops older turns to fit the context window (Pi's
+/// `session_before_compact`). Observation + veto-ish: a hook sees what is about to
+/// be dropped.
+pub const ON_SESSION_BEFORE_COMPACT: &str = "session_before_compact";
+
+/// Fires **after** the dropped turns have been summarized (Pi's `session_compact`),
+/// and may rewrite the summary text via [`HookDirective::Replace`] before it is
+/// merged back into the window.
+///
+/// Note this is RYU's compaction, not Pi's. Pi auto-compacting inside its own turn
+/// loop is invisible to Core; these phases fire at Ryu's own `context_window`
+/// sites, which cover BOTH the OpenAI-compat plane and the short-term replay Ryu
+/// assembles for ACP agents.
+pub const ON_SESSION_COMPACT: &str = "session_compact";
+
+/// Fires when the active model or thinking/effort level changes (Pi's
+/// `model_select` / `thinking_level_select`). Observation-only — no directive can
+/// change a model, so this reports rather than intercepts. The payload rides in
+/// [`HookContext::event`].
+pub const ON_MODEL_SELECT: &str = "model_select";
+
+/// Fires when the conversation's message tree branches — an edit or regenerate
+/// that inserts a sibling and repoints the active leaf (Pi's `session_before_fork`
+/// / `session_tree`). Observation-only. Payload rides in [`HookContext::event`].
+pub const ON_SESSION_TREE: &str = "session_tree";
 
 /// Whether a hook declared for `hook_on` should run in `phase`. Exact match,
 /// except [`ON_STOP`] is treated as an alias of [`ON_POST_ASSISTANT_TURN`].
@@ -563,6 +692,28 @@ mod tests {
                 text: "keep going".into()
             }
         );
+        assert_eq!(
+            parse_directive(Some(&json!({ "kind": "deny", "reason": "no" }))),
+            HookDirective::Deny {
+                reason: "no".into()
+            }
+        );
+        // `transform` carries an arbitrary JSON result, not text — a tool result is
+        // a structured value, so redaction must be able to return an object.
+        assert_eq!(
+            parse_directive(Some(
+                &json!({ "kind": "transform", "output": { "content": "[redacted]" } })
+            )),
+            HookDirective::Transform {
+                output: json!({ "content": "[redacted]" })
+            }
+        );
+        assert_eq!(
+            parse_directive(Some(&json!({ "kind": "transform", "output": "plain string" }))),
+            HookDirective::Transform {
+                output: json!("plain string")
+            }
+        );
         // Garbage / unknown shape → None (fail-safe, never loops on noise).
         assert_eq!(
             parse_directive(Some(&json!({ "kind": "explode" }))),
@@ -572,6 +723,26 @@ mod tests {
             parse_directive(Some(&json!("nonsense"))),
             HookDirective::None
         );
+        // A `transform` with no `output` is malformed — it must NOT silently become
+        // a rewrite to null, which would erase the real tool result.
+        assert_eq!(
+            parse_directive(Some(&json!({ "kind": "transform" }))),
+            HookDirective::None
+        );
+    }
+
+    #[test]
+    fn tool_result_is_a_distinct_phase_from_post_tool_use() {
+        // The split is what keeps observation detached (zero latency) while rewrite
+        // is awaited. If these ever aliased, every `post_tool_use` observer would
+        // start costing the tool hot path a sandbox spawn.
+        assert_ne!(ON_TOOL_RESULT, ON_POST_TOOL_USE);
+        assert!(!phase_matches(ON_POST_TOOL_USE, ON_TOOL_RESULT));
+        assert!(!phase_matches(ON_TOOL_RESULT, ON_POST_TOOL_USE));
+        assert!(phase_matches(ON_TOOL_RESULT, ON_TOOL_RESULT));
+        // `stop` stays an alias of post_assistant_turn and must not leak into the
+        // tool phases.
+        assert!(!phase_matches(ON_STOP, ON_TOOL_RESULT));
     }
 
     #[test]
@@ -1240,7 +1411,7 @@ mod tests {
             return;
         }
         // PreToolUse: a destructive command in the tool args → Deny.
-        let code = fixture_hook_from_file("tool-firewall.plugin.json", "tool-firewall.pre");
+        let code = fixture_hook_from_file("tool-firewall.manifest.json", "tool-firewall.pre");
         let ctx = HookContext {
             tool_name: Some("bash".into()),
             tool_input: Some(serde_json::json!({ "command": "rm -rf /" })),
@@ -1259,7 +1430,7 @@ mod tests {
             return;
         }
         // PreToolUse: a safe command → None (allow).
-        let code = fixture_hook_from_file("tool-firewall.plugin.json", "tool-firewall.pre");
+        let code = fixture_hook_from_file("tool-firewall.manifest.json", "tool-firewall.pre");
         let ctx = HookContext {
             tool_name: Some("bash".into()),
             tool_input: Some(serde_json::json!({ "command": "ls -la" })),
@@ -1275,7 +1446,7 @@ mod tests {
             return;
         }
         // PostToolUse: reads tool_output (observation).
-        let code = fixture_hook_from_file("tool-firewall.plugin.json", "tool-firewall.post");
+        let code = fixture_hook_from_file("tool-firewall.manifest.json", "tool-firewall.post");
         let ctx = HookContext {
             tool_name: Some("web_fetch".into()),
             tool_output: Some(serde_json::json!({ "status": 200 })),
@@ -1294,7 +1465,7 @@ mod tests {
             return;
         }
         // subagent_stop reads ctx.output + ctx.event.
-        let code = fixture_hook_from_file("hook-observers.plugin.json", "observers.subagent-stop");
+        let code = fixture_hook_from_file("hook-observers.manifest.json", "observers.subagent-stop");
         let ctx = HookContext {
             output: Some("did the thing".into()),
             event: Some(serde_json::json!({ "id": "task-7" })),
@@ -1310,7 +1481,7 @@ mod tests {
             other => panic!("expected Note, got {other:?}"),
         }
         // notification reads ctx.event.title.
-        let code = fixture_hook_from_file("hook-observers.plugin.json", "observers.notification");
+        let code = fixture_hook_from_file("hook-observers.manifest.json", "observers.notification");
         let ctx = HookContext {
             event: Some(serde_json::json!({ "title": "Price dropped" })),
             ..Default::default()

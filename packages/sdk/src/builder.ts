@@ -1,6 +1,6 @@
 /**
  * Ryu SDK typed builders — one builder per RunnableKind plus a PluginBuilder that
- * assembles a complete, validated `plugin.json` manifest.
+ * assembles a complete, validated `manifest.json` manifest.
  *
  * Each builder follows a fluent interface: construct, chain setter calls, then
  * call `.build()` to get a validated result. Invalid manifests throw a
@@ -125,7 +125,7 @@ export const skill = () => new SkillBuilder();
 // ── PluginBuilder ─────────────────────────────────────────────────────────────
 
 /**
- * Fluent builder for a complete `plugin.json` Plugin manifest. Produces a
+ * Fluent builder for a complete `manifest.json` Plugin manifest. Produces a
  * validated `PluginManifest` on `.build()` or throws a descriptive `Error`
  * naming the first invalid field.
  *
@@ -279,7 +279,7 @@ export class PluginBuilder {
 			const field = first?.path.join(".") ?? "unknown";
 			const message = first?.message ?? "validation failed";
 			throw new Error(
-				`plugin.json validation failed at '${field}': ${message}`
+				`manifest.json validation failed at '${field}': ${message}`
 			);
 		}
 		return result.data;
@@ -289,7 +289,7 @@ export class PluginBuilder {
 // ── AppBuilder (Ryu Apps) ─────────────────────────────────────────────────────
 
 /**
- * Fluent builder for a Ryu App — a `plugin.json` whose tools render interactive
+ * Fluent builder for a Ryu App — a `manifest.json` whose tools render interactive
  * widgets inline in chat. Delegates to {@link defineApp} on `.build()`, so it
  * derives the render-vs-companion split and validates through
  * `PluginManifestSchema` (throwing a descriptive `Error` on bad input) exactly

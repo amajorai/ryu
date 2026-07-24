@@ -47,8 +47,8 @@
 //! rationale as the `memory`/`rag` primitives: crate-extracted (swappable, zero
 //! `apps/core` dep) is the decoupling that matters; the process boundary is not.
 //! Consequences of this verdict, all already true in the tree:
-//! - The fixture (`plugin_manifest/fixtures/learning.plugin.json`, byte-identical to
-//!   `apps-store/learning/plugin.json`) is **companion-only**: no `public_mount`, no
+//! - The fixture (`plugin_manifest/fixtures/learning.manifest.json`, byte-identical to
+//!   `apps-store/learning/manifest.json`) is **companion-only**: no `public_mount`, no
 //!   sidecar spec. Core serves `/api/learn/*` in-process (`server/learning.rs`).
 //! - Core never spawns/health-checks a learning sidecar (no `RYU_LEARNING_BIN`, no
 //!   port 8002 in `apps/core`). The `[[bin]] ryu-learning` in the crate is dormant

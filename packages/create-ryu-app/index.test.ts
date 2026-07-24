@@ -7,11 +7,11 @@
  *
  * Asserts, for every template:
  *   1. The scaffold produces the expected file set.
- *   2. The generated plugin.json parses against PluginManifestSchema.
+ *   2. The generated manifest.json parses against PluginManifestSchema.
  *   3. The manifest has the shape that template promises (agent runnable /
  *      turn hook / widget / companion tool + surface).
  *   4. The authoring src uses the matching defineX factory, and — for the app
- *      templates — the factory output deep-equals the shipped plugin.json, proving
+ *      templates — the factory output deep-equals the shipped manifest.json, proving
  *      the two never drift.
  *   5. `parseArgs` handles `--template` and rejects bad input.
  */
@@ -25,7 +25,7 @@ import { parseArgs, scaffold } from "./index.ts";
 type Manifest = ReturnType<typeof PluginManifestSchema.parse>;
 
 function readManifest(projectDir: string): Manifest {
-	const raw = readFileSync(join(projectDir, "plugin.json"), "utf8");
+	const raw = readFileSync(join(projectDir, "manifest.json"), "utf8");
 	return PluginManifestSchema.parse(JSON.parse(raw));
 }
 
@@ -47,22 +47,22 @@ describe("create-ryu-app scaffold (agent, default)", () => {
 	});
 
 	it("produces the expected file set", () => {
-		for (const file of ["plugin.json", "src/agent.ts", "package.json"]) {
+		for (const file of ["manifest.json", "src/agent.ts", "package.json"]) {
 			expect(existsSync(join(projectDir, file))).toBe(true);
 		}
 	});
 
-	it("plugin.json parses against PluginManifestSchema", () => {
+	it("manifest.json parses against PluginManifestSchema", () => {
 		expect(() => readManifest(projectDir)).not.toThrow();
 	});
 
-	it("plugin.json contains the correct plugin id slug and name", () => {
+	it("manifest.json contains the correct plugin id slug and name", () => {
 		const parsed = readManifest(projectDir);
 		expect(parsed.id).toBe("com.example.my-test-app");
 		expect(parsed.name).toBe("My Test App");
 	});
 
-	it("plugin.json companion label matches display name", () => {
+	it("manifest.json companion label matches display name", () => {
 		const parsed = readManifest(projectDir);
 		expect(parsed.companion?.label).toBe("My Test App");
 	});
@@ -80,7 +80,7 @@ describe("create-ryu-app scaffold (agent, default)", () => {
 		expect(pkg.dependencies["@ryuhq/sdk"]).toBe("^0.0.9");
 	});
 
-	it("plugin.json has at least one agent runnable", () => {
+	it("manifest.json has at least one agent runnable", () => {
 		const parsed = readManifest(projectDir);
 		const agents = parsed.runnables.filter((r) => r.kind === "agent");
 		expect(agents.length).toBeGreaterThan(0);
@@ -136,7 +136,7 @@ describe("create-ryu-app scaffold (hook-plugin)", () => {
 	});
 
 	it("produces the expected file set", () => {
-		for (const file of ["plugin.json", "src/plugin.ts", "package.json"]) {
+		for (const file of ["manifest.json", "src/plugin.ts", "package.json"]) {
 			expect(existsSync(join(projectDir, file))).toBe(true);
 		}
 	});
@@ -187,7 +187,7 @@ describe("create-ryu-app scaffold (ryu-app)", () => {
 
 	it("produces the expected file set including a widget entry", () => {
 		for (const file of [
-			"plugin.json",
+			"manifest.json",
 			"src/app.ts",
 			"src/widget.tsx",
 			"src/index.html",
@@ -209,7 +209,7 @@ describe("create-ryu-app scaffold (ryu-app)", () => {
 		expect((render?.config as { widget?: boolean })?.widget).toBe(true);
 	});
 
-	it("stamped src/app.ts defineApp output deep-equals the shipped plugin.json", async () => {
+	it("stamped src/app.ts defineApp output deep-equals the shipped manifest.json", async () => {
 		const mod = (await import(join(projectDir, "src/app.ts"))) as {
 			default: unknown;
 		};
@@ -272,7 +272,7 @@ describe("create-ryu-app scaffold (companion-plugin)", () => {
 		expect(label.includes("system")).toBe(false);
 	});
 
-	it("stamped src/app.ts defineApp output deep-equals the shipped plugin.json", async () => {
+	it("stamped src/app.ts defineApp output deep-equals the shipped manifest.json", async () => {
 		const mod = (await import(join(projectDir, "src/app.ts"))) as {
 			default: unknown;
 		};

@@ -13,7 +13,7 @@
 //!
 //! The moved engine reads this flag through
 //! [`ryu_predict::PredictHost::is_enabled`], implemented in [`crate::predict_host`]
-//! over [`is_enabled`]. The plugin id const + the `predict.plugin.json` fixture are
+//! over [`is_enabled`]. The plugin id const + the `predict.manifest.json` fixture are
 //! likewise AppGate/plugin wiring, so they stay in Core.
 
 use std::sync::atomic::{AtomicBool, Ordering};
