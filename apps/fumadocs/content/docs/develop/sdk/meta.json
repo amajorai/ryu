@@ -1,4 +1,0 @@
-{
-  "title": "SDK Reference",
-  "pages": ["index", "client", "rust", "primitives", "language-bindings", "plugin-api"]
-}

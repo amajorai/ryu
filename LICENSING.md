@@ -7,7 +7,7 @@ authoritative `LICENSE` file; this document summarizes the whole.
 
 | License | Units |
 |---|---|
-| **Apache-2.0** (root `LICENSE`) | `apps/{core,cli,ghost,shadow,fumadocs}`, all `crates/*`, `packages/{sdk,create-ryu-app,client}` |
+| **Apache-2.0** (root `LICENSE`) | `apps/{core,cli,ghost,shadow}`, all `crates/*`, `packages/{sdk,create-ryu-app,client}` |
 | **AGPL-3.0** | `apps/gateway` |
 | **MIT** | `apps/raycast` |
 

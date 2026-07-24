@@ -20,9 +20,11 @@ closed half is handled in the monorepo and we'll coordinate.
 
 ## What lives here
 
-Only the open-source units: `apps/{core,gateway,cli,fumadocs}`, the SDK family
+Only the open-source units: `apps/{core,gateway,cli}`, the SDK family
 (`packages/{sdk,create-ryu-app,client}`, `crates/ryu-sdk*`), and docs. The desktop, web, mobile,
 and identity apps are proprietary and developed separately — they are not in this tree.
+The documentation **site** is also its own repo, [`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs) —
+open a docs PR there (or in the monorepo), not here.
 
 See [`docs/open-core.md`](../docs/open-core.md) for the full tier map and
 [`AGENTS.md`](../AGENTS.md) for the architecture and the Core-vs-Gateway placement rule.

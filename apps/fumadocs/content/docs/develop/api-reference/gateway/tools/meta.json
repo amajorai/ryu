@@ -1,9 +1,0 @@
-{
-  "title": "Tools",
-  "description": "Tool integrations (Composio registry) and governed direct execution.",
-  "pages": [
-    "listComposioTools",
-    "execTool",
-    "execScan"
-  ]
-}

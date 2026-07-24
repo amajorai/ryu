@@ -1,7 +1,0 @@
-{
-  "title": "Security",
-  "description": "Firewall guardrail checks over caller-supplied text.",
-  "pages": [
-    "firewallCheck"
-  ]
-}

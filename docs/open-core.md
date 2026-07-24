@@ -15,7 +15,7 @@ Every unit in the monorepo carries its own `LICENSE` file and maps to one of the
 | `apps/cli` | OSS — self-hostable | Apache-2.0 | Thin Core client; drives adoption. |
 | `apps/ghost` + `crates/ghost-{core,eyes,hands}` | OSS — self-hostable | Apache-2.0 | Desktop-automation MCP server + its crates. Dual-use; open for auditability. Shadow depends on the ghost crates, so they open by consequence. |
 | `apps/shadow` + `crates/shadow-core` | OSS — self-hostable | Apache-2.0 | Screen/audio capture + semantic search. Dual-use; open-sourcing a screen recorder is a trust asset. |
-| `apps/fumadocs` | OSS | Apache-2.0 | Documentation site. |
+| `apps/fumadocs` → [`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs) | OSS | Apache-2.0 | Documentation site. Published as its own repo, not part of this tree. |
 | `packages/sdk` + `packages/create-ryu-app` | OSS | Apache-2.0 | Dev SDK + scaffolder; must be open to grow the plugin ecosystem. |
 | `packages/client` | OSS | Apache-2.0 | TS client for the open Core API; no internal deps. |
 | `crates/ryu-sdk{,-ffi,-napi}` | OSS | Apache-2.0 | SDK kernel + FFI/Node-API bindings. |
@@ -79,7 +79,7 @@ Every app, package, and crate now carries its own `LICENSE` file. By license:
 
 | License | Units |
 |---|---|
-| **Apache-2.0** | `apps/{core,cli,ghost,shadow,fumadocs}`, `crates/{ghost-core,ghost-eyes,ghost-hands,shadow-core,ryu-sdk,ryu-sdk-ffi,ryu-sdk-napi}`, `packages/{sdk,create-ryu-app,client,headroom}` |
+| **Apache-2.0** | `apps/{core,cli,ghost,shadow}` (+ the `ryu-docs` repo), `crates/{ghost-core,ghost-eyes,ghost-hands,shadow-core,ryu-sdk,ryu-sdk-ffi,ryu-sdk-napi}`, `packages/{sdk,create-ryu-app,client,headroom}` |
 | **AGPL-3.0** | `apps/gateway` |
 | **MIT** | `apps/raycast` |
 | **Proprietary** | `apps/{desktop,web,server,native,island,command,storyboard,extension}`, `packages/{ui,auth,db,api,email,settings,env,config,command}` |

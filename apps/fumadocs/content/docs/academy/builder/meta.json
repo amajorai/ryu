@@ -1,5 +1,0 @@
-{
-  "title": "Building on Ryu",
-  "icon": "Code",
-  "pages": ["index", "runnables", "sdk-quickstart", "plugins-and-apps", "publishing"]
-}

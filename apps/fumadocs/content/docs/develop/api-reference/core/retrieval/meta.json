@@ -1,8 +1,0 @@
-{
-  "title": "Retrieval",
-  "description": "Chunk indexing + search.",
-  "pages": [
-    "index_retrieval_chunk",
-    "search_retrieval"
-  ]
-}

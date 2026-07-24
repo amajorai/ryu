@@ -187,8 +187,8 @@ Or run it yourself:
 > **License.** The Gateway is **AGPL-3.0**: host a *modified* Gateway and §13
 > obliges you to offer those changes to its users. Core is Apache-2.0.
 
-The documentation site (`apps/fumadocs`) is a Next.js app and deploys to Vercel
-in one click — [![Deploy docs to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/amajorai/ryu&root-directory=apps/fumadocs&project-name=ryu-docs). Vercel is serverless and cannot host the long-running Core/Gateway; use a container host above for the backend.
+The documentation site lives in its own repo, [`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs)
+(Next.js), and deploys to Vercel in one click — [![Deploy docs to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/amajorai/ryu-docs&project-name=ryu-docs). Vercel is serverless and cannot host the long-running Core/Gateway; use a container host above for the backend.
 
 ## Batteries-included defaults (all swappable)
 
@@ -226,7 +226,6 @@ rebrand. See [`TRADEMARK.md`](./TRADEMARK.md). Build instructions:
 | [`apps/gateway`](./apps/gateway) | The LLM control layer: routing, firewall, cache, evals, audit (Rust, :7981) |
 | [`apps/cli`](./apps/cli) | Terminal client for Core (Rust/ratatui) |
 | [`apps/tui`](./apps/tui) | Bun/OpenTUI terminal client — pure HTTP/SSE to a running Core node |
-| [`apps/fumadocs`](./apps/fumadocs) | Documentation site + interactive OpenAPI (Next/Fumadocs) |
 | [`apps/mcp`](./apps/mcp) | MCP server exposing a running Core node to any MCP host (TS) |
 | [`apps/skills`](./apps/skills) | SKILL.md agent skills that teach coding agents to set up and drive Ryu |
 | [`apps/plugins`](./apps/plugins) | Claude Code / Codex plugin definitions for Ryu |

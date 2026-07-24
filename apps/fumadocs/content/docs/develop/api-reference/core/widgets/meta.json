@@ -1,9 +1,0 @@
-{
-  "title": "Widgets",
-  "description": "Widgets API endpoints.",
-  "pages": [
-    "widget_follow_up",
-    "widget_state",
-    "widget_call_tool"
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "title": "Research",
-  "description": "Research API endpoints.",
-  "pages": [
-    "research_status",
-    "research_init_workspace",
-    "research_ledger"
-  ]
-}

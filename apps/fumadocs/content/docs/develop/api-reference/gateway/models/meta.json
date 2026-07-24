@@ -1,8 +1,0 @@
-{
-  "title": "Models",
-  "description": "Available models and configured modalities.",
-  "pages": [
-    "listModalities",
-    "listModels"
-  ]
-}

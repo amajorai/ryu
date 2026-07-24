@@ -1,8 +1,0 @@
-{
-  "title": "Support",
-  "description": "Support API endpoints.",
-  "pages": [
-    "support_access_audit",
-    "support_access_diagnostics"
-  ]
-}
