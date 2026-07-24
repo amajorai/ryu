@@ -1,6 +1,6 @@
 [package]
 name = "ryu-shadow-core"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 description = "Screen/audio/input capture, OCR, and semantic search engine for Shadow."
 license = "Apache-2.0"

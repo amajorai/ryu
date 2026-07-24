@@ -1,6 +1,6 @@
 [package]
 name = "ryu-usage"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "Per-agent subscription usage-metering primitive for Ryu: reads the OAuth token a subscription CLI (Claude Code / Codex) already stored on this machine and calls the vendor's own usage endpoint to return normalized rolling rate-limit windows (5h session + weekly), à la CodexBar / openusage. NEVER refreshes the token (single-use refresh tokens rotate; refreshing would log the real CLI out). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the `GET /api/agents/:id/usage` route is mounted unconditionally). Its one kernel coupling — the Ryu-isolated `CODEX_HOME` (profile/relocation-aware `~/.ryu` data dir) — inverts through the narrow `UsageHost` trait so this crate has ZERO dependency on apps/core. Feeds the gateway budget cross-tier picture later."

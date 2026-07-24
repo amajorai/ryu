@@ -1,6 +1,6 @@
 [package]
 name = "ryu-realtime"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "Room-keyed realtime fan-out primitive for Ryu: a transport-agnostic RoomRegistry mapping room_id -> a per-room tokio actor that owns isolated ephemeral state (presence map + idle clock) behind a command channel, with a bounded broadcast sender for fan-out. Rooms are keyed by id, hibernate when idle, and rehydrate on next join; membership is an RAII guard whose Drop reaps presence. Exposes a typed event contract (the Frame enum over Events/Presence/DocSync channels, broadcast via publish_event, subscribe returning a droppable receiver = unsubscribe handle). An extracted Core capability crate consumed as a NON-optional in-process path dependency (the chat fan-out path drives it directly, never over IPC). ZERO dependency on apps/core."

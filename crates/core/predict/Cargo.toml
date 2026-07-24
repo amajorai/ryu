@@ -1,6 +1,6 @@
 [package]
 name = "ryu-predict"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "Predict: the system-wide predictive-typing brain for Ryu — an extracted Core capability crate owning the completion engine (config, per-app allowlist, secure-field denylist, prompt assembly, reply cleanup) and the `/api/predict/*` HTTP surface. In-process default; Core consumes it as a NON-optional path dependency. Every cross-cutting call it needs (preferences, the agent's bound model, the default model id, the Gateway side-model call, and the plugin-owned enabled flag) is inverted through the `PredictHost` trait so this crate has ZERO dependency on apps/core. The process-global on/off flag (`predict::set_enabled` / boot seeding) stays in the kernel — it is the built-in Predict plugin's switch."

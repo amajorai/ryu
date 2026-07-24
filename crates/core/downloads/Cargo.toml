@@ -1,6 +1,6 @@
 [package]
 name = "ryu-downloads"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "The DownloadCenter artifact-fetch primitive for Ryu: one process-wide registry that owns the lifecycle of every artifact Ryu pulls over the network (chat/embedding GGUFs, engine + agent binaries, tools, skills). Stream-to-`.part` with HTTP Range + `If-Range` resume, bounded retry, checksum-verify + atomic rename, pause/resume/cancel, live SSE progress over a broadcast channel, and a durable history log. An extracted Core capability crate, in-process by default and consumed as a NON-optional path dependency (the sidecar loader, model catalog, engines, and marketplace install all fetch through it — a primitive by reuse, not swap). The three kernel couplings — the `~/.ryu` data dir, the version-store checksum-skip, and Hugging Face bearer auth — invert through the narrow `DownloadsHost` trait so this crate has ZERO dependency on apps/core."

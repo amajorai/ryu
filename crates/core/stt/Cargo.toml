@@ -1,6 +1,6 @@
 [package]
 name = "ryu-stt"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "Speech-to-text (STT) modality primitive for Ryu: `transcribe(audio) -> text` with a swappable engine seam (in-process parakeet ONNX by default; whisper.cpp and Gateway-routed cloud Whisper as HTTP proxies). An extracted Core capability crate — in-process by default and consumed as a NON-optional path dependency (the voice/meetings/hardware data paths reach it unconditionally). The parakeet ONNX inference is the genuinely in-process hot path (feature `voice-parakeet`); whisper + gateway engines are thin HTTP proxies. Host couplings the crate cannot own (whisper base-url, Gateway url/bearer, the parakeet model dir) are injected via the narrow `SttHost` trait, so the crate has ZERO dependency on apps/core."

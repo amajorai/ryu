@@ -1,6 +1,6 @@
 [package]
 name = "ryu-search"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "Conversation search primitive for Ryu: a sqlite-vec (`vec0`) semantic KNN index plus a contentless FTS5 lexical index over past chat messages, storing vectors/inverted-index + metadata only (never message text — the caller re-reads and decrypts snippets from `conversations.db`). An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the ConversationStore reaches it unconditionally). The embedder is injected via the narrow `SearchEmbedder` trait, so the crate has ZERO dependency on apps/core — the registry-driven embedder choice and the default db paths stay Core-side (`apps/core/src/search_host.rs`)."

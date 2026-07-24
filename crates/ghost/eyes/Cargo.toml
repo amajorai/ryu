@@ -1,6 +1,6 @@
 [package]
 name = "ghost-eyes"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 description = "Screen perception (AX tree, screen capture, input monitoring) for Ghost — cross-platform."
 license = "Apache-2.0"
@@ -10,7 +10,7 @@ repository = "https://github.com/amajorai/ghost"
 name = "ghost_eyes"
 
 [dependencies]
-ghost-permissions = { path = "../permissions", version = "0.0.8" }
+ghost-permissions = { path = "../permissions", version = "0.0.9" }
 anyhow = "1"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-mesh"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 license = "Apache-2.0"
 description = "Mesh read/shape primitive for Ryu (#478 P5–P7): the read side of the optional Tailscale/Headscale plane. Owns `RYU_MESH_ENABLED` gating, the `GET /api/mesh/status` (Contract 6) shaping from `tailscale status --json`, the fail-closed shared-mesh-token bearer resolution for `GET /api/mesh/peers` (the node-admittance security model this crate anchors — `enforce_remote_auth` stays in Core and consults `is_insecure_auth_token_placeholder` here), and the Funnel helpers P6 consumes for public webhook ingress. An extracted Core capability crate; in-process by default and consumed as a NON-optional path dependency (the fail-closed startup gate reads `is_enabled()`/`is_insecure_auth_token_placeholder` unconditionally). The one kernel coupling — the `tailscale`/`tailscaled` process shell-outs (the 'what runs' half of the mesh, a Sidecar in Core) — inverts through the narrow `MeshHost` trait so this crate has ZERO dependency on apps/core."
