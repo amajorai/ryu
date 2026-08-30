@@ -24,6 +24,14 @@ fn ack_state_key(node_id: &str) -> String {
     format!("__notify_ack_{node_id}")
 }
 
+/// Whether a run still carries the durable state of a NotifyUser gate. The
+/// executor uses this alongside the current workflow definition so editing a
+/// workflow while a run is paused cannot turn the pending approval into a
+/// directly resumable gate.
+pub(crate) fn has_ack_state(run: &WorkflowRun, node_id: &str) -> bool {
+    run.state.contains_key(&ack_state_key(node_id))
+}
+
 /// Persisted ack bookkeeping for one NotifyUser HITL gate. Serialized as a JSON
 /// string into `run.state` so it is checkpointed with the run.
 #[derive(Debug, Clone, Serialize, Deserialize)]

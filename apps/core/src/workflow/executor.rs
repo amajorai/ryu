@@ -190,11 +190,12 @@ async fn resume_run_inner(
     let workflow = store::load_workflow(&run.workflow_id)
         .map_err(|_| format!("workflow '{}' not found", run.workflow_id))?;
 
-    if !allow_notify_ack
-        && workflow.nodes.iter().any(|node| {
-            node.id == gate_node_id && matches!(&node.kind, NodeKind::NotifyUser { .. })
-        })
-    {
+    let definition_is_notify_gate = workflow
+        .nodes
+        .iter()
+        .any(|node| node.id == gate_node_id && matches!(&node.kind, NodeKind::NotifyUser { .. }));
+    let persisted_is_notify_gate = super::notify_user::has_ack_state(&run, &gate_node_id);
+    if !allow_notify_ack && (definition_is_notify_gate || persisted_is_notify_gate) {
         return Err(
             "run is awaiting member acknowledgements; acknowledge a notification instead"
                 .to_string(),
