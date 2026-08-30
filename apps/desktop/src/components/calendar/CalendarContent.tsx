@@ -374,7 +374,11 @@ export function CalendarContent({
 						/>
 					)}
 					{view === "agenda" && (
-						<AgendaView days={days} eventsByDay={eventsByDay} />
+						<AgendaView
+							days={days}
+							eventsByDay={eventsByDay}
+							jobs={visibleJobs}
+						/>
 					)}
 
 					{view !== "agenda" && selectedDay && (

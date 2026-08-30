@@ -443,6 +443,22 @@ export function groupEventsByDay(
 	return map;
 }
 
+/** Group a status-page window by scheduled job while preserving event order. */
+export function groupEventsByJob(
+	events: CalendarEvent[]
+): Map<string, CalendarEvent[]> {
+	const map = new Map<string, CalendarEvent[]>();
+	for (const event of events) {
+		const bucket = map.get(event.jobId);
+		if (bucket) {
+			bucket.push(event);
+		} else {
+			map.set(event.jobId, [event]);
+		}
+	}
+	return map;
+}
+
 /** Convert one calendar day into the status entries used by the Agenda strip. */
 export function buildRunStatusTimelineEntries(
 	dayStart: Date,

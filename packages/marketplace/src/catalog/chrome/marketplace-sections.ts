@@ -98,7 +98,10 @@ export const MARKETPLACE_BROWSE_KINDS = [
 	{ value: "plugin", label: "Plugins" },
 	{ value: "mcp", label: "MCP" },
 	{ value: "model", label: "Models" },
-	{ value: "agent", label: "Agents" },
+	{
+		value: "agent",
+		label: "Agent Templates",
+	},
 	{ value: "stack_template", label: "Stack Templates" },
 	{ value: "workflow", label: "Workflows" },
 	{ value: "theme", label: "Themes" },
@@ -107,6 +110,16 @@ export const MARKETPLACE_BROWSE_KINDS = [
 	{ value: "output_style", label: "Output Styles" },
 	{ value: "bundle", label: "Bundles" },
 ] as const;
+
+/** Return the user-facing label for a Marketplace Browse kind. Wire values stay
+ * singular and stable; this helper keeps cards, empty states, and command
+ * results from exposing the raw `agent` kind when the listing is a template. */
+export function marketplaceBrowseKindLabel(value: string): string {
+	return (
+		MARKETPLACE_BROWSE_KINDS.find((kind) => kind.value === value)?.label ??
+		value
+	);
+}
 
 /** One canonical Home shelf. Hosts provide cards; this package owns the order,
  * title, empty copy, and the section that receives "See all". For you is a

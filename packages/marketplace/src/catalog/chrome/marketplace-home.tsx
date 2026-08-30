@@ -26,10 +26,12 @@ export type MarketplaceHomeItem = ComponentProps<typeof StoreCatalogCard> & {
 };
 
 export interface MarketplaceHomeShelf {
+	emptyLabel?: string;
 	items: MarketplaceHomeItem[];
 	key: MarketplaceHomeShelfKey;
 	loading?: boolean;
 	onSeeAll?: () => void;
+	title?: string;
 }
 
 export interface MarketplaceHomeRecommendations {
@@ -46,7 +48,9 @@ export interface MarketplaceHomeRecommendations {
 /**
  * Shared Marketplace landing page. Keeping the shelf stack here makes the
  * web/desktop home DOM identical while leaving install, preview, and navigation
- * decisions in the platform adapters.
+ * decisions in the platform adapters. A host may override a shelf's title and
+ * empty copy when its data source has a different user-facing noun, such as the
+ * web's published Agent Templates versus the desktop ACP Agents catalog.
  */
 export default function MarketplaceHome({
 	className,
@@ -102,7 +106,7 @@ function MarketplaceHomeShelfView({ shelf }: { shelf: MarketplaceHomeShelf }) {
 				className="px-0"
 				onOpen={shelf.onSeeAll}
 			>
-				{definition.title}
+				{shelf.title ?? definition.title}
 			</StoreShelfHeading>
 			{shelf.items.length > 0 ? (
 				<StoreCardGrid>
@@ -118,7 +122,7 @@ function MarketplaceHomeShelfView({ shelf }: { shelf: MarketplaceHomeShelf }) {
 					{shelf.loading ? (
 						<Spinner className="size-4" />
 					) : (
-						<span>{definition.emptyLabel}</span>
+						<span>{shelf.emptyLabel ?? definition.emptyLabel}</span>
 					)}
 				</div>
 			)}

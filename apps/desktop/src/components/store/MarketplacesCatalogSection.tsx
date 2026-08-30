@@ -67,8 +67,8 @@ const SOURCE_GROUPS: Array<{
 	},
 	{
 		kind: "agent",
-		label: "Agents",
-		description: "Published agent templates and hosted agent catalogs.",
+		label: "Agent Templates",
+		description: "Published Agent Templates and hosted catalogs.",
 	},
 ];
 

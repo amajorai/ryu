@@ -1,7 +1,7 @@
 // apps/desktop/src/hooks/useCommunityAgents.ts
 //
-// The community shelf of the Store's Agents tab: agents PUBLISHED by other users
-// (instructions + model preference + declared dependencies), as opposed to the
+// The Agent Templates shelf of the Store's Agents tab: customized definitions
+// PUBLISHED by other users (instructions + model preference + declared dependencies), as opposed to the
 // ACP runtimes (Claude Code, Codex, …) that `useAgentsCatalog` browses.
 //
 // It reads two different servers, on purpose:
@@ -106,7 +106,7 @@ export function useCommunityAgents(): UseCommunityAgentsResult {
 		} catch (e) {
 			setAgents([]);
 			setError(
-				e instanceof Error ? e.message : "Couldn't load community agents"
+				e instanceof Error ? e.message : "Couldn't load Agent Templates"
 			);
 		} finally {
 			setLoading(false);

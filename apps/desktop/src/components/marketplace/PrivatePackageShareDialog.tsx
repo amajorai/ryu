@@ -5,6 +5,7 @@ import {
 	Key01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { marketplaceBrowseKindLabel } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Dialog,
@@ -46,13 +47,6 @@ const SHAREABLE_KINDS: MarketplaceKind[] = [
 ];
 
 type ShareAudience = "organization" | "shareable";
-
-function kindLabel(kind: MarketplaceKind): string {
-	return kind
-		.split("_")
-		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-		.join(" ");
-}
 
 export default function PrivatePackageShareDialog({
 	onClose,
@@ -272,7 +266,7 @@ export default function PrivatePackageShareDialog({
 								<span className="font-medium text-sm">Package type</span>
 								<Select
 									items={SHAREABLE_KINDS.map((value) => ({
-										label: kindLabel(value),
+										label: marketplaceBrowseKindLabel(value),
 										value,
 									}))}
 									onValueChange={(value) => {
@@ -291,7 +285,7 @@ export default function PrivatePackageShareDialog({
 									<SelectContent>
 										{SHAREABLE_KINDS.map((value) => (
 											<SelectItem key={value} value={value}>
-												{kindLabel(value)}
+												{marketplaceBrowseKindLabel(value)}
 											</SelectItem>
 										))}
 									</SelectContent>

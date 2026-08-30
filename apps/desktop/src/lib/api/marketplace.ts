@@ -42,9 +42,9 @@ import {
 
 /** The catalog kinds, matching the server's `MarketplaceKind`.
  *
- * `agent` is a user-PUBLISHED agent definition (instructions + model preference
+ * `agent` is a user-PUBLISHED Agent Template (instructions + model preference
  * + declared dependencies), not an ACP runtime like Claude Code — those live in
- * Core's own agent catalog and never reach this client. */
+ * Core's own Agents catalog and never reach this client. */
 export type MarketplaceKind =
 	| "app"
 	| "plugin"

@@ -18,9 +18,10 @@
 // Recommended agents (the flagship) sort first and carry a "Recommended" badge.
 // The flagship `ryu` is locked: it is always installed and cannot be removed.
 //
-// Below the runtimes sits the COMMUNITY shelf (`CommunityAgents.tsx`): agents
-// other users published, browsed from the control plane rather than Core. They
-// are a different species — a configuration someone wrote, not a vendor program —
+// Below the runtimes sits the Agent Templates shelf (`CommunityAgents.tsx`):
+// customized definitions other users published, browsed from the control plane
+// rather than Core. They are a different species — a configuration someone
+// wrote, not a vendor program —
 // so they never mix into the runtime groups, and installing one goes through
 // Core's published-agent install (which strips the privilege-bearing bindings and
 // reports them back) rather than the runtime installer used above.
@@ -566,7 +567,7 @@ export default function AgentsCatalogSection({
 		useAgentsCatalog();
 	const [errorId, setErrorId] = useState<string | null>(null);
 
-	// ── Community agents (published definitions, control plane) ────────────────
+	// ── Agent Templates (published definitions, control plane) ────────────────
 	// A second, independent catalog: it has its own loading/error state and its own
 	// selection, because a marketplace outage must not touch the runtime list above.
 	const community = useCommunityAgents();

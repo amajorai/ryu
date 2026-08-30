@@ -1492,13 +1492,13 @@ export default function AgentEditPage({
 							variant="ghost"
 						>
 							<HugeiconsIcon className="size-4" icon={Rocket01Icon} />
-							Publish to marketplace
+							Publish agent template
 						</Button>
 					</div>
 				) : null}
 				{canPublish ? (
 					<PublishDialog
-						kindLabel="agent"
+						kindLabel="Agent Template"
 						onOpenChange={setPublishOpen}
 						open={publishOpen}
 					/>

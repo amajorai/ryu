@@ -277,9 +277,9 @@ export function PublishDialog({
 						<div className="rounded-2xl bg-secondary/60 p-4 text-sm">
 							<p className="font-medium">Submitted for review</p>
 							<p className="mt-1 text-muted-foreground">
-								<span className="font-mono">{published.id}</span> (
-								{published.kind} {published.version}) is pending moderation.
-								Future releases stay in the linked GitHub repository.
+								<span className="font-mono">{published.id}</span> ({kindLabel}{" "}
+								{published.version}) is pending moderation. Future releases stay
+								in the linked GitHub repository.
 							</p>
 						</div>
 						<DialogFooter>

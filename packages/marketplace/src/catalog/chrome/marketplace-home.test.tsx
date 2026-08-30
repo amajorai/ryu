@@ -81,4 +81,24 @@ describe("MarketplaceHome", () => {
 		expect((html.match(/>For you</g) ?? []).length).toBe(1);
 		expect(html).not.toContain("No featured listings yet.");
 	});
+
+	test("allows a host to name a different source without changing shelf order", () => {
+		const html = renderToStaticMarkup(
+			<MarketplaceHome
+				recommendations={{ data: EMPTY_RECOMMENDATIONS }}
+				shelves={[
+					{
+						emptyLabel: "No agent templates found.",
+						items: [],
+						key: "agents",
+						title: "Agent Templates",
+					},
+				]}
+			/>
+		);
+
+		expect(html).toContain("Agent Templates");
+		expect(html).toContain("No agent templates found.");
+		expect(html).not.toContain(">No agents found.<");
+	});
 });

@@ -27,6 +27,7 @@ import { renderTemplate } from "@ryu/app-host/views";
 import { CommandPalette as SharedCommandPalette } from "@ryu/command/CommandPalette";
 import type { CommandAction, CommandPaletteTab } from "@ryu/command/types";
 import { useHotkey } from "@ryu/hotkeys/react";
+import { marketplaceBrowseKindLabel } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -955,7 +956,9 @@ export function CommandPalette() {
 					title: card.name,
 					value: `${q} marketplace ${card.kind} ${card.id} ${card.description ?? ""} ${card.author ?? ""}`,
 					resultType: "marketplace",
-					trailing: card.pricing ? formatPricingLabel(card.pricing) : card.kind,
+					trailing: card.pricing
+						? formatPricingLabel(card.pricing)
+						: marketplaceBrowseKindLabel(card.kind),
 					icon: Package01Icon,
 					onSelect: () => handleSelectMarketplace(card, q),
 				});

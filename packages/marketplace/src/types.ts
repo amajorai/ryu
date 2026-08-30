@@ -14,8 +14,8 @@
 import { formatMinorCurrency } from "@ryu/ui/lib/number-format.ts";
 
 /** The catalog kinds the money layer covers, matching the server's kind.
- *  `agent` is a user-published agent definition — the one kind whose listing is
- *  a configuration rather than code. */
+ *  `agent` is a user-published Agent Template — a configuration rather than
+ *  executable code. */
 export type MarketplaceKind =
 	| "app"
 	| "plugin"

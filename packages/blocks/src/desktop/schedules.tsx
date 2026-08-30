@@ -676,6 +676,9 @@ export function SchedulesView({
 			workflowsLoading={workflowsLoading}
 		/>
 	);
+	const statusRuns = jobs.flatMap((job) => job.recentRuns ?? []);
+	const statusEndAt = timelineEndAt ?? Date.now();
+	const statusStartAt = statusEndAt - 24 * 60 * 60 * 1000;
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
@@ -700,17 +703,29 @@ export function SchedulesView({
 					</Empty>
 				) : (
 					<>
-						<div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
-							<div>
-								<p className="font-medium text-sm">
-									Run status · last 24 hours
-								</p>
-								<p className="text-muted-foreground text-xs">
-									Green completed, red failed, amber scheduled or waiting.
-								</p>
+						<div className="mb-4 flex flex-col gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
+							<div className="flex flex-wrap items-center justify-between gap-3">
+								<div>
+									<p className="font-medium text-sm">All scheduled jobs</p>
+									<p className="text-muted-foreground text-xs">
+										Run status · last 24 hours · {jobs.length}{" "}
+										{jobs.length === 1 ? "job" : "jobs"} · {statusRuns.length}{" "}
+										{statusRuns.length === 1 ? "run" : "runs"}
+									</p>
+									<p className="text-muted-foreground text-xs">
+										Green completed, red failed, amber scheduled or waiting.
+									</p>
+								</div>
+								<RunStatusTimelineLegend
+									statuses={["success", "failure", "scheduled", "waiting"]}
+								/>
 							</div>
-							<RunStatusTimelineLegend
-								statuses={["success", "failure", "scheduled", "waiting"]}
+							<RunStatusTimeline
+								ariaLabel="All scheduled job run status in the last 24 hours"
+								endAt={statusEndAt}
+								entries={statusRuns}
+								showScale
+								startAt={statusStartAt}
 							/>
 						</div>
 						<div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -719,7 +734,7 @@ export function SchedulesView({
 									job={job}
 									key={job.id}
 									onDelete={onDelete}
-									timelineEndAt={timelineEndAt}
+									timelineEndAt={statusEndAt}
 								/>
 							))}
 						</div>
