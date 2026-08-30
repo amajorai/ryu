@@ -2,19 +2,19 @@
 //!
 //! This is the **multi-language** path: one cdylib, from which `uniffi-bindgen`
 //! emits idiomatic Python / Swift / Kotlin packages (and, via the third-party
-//! `uniffi-bindgen-cs` / `uniffi-bindgen-go`, C# and Go). It sits alongside the
+//! `uniffi-bindgen-cs`, C#). Go uses the hand-written C ABI. It sits alongside the
 //! two existing bindings and wraps the **same** `ryu_sdk::*` functions they do,
 //! so manifest rules, the gateway egress blocklist, and the model/embedding
 //! transport never drift across languages:
 //!
-//! - `crates/ryu-sdk-napi`  — TypeScript/JS (napi-rs; the shipped #439 binding,
+//! - `crates/sdk/napi`  — TypeScript/JS (napi-rs; the shipped binding,
 //!   keeps the streaming closure boundary via `ThreadsafeFunction`).
-//! - `crates/ryu-sdk-ffi`   — raw C-ABI (hand-written; cgo-consumed Go today).
-//! - `crates/ryu-sdk-uniffi` (this) — the generated multi-language path.
+//! - `crates/sdk/ffi`   — raw C-ABI (hand-written; cgo-consumed Go today).
+//! - `crates/sdk/uniffi` (this) — the generated multi-language path.
 //!
 //! ## Scope: the blocking surface + streaming via a callback interface
 //!
-//! UniFFI has no closure type (`crates/ryu-sdk/SPIKE-napi-closure-boundary.md`,
+//! UniFFI has no closure type (`crates/sdk/core/SPIKE-napi-closure-boundary.md`,
 //! section (a)), so the bulk of the surface is **blocking, value-in / value-out**
 //! and maps onto UniFFI's IDL with zero callback machinery. Streaming chat
 //! (`ModelClient::stream`) is the one exception: it is surfaced through the

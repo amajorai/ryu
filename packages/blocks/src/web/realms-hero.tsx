@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { DOCS_URL } from "./data/resources.tsx";
 import { DownloadMenu } from "./download-menu.tsx";
 import {
 	InstallLocalMock,
@@ -34,6 +35,7 @@ import {
 	sectionSubtitleClass,
 } from "./sections.tsx";
 import { StaggerLines } from "./stagger-lines.tsx";
+import { StandaloneServicesSection } from "./standalone-services-section.tsx";
 import StartupPrograms from "./startup-programs.tsx";
 
 const MANAGED_DEPLOYMENT_STEPS = [
@@ -204,15 +206,17 @@ export default function RealmsHero() {
 							separatorClassName="bg-primary-foreground/10 data-vertical:mx-0"
 							size="default"
 						/>
-						<Link
+						<a
 							className={cn(
 								buttonVariants({ variant: "ghost" }),
 								"rounded-full"
 							)}
-							href="/help"
+							href={DOCS_URL}
+							rel="noopener noreferrer"
+							target="_blank"
 						>
 							Documentation
-						</Link>
+						</a>
 					</div>
 				</div>
 
@@ -375,6 +379,7 @@ export default function RealmsHero() {
 			</section>
 
 			<ManagedDeployment />
+			<StandaloneServicesSection />
 
 			<section>
 				<div className="mx-auto flex max-w-6xl flex-col items-center px-6 py-20 text-center md:py-28">

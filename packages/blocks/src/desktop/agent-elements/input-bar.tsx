@@ -157,6 +157,13 @@ export interface ComposerDraftControls {
 	onSave: (text: string) => void;
 }
 
+/** Explicit promotion action for a temporary chat that is currently in memory. */
+export interface TemporaryChatSaveControls {
+	disabled?: boolean;
+	onSave: () => void;
+	saving?: boolean;
+}
+
 export interface AttachedFile {
 	filename: string;
 	id: string;
@@ -198,8 +205,6 @@ export interface InputBarProps {
 		deletions: number;
 	};
 	className?: string;
-	/** Remove the composer field's card chrome when embedded in voice mode. */
-	seamless?: boolean;
 
 	/**
 	 * Responsive compact composer used once a conversation has history. A plain
@@ -263,7 +268,7 @@ export interface InputBarProps {
 	expandComposer?: boolean;
 
 	/**
-	 * Ghost (temporary/incognito) chat active. When true, the composer box gets a
+	 * Temporary (incognito) chat active. When true, the composer box gets a
 	 * persistent violet ring so it's visually obvious the current thread isn't
 	 * being saved — mirroring the temporary-chat cue in ChatGPT / Grok.
 	 */
@@ -273,7 +278,7 @@ export interface InputBarProps {
 	 * Temporary-chat toggle for the composer "+" dropdown. When provided, the
 	 * dropdown gains a "Temporary chat" row that flips {@link ghost}. Separate from
 	 * `ghost` (which only drives the violet ring) so the host can hide the toggle
-	 * — e.g. once a thread has messages — while still showing the active-ghost ring.
+	 * — e.g. once a thread has messages — while still showing the temporary ring.
 	 */
 	ghostControls?: GhostControls;
 
@@ -365,6 +370,8 @@ export interface InputBarProps {
 	queueBar?: QueueBarProps;
 	/** Content rendered on the right of the toolbar, before the send button. */
 	rightActions?: React.ReactNode;
+	/** Remove the composer field's card chrome when embedded in voice mode. */
+	seamless?: boolean;
 	status: ChatStatus;
 	suggestions?:
 		| SuggestionItem[]
@@ -373,6 +380,8 @@ export interface InputBarProps {
 				className?: string;
 				itemClassName?: string;
 		  };
+	/** Save the client-held temporary transcript as a normal conversation. */
+	temporaryChatSaveControls?: TemporaryChatSaveControls;
 	/** Live todo list and file edits derived from the current user turn. */
 	turnProgress?: InputBarTurnProgress;
 
@@ -541,6 +550,7 @@ export const InputBar = memo(function InputBar({
 	onComposerMenuSelect,
 	onHeightChange,
 	onTextareaKeyDown,
+	temporaryChatSaveControls,
 }: InputBarProps) {
 	const [internalInput, setInternalInput] = useState("");
 	const [isInfoBarOpen, setIsInfoBarOpen] = useState(true);
@@ -935,14 +945,39 @@ export const InputBar = memo(function InputBar({
 		</div>
 	) : null;
 
-	// Ghost (temporary) chat: a top info-bar strip signalling the thread isn't being
+	// Temporary chat: a top info-bar strip signalling the thread isn't being
 	// saved. Neutral styling (no bg/border of its own) so it shows the frame color
 	// like the other bars — the ghost icon + copy carry the signal.
 	const ghostBarNode = ghost ? (
-		<div className="flex h-[34px] items-center gap-2 rounded-t-2xl px-3 text-[12px] text-muted-foreground">
+		<div className="flex h-[34px] min-w-0 items-center gap-2 rounded-t-2xl px-3 text-[12px] text-muted-foreground">
 			<IconGhost2 className="size-3.5 shrink-0" />
-			<span className="font-medium text-foreground">Ghost chat</span>
-			<span className="truncate">Messages in this chat won't be saved.</span>
+			<span className="shrink-0 font-medium text-foreground">
+				Temporary chat
+			</span>
+			<span className="min-w-0 flex-1 truncate">
+				Messages in this chat won't be saved.
+			</span>
+			{temporaryChatSaveControls ? (
+				<Button
+					aria-label={
+						temporaryChatSaveControls.saving
+							? "Saving temporary chat"
+							: "Save temporary chat"
+					}
+					className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+					disabled={
+						temporaryChatSaveControls.disabled ||
+						temporaryChatSaveControls.saving
+					}
+					onClick={temporaryChatSaveControls.onSave}
+					title="Save this temporary chat to your history"
+					type="button"
+					variant="ghost"
+				>
+					<IconBookmark className="size-3.5" />
+					{temporaryChatSaveControls.saving ? "Saving…" : "Save chat"}
+				</Button>
+			) : null}
 		</div>
 	) : null;
 
@@ -1546,7 +1581,8 @@ export const InputBar = memo(function InputBar({
 				"composer-container relative cursor-text",
 				seamless ? "bg-transparent" : "rounded-2xl bg-muted",
 				expanded && !seamless && "border border-border/70 shadow-sm",
-				isDragOver && "ring-2 ring-primary ring-inset"
+				isDragOver && "ring-2 ring-primary ring-inset",
+				ghost && "ring-1 ring-violet-500/70"
 			)}
 			initial={false}
 			onClick={handleContainerClick}
@@ -1600,7 +1636,10 @@ export const InputBar = memo(function InputBar({
 						>
 							<div className="overflow-hidden">
 								{showContextItems && (
-									<div className="flex flex-wrap items-center gap-[6px] px-2.5 pt-2.5 pb-0.5">
+									<div
+										className="flex flex-wrap items-center gap-[6px] px-2.5 pt-2.5 pb-0.5"
+										data-slot="composer-attachments"
+									>
 										{attachedImages.map((img) => (
 											<FileAttachment
 												display={imageDisplayMode}
@@ -1801,7 +1840,7 @@ export const InputBar = memo(function InputBar({
 						// (distinct from the input box), so the bars — which carry no bg of
 						// their own — show this color, and the sliver at the input box's
 						// rounded corners is the same color as the bars (seamless).
-						!seamless && (shouldShowInfoBar || goalBar || workspaceBar)
+						!seamless && (shouldShowInfoBar || goalBar || workspaceBar || ghost)
 							? "rounded-2xl bg-card"
 							: null
 					)}

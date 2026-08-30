@@ -54,7 +54,7 @@ if (process.platform === "win32") {
 
 // Dev-mode sidecar-app ergonomics: the out-of-process sidecar-app bins (ryu-mail
 // + the wave 2-4 conversions: teams/research/clips/finetune/quests/healing/
-// meetings/recipes/dashboards/monitors) and the browser (electron) app aren't
+// meetings/recipes/dashboards/monitors/anydoc) and the browser (electron) app aren't
 // auto-built/downloaded in dev the way ryu-core is, so enabling any of them would
 // fail to spawn. Wire them all up here, best-effort — a failure warns but never
 // blocks Core. Core inherits the RYU_*_BIN overrides via env, which the kind:local
@@ -89,6 +89,7 @@ const sidecarBins = [
 	"feedback-board",
 	"expenses",
 	"subtitles",
+	"anydoc",
 ];
 
 // Build ALL sidecar bins in a SINGLE cargo invocation so the shared dependency

@@ -1022,10 +1022,8 @@ mod tests {
         assert_eq!(d.approved.len(), 2);
 
         // The capability is deliberately reusable by another first-party consumer.
-        let consumer = validate_grants_for(
-            Some("@ryu/feedback-board"),
-            &scopes(&["blueprint:review"]),
-        );
+        let consumer =
+            validate_grants_for(Some("@ryu/feedback-board"), &scopes(&["blueprint:review"]));
         assert!(consumer.all_approved(), "denied: {:?}", consumer.denied);
     }
 

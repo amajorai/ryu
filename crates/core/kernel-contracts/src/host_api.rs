@@ -52,7 +52,7 @@ use serde::Serialize;
 /// `1.y` (y ≥ x) kernel unchanged. The `ryu-plugin-ready` handshake carries this
 /// value as `hostApiVersion`; the host accepts a missing value (legacy) this
 /// major and only annotates it (no rejection).
-pub const HOST_API_VERSION: &str = "1.8.0";
+pub const HOST_API_VERSION: &str = "1.9.0";
 
 /// One method in the host↔plugin RPC surface — the row type of the single-sourced
 /// `method → capability → grant` table.
@@ -95,7 +95,7 @@ const fn m(
 }
 
 /// The canonical host-API method table. The union of the TS app host's
-/// `METHOD_CAPABILITY` (137 methods) and the Rust bridge's `view.action`
+/// `METHOD_CAPABILITY` (138 methods) and the Rust bridge's `view.action`
 /// (Rust-only). Serialised to `schemas/host-api.json` for the TS host to consume.
 pub const HOST_API_METHODS: &[HostApiMethod] = &[
     // Local browser/native host capabilities. These rows are intentionally
@@ -779,6 +779,17 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     ),
     m(
         "workflows.schedules",
+        "workflows.catalogs",
+        Some("workflows:catalogs"),
+        false,
+        true,
+    ),
+    // The scoped organization roster behind the NotifyUser workflow recipient
+    // picker. It is read-only and carries the same workflows:catalogs grant as
+    // the other node-config pickers; Core still authorizes and re-validates the
+    // final member set when the workflow runs.
+    m(
+        "workflows.notifyTargets",
         "workflows.catalogs",
         Some("workflows:catalogs"),
         false,

@@ -100,7 +100,12 @@ function toInput(agent: Agent, patch: Partial<AgentInput>): AgentInput {
  * agent configured before organization memory existed never silently gains
  * organization-wide recall.
  */
-const DEFAULT_MEMORY_LEVELS: MemoryScope[] = ["user", "node", "project"];
+const DEFAULT_MEMORY_LEVELS: MemoryScope[] = [
+	"agent",
+	"user",
+	"node",
+	"project",
+];
 
 /**
  * Compact cross-app access editor for a selected agent: Readable Spaces +
@@ -241,8 +246,8 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 	/**
 	 * Toggle one memory scope level for this agent.
 	 *
-	 * An EMPTY list is not "none" — Core reads it as the three personal levels
-	 * (user/node/project), the back-compat default for agents configured before
+	 * An EMPTY list is not "none" — Core reads it as the four personal levels
+	 * (agent/user/node/project), the back-compat default for agents configured before
 	 * levels existed. So unchecking everything restores that default rather than
 	 * cutting the agent off from memory, and `org` is the one level that only ever
 	 * applies when explicitly checked.
@@ -367,9 +372,9 @@ export function AgentAccessPanel({ agentId, target }: AgentAccessPanelProps) {
 					<span className="font-medium text-sm">Memory levels</span>
 					<p className="text-muted-foreground text-xs">
 						Which scopes of long-term memory this agent may recall from. Leave
-						all unchecked for the default (user, node and project). Organization
-						memory is shared with everyone in your org, so it is only ever
-						recalled when you check it here.
+						all unchecked for the default (agent, user, node and project).
+						Organization memory is shared with everyone in your org, so it is
+						only ever recalled when you check it here.
 					</p>
 					<div className="flex flex-col gap-2">
 						{MEMORY_SCOPES.map((level) => {

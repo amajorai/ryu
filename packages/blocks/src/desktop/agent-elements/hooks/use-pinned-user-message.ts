@@ -45,9 +45,10 @@ const PINNED_BAR_SLOT = '[data-slot="pinned-user-message-bar"]';
 
 /**
  * Tracks which user message should appear in the sticky pin bar while scrolling
- * through a long assistant reply (Cursor-style). Returns the message to pin when
- * its bubble has scrolled above the viewport top; clears when it scrolls back
- * into view or when a newer turn's user message takes over.
+ * upward through a long assistant reply (Cursor-style). Returns the message to
+ * pin when its bubble has scrolled above the viewport top; the caller hides the
+ * bar while the reader scrolls down, matching the direction-aware chrome in
+ * common messaging apps.
  */
 export function usePinnedUserMessage({
 	enabled,
@@ -63,10 +64,14 @@ export function usePinnedUserMessage({
 	pinReleaseSlack?: number;
 }) {
 	const [pinnedId, setPinnedId] = useState<string | null>(null);
+	const [isScrollingUp, setIsScrollingUp] = useState(false);
 	// Mirrors `pinnedId` so the measuring pass can read the current election
 	// without listing it as an effect dependency (which would re-register the
 	// scroll listener on every pin change).
 	const pinnedIdRef = useRef<string | null>(null);
+	const isScrollingUpRef = useRef(false);
+	const scrollIntentRef = useRef<"down" | "up" | null>(null);
+	const touchYRef = useRef<number | null>(null);
 	const anchorRefs = useRef(new Map<string, HTMLElement>());
 
 	const registerAnchor = useCallback(
@@ -97,11 +102,23 @@ export function usePinnedUserMessage({
 			) ?? null
 		);
 	}, [scrollerRef]);
+	const setScrollDirection = useCallback((direction: "down" | "up") => {
+		const nextIsScrollingUp = direction === "up";
+		if (isScrollingUpRef.current === nextIsScrollingUp) {
+			return;
+		}
+		isScrollingUpRef.current = nextIsScrollingUp;
+		setIsScrollingUp(nextIsScrollingUp);
+	}, []);
 
 	useEffect(() => {
 		if (!enabled) {
 			pinnedIdRef.current = null;
+			isScrollingUpRef.current = false;
+			scrollIntentRef.current = null;
+			touchYRef.current = null;
 			setPinnedId(null);
+			setIsScrollingUp(false);
 			return;
 		}
 
@@ -109,8 +126,24 @@ export function usePinnedUserMessage({
 		if (!viewport) {
 			return;
 		}
+		isScrollingUpRef.current = false;
+		scrollIntentRef.current = null;
+		setIsScrollingUp(false);
+
+		const setIntentFromDelta = (delta: number) => {
+			if (delta !== 0) {
+				const direction = delta < 0 ? "up" : "down";
+				scrollIntentRef.current = direction;
+				setScrollDirection(direction);
+			}
+		};
 
 		const update = () => {
+			const intent = scrollIntentRef.current;
+			if (intent) {
+				setScrollDirection(intent);
+				scrollIntentRef.current = null;
+			}
 			const electTop = viewport.getBoundingClientRect().top + pinThreshold;
 			// Hysteresis: the already-elected anchor keeps its pin until it clears
 			// the line by more than the bar's own height, so the bar can never
@@ -151,15 +184,59 @@ export function usePinnedUserMessage({
 		// "Maximum update depth exceeded".
 		const frame = requestAnimationFrame(update);
 		viewport.addEventListener("scroll", update, { passive: true });
+		const onWheel = (event: WheelEvent) => {
+			setIntentFromDelta(event.deltaY);
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+				setIntentFromDelta(-1);
+				return;
+			}
+			if (["ArrowDown", "PageDown", "End"].includes(event.key)) {
+				setIntentFromDelta(1);
+			}
+		};
+		const onTouchStart = (event: TouchEvent) => {
+			touchYRef.current = event.touches[0]?.clientY ?? null;
+		};
+		const onTouchMove = (event: TouchEvent) => {
+			const currentY = event.touches[0]?.clientY;
+			const previousY = touchYRef.current;
+			if (currentY === undefined || previousY === null) {
+				return;
+			}
+			setIntentFromDelta(previousY - currentY);
+			touchYRef.current = currentY;
+		};
+		const onTouchEnd = () => {
+			touchYRef.current = null;
+		};
+		viewport.addEventListener("wheel", onWheel, { passive: true });
+		viewport.addEventListener("keydown", onKeyDown);
+		viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+		viewport.addEventListener("touchmove", onTouchMove, { passive: true });
+		viewport.addEventListener("touchend", onTouchEnd, { passive: true });
 		const ro = new ResizeObserver(update);
 		ro.observe(viewport);
 
 		return () => {
 			cancelAnimationFrame(frame);
 			viewport.removeEventListener("scroll", update);
+			viewport.removeEventListener("wheel", onWheel);
+			viewport.removeEventListener("keydown", onKeyDown);
+			viewport.removeEventListener("touchstart", onTouchStart);
+			viewport.removeEventListener("touchmove", onTouchMove);
+			viewport.removeEventListener("touchend", onTouchEnd);
 			ro.disconnect();
 		};
-	}, [enabled, userMessages, getViewport, pinThreshold, pinReleaseSlack]);
+	}, [
+		enabled,
+		getViewport,
+		pinReleaseSlack,
+		pinThreshold,
+		setScrollDirection,
+		userMessages,
+	]);
 
 	const scrollToPinned = useCallback(() => {
 		if (!pinnedId) {
@@ -169,5 +246,11 @@ export function usePinnedUserMessage({
 		el?.scrollIntoView({ behavior: "smooth", block: "start" });
 	}, [pinnedId]);
 
-	return { pinnedMessage, registerAnchor, scrollToPinned };
+	return {
+		isScrollingUp,
+		pinnedMessage,
+		registerAnchor,
+		scrollToPinned,
+		setScrollDirection,
+	};
 }

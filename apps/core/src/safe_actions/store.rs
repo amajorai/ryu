@@ -712,7 +712,10 @@ pub fn sanitize_error(error: &anyhow::Error) -> String {
     // Keep only a correlation hash in durable receipts; the live Core log remains
     // the place for operator diagnostics.
     let digest = format!("{:x}", Sha256::digest(error.to_string().as_bytes()));
-    format!("tool execution did not complete (detail hash {})", &digest[..12])
+    format!(
+        "tool execution did not complete (detail hash {})",
+        &digest[..12]
+    )
 }
 
 fn hydrate_policy_bindings(conn: &Connection, mut record: PolicyRecord) -> Result<PolicyRecord> {

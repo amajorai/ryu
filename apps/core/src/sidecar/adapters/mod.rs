@@ -17,9 +17,13 @@ use crate::registry::ProviderRegistry;
 use crate::ryu_platform::RyuResponseMode;
 use crate::server::conversations::{ConversationStore, MessageSearchHit, Tenancy};
 use crate::server::memory::{
-    MemoryCategory, MemoryScope, MemoryStore, NewMemory, DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
+    MemoryCategory, MemoryScope, MemoryStore, MemoryVisibility, NewMemory,
+    DEFAULT_SHORT_TERM_LIMIT, LOCAL_USER,
 };
-use crate::server::retrieval::{ChunkSource, RetrievalOptions, RetrievalStore, ScoredChunk};
+use crate::server::retrieval::{
+    ChunkSource, MemoryGraph, MemoryGraphDocument, MemoryGraphQuery, RetrievalOptions,
+    RetrievalStore, ScoredChunk,
+};
 use crate::sidecar::active_engine::{is_local_engine, local_engine_base_url};
 use crate::sidecar::mcp::McpRegistry;
 use crate::sidecar::untrusted;
@@ -3286,9 +3290,17 @@ fn infer_new_memory(content: &str, project_id: Option<&str>, agent_id: Option<&s
     } else {
         MemoryCategory::UserFact
     };
-    let (scope, scope_id) = match project_id.filter(|p| !p.trim().is_empty()) {
-        Some(p) => (MemoryScope::Project, Some(p.to_string())),
-        None => (MemoryScope::User, None),
+    // Sensitive facts are user-scoped in this release. Keep the automatic capture
+    // usable when a user has opted in by avoiding a project-scoped row, even if the
+    // turn also has a working-folder project.
+    let sensitive = crate::server::memory::detect_sensitive_topics(content);
+    let (scope, scope_id) = if !sensitive.is_empty() {
+        (MemoryScope::User, None)
+    } else {
+        match project_id.filter(|p| !p.trim().is_empty()) {
+            Some(p) => (MemoryScope::Project, Some(p.to_string())),
+            None => (MemoryScope::User, None),
+        }
     };
     NewMemory {
         content: content.to_string(),
@@ -3340,11 +3352,53 @@ async fn assemble_long_term_context(
     agent_id: Option<&str>,
     limit: usize,
 ) -> LongTermMemoryContext {
+    assemble_long_term_context_for_user(
+        memory,
+        enabled,
+        LOCAL_USER,
+        agent_id,
+        None,
+        &[],
+        MemoryVisibility::unrestricted(),
+        limit,
+        true,
+    )
+    .await
+}
+
+/// Build the recency block for the server-resolved owner and sensitive-topic
+/// consent of the current turn. The legacy wrapper above remains for pure tests
+/// and callers on an unbound personal node.
+async fn assemble_long_term_context_for_user(
+    memory: &MemoryStore,
+    enabled: bool,
+    user_id: &str,
+    agent_id: Option<&str>,
+    project_id: Option<&str>,
+    read_levels: &[String],
+    visibility: MemoryVisibility<'_>,
+    limit: usize,
+    include_sensitive: bool,
+) -> LongTermMemoryContext {
     if !enabled {
         return LongTermMemoryContext::default();
     }
-    let scope = long_term_agent_scope(agent_id);
-    let entries = match memory.recall(LOCAL_USER, &scope, limit).await {
+    let parsed_levels = read_levels
+        .iter()
+        .map(|level| MemoryScope::from_str(level))
+        .collect::<Vec<_>>();
+    let entries = match memory
+        .recall_visible_scoped_for_agent(
+            user_id,
+            &parsed_levels,
+            agent_id,
+            project_id,
+            visibility,
+            limit,
+            include_sensitive,
+        )
+        .await
+    {
         Ok(e) => e,
         Err(e) => {
             tracing::warn!("failed to recall long-term memory: {e:#}");
@@ -3441,6 +3495,7 @@ const AUTO_RECALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// backlog cannot make the (already timeout-wrapped) backfill unbounded; facts
 /// beyond this are picked up on later turns (newest are enumerated first).
 const MEMORY_BACKFILL_LIMIT: usize = 500;
+const MEMORY_BACKFILL_PAGE_SIZE: usize = 128;
 
 /// Resolved auto-recall config threaded into `route_chat_stream`. `None` (the
 /// param is `Option<AutoRecallConfig>`) means the feature is disabled for this
@@ -3457,8 +3512,9 @@ pub struct AutoRecallConfig {
     /// past-chat set (deduped by message id). When `false`, no FTS work is done.
     pub fts_enabled: bool,
     /// Memory scope levels the active agent may recall from (subset of
-    /// `["user", "node", "project"]`). **Empty** means all three levels (the
-    /// back-compat default for an unconfigured agent). Resolved from the agent's
+    /// `["agent", "user", "node", "project", "org"]`). **Empty** means all personal
+    /// levels (the back-compat default for an unconfigured agent); organization memory
+    /// must be explicitly named. Resolved from the agent's
     /// `MemorySlot.read_levels` at the call site.
     pub read_levels: Vec<String>,
     /// Space IDs the active agent may inject into chat, from its
@@ -3480,6 +3536,10 @@ pub struct AutoRecallConfig {
     /// owner's context; programmatic turns leave this unset and retain the
     /// conversation-owner fallback below.
     pub caller_user_id: Option<String>,
+    /// Active agent id used to resolve `agent`-scoped memory and its graph facet.
+    pub agent_id: Option<String>,
+    /// Server-resolved per-user consent for special-category memory.
+    pub include_sensitive_topics: bool,
 }
 
 /// Resolve the principal used for per-caller auto-recall. Interactive requests
@@ -3490,6 +3550,14 @@ fn effective_recall_user_id(
     conversation_owner_id: Option<String>,
 ) -> Option<String> {
     caller_user_id.map(str::to_owned).or(conversation_owner_id)
+}
+
+/// A bound node must never use the local-account fallback for an interactive
+/// memory operation. The fallback is valid only for an unbound personal node;
+/// on a shared node an absent verified caller means there is no user partition
+/// to read from or write to.
+fn has_memory_principal(node_bound: bool, caller_user_id: Option<&str>) -> bool {
+    !node_bound || caller_user_id.is_some()
 }
 
 /// Truncate a snippet to `AUTO_RECALL_SNIPPET_CHARS` on a char boundary, adding
@@ -3624,26 +3692,15 @@ fn drop_recency_dupes(
 /// searches.
 ///
 /// FAIL-OPEN + BOUNDED: a per-fact embed failure logs and skips that fact (the
-/// loop never aborts); enumeration is capped at [`MEMORY_BACKFILL_LIMIT`]; the
-/// whole call already runs inside the [`AUTO_RECALL_TIMEOUT`] budget. Never
-/// panics or propagates.
+/// loop never aborts); at most [`MEMORY_BACKFILL_LIMIT`] new facts are embedded
+/// per call, while indexed facts are scanned in pages so an already-indexed head
+/// cannot starve older facts forever. The whole call already runs inside the
+/// [`AUTO_RECALL_TIMEOUT`] budget. Never panics or propagates.
 /// Enumerates facts across ALL scope levels (per-agent/level filtering happens at
 /// retrieve time, using the chunk's denormalized `mem_scope`/`mem_scope_id`), so a
 /// fact recorded at any level becomes searchable once indexed.
 async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore) {
-    let facts = match memory.all_for_backfill(MEMORY_BACKFILL_LIMIT).await {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(
-                "auto-recall: enumerating memory facts failed (skipping backfill): {e:#}"
-            );
-            return;
-        }
-    };
-    if facts.is_empty() {
-        return;
-    }
-    let indexed = match retrieval.indexed_memory_ids().await {
+    let mut indexed = match retrieval.indexed_memory_ids().await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::warn!(
@@ -3653,37 +3710,186 @@ async fn backfill_memory_facts(memory: &MemoryStore, retrieval: &RetrievalStore)
         }
     };
     let node_org = crate::sidecar::control_plane::registered_org().map(|o| o.id);
-    for fact in facts {
-        if indexed.contains(&fact.id) {
-            continue;
-        }
-        // Denormalize the fact's own owner onto its retrieval chunk so the
-        // per-caller filter can gate it. A legacy `'local'`/None owner → shared
-        // (the retrieval memory-owner backfill re-stamps it on the next open).
-        let owner = match (node_org.as_deref(), fact.owner_user_id.as_deref()) {
-            (Some(org), Some(uid)) if uid != crate::server::memory::LOCAL_USER => {
-                crate::server::retrieval::RetrievalOwner::owned(Some(uid), Some(org), None)
-            }
-            _ => crate::server::retrieval::RetrievalOwner::shared(),
-        };
-        if let Err(e) = retrieval
-            .index_memory_chunk(
-                &fact.id,
-                &fact.content,
-                fact.scope.as_str(),
-                fact.scope_id.as_deref(),
-                fact.category.as_str(),
-                fact.importance,
-                owner,
-            )
+    let mut offset = 0usize;
+    let mut newly_indexed = 0usize;
+    loop {
+        let facts = match memory
+            .all_for_backfill_page(MEMORY_BACKFILL_PAGE_SIZE, offset)
             .await
         {
-            tracing::warn!(
-                "auto-recall: indexing memory fact {} failed (skipping): {e:#}",
-                fact.id
-            );
+            Ok(facts) => facts,
+            Err(error) => {
+                tracing::warn!(
+                    "auto-recall: enumerating memory facts failed (skipping backfill): {error:#}"
+                );
+                return;
+            }
+        };
+        if facts.is_empty() {
+            return;
+        }
+        offset += facts.len();
+        for fact in facts {
+            let consent_user = fact
+                .owner_user_id
+                .as_deref()
+                .unwrap_or(crate::server::memory::LOCAL_USER);
+            let sensitive = !fact.sensitive_topics.is_empty();
+            if sensitive
+                && !memory
+                    .include_sensitive_topics(consent_user)
+                    .await
+                    .unwrap_or(false)
+            {
+                // Revocation removes the derived copy while the encrypted source
+                // remains available for an explicit owner review.
+                let _ = retrieval.remove_chunk(&fact.id).await;
+                continue;
+            }
+            // Denormalize the fact's own owner onto its retrieval chunk so the
+            // per-caller filter can gate it. A legacy `'local'`/None owner → shared
+            // (the retrieval memory-owner backfill re-stamps it on the next open).
+            let owner = match (node_org.as_deref(), fact.owner_user_id.as_deref()) {
+                (Some(org), Some(uid)) if uid != crate::server::memory::LOCAL_USER => {
+                    crate::server::retrieval::RetrievalOwner::owned(Some(uid), Some(org), None)
+                }
+                _ => crate::server::retrieval::RetrievalOwner::shared(),
+            };
+            if indexed.contains(&fact.id) {
+                if let Err(error) = retrieval
+                    .update_memory_metadata(
+                        &fact.id,
+                        fact.scope.as_str(),
+                        fact.scope_id.as_deref(),
+                        fact.category.as_str(),
+                        fact.importance,
+                        fact.author_agent_id.as_deref(),
+                        sensitive,
+                        owner,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        "auto-recall: refreshing memory metadata {} failed (skipping): {error:#}",
+                        fact.id
+                    );
+                }
+                continue;
+            }
+            if let Err(error) = retrieval
+                .index_memory_chunk_with_metadata(
+                    &fact.id,
+                    &fact.content,
+                    fact.scope.as_str(),
+                    fact.scope_id.as_deref(),
+                    fact.category.as_str(),
+                    fact.importance,
+                    fact.author_agent_id.as_deref(),
+                    sensitive,
+                    owner,
+                )
+                .await
+            {
+                tracing::warn!(
+                    "auto-recall: indexing memory fact {} failed (skipping): {error:#}",
+                    fact.id
+                );
+            } else {
+                indexed.insert(fact.id);
+                newly_indexed += 1;
+                if newly_indexed >= MEMORY_BACKFILL_LIMIT {
+                    return;
+                }
+            }
         }
     }
+}
+
+fn memory_graph_document(entry: &crate::server::memory::LongTermEntry) -> MemoryGraphDocument {
+    MemoryGraphDocument {
+        memory_id: entry.id.clone(),
+        content: entry.content.clone(),
+        scope: entry.scope.as_str().to_owned(),
+        scope_id: entry.scope_id.clone(),
+        category: entry.category.as_str().to_owned(),
+        agent_id: entry.author_agent_id.clone(),
+        owner_user_id: entry.owner_user_id.clone(),
+        owner_org_id: None,
+        importance: entry.importance,
+        tags: entry.tags.clone(),
+        sensitive_topics: entry
+            .sensitive_topics
+            .iter()
+            .map(|topic| topic.as_str().to_owned())
+            .collect(),
+    }
+}
+
+/// Run the local typed Memory GraphRAG projection. The graph is rebuilt from a
+/// bounded source snapshot so it never becomes a second authority or a stale
+/// plaintext database. Every returned fact is still selected by the same scope,
+/// caller, project, and sensitive-topic filters used by vector retrieval.
+async fn graph_memory_chunks(
+    memory: &MemoryStore,
+    cfg: &AutoRecallConfig,
+    project_id: Option<&str>,
+    caller_user_id: Option<&str>,
+    caller_org_id: Option<&str>,
+    node_bound: bool,
+    query: &str,
+    limit: usize,
+) -> Vec<ScoredChunk> {
+    let facts = match memory.all_for_backfill(MEMORY_BACKFILL_LIMIT).await {
+        Ok(facts) => facts,
+        Err(error) => {
+            tracing::warn!("auto-recall: memory graph source scan failed (skipping): {error:#}");
+            return Vec::new();
+        }
+    };
+    let graph = MemoryGraph::from_documents(facts.iter().map(memory_graph_document));
+    let allowed_scopes = if cfg.read_levels.is_empty() {
+        None
+    } else {
+        Some(cfg.read_levels.as_slice())
+    };
+    let filter = MemoryGraphQuery {
+        agent_id: cfg.agent_id.as_deref(),
+        include_all_agents: false,
+        allowed_scopes,
+        project_id,
+        include_all_projects: false,
+        node_bound,
+        caller_user_id,
+        caller_org_id,
+        include_sensitive: cfg.include_sensitive_topics,
+    };
+    graph
+        .search(query, &filter, limit)
+        .into_iter()
+        .filter_map(|hit| {
+            graph.document(&hit.memory_id).map(|entry| ScoredChunk {
+                id: entry.memory_id.clone(),
+                source: ChunkSource::Memory,
+                space_id: None,
+                content: entry.content.clone(),
+                score: hit.score,
+            })
+        })
+        .collect()
+}
+
+/// Merge graph candidates with the ordinary vector/Space result without
+/// inventing a score scale. Reciprocal-rank fusion is the existing primitive for
+/// combining independently ranked sources, and it deduplicates by memory id.
+fn fuse_memory_graph_candidates(
+    vector_chunks: Vec<ScoredChunk>,
+    graph_chunks: Vec<ScoredChunk>,
+    limit: usize,
+) -> Vec<ScoredChunk> {
+    if graph_chunks.is_empty() {
+        return vector_chunks;
+    }
+    crate::server::retrieval::fuse_ranked_lists(vector_chunks, vec![graph_chunks], limit)
 }
 
 /// Run the auto-recall retrieval and return a ready-to-merge context block, or
@@ -3756,6 +3962,17 @@ async fn run_auto_recall_context(
     // rankings are merged by rank (their scores are not comparable — a graph hit has
     // none). An EMPTY allowlist skips `spaces.db` entirely, which is what keeps the
     // default agent's turn free of that work.
+    let graph_chunks = graph_memory_chunks(
+        memory,
+        cfg,
+        project_id,
+        caller_user_id.as_deref(),
+        caller_org_id.as_deref(),
+        node_bound,
+        query,
+        cfg.top_k + recency_ids.len(),
+    )
+    .await;
     let memory_chunks = {
         let opts = RetrievalOptions {
             top_k: cfg.top_k + recency_ids.len(),
@@ -3769,18 +3986,30 @@ async fn run_auto_recall_context(
                 Some(cfg.read_levels.clone())
             },
             project_id: project_id.map(str::to_string),
+            agent_id: cfg.agent_id.clone(),
+            include_sensitive: cfg.include_sensitive_topics,
             node_bound,
             caller_user_id: caller_user_id.clone(),
             caller_org_id: caller_org_id.clone(),
             ..RetrievalOptions::default()
         };
-        match cfg.retrieval.retrieve(query, &opts).await {
-            Ok(chunks) => drop_recency_dupes(chunks, recency_ids),
+        let vector_chunks = match cfg.retrieval.retrieve(query, &opts).await {
+            Ok(chunks) => chunks,
             Err(e) => {
-                tracing::warn!("auto-recall: memory retrieve failed (skipping): {e:#}");
+                tracing::warn!(
+                    "auto-recall: vector memory retrieve failed (using graph only): {e:#}"
+                );
                 Vec::new()
             }
-        }
+        };
+        drop_recency_dupes(
+            fuse_memory_graph_candidates(
+                vector_chunks,
+                graph_chunks,
+                cfg.top_k + recency_ids.len(),
+            ),
+            recency_ids,
+        )
     };
 
     // The past-chat half must scope to the caller's readable conversations on a
@@ -4967,6 +5196,27 @@ async fn run_member_text(
     conversation_id: Option<String>,
     deps: &TeamRunDeps,
 ) -> anyhow::Result<String> {
+    run_member_text_with_flags(
+        member_id,
+        messages,
+        conversation_id,
+        deps,
+        std::collections::HashMap::new(),
+    )
+    .await
+}
+
+/// Team member variant that carries the caller's per-turn plugin flags. The
+/// ordinary team path keeps the empty map because its members are internal
+/// fan-out calls; a temporary chat can explicitly opt its members into the same
+/// read-only personalized context as a single-agent turn.
+async fn run_member_text_with_flags(
+    member_id: &str,
+    messages: Vec<UiMessage>,
+    conversation_id: Option<String>,
+    deps: &TeamRunDeps,
+    plugin_flags: std::collections::HashMap<String, bool>,
+) -> anyhow::Result<String> {
     let req = ChatStreamRequest {
         messages,
         agent_id: Some(member_id.to_owned()),
@@ -5004,7 +5254,7 @@ async fn run_member_text(
         // Programmatic fan-out (delegate / threads / worker / scheduled / team
         // member) — yield to a directly-typing user on the shared local engine.
         background: true,
-        plugin_flags: std::collections::HashMap::new(),
+        plugin_flags,
         // Unstyled, same scope rule as [`run_text_turn_in`].
         output_style: None,
         // Programmatic per-member turn, no human author to attribute.
@@ -5236,6 +5486,7 @@ pub async fn route_team_chat_stream(
         .lead_agent_id
         .clone()
         .unwrap_or_else(|| team.members[0].clone());
+    let member_plugin_flags = req.plugin_flags.clone();
     let persist_combined = req.persist;
 
     let stream = async_stream::stream! {
@@ -5248,7 +5499,7 @@ pub async fn route_team_chat_stream(
             // Every member answers the same prompt independently.
             Coordination::Broadcast => {
                 for (idx, (mid, mname)) in members.iter().enumerate() {
-                    let text = match run_member_text(mid, original_messages.clone(), conversation_id.clone(), &deps).await {
+                    let text = match run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
                         Ok(t) if !t.trim().is_empty() => t,
                         Ok(_) => "_(no response)_".to_owned(),
                         Err(e) => format!("_(error: {e})_"),
@@ -5271,7 +5522,7 @@ pub async fn route_team_chat_stream(
                         );
                         messages_with_preamble(&original_messages, &preamble)
                     };
-                    let text = match run_member_text(mid, msgs, conversation_id.clone(), &deps).await {
+                    let text = match run_member_text_with_flags(mid, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
                         Ok(t) if !t.trim().is_empty() => t,
                         Ok(_) => "_(no response)_".to_owned(),
                         Err(e) => format!("_(error: {e})_"),
@@ -5287,7 +5538,7 @@ pub async fn route_team_chat_stream(
             Coordination::DebateSynthesis => {
                 let mut round1 = String::new();
                 for (idx, (mid, mname)) in members.iter().enumerate() {
-                    let text = match run_member_text(mid, original_messages.clone(), conversation_id.clone(), &deps).await {
+                    let text = match run_member_text_with_flags(mid, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
                         Ok(t) if !t.trim().is_empty() => t,
                         Ok(_) => "_(no response)_".to_owned(),
                         Err(e) => format!("_(error: {e})_"),
@@ -5308,7 +5559,7 @@ pub async fn route_team_chat_stream(
                     "You are the lead of a team. Your teammates gave these answers to the user's request:\n\n{round1}\nSynthesize them into one definitive, non-repetitive answer for the user."
                 );
                 let msgs = messages_with_preamble(&original_messages, &preamble);
-                let synth = match run_member_text(&lead_id, msgs, conversation_id.clone(), &deps).await {
+                let synth = match run_member_text_with_flags(&lead_id, msgs, conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
                     Ok(t) if !t.trim().is_empty() => t,
                     Ok(_) => "_(no synthesis)_".to_owned(),
                     Err(e) => format!("_(synthesis error: {e})_"),
@@ -5342,7 +5593,7 @@ pub async fn route_team_chat_stream(
                     .find(|(id, _)| pick.contains(id.as_str()))
                     .cloned()
                     .unwrap_or_else(|| members[0].clone());
-                let text = match run_member_text(&chosen.0, original_messages.clone(), conversation_id.clone(), &deps).await {
+                let text = match run_member_text_with_flags(&chosen.0, original_messages.clone(), conversation_id.clone(), &deps, member_plugin_flags.clone()).await {
                     Ok(t) if !t.trim().is_empty() => t,
                     Ok(_) => "_(no response)_".to_owned(),
                     Err(e) => format!("_(error: {e})_"),
@@ -5780,6 +6031,23 @@ pub async fn route_chat_stream(
     );
 
     let user_text = last_user_message(&req.messages);
+    // A normal turn is allowed to create its row later in this function, but a
+    // non-persisted turn may only reuse a conversation that an orchestrator has
+    // already created (team members). This keeps client-held temporary chats from
+    // becoming durable through participant/status/trace side effects.
+    let durable_conversation = if req.persist {
+        req.conversation_id.is_some()
+    } else {
+        match req.conversation_id.as_deref() {
+            Some(conversation_id) => conversations
+                .get_access_meta(conversation_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some(),
+            None => false,
+        }
+    };
     let widget_provenance =
         req.widget_provenance
             .as_ref()
@@ -5798,14 +6066,16 @@ pub async fn route_chat_stream(
     // use the primary `agent_id` (backward compatible).
     let effective_agent_id: Option<String> = if let Some(ref target) = req.target_agent_id {
         // Auto-register the target as a participant in this conversation.
-        if let Some(ref conv_id) = req.conversation_id {
-            // The conversation row already exists and is stamped by
-            // `gate_and_claim_conversation` upstream; COALESCE preserves its owner.
-            if let Err(e) = conversations
-                .add_participant(conv_id, target, Tenancy::Unattributed)
-                .await
-            {
-                tracing::warn!("failed to add participant {target}: {e:#}");
+        if durable_conversation {
+            if let Some(ref conv_id) = req.conversation_id {
+                // The conversation row already exists and is stamped by
+                // `gate_and_claim_conversation` upstream; COALESCE preserves its owner.
+                if let Err(e) = conversations
+                    .add_participant(conv_id, target, Tenancy::Unattributed)
+                    .await
+                {
+                    tracing::warn!("failed to add participant {target}: {e:#}");
+                }
             }
         }
         Some(target.clone())
@@ -5828,12 +6098,16 @@ pub async fn route_chat_stream(
         tracing::info!(resolved_agent = %resolved, "agent-auto: resolved 'auto' to concrete agent");
         // Register the resolved agent as a participant so the conversation reflects
         // which agent actually handled the turn (mirrors the target_agent_id path).
-        if let Some(ref conv_id) = req.conversation_id {
-            if let Err(e) = conversations
-                .add_participant(conv_id, &resolved, Tenancy::Unattributed)
-                .await
-            {
-                tracing::warn!("agent-auto: failed to add resolved participant {resolved}: {e:#}");
+        if durable_conversation {
+            if let Some(ref conv_id) = req.conversation_id {
+                if let Err(e) = conversations
+                    .add_participant(conv_id, &resolved, Tenancy::Unattributed)
+                    .await
+                {
+                    tracing::warn!(
+                        "agent-auto: failed to add resolved participant {resolved}: {e:#}"
+                    );
+                }
             }
         }
         Some(resolved)
@@ -6014,7 +6288,8 @@ pub async fn route_chat_stream(
     // workflow target is a stronger user intent and leaves the pending control
     // for the next ordinary turn. Applying here keeps the ordinary model router
     // as the default and makes agent control the deliberate post-routing override.
-    if !req.background
+    if durable_conversation
+        && !req.background
         && req.target_agent_id.is_none()
         && req.team_id.is_none()
         && req.workflow_id.is_none()
@@ -6358,24 +6633,84 @@ pub async fn route_chat_stream(
         Some(state) => crate::memory_policy::MemoryPolicy::load(&state.preferences).await,
         None => crate::memory_policy::MemoryPolicy::default(),
     };
+    // Sensitive-topic consent is per verified user on a bound node. The request
+    // author wins over the local-account fallback; an unbound node keeps the
+    // single LOCAL_USER principal.
+    let memory_principal_available = has_memory_principal(
+        crate::server::node_org_id().is_some(),
+        req.author_user_id.as_deref(),
+    );
+    let memory_owner = if crate::server::node_org_id().is_some() {
+        req.author_user_id
+            .clone()
+            .unwrap_or_else(crate::server::background_memory_user_id)
+    } else {
+        LOCAL_USER.to_owned()
+    };
+    let memory_policy = memory_policy.with_sensitive_topics(if memory_principal_available {
+        memory
+            .include_sensitive_topics(&memory_owner)
+            .await
+            .unwrap_or(false)
+    } else {
+        false
+    });
+    // A temporary chat normally opts out of every personalized context layer.
+    // The Memory plugin's composer flag is the explicit read-only exception: it
+    // allows existing facts/recall for this request, but never changes the
+    // `persist` boundary or the separate write decision below.
+    let temporary_context_flag_enabled = req
+        .plugin_flags
+        .get(crate::memory_policy::TEMPORARY_CONTEXT_FLAG)
+        .copied()
+        .unwrap_or(false);
+    let memory_context_enabled = memory_principal_available
+        && crate::memory_policy::MemoryPolicy::context_enabled(
+            req.enable_long_term,
+            req.persist,
+            temporary_context_flag_enabled,
+        );
     // The per-REQUEST opt-in AND the per-NODE policy. The policy can only narrow
     // what the request asked for — it can never turn memory on for a caller that
     // did not request it, which is what keeps privacy-by-default intact.
-    let auto_recall_allowed = memory_policy.should_auto_recall(req.enable_long_term);
+    let auto_recall_allowed = memory_policy.should_auto_recall(memory_context_enabled);
+    // Auto-recall is independently resolved by the interactive handler. Keep a
+    // second boundary here because programmatic callers can invoke this shared
+    // route directly and must not inherit the bound node's local-owner fallback.
+    let recall = if memory_principal_available && (req.persist || temporary_context_flag_enabled) {
+        recall
+    } else {
+        None
+    };
 
     // Recall long-term (cross-session) memory BEFORE recording the current turn,
     // so the just-sent message does not echo back to the model as a remembered
     // "fact". This keeps long-term context strictly cross-session.
     // Use effective_agent_id so multi-agent turns scope memory correctly.
+    let memory_read_levels = recall
+        .as_ref()
+        .map(|config| config.read_levels.as_slice())
+        .unwrap_or(&[]);
+    let memory_node_org = crate::server::node_org_id();
+    let memory_visibility = MemoryVisibility::for_caller_in_org(
+        req.author_user_id.as_deref(),
+        memory_node_org.as_deref(),
+        memory_node_org.is_some(),
+    );
     let LongTermMemoryContext {
         system: long_term_system,
         citations: mut memory_citations,
         recency_ids,
-    } = assemble_long_term_context(
+    } = assemble_long_term_context_for_user(
         &memory,
         auto_recall_allowed,
+        &memory_owner,
         effective_agent_id.as_deref(),
+        req.cwd.as_deref(),
+        memory_read_levels,
+        memory_visibility,
         memory_policy.recall_budget.long_term_limit(),
+        memory_policy.include_sensitive_topics,
     )
     .await;
 
@@ -6391,10 +6726,11 @@ pub async fn route_chat_stream(
         // Both READ-side hooks under ONE timeout budget, run concurrently: the
         // provider's standing summary (opt-in) and the facts matching this turn.
         // Sequentially they would spend two budgets on a turn that needs one.
-        let mut blocks = crate::memory_provider::read_hooks(
+        let mut blocks = crate::memory_provider::read_hooks_with_consent(
             &user_text,
             memory_policy.recall_budget.long_term_limit(),
             memory_policy.provider_context,
+            memory_policy.include_sensitive_topics,
         )
         .await;
 
@@ -6435,10 +6771,15 @@ pub async fn route_chat_stream(
         managed_instructions.as_deref(),
     );
     let long_term_system = merge_system_prompt(long_term_system, managed_instructions);
-    let user_personalization = match crate::learning::global_state() {
-        Some(state) => user_personalization_block(&state.preferences).await,
-        None => None,
-    };
+    let user_personalization =
+        if memory_principal_available && (req.persist || memory_context_enabled) {
+            match crate::learning::global_state() {
+                Some(state) => user_personalization_block(&state.preferences).await,
+                None => None,
+            }
+        } else {
+            None
+        };
     let long_term_system = merge_system_prompt(long_term_system, user_personalization);
 
     // Project instructions remain host-discovered data, but injection belongs to
@@ -6579,7 +6920,10 @@ pub async fn route_chat_stream(
     // future sessions. No-op (and nothing is stored) when disabled. Metadata is
     // auto-classified from the text + active project (`cwd`); users can edit any
     // field later in the desktop Memory Library.
-    if memory_policy.should_write(req.enable_long_term) && !user_text.is_empty() {
+    if memory_principal_available
+        && memory_policy.should_write(req.enable_long_term && req.persist)
+        && !user_text.is_empty()
+    {
         let scope = long_term_agent_scope(effective_agent_id.as_deref());
         // Sanitize at WRITE time too: the raw turn is stored verbatim and will
         // re-enter a future session's system context, so template tokens are
@@ -6591,21 +6935,28 @@ pub async fn route_chat_stream(
             req.cwd.as_deref(),
             effective_agent_id.as_deref(),
         );
-        // Attribute to the local owner on a bound node (no HTTP caller on the chat
-        // path) so the captured fact is recallable by its owner; LOCAL_USER on an
-        // unbound node keeps the single-user path byte-identical.
-        let owner = crate::server::background_memory_user_id();
-        let mirrored = new.content.clone();
-        let mirrored_scope = new.scope.as_str();
-        if let Err(e) = memory.record_full(&owner, &scope, new).await {
-            tracing::warn!("failed to record long-term memory: {e:#}");
-        } else if memory_policy.mirror_builtin {
-            // MIRROR hook: echo the just-recorded fact to the external provider so
-            // the two stores do not drift. Only on success — mirroring a write that
-            // failed locally would put a fact in the remote store that this node has
-            // no record of. Fire-and-forget: the built-in write is the source of
-            // truth and already succeeded, so a mirror failure surfaces nowhere.
-            crate::memory_provider::mirror(&mirrored, mirrored_scope);
+        let sensitive = crate::server::memory::detect_sensitive_topics(&new.content);
+        if !sensitive.is_empty() && !memory_policy.include_sensitive_topics {
+            tracing::info!(
+                "long-term memory capture skipped because sensitive-topic consent is off"
+            );
+        } else {
+            // Attribute to the verified caller on a bound node so the fact is
+            // recallable by its owner; LOCAL_USER on an unbound node keeps the
+            // single-user path byte-identical.
+            let owner = memory_owner.clone();
+            let mirrored = new.content.clone();
+            let mirrored_scope = new.scope.as_str();
+            if let Err(e) = memory.record_full(&owner, &scope, new).await {
+                tracing::warn!("failed to record long-term memory: {e:#}");
+            } else if memory_policy.mirror_builtin {
+                // MIRROR hook: echo the just-recorded fact to the external provider so
+                // the two stores do not drift. Only on success — mirroring a write that
+                // failed locally would put a fact in the remote store that this node has
+                // no record of. Fire-and-forget: the built-in write is the source of
+                // truth and already succeeded, so a mirror failure surfaces nowhere.
+                crate::memory_provider::mirror(&mirrored, mirrored_scope);
+            }
         }
     }
 
@@ -6615,7 +6966,13 @@ pub async fn route_chat_stream(
     // nothing, while sync is about what a provider the user deliberately chose is
     // allowed to see. Off by default — raw turns leaving the node is not something to
     // start doing without being asked.
-    if memory_policy.sync_turns && !user_text.is_empty() {
+    if memory_principal_available
+        && req.persist
+        && memory_policy.sync_turns
+        && !user_text.is_empty()
+        && (memory_policy.include_sensitive_topics
+            || crate::server::memory::detect_sensitive_topics(&user_text).is_empty())
+    {
         crate::memory_provider::sync_turn(&user_text, "user");
     }
 
@@ -6742,7 +7099,11 @@ pub async fn route_chat_stream(
         plane_breakdown.add_text("instructions", "Output style", style_prefix.as_deref());
         plane_breakdown.add_messages("Conversation history", &req.messages);
         record_context_breakdown(
-            req.conversation_id.as_deref(),
+            if durable_conversation {
+                req.conversation_id.as_deref()
+            } else {
+                None
+            },
             plane_breakdown,
             context_breakdown::ContextPlane::Openai,
         );
@@ -6829,25 +7190,27 @@ pub async fn route_chat_stream(
     // so the state is durable even if the connection drops mid-stream (U013).
     // When worktree isolation is active, the guard's path takes priority over
     // any client-supplied worktree_path.
-    if let Some(ref conv_id) = req.conversation_id {
-        let folder_path = req.cwd.as_deref();
-        let branch = req.branch.as_deref();
-        let resolved_worktree = worktree_guard
-            .as_ref()
-            .map(|g| g.path.to_string_lossy().into_owned());
-        let worktree_path = resolved_worktree
-            .as_deref()
-            .or(req.worktree_path.as_deref());
-        if folder_path.is_some() || branch.is_some() || worktree_path.is_some() {
-            if let Err(e) = conversations
-                .set_run_metadata(conv_id, folder_path, branch, worktree_path)
-                .await
-            {
-                tracing::warn!("failed to set run metadata: {e:#}");
+    if durable_conversation {
+        if let Some(ref conv_id) = req.conversation_id {
+            let folder_path = req.cwd.as_deref();
+            let branch = req.branch.as_deref();
+            let resolved_worktree = worktree_guard
+                .as_ref()
+                .map(|g| g.path.to_string_lossy().into_owned());
+            let worktree_path = resolved_worktree
+                .as_deref()
+                .or(req.worktree_path.as_deref());
+            if folder_path.is_some() || branch.is_some() || worktree_path.is_some() {
+                if let Err(e) = conversations
+                    .set_run_metadata(conv_id, folder_path, branch, worktree_path)
+                    .await
+                {
+                    tracing::warn!("failed to set run metadata: {e:#}");
+                }
             }
-        }
-        if let Err(e) = conversations.set_run_status(conv_id, "running").await {
-            tracing::warn!("failed to set run status to running: {e:#}");
+            if let Err(e) = conversations.set_run_status(conv_id, "running").await {
+                tracing::warn!("failed to set run status to running: {e:#}");
+            }
         }
     }
 
@@ -7208,7 +7571,11 @@ pub async fn route_chat_stream(
             );
             breakdown.add_tools(&mcp.tools_for_agent(allowlist.as_deref()).await);
             record_context_breakdown(
-                req.conversation_id.as_deref(),
+                if durable_conversation {
+                    req.conversation_id.as_deref()
+                } else {
+                    None
+                },
                 breakdown,
                 context_breakdown::ContextPlane::Acp,
             );
@@ -7227,7 +7594,11 @@ pub async fn route_chat_stream(
                 persist_store_for_acp,
                 conversation_id_for_persist,
                 persist_agent_id,
-                conversation_id,
+                if durable_conversation {
+                    conversation_id
+                } else {
+                    None
+                },
                 worktree_diffs,
                 mcp,
                 allowlist,
@@ -11502,6 +11873,80 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn backfill_reaches_older_facts_after_the_newest_page_is_indexed() {
+        let memory = MemoryStore::open_in_memory().unwrap();
+        let retrieval = RetrievalStore::open_in_memory(
+            crate::registry::DEFAULT_EMBED_DIMS,
+            crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+        )
+        .unwrap();
+        let oldest_id = memory
+            .record(LOCAL_USER, "default", "the oldest searchable fact")
+            .await
+            .unwrap()
+            .unwrap();
+        for index in 0..500 {
+            memory
+                .record(
+                    LOCAL_USER,
+                    "default",
+                    &format!("newer searchable fact {index}"),
+                )
+                .await
+                .unwrap();
+        }
+
+        backfill_memory_facts(&memory, &retrieval).await;
+        assert!(!retrieval
+            .indexed_memory_ids()
+            .await
+            .unwrap()
+            .contains(&oldest_id));
+
+        backfill_memory_facts(&memory, &retrieval).await;
+        assert!(retrieval
+            .indexed_memory_ids()
+            .await
+            .unwrap()
+            .contains(&oldest_id));
+    }
+
+    #[tokio::test]
+    async fn graph_recall_connects_people_and_shared_topics() {
+        let memory = MemoryStore::open_in_memory().unwrap();
+        let retrieval = RetrievalStore::open_in_memory(
+            crate::registry::DEFAULT_EMBED_DIMS,
+            crate::registry::DEFAULT_RERANKER_MODEL.to_owned(),
+        )
+        .unwrap();
+        memory
+            .record(LOCAL_USER, "agent-a", "Maya owns the launch plan")
+            .await
+            .unwrap();
+        let related_id = memory
+            .record(LOCAL_USER, "agent-a", "The launch plan needs a review")
+            .await
+            .unwrap()
+            .unwrap();
+        let cfg = AutoRecallConfig {
+            retrieval,
+            top_k: 5,
+            fts_enabled: false,
+            read_levels: Vec::new(),
+            space_ids: Vec::new(),
+            caller_user_id: None,
+            agent_id: Some("agent-a".to_owned()),
+            include_sensitive_topics: false,
+        };
+        let chunks = graph_memory_chunks(&memory, &cfg, None, None, None, false, "Maya", 5).await;
+        assert!(chunks.iter().any(|chunk| chunk.content.contains("Maya")));
+        assert!(
+            chunks.iter().any(|chunk| chunk.id == related_id),
+            "a shared launch topic should connect the related fact"
+        );
+    }
+
     /// FTS session-search sub-source: with `fts_enabled = false` the FTS pass does
     /// no work (a matching past message is NOT surfaced); with `fts_enabled = true`
     /// an FTS-only match surfaces in the assembled recall block. Network-free.
@@ -11542,6 +11987,8 @@ mod tests {
             read_levels: Vec::new(),
             space_ids: Vec::new(),
             caller_user_id: None,
+            agent_id: None,
+            include_sensitive_topics: false,
         };
         let block_off = run_auto_recall(
             &cfg_off,
@@ -11566,6 +12013,8 @@ mod tests {
             read_levels: Vec::new(),
             space_ids: Vec::new(),
             caller_user_id: None,
+            agent_id: None,
+            include_sensitive_topics: false,
         };
         let block_disabled = run_auto_recall(
             &cfg_on,
@@ -11611,6 +12060,13 @@ mod tests {
             Some("alice".to_owned())
         );
         assert_eq!(effective_recall_user_id(None, None), None);
+    }
+
+    #[test]
+    fn bound_node_memory_requires_a_verified_caller() {
+        assert!(has_memory_principal(false, None));
+        assert!(has_memory_principal(true, Some("alice")));
+        assert!(!has_memory_principal(true, None));
     }
 
     // ── ACP skill injection seam (per-agent allowlist on the ACP plane) ─────────
@@ -12836,6 +13292,21 @@ mod tests {
         assert_eq!(long_term_agent_scope(None), "default");
         assert_eq!(long_term_agent_scope(Some("")), "default");
         assert_eq!(long_term_agent_scope(Some("acp:claude")), "acp:claude");
+    }
+
+    #[test]
+    fn sensitive_captures_use_user_scope_even_inside_a_project() {
+        let memory = infer_new_memory(
+            "I have a medical condition",
+            Some("/work/ryu"),
+            Some("agent-a"),
+        );
+        assert_eq!(memory.scope, MemoryScope::User);
+        assert!(memory.scope_id.is_none());
+
+        let unassigned = infer_new_memory("I have a medical condition", Some("/work/ryu"), None);
+        assert_eq!(unassigned.scope, MemoryScope::User);
+        assert!(unassigned.scope_id.is_none());
     }
 
     #[tokio::test]

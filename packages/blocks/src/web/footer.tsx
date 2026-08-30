@@ -2,7 +2,6 @@
 
 import { Logo } from "@ryu/ui/components/logo.tsx";
 
-import Aurora from "./aurora.tsx";
 import BackedBy from "./backed-by.tsx";
 import FooterBuildInfo from "./footer-build-info.tsx";
 import { GitHubStars } from "./github-stars.tsx";
@@ -20,7 +19,7 @@ export default function Footer({
 }) {
 	return (
 		<footer className="relative overflow-x-clip pt-16">
-			{/* Content - sits above the gradient */}
+			{/* Content sits above the outline mark and stays on shared surfaces. */}
 			<div className="container relative z-10 mx-auto px-4">
 				{/* Two column links */}
 				<div className="mb-12 grid grid-cols-1 gap-12 md:grid-cols-2">
@@ -198,13 +197,6 @@ export default function Footer({
 						/>
 					</p>
 				</div>
-			</div>
-
-			<div
-				aria-hidden="true"
-				className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[38rem] [mask-image:linear-gradient(to_top,black_72%,transparent)]"
-			>
-				<Aurora amplitude={0.2} blend={0.65} fan={0.65} speed={2.5} />
 			</div>
 
 			{/* Giant Ryu outline — only the top half rises into view; the eyes track the cursor. */}

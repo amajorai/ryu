@@ -1,0 +1,91 @@
+{
+  "tags": [
+    "document",
+    "parse",
+    "pdf",
+    "docx",
+    "pptx",
+    "xlsx",
+    "markdown",
+    "extraction",
+    "api"
+  ],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-anydoc",
+  "homepage": "https://github.com/amajorai/ryu-anydoc",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/anydoc",
+  "name": "AnyDoc",
+  "version": "0.2.3",
+  "stability": "experimental",
+  "description": "Document extraction through Firecrawl's MIT-licensed AnyDoc Rust library. It converts Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and text-based PDF files into GitHub-Flavored Markdown through the swappable `document.parse` capability. The local backend is fast and has no model or native-tool download, but it does not OCR scanned pages or fetch URLs. The same out-of-process backend also exposes an API-key-authenticated `/v1/extract` service for direct deployments.",
+  "icon": "document-attachment",
+  "iconDither": { "from": 303, "to": "transparent", "direction": "down" },
+  "tagline": "Fast local document extraction and API service",
+  "keywords": [
+    "document",
+    "parse",
+    "pdf",
+    "docx",
+    "pptx",
+    "xlsx",
+    "markdown",
+    "extraction",
+    "api"
+  ],
+  "category": "Documents",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "full" },
+    "mobile": { "support": "full" },
+    "extension": { "support": "full" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "provides": [
+    {
+      "capability": "document.parse",
+      "version": "1.0.0",
+      "title": "Document Parsing",
+      "selectable": true,
+      "sidecar": "anydoc",
+      "route": "/parse"
+    }
+  ],
+  "permission_grants": [],
+  "sidecars": [
+    {
+      "name": "anydoc",
+      "port": 8097,
+      "health_path": "/health",
+      "lazy": true,
+      "idle_stop_secs": 900,
+      "process": {
+        "kind": "local",
+        "command": "ryu-anydoc",
+        "command_env": "RYU_ANYDOC_BIN",
+        "port_env": "RYU_ANYDOC_PORT"
+      },
+      "http": {
+        "mount": "/api/anydoc",
+        "public_mount": "/api/anydoc",
+        "max_body_bytes": 230686720,
+        "routes": [
+          { "path": "/health", "method": "GET", "auth": "public" },
+          { "path": "/capability", "method": "GET" },
+          { "path": "/parse", "method": "POST" },
+          { "path": "/jobs", "method": "GET" },
+          { "path": "/jobs/:job_id", "method": "GET" },
+          { "path": "/jobs/:job_id", "method": "DELETE" },
+          { "path": "/v1/capability", "method": "GET" },
+          { "path": "/v1/extract", "method": "POST" }
+        ]
+      }
+    }
+  ]
+}

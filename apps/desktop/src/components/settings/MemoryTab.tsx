@@ -38,6 +38,11 @@ import {
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
+	createMemory,
+	getMemorySettings,
+	setMemorySettings,
+} from "@/src/lib/api/memory.ts";
+import {
 	AUTO_RECALL_MAX_TOP_K,
 	AUTO_RECALL_MIN_TOP_K,
 	CONTEXT_MAX_OUTPUT_RESERVE,
@@ -65,7 +70,6 @@ import {
 	type ToolRankerId,
 } from "@/src/lib/api/preferences.ts";
 import {
-	indexChunk,
 	listSpaceSummaries,
 	type ScoredChunk,
 	type SpaceSummary,
@@ -514,6 +518,40 @@ export function MemoryTab() {
 		localStorage.setItem(LONG_TERM_MEMORY_KEY, String(next));
 	}, []);
 
+	// Sensitive-topic consent is stored by Core per user/node, not in
+	// localStorage or the node-global preference table. Core defaults it off and
+	// applies it to capture, recall, search, and graph snapshots.
+	const [includeSensitiveTopics, setIncludeSensitiveTopics] = useState(false);
+	useEffect(() => {
+		let cancelled = false;
+		setIncludeSensitiveTopics(false);
+		getMemorySettings(target)
+			.then((settings) => {
+				if (!cancelled) {
+					setIncludeSensitiveTopics(settings.includeSensitiveTopics);
+				}
+			})
+			.catch(() => {
+				// Unavailable or unauthenticated nodes fail closed to off.
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [target]);
+	const handleSensitiveTopicsChange = useCallback(
+		(next: boolean) => {
+			setIncludeSensitiveTopics(next);
+			setMemorySettings(target, { includeSensitiveTopics: next }).catch(() => {
+				setIncludeSensitiveTopics(!next);
+				toast.error({
+					title: "Couldn't save sensitive-memory consent",
+					description: "Your change wasn't saved. Please try again.",
+				});
+			});
+		},
+		[target]
+	);
+
 	// Auto-recall (U17): before each chat turn Core retrieves relevant memory +
 	// past chat messages and injects them into the prompt. Default ON; persisted in
 	// Core under the `auto-recall-enabled` pref so it applies on every node-served
@@ -668,11 +706,7 @@ export function MemoryTab() {
 			setIndexStatus(null);
 			setIndexError(null);
 			try {
-				await indexChunk(target, {
-					id: `manual-${Date.now()}`,
-					content: trimmed,
-					source: "memory",
-				});
+				await createMemory(target, { content: trimmed });
 				setIndexStatus("Saved to memory.");
 				setIndexContent("");
 			} catch {
@@ -700,6 +734,17 @@ export function MemoryTab() {
 							/>
 						}
 						title="Remember facts across conversations"
+					/>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={includeSensitiveTopics}
+								id="include-sensitive-topics"
+								onCheckedChange={handleSensitiveTopicsChange}
+							/>
+						}
+						description="Allows Ryu to capture and recall sensitive topics such as health conditions and religious beliefs. Off by default; existing sensitive memories stay hidden while it is off."
+						title="Include sensitive topics in memory"
 					/>
 				</SettingsGroup>
 			</SettingsSection>

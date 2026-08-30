@@ -3,7 +3,7 @@
 This does NOT hit the network. It exercises the SHARED Rust rules through the
 UniFFI-generated `ryu_sdk` module, proving the full pipeline works:
 
-    crates/ryu-sdk-uniffi (cdylib)
+    crates/sdk/uniffi (cdylib)
         -> uniffi-bindgen generate --language python
         -> import ryu_sdk
         -> the same egress / manifest / plugin-id rules every binding enforces.

@@ -148,7 +148,7 @@ import {
  *  exist (tools/agents/channels/policies, turn hooks, capability providers, settings
  *  tabs, sidebar sections). "all" = the historical unsplit tab, which web still uses.
  *
- *  Notably NOT app-ness: shipping a sidecar (the four `document.parse` providers each
+ *  Notably NOT app-ness: shipping a sidecar (the five `document.parse` providers each
  *  ship one and nobody opens Docling), living under `apps-store/` (that is a
  *  PACKAGING root — items published as their own satellite repo), or declaring a
  *  `category`. The rule is adjudicated server-side by `manifest_declares_destination`

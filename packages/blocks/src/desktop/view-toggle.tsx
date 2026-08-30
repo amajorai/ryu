@@ -10,22 +10,29 @@ import {
 	GridViewIcon,
 	HierarchyIcon,
 	ListViewIcon,
+	SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 
-export type ViewMode = "grid" | "list";
+export type ViewMode = "grid" | "list" | "showcase";
 export type LibraryViewMode = ViewMode | "graph";
 
 export function ViewToggle({
 	value,
 	onChange,
+	showShowcase = false,
 }: {
+	showShowcase?: boolean;
 	value: ViewMode;
 	onChange: (mode: ViewMode) => void;
 }) {
 	return (
-		<div className="inline-flex items-center gap-0.5 rounded-md border p-0.5">
+		<div
+			className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
+			data-slot="view-toggle"
+			data-view-mode={value}
+		>
 			<Button
 				aria-label="Grid view"
 				aria-pressed={value === "grid"}
@@ -44,21 +51,41 @@ export function ViewToggle({
 			>
 				<HugeiconsIcon className="size-4" icon={ListViewIcon} />
 			</Button>
+			{showShowcase ? (
+				<Button
+					aria-label="Showcase view"
+					aria-pressed={value === "showcase"}
+					onClick={() => onChange("showcase")}
+					size="icon-sm"
+					title="Showcase view"
+					variant={value === "showcase" ? "secondary" : "ghost"}
+				>
+					<HugeiconsIcon className="size-4" icon={SparklesIcon} />
+				</Button>
+			) : null}
 		</div>
 	);
 }
 
-/** Library-only view switcher. Store catalogs intentionally keep the smaller
- * grid/list contract; the Skills library adds Relations as a third projection. */
+/** Library view switcher. Relations and Showcase are opt-in additions to the
+ * shared Grid/List control because only some Library collections support them. */
 export function LibraryViewToggle({
 	value,
 	onChange,
+	showGraph = false,
+	showShowcase = false,
 }: {
+	showGraph?: boolean;
+	showShowcase?: boolean;
 	value: LibraryViewMode;
 	onChange: (mode: LibraryViewMode) => void;
 }) {
 	return (
-		<div className="inline-flex items-center gap-0.5 rounded-md border p-0.5">
+		<div
+			className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
+			data-slot="view-toggle"
+			data-view-mode={value}
+		>
 			<Button
 				aria-label="Grid view"
 				aria-pressed={value === "grid"}
@@ -77,15 +104,29 @@ export function LibraryViewToggle({
 			>
 				<HugeiconsIcon className="size-4" icon={ListViewIcon} />
 			</Button>
-			<Button
-				aria-label="Relations view"
-				aria-pressed={value === "graph"}
-				onClick={() => onChange("graph")}
-				size="icon-sm"
-				variant={value === "graph" ? "secondary" : "ghost"}
-			>
-				<HugeiconsIcon className="size-4" icon={HierarchyIcon} />
-			</Button>
+			{showShowcase ? (
+				<Button
+					aria-label="Showcase view"
+					aria-pressed={value === "showcase"}
+					onClick={() => onChange("showcase")}
+					size="icon-sm"
+					title="Showcase view"
+					variant={value === "showcase" ? "secondary" : "ghost"}
+				>
+					<HugeiconsIcon className="size-4" icon={SparklesIcon} />
+				</Button>
+			) : null}
+			{showGraph ? (
+				<Button
+					aria-label="Relations view"
+					aria-pressed={value === "graph"}
+					onClick={() => onChange("graph")}
+					size="icon-sm"
+					variant={value === "graph" ? "secondary" : "ghost"}
+				>
+					<HugeiconsIcon className="size-4" icon={HierarchyIcon} />
+				</Button>
+			) : null}
 		</div>
 	);
 }

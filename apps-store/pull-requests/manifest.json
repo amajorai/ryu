@@ -144,6 +144,24 @@
     "icon": "git-pull-request"
   },
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "pull-requests-pulls",
+        "title": "Pull requests",
+        "icon": "git-pull-request",
+        "target": "/plugin/app__pull-requests-companion",
+        "context": { "view": "pulls" },
+        "order": 33
+      },
+      {
+        "id": "pull-requests-issues",
+        "title": "Issues",
+        "icon": "issue-opened",
+        "target": "/plugin/app__pull-requests-companion",
+        "context": { "view": "issues" },
+        "order": 34
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "pull-requests.chat",

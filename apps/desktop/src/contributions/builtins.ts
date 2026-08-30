@@ -271,7 +271,9 @@ export function seedBuiltinRoutes(): void {
 			tab,
 			createElement(ChatPage, {
 				initialAgent: tab.initialAgent,
+				initialTeamId: tab.initialTeamId,
 				initialGhost: tab.initialGhost,
+				initialPluginFlags: tab.initialPluginFlags,
 				initialImages: tab.initialImages as AttachedImage[] | undefined,
 				initialProject: tab.initialProject,
 				initialPrompt: tab.initialPrompt,

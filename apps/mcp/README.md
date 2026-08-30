@@ -84,6 +84,12 @@ original user OAuth token to Core.
 bun run apps/mcp/src/index.ts
 ```
 
+The pure target/auth boundary tests run without a Core or control-plane server:
+
+```bash
+(cd apps/mcp && bun test src)
+```
+
 ## Use it from an MCP host
 
 Add this to your host's MCP config (e.g. `claude_desktop_config.json`):

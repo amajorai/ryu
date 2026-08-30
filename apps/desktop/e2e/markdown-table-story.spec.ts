@@ -34,13 +34,14 @@ test("expands a wide markdown table into a scrollable dialog", async ({
 	expect(inlineMetrics.animationName).toContain("scroll-fade-reveal");
 	expect(inlineMetrics.animationTimeline).toContain("scroll");
 	const expand = page.getByTestId("markdown-table-expand").first();
+	const expandControls = expand.locator("xpath=..");
 	await expect
-		.poll(() => expand.evaluate((el) => getComputedStyle(el).opacity))
+		.poll(() => expandControls.evaluate((el) => getComputedStyle(el).opacity))
 		.toBe("0");
 
 	await table.hover();
 	await expect
-		.poll(() => expand.evaluate((el) => getComputedStyle(el).opacity))
+		.poll(() => expandControls.evaluate((el) => getComputedStyle(el).opacity))
 		.toBe("1");
 	await page.screenshot({ fullPage: true, path: PROOF_SCREENSHOT });
 	await expand.click();

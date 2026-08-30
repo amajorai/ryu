@@ -602,7 +602,7 @@ export default function AgentEditPage({
 
 	// ── Memory / Spaces slot state ───────────────────────────────────────────────
 	// `memorySpaceIds`: Space ids the agent may read (empty = none injected).
-	// `memoryReadLevels`: recallable memory levels (empty = all three levels).
+	// `memoryReadLevels`: recallable memory levels (empty = all personal levels).
 	// `memoryWriteEnabled`: may the agent record new memories.
 	const [availableSpaces, setAvailableSpaces] = useState<
 		{ id: string; name: string }[]
@@ -882,7 +882,7 @@ export default function AgentEditPage({
 			setSelectedComposio(new Set(existing.composioActions ?? []));
 			setSelectedIdentities(new Set(existing.identityProfileIds ?? []));
 			// Memory / Spaces slot round-trips from the record. Empty read_levels
-			// stays empty here (the "all three levels" default is applied by Core).
+			// stays empty here (the "all personal levels" default is applied by Core).
 			setMemorySpaceIds(new Set(existing.memory?.space_ids ?? []));
 			setMemoryReadLevels(new Set(existing.memory?.read_levels ?? []));
 			setMemoryWriteEnabled(existing.memory?.write_enabled ?? false);
@@ -994,7 +994,7 @@ export default function AgentEditPage({
 		});
 	};
 
-	// ── Toggle a memory access level (user/node/project) ─────────────────────────
+	// ── Toggle a memory access level (agent/user/node/project/org) ───────────────
 	const toggleMemoryReadLevel = (level: string) => {
 		setMemoryReadLevels((prev) => {
 			const next = new Set(prev);
@@ -1085,7 +1085,7 @@ export default function AgentEditPage({
 			orchestrator,
 			canCreateAgents,
 			safetyProfile,
-			// Memory / Spaces slot. Empty read_levels means "all three levels"
+			// Memory / Spaces slot. Empty read_levels means "all personal levels"
 			// (Core's back-compat default), so we send the raw selection as-is.
 			memory: {
 				space_ids: Array.from(memorySpaceIds),

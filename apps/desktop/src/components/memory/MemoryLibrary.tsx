@@ -44,7 +44,7 @@ import {
 } from "@ryu/ui/components/select";
 import { toast } from "@ryu/ui/components/sileo";
 import { Spinner } from "@ryu/ui/components/spinner";
-import { BarChart3, Sparkles } from "lucide-react";
+import { BarChart3, Network, Sparkles } from "lucide-react";
 import {
 	type ChangeEvent,
 	useCallback,
@@ -57,11 +57,13 @@ import { useFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	deleteMemory,
+	getMemoryGraph,
 	listMemories,
 	MEMORY_CATEGORIES,
 	MEMORY_SCOPES,
 	type Memory,
 	type MemoryCategory,
+	type MemoryGraphSnapshot,
 	type MemoryScope,
 	memoryCategoryLabels,
 	memoryScopeLabels,
@@ -69,10 +71,11 @@ import {
 import { MemoryDreamReview } from "./MemoryDreamReview.tsx";
 import { MemoryEditor } from "./MemoryEditor.tsx";
 import { MemoryGitSourceCard } from "./MemoryGitSourceCard.tsx";
+import { MemoryGraph } from "./MemoryGraph.tsx";
 import { MemoryReflectDashboard } from "./MemoryReflectDashboard.tsx";
 
 const ALL = "all";
-export type MemoryView = "library" | "dream" | "reflect";
+export type MemoryView = "library" | "graph" | "dream" | "reflect";
 
 function MemoryViewNav({
 	onChange,
@@ -89,6 +92,7 @@ function MemoryViewNav({
 		>
 			{[
 				{ icon: null, label: "Library", value: "library" as const },
+				{ icon: Network, label: "Graph", value: "graph" as const },
 				{ icon: Sparkles, label: "Dream", value: "dream" as const },
 				{ icon: BarChart3, label: "Reflect", value: "reflect" as const },
 			].map((item) => {
@@ -180,6 +184,9 @@ function MemoryRow({
 				<Badge variant="secondary">{scopeLabels[memory.scope]}</Badge>
 				<Badge variant="outline">{categoryLabels[memory.category]}</Badge>
 				<Badge variant="outline">Importance {memory.importance}</Badge>
+				{memory.sensitiveTopics.length > 0 ? (
+					<Badge variant="destructive">Sensitive topic</Badge>
+				) : null}
 				{memory.tags.map((tag) => (
 					<Badge key={tag} variant="secondary">
 						#{tag}
@@ -214,6 +221,8 @@ export function MemoryLibrary({
 	useEffect(() => setView(initialView), [initialView]);
 
 	const [memories, setMemories] = useState<Memory[]>([]);
+	const [graph, setGraph] = useState<MemoryGraphSnapshot | null>(null);
+	const [graphLoading, setGraphLoading] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -256,6 +265,42 @@ export function MemoryLibrary({
 	}, [target]);
 
 	useEffect(() => reload(), [reload]);
+
+	const reloadGraph = useCallback(() => {
+		let cancelled = false;
+		setGraphLoading(true);
+		getMemoryGraph(target, { maxEdges: 320, maxNodes: 160 })
+			.then((next) => {
+				if (!cancelled) {
+					setGraph(next);
+				}
+			})
+			.catch(() => {
+				if (!cancelled) {
+					setGraph({
+						edges: [],
+						memoryCount: 0,
+						nodes: [],
+						truncated: false,
+					});
+				}
+			})
+			.finally(() => {
+				if (!cancelled) {
+					setGraphLoading(false);
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [target]);
+
+	useEffect(() => {
+		if (view === "graph") {
+			return reloadGraph();
+		}
+		return undefined;
+	}, [reloadGraph, view]);
 
 	// Merge a created/updated memory into the list in place (id match = update).
 	const handleSaved = useCallback((saved: Memory) => {
@@ -347,7 +392,17 @@ export function MemoryLibrary({
 				<div className="scroll-fade min-h-0 flex-1 overflow-y-auto px-4 pt-12 pb-24">
 					<div className="mx-auto flex max-w-3xl flex-col gap-6">
 						<MemoryViewNav onChange={setView} value={view} />
-						{view === "dream" ? (
+						{view === "graph" ? (
+							<div className="h-[min(70vh,680px)] min-h-[460px] overflow-hidden rounded-lg border border-border/60 bg-muted/15">
+								{graphLoading || !graph ? (
+									<div className="flex h-full items-center justify-center">
+										<Spinner />
+									</div>
+								) : (
+									<MemoryGraph graph={graph} />
+								)}
+							</div>
+						) : view === "dream" ? (
 							<MemoryDreamReview target={target} />
 						) : (
 							<MemoryReflectDashboard target={target} />

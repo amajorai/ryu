@@ -3338,6 +3338,43 @@
         }
       }
     },
+    "/api/conversations/{id}/save": {
+      "post": {
+        "tags": [
+          "Conversations"
+        ],
+        "summary": "Save a temporary chat",
+        "operationId": "save_temporary_conversation_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Saved conversation",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/conversations/{id}/sessions": {
       "get": {
         "tags": [
@@ -6251,6 +6288,105 @@
           },
           "403": {
             "description": "Unavailable on organization-bound nodes",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/graph": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Get the typed memory graph",
+        "operationId": "get_memory_graph",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_nodes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "max_edges",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/settings": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Get memory privacy settings",
+        "operationId": "get_memory_settings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Memory"
+        ],
+        "summary": "Update memory privacy settings",
+        "operationId": "update_memory_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
             "content": {
               "application/json": {
                 "schema": {}

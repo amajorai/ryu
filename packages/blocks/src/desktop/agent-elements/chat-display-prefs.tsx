@@ -130,8 +130,9 @@ export interface ChatDisplayPrefs {
 	 */
 	openAtBottom: boolean;
 	/**
-	 * When true, the latest scrolled-past user message stays pinned at the top of
-	 * the chat while reading a long assistant reply (Cursor-style). Default: true.
+	 * When true, the latest scrolled-past user message appears in a compact pinned
+	 * bar while scrolling upward through a long assistant reply (Cursor-style),
+	 * and hides again when the reader scrolls down. Default: true.
 	 */
 	pinUserMessage: boolean;
 	/**

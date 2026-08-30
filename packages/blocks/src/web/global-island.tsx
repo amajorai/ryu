@@ -128,7 +128,7 @@ function SuggestionActionPills({
 /* ── the island detail content, by state ───────────────────────────────────── */
 
 const ISLAND_REPLIES = [
-	"On it. Running that locally on your node, nothing leaves the machine.",
+	"On it. Running that locally on your server, nothing leaves the machine.",
 	"Done. I pulled the action items and queued a follow-up for 9am.",
 ];
 

@@ -408,7 +408,7 @@ fn schema_memory_search() -> Value {
         "type": "object",
         "properties": {
             "query": { "type": "string", "description": "What to recall." },
-            "scope": { "type": "string", "description": "Restrict to one scope level.", "enum": ["user", "node", "project", "team", "org"] },
+            "scope": { "type": "string", "description": "Restrict to one scope level.", "enum": ["agent", "user", "node", "project", "org"] },
             "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
         },
         "required": ["query"]
@@ -420,7 +420,7 @@ fn schema_memory_store() -> Value {
         "type": "object",
         "properties": {
             "content": { "type": "string", "description": "The durable fact to remember." },
-            "scope": { "type": "string", "description": "How broadly the fact applies.", "enum": ["user", "node", "project", "team", "org"] },
+            "scope": { "type": "string", "description": "How broadly the fact applies.", "enum": ["agent", "user", "node", "project", "org"] },
             "category": { "type": "string", "description": "What kind of fact this is." },
             "importance": { "type": "integer", "minimum": 1, "maximum": 5 },
             "when_to_use": { "type": "string", "description": "Hint describing when this fact is relevant." }
@@ -683,8 +683,8 @@ pub fn verbs() -> &'static [Verb] {
             server: SERVER_MEMORY,
             name: "store",
             capability: CAP_MEMORY,
-            description: "Remember a durable fact at a given scope level (user, node, project, \
-                          team, or org).",
+            description: "Remember a durable fact at a given scope level (agent, user, node, \
+                          project, or org).",
             schema: schema_memory_store,
         },
         Verb {

@@ -1,7 +1,7 @@
+mod a2a;
 mod acl;
 mod acp_runtime;
 mod activity;
-mod a2a;
 mod agent_control;
 mod agent_execution;
 mod agent_routing;
@@ -26,8 +26,8 @@ pub(crate) use ryu_composio::auth as composio_auth;
 pub(crate) use ryu_composio::catalog as composio_catalog;
 pub(crate) use ryu_composio::connect as composio_connect;
 pub(crate) use ryu_composio::triggers as composio_triggers;
-mod connections;
 mod config_file;
+mod connections;
 mod crash;
 mod crypto_host;
 mod dashboards_client;
@@ -118,11 +118,11 @@ mod plugin_storage;
 mod plugins;
 mod policy_alerts;
 mod portable_packages;
-mod prompt_evals;
 mod predict;
 mod predict_host;
 mod privacy;
 mod profile;
+mod prompt_evals;
 mod quests_client;
 mod rag_host;
 mod recipes_client;
@@ -133,8 +133,8 @@ mod routing_policy;
 mod rtk_config;
 mod runnable;
 mod ryu_analytics;
-mod safe_actions;
 mod ryu_platform;
+mod safe_actions;
 /// The OS-style "boot with the extension layer off" switch (apps, plugins,
 /// skills, user MCP servers, the scheduler). Resolved once, below, BEFORE
 /// anything it suppresses has a chance to spawn.
@@ -179,11 +179,11 @@ use sidecar::{
     providers::{
         apfel::ApfelManager, llamacpp::LlamaCppClassifyManager, llamacpp::LlamaCppEmbedManager,
         llamacpp::LlamaCppManager, llamacpp::LlamaCppRerankManager,
-        llamacpp::LlamaCppSpeechManager, mlx::MlxManager,
-        mlx_vlm::MlxVlmManager, mesh_llm::MeshLlmManager, ollama::OllamaManager, omlx::OmlxManager, outetts::OuteTtsManager,
-        parakeet::ParakeetManager, ryutts::RyuTtsManager, sdcpp::StableDiffusionManager,
-        sglang::SglangManager, vllm::VllmManager, whispercpp::WhisperCppManager,
-        DockerModelRunnerManager,
+        llamacpp::LlamaCppSpeechManager, mesh_llm::MeshLlmManager, mlx::MlxManager,
+        mlx_serve::MlxServeManager, mlx_vlm::MlxVlmManager, ollama::OllamaManager,
+        omlx::OmlxManager, outetts::OuteTtsManager, parakeet::ParakeetManager,
+        ryutts::RyuTtsManager, sdcpp::StableDiffusionManager, sglang::SglangManager,
+        vllm::VllmManager, whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
     tailscale::TailscaleManager,
     tools::{
@@ -298,8 +298,8 @@ async fn main() {
     // Prompt Studio suites/runs/reviews are Core-owned durable resources. Install
     // the store after profile defaults so the database follows the active node
     // data directory, before any HTTP router can serve the prompt-eval surface.
-    let prompt_eval_store = crate::prompt_evals::PromptEvalStore::open()
-        .expect("open prompt eval store");
+    let prompt_eval_store =
+        crate::prompt_evals::PromptEvalStore::open().expect("open prompt eval store");
     crate::prompt_evals::PromptEvalStore::install_global(prompt_eval_store)
         .expect("install prompt eval store");
 
@@ -577,12 +577,9 @@ async fn main() {
         let island_downloads = download_center.clone();
         tokio::spawn(async move {
             let version = env!("CARGO_PKG_VERSION");
-            if let Err(error) = crate::sidecar::tools::island::ensure_installed(
-                &island_downloads,
-                version,
-                false,
-            )
-            .await
+            if let Err(error) =
+                crate::sidecar::tools::island::ensure_installed(&island_downloads, version, false)
+                    .await
             {
                 tracing::warn!(error = %error, "Island preinstall/update failed");
             }
@@ -623,6 +620,9 @@ async fn main() {
         // MLX-VLM — vision/omni MLX engine (recommended default MLX on Apple
         // Silicon). Same node-gate as mlx-lm.
         Arc::new(MlxVlmManager::new()),
+        // mlx-serve — native Zig, model-directory MLX + GGUF server. It is
+        // opt-in and uses the same active-engine swap as the Python MLX lanes.
+        Arc::new(MlxServeManager::new()),
         // oMLX — high-performance Apple-Silicon server (PATH-adopted, opt-in).
         Arc::new(OmlxManager::new()),
         // Docker Model Runner — adopt-only: Ryu downloads/spawns nothing, it just
@@ -713,6 +713,7 @@ async fn main() {
         "vllm".into(),
         "sglang".into(),
         "mlx".into(),
+        "mlx-serve".into(),
         // Docker Model Runner is adopt-only (never spawned/downloaded), but it
         // MUST be in startup_order: `seed_names = startup_order.clone()` drives
         // `seed_installed_from_disk`, so without it a persisted install would not
@@ -2274,9 +2275,7 @@ async fn main() {
             loop {
                 attempt += 1;
                 match sidecar::control_plane::register_managed_node(&cp_client).await {
-                    Ok(None)
-                        if fleet::enrollment_recovery_pending() && attempt < MAX_ATTEMPTS =>
-                    {
+                    Ok(None) if fleet::enrollment_recovery_pending() && attempt < MAX_ATTEMPTS => {
                         let backoff = std::time::Duration::from_secs(2u64.pow(attempt.min(5)));
                         tracing::info!(
                             "control-plane: waiting for saved organization enrollment recovery; retrying registration in {backoff:?}"

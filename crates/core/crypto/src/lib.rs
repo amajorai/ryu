@@ -71,13 +71,12 @@ const KEYRING_ACCOUNT: &str = "master-key";
 /// This is the shared webhook/signature primitive; app satellites must not copy
 /// the block-padding construction into their own request handlers.
 pub fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
-	use hmac::{Hmac, Mac};
+    use hmac::{Hmac, Mac};
 
-	type HmacSha256 = Hmac<sha2::Sha256>;
-	let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
-		.expect("HMAC accepts every key length");
-	mac.update(message);
-	hex::encode(mac.finalize().into_bytes())
+    type HmacSha256 = Hmac<sha2::Sha256>;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).expect("HMAC accepts every key length");
+    mac.update(message);
+    hex::encode(mac.finalize().into_bytes())
 }
 
 /// Env override carrying a base64-encoded 32-byte master key (for

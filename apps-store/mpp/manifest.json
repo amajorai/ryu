@@ -269,6 +269,32 @@
     "tool:http-egress:127.0.0.1"
   ],
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "mpp-services",
+        "title": "Services",
+        "icon": "search-01",
+        "target": "/plugin/app__mpp-companion",
+        "context": { "tab": "services" },
+        "order": 30
+      },
+      {
+        "id": "mpp-policy",
+        "title": "Policy",
+        "icon": "shield-01",
+        "target": "/plugin/app__mpp-companion",
+        "context": { "tab": "policy" },
+        "order": 31
+      },
+      {
+        "id": "mpp-receipts",
+        "title": "Receipts",
+        "icon": "receipt",
+        "target": "/plugin/app__mpp-companion",
+        "context": { "tab": "receipts" },
+        "order": 32
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "mpp.chat",

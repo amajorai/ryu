@@ -11,6 +11,9 @@
 //! notification hits all three channels; the ack bookkeeping lives in the run's
 //! own `state` map so it survives a restart like every other checkpoint.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
+
 use serde::{Deserialize, Serialize};
 
 use super::store::WorkflowRun;
@@ -25,7 +28,7 @@ fn ack_state_key(node_id: &str) -> String {
 /// string into `run.state` so it is checkpointed with the run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AckState {
-    /// `first` | `all` | `quorum`.
+    /// `first` | `all` | `quorum` | `percentage`.
     pub mode: String,
     /// Number of acks required to resume the run.
     pub threshold: u32,
@@ -35,7 +38,7 @@ pub struct AckState {
     pub acked: Vec<String>,
     /// Map of member user id → their inbox notification id (so an ack can mark the
     /// right inbox row read/acked).
-    pub notifications: std::collections::HashMap<String, String>,
+    pub notifications: HashMap<String, String>,
 }
 
 impl AckState {
@@ -45,11 +48,80 @@ impl AckState {
     }
 }
 
+/// The in-process lock registry prevents two members acknowledging the same
+/// run at once from loading the same stale JSON snapshot and losing one ack.
+/// Locks are keyed per run so unrelated workflows can continue acknowledging
+/// independently. The map intentionally lives for the Core process lifetime;
+/// entries are tiny and retaining them avoids a lock-removal race that could
+/// create two locks for one run.
+fn ack_locks() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn ack_lock(run_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = ack_locks()
+        .lock()
+        .expect("NotifyUser ack lock registry is not poisoned");
+    Arc::clone(
+        locks
+            .entry(run_id.to_owned())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+    )
+}
+
+fn unique_user_ids<I>(ids: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut seen = HashSet::new();
+    ids.into_iter()
+        .map(|id| id.trim().to_owned())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect()
+}
+
+fn is_org_bound() -> bool {
+    crate::sidecar::control_plane::is_managed_node()
+        || crate::sidecar::control_plane::registered_org().is_some()
+        || crate::sidecar::control_plane::gateway_key().is_some()
+}
+
+/// Resolve an explicit member set and verify it against the bound organization
+/// whenever this Core is managed. Local unbound nodes retain the historical
+/// explicit-id behavior, while an org-bound node can never notify an arbitrary
+/// user id supplied by a workflow definition.
+async fn resolve_explicit_recipients(user_ids: &[String]) -> Result<Vec<String>, String> {
+    let recipients = unique_user_ids(user_ids.iter().cloned());
+    if recipients.is_empty() || !is_org_bound() {
+        return Ok(recipients);
+    }
+
+    let client = reqwest::Client::new();
+    let members = crate::sidecar::control_plane::resolve_notify_targets(&client, None)
+        .await
+        .map_err(|e| {
+            format!("NotifyUser: could not verify recipients against the organization: {e}")
+        })?;
+    let allowed: HashSet<String> = members.into_iter().map(|member| member.user_id).collect();
+    let invalid: Vec<String> = recipients
+        .iter()
+        .filter(|user_id| !allowed.contains(*user_id))
+        .cloned()
+        .collect();
+    if !invalid.is_empty() {
+        return Err(format!(
+            "NotifyUser: recipients are not members of the bound organization: {}",
+            invalid.join(", ")
+        ));
+    }
+    Ok(recipients)
+}
+
 /// Resolve a target spec to the set of member user ids to ping.
 async fn resolve_recipients(target: &NotifyTargetSpec) -> Result<Vec<String>, String> {
     match target {
-        // Explicit members need no roster lookup.
-        NotifyTargetSpec::Members { user_ids } => Ok(user_ids.clone()),
+        NotifyTargetSpec::Members { user_ids } => resolve_explicit_recipients(user_ids).await,
         NotifyTargetSpec::Org | NotifyTargetSpec::Team { .. } => {
             let team_id = match target {
                 NotifyTargetSpec::Team { team_id } => Some(team_id.as_str()),
@@ -59,7 +131,7 @@ async fn resolve_recipients(target: &NotifyTargetSpec) -> Result<Vec<String>, St
             let users = crate::sidecar::control_plane::resolve_notify_targets(&client, team_id)
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(users.into_iter().map(|u| u.user_id).collect())
+            Ok(unique_user_ids(users.into_iter().map(|u| u.user_id)))
         }
     }
 }
@@ -74,6 +146,14 @@ fn threshold_for(mode: &AckMode, recipients: usize) -> u32 {
         // Never require more acks than there are recipients (an over-large quorum
         // would hang the run forever).
         AckMode::Quorum { n: q } => (*q).min(n).max(1),
+        // Percentages use ceiling division: 50% of 3 people means 2, not 1.
+        // Clamp malformed values at execution so a hand-authored workflow can
+        // never create a zero-ack gate or a gate that can never be satisfied.
+        AckMode::Percentage { percent } => {
+            let percent = (*percent).clamp(1, 100) as u64;
+            let required = ((recipients as u64 * percent) + 99) / 100;
+            required.clamp(1, recipients as u64) as u32
+        }
     }
 }
 
@@ -142,6 +222,7 @@ pub async fn run(
             AckMode::First => "first",
             AckMode::All => "all",
             AckMode::Quorum { .. } => "quorum",
+            AckMode::Percentage { .. } => "percentage",
             AckMode::None => "none",
         }
         .to_string(),
@@ -245,6 +326,41 @@ mod tests {
         assert_eq!(threshold_for(&AckMode::Quorum { n: 9 }, 3), 3);
         // A zero/one quorum floors at 1.
         assert_eq!(threshold_for(&AckMode::Quorum { n: 0 }, 3), 1);
+        // Percentage thresholds round up so a majority of 3 requires 2.
+        assert_eq!(threshold_for(&AckMode::Percentage { percent: 50 }, 3), 2);
+        assert_eq!(threshold_for(&AckMode::Percentage { percent: 34 }, 3), 2);
+        assert_eq!(threshold_for(&AckMode::Percentage { percent: 100 }, 3), 3);
+        // Malformed percentages are bounded at execution and still require one
+        // acknowledgement, so a hand-authored workflow cannot bypass the gate.
+        assert_eq!(threshold_for(&AckMode::Percentage { percent: 0 }, 3), 1);
+        assert_eq!(threshold_for(&AckMode::Percentage { percent: 101 }, 3), 3);
+    }
+
+    #[test]
+    fn explicit_recipients_are_trimmed_and_deduplicated() {
+        assert_eq!(
+            unique_user_ids(vec![
+                " u1 ".to_string(),
+                "u2".to_string(),
+                "u1".to_string(),
+                "  ".to_string(),
+            ]),
+            vec!["u1", "u2"]
+        );
+    }
+
+    #[test]
+    fn percentage_ack_mode_round_trips_on_the_wire() {
+        let mode: AckMode = serde_json::from_value(serde_json::json!({
+            "mode": "percentage",
+            "percent": 75,
+        }))
+        .expect("percentage ack mode should deserialize");
+        assert_eq!(mode, AckMode::Percentage { percent: 75 });
+        assert_eq!(
+            serde_json::to_value(mode).expect("percentage ack mode should serialize"),
+            serde_json::json!({ "mode": "percentage", "percent": 75 })
+        );
     }
 
     #[tokio::test]
@@ -260,6 +376,17 @@ mod tests {
         let mut run = gate_run("n1", &["u1", "u2"], &AckMode::All);
         assert!(!record_ack(&mut run, "u1").await.unwrap().satisfied);
         // A repeat ack from the same member does not double-count.
+        assert!(!record_ack(&mut run, "u1").await.unwrap().satisfied);
+        assert!(record_ack(&mut run, "u2").await.unwrap().satisfied);
+    }
+
+    #[tokio::test]
+    async fn percentage_ack_requires_the_rounded_up_threshold() {
+        let mut run = gate_run(
+            "n1",
+            &["u1", "u2", "u3"],
+            &AckMode::Percentage { percent: 50 },
+        );
         assert!(!record_ack(&mut run, "u1").await.unwrap().satisfied);
         assert!(record_ack(&mut run, "u2").await.unwrap().satisfied);
     }
@@ -288,6 +415,8 @@ pub struct AckAckResult {
 pub async fn ack_gate(run_id: &str, user_id: &str) -> Result<AckAckResult, String> {
     use super::store;
 
+    let lock = ack_lock(run_id);
+    let _guard = lock.lock().await;
     let mut run = store::load_run(run_id).map_err(|_| "run not found".to_string())?;
     if run.status != store::RunStatus::AwaitingInput {
         return Err("run is not awaiting a notification ack".to_string());
@@ -298,7 +427,7 @@ pub async fn ack_gate(run_id: &str, user_id: &str) -> Result<AckAckResult, Strin
 
     if result.satisfied {
         let payload = serde_json::json!({ "acked_by": user_id }).to_string();
-        super::executor::resume_run(run_id, payload).await?;
+        super::executor::resume_run_after_notify_ack(run_id, payload).await?;
     }
     Ok(result)
 }

@@ -1171,7 +1171,8 @@ impl SetupManager {
             w_parakeet,
             w_vad,
             w_outetts,
-            w_kokoro, w_sdcpp,
+            w_kokoro,
+            w_sdcpp,
         ] {
             warnings.extend(w);
         }

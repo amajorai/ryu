@@ -41,6 +41,10 @@ pub const MIRROR_BUILTIN_KEY: &str = "memory.mirror-builtin";
 pub const SYNC_TURNS_KEY: &str = "memory.sync-turns";
 /// Preference key: inject the external provider's standing summary each turn.
 pub const PROVIDER_CONTEXT_KEY: &str = "memory.provider-context";
+/// Per-turn composer flag that opts a temporary chat into read-only
+/// personalized context. The temporary-chat privacy boundary still prevents
+/// conversation and memory writes; this only permits reading existing context.
+pub const TEMPORARY_CONTEXT_FLAG: &str = "@ryu/memory/temporary-context";
 
 /// How memory enters a chat turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -149,6 +153,10 @@ pub struct MemoryPolicy {
     /// Off by default: it costs prompt space every single turn, and only providers
     /// that model a user over time have anything to say.
     pub provider_context: bool,
+    /// Server-resolved per-user consent for special-category memory. This is not
+    /// loaded from the node-global preference table; the chat caller overlays it
+    /// from `MemoryStore` after resolving the verified user.
+    pub include_sensitive_topics: bool,
 }
 
 impl Default for MemoryPolicy {
@@ -166,11 +174,20 @@ impl Default for MemoryPolicy {
             // opt-in.
             sync_turns: false,
             provider_context: false,
+            include_sensitive_topics: false,
         }
     }
 }
 
 impl MemoryPolicy {
+    /// Overlay the server-resolved per-user sensitive-topic consent onto the
+    /// otherwise node-level turn policy.
+    #[must_use]
+    pub fn with_sensitive_topics(mut self, enabled: bool) -> Self {
+        self.include_sensitive_topics = enabled;
+        self
+    }
+
     /// Resolve from the three preference values. Any unrecognised or absent value
     /// falls back to the default, which reproduces pre-policy behaviour — a garbled
     /// preference must never silently disable a user's memory.
@@ -238,6 +255,26 @@ impl MemoryPolicy {
     pub fn should_write(self, request_enabled: bool) -> bool {
         request_enabled && self.write_frequency.writes_this_turn()
     }
+
+    /// Whether a temporary request explicitly opted into personalized context.
+    /// A false `persist` value is the server-side temporary-chat boundary; the
+    /// client flag alone must never broaden a normal saved turn's policy.
+    pub fn temporary_context_enabled(persist: bool, flag_enabled: bool) -> bool {
+        !persist && flag_enabled
+    }
+
+    /// Resolve the personalized context allowed for one request. Saved chats
+    /// use their ordinary request opt-in; temporary chats need the explicit
+    /// composer opt-in and never inherit `enable_long_term` into a read/write
+    /// exception by accident.
+    pub fn context_enabled(
+        request_enabled: bool,
+        persist: bool,
+        temporary_flag_enabled: bool,
+    ) -> bool {
+        (persist && request_enabled)
+            || Self::temporary_context_enabled(persist, temporary_flag_enabled)
+    }
 }
 
 #[cfg(test)]
@@ -249,7 +286,18 @@ mod tests {
         let p = MemoryPolicy::default();
         assert!(p.should_auto_recall(true));
         assert!(p.should_write(true));
+        assert!(!p.include_sensitive_topics);
         assert_eq!(p.recall_budget.long_term_limit(), DEFAULT_LONG_TERM_LIMIT);
+    }
+
+    #[test]
+    fn per_user_sensitive_consent_is_an_explicit_overlay() {
+        let policy = MemoryPolicy::default().with_sensitive_topics(true);
+        assert!(policy.include_sensitive_topics);
+        assert_eq!(
+            MemoryPolicy::default().with_sensitive_topics(false),
+            MemoryPolicy::default()
+        );
     }
 
     #[test]
@@ -298,6 +346,17 @@ mod tests {
         let p = MemoryPolicy::from_raw(None, None, Some("never"));
         assert!(!p.should_write(true));
         assert!(p.should_auto_recall(true));
+    }
+
+    #[test]
+    fn temporary_context_requires_the_explicit_flag() {
+        assert!(!MemoryPolicy::temporary_context_enabled(false, false));
+        assert!(MemoryPolicy::temporary_context_enabled(false, true));
+        assert!(!MemoryPolicy::temporary_context_enabled(true, true));
+        assert!(!MemoryPolicy::context_enabled(true, false, false));
+        assert!(MemoryPolicy::context_enabled(true, false, true));
+        assert!(MemoryPolicy::context_enabled(true, true, false));
+        assert!(!MemoryPolicy::context_enabled(false, true, false));
     }
 
     #[test]

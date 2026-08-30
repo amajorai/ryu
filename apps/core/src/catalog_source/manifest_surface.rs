@@ -305,12 +305,7 @@ fn project_extensions(manifest: &Value) -> Vec<Value> {
                 .and_then(Value::as_array)
                 .is_some_and(|items| !items.is_empty())
             {
-                add_grouped_feature(
-                    &mut groups,
-                    "core",
-                    "Core runtime",
-                    Some(label.to_owned()),
-                );
+                add_grouped_feature(&mut groups, "core", "Core runtime", Some(label.to_owned()));
             }
         }
     }
@@ -371,12 +366,14 @@ fn project_implementation(manifest: &Value) -> Vec<Value> {
                     &mut groups,
                     "core",
                     "Core runtime",
-                    Some(match key {
-                        "turn_hooks" => "turn hooks",
-                        "hook_events" => "app events",
-                        _ => "tool filters",
-                    }
-                    .to_owned()),
+                    Some(
+                        match key {
+                            "turn_hooks" => "turn hooks",
+                            "hook_events" => "app events",
+                            _ => "tool filters",
+                        }
+                        .to_owned(),
+                    ),
                 );
             }
         }

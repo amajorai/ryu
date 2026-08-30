@@ -23,7 +23,7 @@ export interface Inbox {
 	address: string;
 	created_at: string;
 	id: string;
-	inbound_secret: string;
+	inbound_secret?: string;
 	name: string;
 	provider: InboxProvider;
 }

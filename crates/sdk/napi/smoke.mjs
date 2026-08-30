@@ -2,7 +2,9 @@
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const addon = require("./ryu_sdk_napi.node");
+// Load through the generated platform resolver so the smoke covers the same
+// entry point consumers use, regardless of the host target suffix.
+const addon = require("./index.js");
 
 const results = [];
 const check = (name, fn) => {

@@ -178,8 +178,22 @@ pub(super) async fn get_dream_review(
     State(state): State<ServerState>,
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> Response {
+    if let Err(response) = super::require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return response;
+    }
     let owner = super::memory_owner_user_id(&caller);
-    match pending_proposals(&state, &owner).await {
+    let include_sensitive = state
+        .memory
+        .include_sensitive_topics(&owner)
+        .await
+        .unwrap_or(false);
+    match pending_proposals(&state, &owner, include_sensitive).await {
         Ok(proposals) => Json(review_body(
             "manual",
             &proposals,
@@ -207,6 +221,15 @@ pub(super) async fn run_dream_review(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<DreamReviewBody>,
 ) -> Response {
+    if let Err(response) = super::require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     let mode = requested_mode(body.mode.as_deref());
     match run_dream_review_inner(&state, &caller, mode).await {
         Ok(body) => Json(body).into_response(),
@@ -230,7 +253,12 @@ async fn run_dream_review_inner(
     }
 
     let owner = super::memory_owner_user_id(caller);
-    let sources = load_sources(state, caller)
+    let include_sensitive = state
+        .memory
+        .include_sensitive_topics(&owner)
+        .await
+        .unwrap_or(false);
+    let sources = load_sources(state, caller, include_sensitive)
         .await
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     if sources.is_empty() {
@@ -258,19 +286,20 @@ async fn run_dream_review_inner(
         )
     })?;
 
-    let pending = pending_proposals(state, &owner)
+    let pending = pending_proposals(state, &owner, include_sensitive)
         .await
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let visible = memory_visibility(caller);
     let active = state
         .memory
-        .list_visible(
+        .list_visible_with_sensitive(
             &memory::MemoryFilter {
                 lifecycle: Some(memory::MemoryLifecycle::Active),
                 limit: Some(500),
                 ..Default::default()
             },
             visible,
+            include_sensitive,
         )
         .await
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -294,6 +323,9 @@ async fn run_dream_review_inner(
         let Some(content) = bounded_text(&candidate.content, DREAM_MAX_MEMORY_CHARS) else {
             continue;
         };
+        if !include_sensitive && !memory::detect_sensitive_topics(&content).is_empty() {
+            continue;
+        }
         let key = normalize_key(&content);
         if key.is_empty() || !known_content.insert(key) {
             continue;
@@ -374,7 +406,7 @@ async fn run_dream_review_inner(
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     }
 
-    let proposals = pending_proposals(state, &owner)
+    let proposals = pending_proposals(state, &owner, include_sensitive)
         .await
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let summary = bounded_text(
@@ -394,7 +426,19 @@ async fn run_dream_review_inner(
     summary = "Read Dream review settings",
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
-pub(super) async fn get_dream_settings(State(state): State<ServerState>) -> Response {
+pub(super) async fn get_dream_settings(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> Response {
+    if let Err(response) = super::require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return response;
+    }
     match read_settings(&state).await {
         Ok(settings) => Json(json!({ "settings": settings })).into_response(),
         Err(error) => super::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
@@ -411,8 +455,18 @@ pub(super) async fn get_dream_settings(State(state): State<ServerState>) -> Resp
 )]
 pub(super) async fn update_dream_settings(
     State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(patch): Json<DreamSettingsPatch>,
 ) -> Response {
+    if let Err(response) = super::require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     for hour in [patch.quiet_hours_start, patch.quiet_hours_end]
         .into_iter()
         .flatten()
@@ -474,6 +528,15 @@ pub(super) async fn accept_dream_proposal(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(response) = super::require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     let owner = super::memory_owner_user_id(&caller);
     let reviewer = caller.as_ref().map(|caller| caller.user_id.clone());
     let memory = state.memory;
@@ -494,6 +557,15 @@ pub(super) async fn reject_dream_proposal(
     Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> Response {
+    if let Err(response) = super::require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     let owner = super::memory_owner_user_id(&caller);
     let reviewer = caller.as_ref().map(|caller| caller.user_id.clone());
     let memory = state.memory;
@@ -509,12 +581,24 @@ async fn review_dream_proposal(
     id: &str,
     approve: bool,
 ) -> Response {
-    match memory.get_proposal(id).await {
-        Ok(Some(proposal)) if proposal.owner_user_id == owner => {}
+    let proposal = match memory.get_proposal(id).await {
+        Ok(Some(proposal)) if proposal.owner_user_id == owner => proposal,
         Ok(_) => return super::json_error(StatusCode::NOT_FOUND, "proposal not found".to_owned()),
         Err(error) => {
             return super::json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
         }
+    };
+    if approve
+        && !memory::detect_sensitive_topics(&proposal.draft.content).is_empty()
+        && !memory
+            .include_sensitive_topics(&owner)
+            .await
+            .unwrap_or(false)
+    {
+        return super::json_error(
+            StatusCode::BAD_REQUEST,
+            "sensitive topics are disabled in Settings → Memory".to_owned(),
+        );
     }
     let reviewed = match memory
         .review_proposal(id, approve, reviewer.as_deref())
@@ -540,7 +624,12 @@ async fn review_dream_proposal(
     };
     match memory.get(memory_id).await {
         Ok(Some(entry)) => {
-            index_reviewed_memory(retrieval, entry.clone()).await;
+            if let Some(superseded_id) = entry.supersedes_id.as_deref() {
+                // A revision creates a new source row; remove the old derived
+                // vector before it can remain recallable as a stale answer.
+                let _ = retrieval.remove_chunk(superseded_id).await;
+            }
+            index_reviewed_memory(memory.clone(), retrieval, entry.clone()).await;
             Json(json!({ "memory": entry })).into_response()
         }
         Ok(None) => super::json_error(
@@ -552,9 +641,20 @@ async fn review_dream_proposal(
 }
 
 async fn index_reviewed_memory(
+    memory: memory::MemoryStore,
     retrieval: crate::server::retrieval::RetrievalStore,
     entry: memory::LongTermEntry,
 ) {
+    let consent_user = entry.owner_user_id.as_deref().unwrap_or(memory::LOCAL_USER);
+    if !entry.sensitive_topics.is_empty()
+        && !memory
+            .include_sensitive_topics(consent_user)
+            .await
+            .unwrap_or(false)
+    {
+        let _ = retrieval.remove_chunk(&entry.id).await;
+        return;
+    }
     let node_org = super::node_org_id();
     let owner = match (node_org.as_deref(), entry.owner_user_id.as_deref()) {
         (Some(org), Some(uid)) if uid != memory::LOCAL_USER => {
@@ -563,13 +663,15 @@ async fn index_reviewed_memory(
         _ => crate::server::retrieval::RetrievalOwner::shared(),
     };
     if let Err(error) = retrieval
-        .index_memory_chunk(
+        .index_memory_chunk_with_metadata(
             &entry.id,
             &entry.content,
             entry.scope.as_str(),
             entry.scope_id.as_deref(),
             entry.category.as_str(),
             entry.importance,
+            entry.author_agent_id.as_deref(),
+            !entry.sensitive_topics.is_empty(),
             owner,
         )
         .await
@@ -584,8 +686,9 @@ async fn index_reviewed_memory(
 async fn pending_proposals(
     state: &ServerState,
     owner: &str,
+    include_sensitive: bool,
 ) -> anyhow::Result<Vec<memory::MemoryRevisionProposal>> {
-    state
+    let proposals = state
         .memory
         .list_proposals(
             owner,
@@ -594,12 +697,21 @@ async fn pending_proposals(
                 limit: Some(100),
             },
         )
-        .await
+        .await?;
+    Ok(if include_sensitive {
+        proposals
+    } else {
+        proposals
+            .into_iter()
+            .filter(|proposal| memory::detect_sensitive_topics(&proposal.draft.content).is_empty())
+            .collect()
+    })
 }
 
 async fn load_sources(
     state: &ServerState,
     caller: &Option<crate::identity_verify::VerifiedCaller>,
+    include_sensitive: bool,
 ) -> anyhow::Result<Vec<DreamSource>> {
     let summaries = state
         .conversations
@@ -620,6 +732,9 @@ async fn load_sources(
             if !matches!(message.role.as_str(), "user" | "assistant")
                 || message.content.trim().is_empty()
             {
+                continue;
+            }
+            if !include_sensitive && !memory::detect_sensitive_topics(&message.content).is_empty() {
                 continue;
             }
             let Some(content) = bounded_text(&message.content, 4_000) else {

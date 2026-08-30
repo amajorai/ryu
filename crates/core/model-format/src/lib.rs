@@ -118,10 +118,10 @@ pub struct EngineCapability {
 /// module + main registration, which already exist for current engines).
 /// Order matters: it is the recommendation tiebreaker (earlier = preferred).
 ///
-/// NOTE: `omlx` is intentionally absent — it serves a model-dir, not a
-/// resolvable single model, so it stays outside format-derived activation.
-/// Adding it would route format-derived installs into an engine that serves
-/// nothing until a model is manually placed in its dir.
+/// NOTE: `omlx` and `mlx-serve` are intentionally absent — this Ryu integration
+/// uses each runtime's own model directory and discovery lifecycle, rather than
+/// treating a format-derived single-model install as a directly resolvable
+/// engine activation.
 pub fn engine_capabilities() -> &'static [EngineCapability] {
     &[
         EngineCapability {
@@ -245,10 +245,14 @@ mod tests {
             vec!["vllm", "sglang"]
         );
         assert_eq!(engines_for_format(ModelFormat::Mlx), vec!["mlx", "mlx-vlm"]);
-        // omlx is deliberately not in the table.
+        // Model-directory engines are deliberately not in the table.
         assert!(!engine_capabilities().iter().any(|c| c.engine == "omlx"));
+        assert!(!engine_capabilities()
+            .iter()
+            .any(|c| c.engine == "mlx-serve"));
         assert_eq!(formats_for_engine("vllm"), &[ModelFormat::Safetensors]);
         assert_eq!(formats_for_engine("omlx"), &[] as &[ModelFormat]);
+        assert_eq!(formats_for_engine("mlx-serve"), &[] as &[ModelFormat]);
     }
 
     #[test]

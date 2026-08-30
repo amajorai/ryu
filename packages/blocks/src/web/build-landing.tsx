@@ -3,6 +3,7 @@
 import { Blocks, Check, Terminal } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { DOCS_URL } from "./data/resources.tsx";
 import HeroWorkflowLoop, {
 	HeroUseCaseSwitcher,
 } from "./hero-workflow-loop.tsx";
@@ -113,8 +114,8 @@ export default function ConsoleLanding() {
 				</h1>
 				<p className="mt-7 max-w-2xl text-balance text-lg text-muted-foreground leading-relaxed md:text-xl">
 					Ryu Console is the desktop workspace for power users and admins. Use
-					Ryu's AI or bring your own, then configure the node, tools, and access
-					your team relies on.
+					Ryu's AI or bring your own, then configure the server, tools, and
+					access your team relies on.
 				</p>
 
 				<ProductLandingCtas className="mt-8" />
@@ -164,9 +165,14 @@ export default function ConsoleLanding() {
 					<Link className="hover:text-foreground" href="/platform">
 						Use Ryu Platform <ArrowIcon />
 					</Link>
-					<Link className="hover:text-foreground" href="/docs">
+					<a
+						className="hover:text-foreground"
+						href={DOCS_URL}
+						rel="noopener noreferrer"
+						target="_blank"
+					>
 						Read docs <ArrowIcon />
-					</Link>
+					</a>
 				</div>
 			</section>
 		</main>

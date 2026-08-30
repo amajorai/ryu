@@ -13,6 +13,7 @@ import { widgetDefinition } from "@/src/components/dashboard/widgets/registry.ts
 import type { VoiceMode } from "@/src/hooks/useVoiceMode.ts";
 import { formatVoiceCallDuration, getVoiceCallInitials } from "./voice-call.ts";
 import { extractVoiceWidgets } from "./voice-widgets.ts";
+
 interface VoicePhaseMeta {
 	detail: string;
 }

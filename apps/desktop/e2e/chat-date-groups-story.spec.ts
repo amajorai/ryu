@@ -155,6 +155,7 @@ test("the chip and the pinned bar never overlap while both are shown", async ({
 	// Deep enough into the transcript that a user message is above the fold and
 	// the pin bar is elected.
 	await scroller.evaluate((el) => {
+		el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1 }));
 		el.scrollTop = Math.floor(el.scrollHeight * 0.6);
 	});
 	await expect(pinnedBar(page)).toBeVisible({ timeout: 30_000 });
@@ -168,6 +169,37 @@ test("the chip and the pinned bar never overlap while both are shown", async ({
 		// The chip's lane sits entirely ABOVE the bar's painted top edge.
 		expect(chipBox.y + chipBox.height).toBeLessThanOrEqual(barBox.y + 1);
 	}
+});
+
+test("the pinned message is shown while scrolling up and hides while scrolling down", async ({
+	page,
+}) => {
+	await openStory(page);
+	await expect(separators(page)).toHaveCount(EXPECTED_SEPARATORS, {
+		timeout: 30_000,
+	});
+
+	const scroller = viewport(page);
+	await scroller.evaluate((element) => {
+		element.dispatchEvent(
+			new WheelEvent("wheel", { bubbles: true, deltaY: -1 })
+		);
+		element.scrollTop = Math.floor(element.scrollHeight * 0.7);
+		element.dispatchEvent(new Event("scroll", { bubbles: true }));
+	});
+	await expect(pinnedBar(page)).toBeVisible({ timeout: 30_000 });
+
+	await scroller.evaluate((element) => {
+		element.dispatchEvent(
+			new WheelEvent("wheel", { bubbles: true, deltaY: 1 })
+		);
+		element.scrollTop = Math.min(
+			element.scrollHeight - element.clientHeight,
+			element.scrollTop + 180
+		);
+		element.dispatchEvent(new Event("scroll", { bubbles: true }));
+	});
+	await expect(pinnedBar(page)).toHaveCount(0);
 });
 
 test("the chip keeps its position with the pinned message turned off", async ({

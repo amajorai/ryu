@@ -349,4 +349,44 @@ test.describe("composer + menu — real InputBar in isolation", () => {
 
 		await expect(page.getByTestId("ghost-state")).toHaveText("on");
 	});
+
+	test("temporary chats can opt into memory and be saved later", async ({
+		page,
+	}) => {
+		await page.goto(STORY_URL);
+		const mount = page.getByTestId("full");
+
+		await mount.getByRole("button", { name: "Add", exact: true }).click();
+		const temporaryOption = page.getByRole("option", {
+			name: "Temporary chat",
+		});
+		await expect(temporaryOption).toBeVisible();
+		await temporaryOption.click();
+		await expect(page.getByTestId("temporary-memory-state")).toHaveText("off");
+
+		await mount.getByRole("button", { name: "Add", exact: true }).click();
+		await page
+			.getByRole("option", { name: "Use memory in temporary chat" })
+			.click();
+		await expect(page.getByTestId("temporary-memory-state")).toHaveText("on");
+		await expect(
+			mount.getByRole("button", { name: "Save temporary chat" })
+		).toBeVisible();
+		await mount.getByRole("button", { name: "Add", exact: true }).click();
+		await expect(
+			page.getByRole("option", { name: "Use memory in temporary chat" })
+		).toBeVisible();
+		await page.screenshot({
+			path: "test-results/temporary-chat-memory-save-proof.png",
+			fullPage: true,
+		});
+
+		await page.keyboard.press("Escape");
+		await page.screenshot({
+			path: "test-results/temporary-chat-save-bar-proof.png",
+			fullPage: true,
+		});
+		await mount.getByRole("button", { name: "Save temporary chat" }).click();
+		await expect(page.getByTestId("temporary-chat-saved")).toHaveText("saved");
+	});
 });

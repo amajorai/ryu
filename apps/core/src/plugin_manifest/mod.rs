@@ -53,8 +53,8 @@ pub(crate) fn read_contained_package_file(base: &Path, rel: &str) -> Result<Stri
     let canonical_base = std::fs::canonicalize(base)
         .map_err(|e| format!("{}: cannot resolve package root: {e}", base.display()))?;
     let joined = base.join(rel);
-    let canonical_target = std::fs::canonicalize(&joined)
-        .map_err(|e| format!("{}: {e}", joined.display()))?;
+    let canonical_target =
+        std::fs::canonicalize(&joined).map_err(|e| format!("{}: {e}", joined.display()))?;
     if !canonical_target.starts_with(&canonical_base) {
         return Err(format!(
             "{}: resolved target '{}' escapes package root '{}'",
@@ -954,9 +954,9 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // edge remains a generic RyuRelay/control-plane seam rather than app-specific
     // Core routing.
     include_str!("../../../../apps-store/sites/manifest.json"),
-    // Bookmarks is an extension contribution that owns app-scoped Space documents.
-    // It intentionally declares no Companion until the satellite ships a packed UI
-    // payload; Core owns the RAG index, visibility, and tenancy checks.
+    // Bookmarks is an extension contribution and desktop Companion that owns
+    // app-scoped Space documents; Core owns the RAG index, visibility, and tenancy
+    // checks.
     include_str!("../../../../apps-store/bookmarks/manifest.json"),
     // W7 frontend extraction: the timeline page moved to a sandboxed companion app
     // (`apps-store/timeline/ui`). Pre-installed, no `requires` — Shadow's device-local
@@ -1060,29 +1060,29 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../plugins-store/plugins/spidercloud/manifest.json"),
     include_str!("../../../../plugins-store/plugins/honcho/manifest.json"),
     include_str!("../../../../plugins-store/plugins/bytebot/manifest.json"),
-    // The four `document.parse` providers. Each is an apps-store satellite
-    // (`apps-store/{markitdown,unstructured,docling,mineru}/`) wrapping a different
-    // extraction library in its own Python sidecar, registered exactly like
+    // The five `document.parse` providers. Each is an apps-store satellite
+    // (`apps-store/{anydoc,markitdown,unstructured,docling,mineru}/`) wrapping a different
+    // extraction library in its own sidecar, registered exactly like
     // `finetune`: Core-tier so each is governed and disable-able, and each with an
     // EMPTY `permission_grants` — a Core-tier built-in that asked for
     // `sidecar:process` would be DENIED at enable and the enable itself would fail
     // (`plugins::lifecycle`). The contract every provider copies — provides block,
-    // ports (8093-8096, dev-shifted to 9093-9096), wire format — is
+    // ports (8093-8097, dev-shifted to 9093-9097), wire format — is
     // `docs/document-parsing.md` §3-§4.
     //
     // **Exactly one carries `"default": true`, and it is `markitdown`** (see its
     // `provides` block). That is not decoration: with several providers ENABLED and
     // no default, `plugins::binding` falls through to the lexicographically-lowest
-    // plugin id, which elects `@ryu/docling` — an alphabetical accident, not a
+    // plugin id, which elects `@ryu/anydoc` — an alphabetical accident, not a
     // product decision. Adding a second `"default": true` does not make that provider
-    // win; it re-runs the same tiebreak and lands on docling again. So: never add a
+    // win; it re-runs the same tiebreak and lands on AnyDoc again. So: never add a
     // second default, and never drop markitdown's.
     //
     // The flag is dormant on a stock install. Only `markitdown` is in
     // `plugins::builtins::CORE_PREINSTALLED`, so it is the sole ENABLED provider and
     // binding resolves it by "single provider" without ever consulting the flag; the
     // default only decides anything once a user enables a second backend from the
-    // Store. The other three are deliberately not pre-installed because they are heavy —
+    // Store. The other four are deliberately not pre-installed because they are opt-in —
     // `unstructured[all-docs]` is a 1-2 GB pip install whose native helpers
     // (poppler/tesseract/libreoffice/pandoc) pip cannot supply, and `docling`/`mineru`
     // download ML models on first parse. markitdown is the one small pure-Python
@@ -1093,6 +1093,7 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // `plugins::binding` exactly like `web.search`, so a fifth backend stays pure
     // manifest data. Do not add a second call site; route new surfaces through the
     // facade.
+    include_str!("../../../../apps-store/anydoc/manifest.json"),
     include_str!("../../../../apps-store/unstructured/manifest.json"),
     include_str!("../../../../apps-store/markitdown/manifest.json"),
     include_str!("../../../../apps-store/docling/manifest.json"),
@@ -1304,6 +1305,7 @@ const CORE_RUNTIME_BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../apps-store/crm/manifest.json"),
     include_str!("../../../../apps-store/dashboards/manifest.json"),
     include_str!("../../../../apps-store/dictation/manifest.json"),
+    include_str!("../../../../apps-store/anydoc/manifest.json"),
     include_str!("../../../../apps-store/docling/manifest.json"),
     include_str!("../../../../apps-store/drafts/manifest.json"),
     include_str!("../../../../apps-store/desktop/manifest.json"),
@@ -2105,11 +2107,13 @@ impl PluginManifestLoader {
         let mut seen_ids = HashSet::new();
         BOOTSTRAP_MANIFESTS
             .iter()
-            .filter_map(|raw| match Self::parse_and_validate(raw, "<bootstrap>", None, &mut seen_ids) {
-                Ok(manifest) => Some(manifest),
-                Err(error) => {
-                    tracing::warn!(%error, "bootstrap manifest skipped");
-                    None
+            .filter_map(|raw| {
+                match Self::parse_and_validate(raw, "<bootstrap>", None, &mut seen_ids) {
+                    Ok(manifest) => Some(manifest),
+                    Err(error) => {
+                        tracing::warn!(%error, "bootstrap manifest skipped");
+                        None
+                    }
                 }
             })
             .collect()
@@ -2451,7 +2455,13 @@ mod tests {
 
         let temp = tempfile::tempdir().expect("tempdir");
         let package = temp.path().join("plugin");
-        for dir in ["hooks", "adapters", "output-styles", "pi-extensions", "real"] {
+        for dir in [
+            "hooks",
+            "adapters",
+            "output-styles",
+            "pi-extensions",
+            "real",
+        ] {
             std::fs::create_dir_all(package.join(dir)).expect("create package dir");
         }
         let external = temp.path().join("outside.txt");

@@ -79,6 +79,16 @@ const EVENT_CARDS = [
 		id: "revoked",
 		label: "Terminal consequence",
 	},
+	{
+		audience: "Owners + admins on both organizations",
+		body: "Node, credit, Marketplace, and organization-invitation lifecycle events are recorded in the server inbox and emailed to both sides.",
+		event: "organization activity · transfer/invitation lifecycle",
+		heading: "Organization activity",
+		href: `${BASE_URL}/inbox`,
+		id: "organization-activity",
+		label: "Organization activity",
+		linkLabel: "Open organization inbox",
+	},
 ] as const;
 
 function StatusPill({
@@ -112,13 +122,17 @@ function EmailCard({
 	body,
 	event,
 	heading,
+	href = BILLING_URL,
 	label,
+	linkLabel = "Open billing",
 }: {
 	audience: string;
 	body: string;
 	event: string;
 	heading: string;
+	href?: string;
 	label: string;
+	linkLabel?: string;
 }) {
 	return (
 		<article
@@ -175,14 +189,14 @@ function EmailCard({
 					{body}
 				</p>
 				<a
-					href={BILLING_URL}
+					href={href}
 					style={{
 						color: "#2754c5",
 						fontSize: 13,
 						textDecoration: "underline",
 					}}
 				>
-					Open billing
+					{linkLabel}
 				</a>
 				<div style={{ color: "#898989", fontSize: 10, marginTop: 12 }}>
 					{audience} · Notion-style transactional shell
@@ -323,6 +337,12 @@ const ORGANIZATION_NOTIFICATION_ROWS = [
 		id: "organization-invitation",
 		label: "Organization invitations",
 	},
+	{
+		description:
+			"Node, credit, Marketplace, and invitation lifecycle events for both sides.",
+		id: "organization-activity",
+		label: "Organization activity",
+	},
 ] as const;
 
 function OrganizationNotificationSettingsProof() {
@@ -375,13 +395,13 @@ function OrganizationNotificationSettingsProof() {
 						are read-only
 					</p>
 				</div>
-				<StatusPill>{enabledCount} OF 8 ENABLED</StatusPill>
+				<StatusPill>{enabledCount} OF 9 ENABLED</StatusPill>
 			</div>
 			<div
 				data-testid="organization-notification-count"
 				style={{ color: styles.muted, fontSize: 12, marginTop: 16 }}
 			>
-				{enabledCount} of 8 enabled
+				{enabledCount} of 9 enabled
 			</div>
 			<div style={{ display: "grid", gap: 8, marginTop: 12 }}>
 				{ORGANIZATION_NOTIFICATION_ROWS.map((notification) => {
@@ -492,9 +512,9 @@ function BillingTransactionalEmailsProof() {
 							maxWidth: 790,
 						}}
 					>
-						Every charge, balance threshold, subscription transition, and
-						organization invitation has a specific message, a safe action link,
-						and a durable delivery identity.
+						Every charge, balance threshold, subscription transition,
+						invitation, and organization transfer has a specific message, a safe
+						action link, and a durable delivery identity.
 					</p>
 				</header>
 
@@ -523,8 +543,8 @@ function BillingTransactionalEmailsProof() {
 								DELIVERY GUARANTEES
 							</div>
 							<div style={{ fontSize: 17, fontWeight: 650, marginTop: 5 }}>
-								7 billing events · 1 account-aware invitation · 1 replay-safe
-								ledger
+								7 billing events · 1 organization activity · 1 account-aware
+								invitation · 1 replay-safe ledger
 							</div>
 						</div>
 						<button

@@ -247,11 +247,17 @@ pub const RESEARCH_PLUGIN_ID: &str = "@ryu/research";
 
 /// The MarkItDown app's plugin id — the **shipped default** provider of the
 /// `document.parse` capability (`apps-store/markitdown/`, a Python sidecar wrapping
-/// Microsoft's MIT-licensed MarkItDown). The only one of the four parsing backends in
+/// Microsoft's MIT-licensed MarkItDown). The only one of the five parsing backends in
 /// [`CORE_PREINSTALLED`], and the only one whose `provides` block carries
 /// `"default": true` — see the block comment on its entry there for why both halves
-/// are load-bearing and why the other three stay opt-in.
+/// are load-bearing and why the other four stay opt-in.
 pub const MARKITDOWN_PLUGIN_ID: &str = "@ryu/markitdown";
+
+/// The AnyDoc app's plugin id — a `document.parse` provider
+/// (`apps-store/anydoc/`) backed by Firecrawl's MIT-licensed Rust converter.
+/// It is Core-tier and opt-in: the binary is lightweight, but it is a separate
+/// service and should not silently replace the shipped MarkItDown default.
+pub const ANYDOC_PLUGIN_ID: &str = "@ryu/anydoc";
 
 /// The Unstructured app's plugin id — a `document.parse` provider
 /// (`apps-store/unstructured/`, a Python sidecar wrapping the Apache-2.0 Unstructured
@@ -267,15 +273,15 @@ pub const UNSTRUCTURED_PLUGIN_ID: &str = "@ryu/unstructured";
 /// downloads layout/OCR models on first parse.
 ///
 /// It is also the id the `document.parse` binding falls back to if `markitdown` ever
-/// loses its `"default": true` — `@ryu/docling` sorts lexicographically lowest of
-/// the four, and the tiebreak is alphabetical. That fallback would be an accident,
+/// loses its `"default": true` — `@ryu/anydoc` sorts lexicographically lowest of
+/// the five, and the tiebreak is alphabetical. That fallback would be an accident,
 /// never an intent.
 pub const DOCLING_PLUGIN_ID: &str = "@ryu/docling";
 
 /// The MinerU app's plugin id — a `document.parse` provider (`apps-store/mineru/`, a
 /// Python sidecar driving the AGPL-licensed MinerU CLI, PDF-focused). Core-tier and
 /// governed but **not pre-installed** (absent from [`CORE_PREINSTALLED`]): heaviest of the
-/// four (model downloads, GPU-oriented backends), so it is opt-in from the Store.
+/// five (model downloads, GPU-oriented backends), so it is opt-in from the Store.
 pub const MINERU_PLUGIN_ID: &str = "@ryu/mineru";
 
 /// The Dashboards app's plugin id — the `/api/dashboards/*` live widget-grid
@@ -838,17 +844,18 @@ pub const CORE_PLUGINS: &[&str] = &[
     // explicit install carries its approved grants + `ui_code` HTML blob. Replaces
     // the built-in fine-tuning page.
     "@ryu/finetune",
-    // The four document-parsing apps — the providers of the `document.parse`
-    // capability, each backed by a Python sidecar it owns (spawned on the Core-tier
-    // auto-run path, so like `finetune` each declares NO `sidecar:process` grant — the
-    // Gateway denies that grant at enable and the enable fails). All four are here so
-    // they are governed and enable-able from the Store; only `markitdown` is ALSO in
-    // CORE_PREINSTALLED (see the block there). The other three are opt-in weight, not
-    // fresh-install weight: `unstructured[all-docs]` is a 1-2 GB pip install plus
-    // native helpers (poppler/tesseract/libreoffice/pandoc) that pip cannot supply,
-    // and `docling`/`mineru` each pull a Torch stack and download ML models on first
-    // parse. Enabling a second one is what makes the capability actually swappable —
-    // the read model derives the provider list from the ENABLED set.
+    // The five document-parsing apps — the providers of the `document.parse`
+    // capability. Four are Python sidecars and AnyDoc is a Rust sidecar it owns
+    // (all spawned on the Core-tier auto-run path, so like `finetune` each declares
+    // NO `sidecar:process` grant — the Gateway denies that grant at enable and the
+    // enable fails). All five are here so they are governed and enable-able from the
+    // Store; only `markitdown` is ALSO in CORE_PREINSTALLED (see the block there).
+    // The other four are opt-in: `unstructured[all-docs]` is a 1-2 GB pip install
+    // plus native helpers, `docling`/`mineru` pull model stacks, and AnyDoc is an
+    // additional standalone extraction service. Enabling a second one is what makes
+    // the capability actually swappable — the read model derives providers from the
+    // ENABLED set.
+    ANYDOC_PLUGIN_ID,
     MARKITDOWN_PLUGIN_ID,
     UNSTRUCTURED_PLUGIN_ID,
     DOCLING_PLUGIN_ID,
@@ -1290,7 +1297,7 @@ pub const CORE_PREINSTALLED: &[&str] = &[
     // ALREADY-ENABLED providers, it never installs anything. This line is what
     // installs it.
     //
-    // markitdown specifically because it is the only one of the four that is cheap
+    // markitdown specifically because it is the only one of the five that is cheap
     // enough to seed: a small pure-Python install with no native toolchain and no model
     // download. `unstructured` / `docling` / `mineru` stay not pre-installed (see the note
     // below) — a user who wants OCR or layout-aware PDF extraction enables one from the
@@ -1704,7 +1711,7 @@ pub fn is_load_bearing(manifest_id: &str) -> bool {
 /// `memory` is deliberately NOT here despite being the same tier of subsystem: it
 /// is pre-installed but user-disableable (see [`MEMORY_PLUGIN_ID`]), and a plugin that
 /// ships disabled cannot also be one the user may never disable. Mandatory is a strict subset of
-    /// [`CORE_PREINSTALLED`], asserted by `mandatory_plugins_are_all_preinstalled`.
+/// [`CORE_PREINSTALLED`], asserted by `mandatory_plugins_are_all_preinstalled`.
 ///
 /// **The manifest's `mandatory: true` does not put anything here.** This constant
 /// is the enforcement set and it is Core-owned; the manifest field is the
@@ -1912,7 +1919,10 @@ mod tests {
         use crate::plugin_manifest::PluginTier;
         for id in ["@ryu/ghost", "@ryu/shadow", "@ryu/agentbrowser"] {
             assert_eq!(tier_for(id), PluginTier::Core, "{id} must be Core-tier");
-            assert!(is_preinstalled(id), "{id} must be pre-installed (auto-seeded)");
+            assert!(
+                is_preinstalled(id),
+                "{id} must be pre-installed (auto-seeded)"
+            );
             assert!(is_system_plugin(id), "{id} must be a system plugin");
         }
         // Spider is Core-tier + pre-installed (record seeded enabled so its
@@ -1923,7 +1933,10 @@ mod tests {
             PluginTier::Core,
             "spider must be Core-tier"
         );
-        assert!(is_preinstalled("@ryu/spider"), "spider must be pre-installed");
+        assert!(
+            is_preinstalled("@ryu/spider"),
+            "spider must be pre-installed"
+        );
         assert!(
             !is_system_plugin("@ryu/spider"),
             "spider is not a system plugin"
@@ -2712,7 +2725,7 @@ mod tests {
         );
     }
 
-    /// The `document.parse` capability has FOUR providers, and the whole
+    /// The `document.parse` capability has FIVE providers, and the whole
     /// "markitdown is the default parser" claim rests on two independent facts that
     /// live in different files and are easy to break apart:
     ///
@@ -2720,14 +2733,14 @@ mod tests {
     ///    not whichever id happens to sort first. `plugins::binding` resolves a
     ///    selectable capability as user override > sole provider > declared default >
     ///    **lexicographically-lowest provider id**, so zero defaults AND two defaults
-    ///    both silently elect `@ryu/docling`. Nothing errors either way.
+    ///    both silently elect `@ryu/anydoc`. Nothing errors either way.
     /// 2. `markitdown` is in [`CORE_PREINSTALLED`] — the flag only breaks ties among
     ///    ALREADY-ENABLED providers, it never installs anything, so without the seed
     ///    the capability has zero providers on a fresh install.
     ///
     /// Asserted against the LOADED manifests (not the raw JSON) so it also covers the
     /// serde mapping of the `default` key onto `ProvidesEntry::default_provider`.
-    /// `selectable` is checked on all four because it is a per-provider **veto**: one
+    /// `selectable` is checked on all five because it is a per-provider **veto**: one
     /// provider omitting it makes `document.parse` non-swappable for everyone.
     #[test]
     fn exactly_one_document_parse_provider_is_default_and_it_is_markitdown() {
@@ -2748,12 +2761,13 @@ mod tests {
         assert_eq!(
             ids,
             vec![
+                ANYDOC_PLUGIN_ID,
                 DOCLING_PLUGIN_ID,
                 MARKITDOWN_PLUGIN_ID,
                 MINERU_PLUGIN_ID,
                 UNSTRUCTURED_PLUGIN_ID,
             ],
-            "all four parsing backends must be registered in BUILTIN_MANIFESTS"
+            "all five parsing backends must be registered in BUILTIN_MANIFESTS"
         );
 
         let defaults: Vec<&str> = providers
@@ -2784,15 +2798,19 @@ mod tests {
              ENABLED providers, so without the seed `document.parse` has zero providers on \
              a fresh install and document_parse falls back to its text-only builtin floor"
         );
-        for id in [UNSTRUCTURED_PLUGIN_ID, DOCLING_PLUGIN_ID, MINERU_PLUGIN_ID] {
+        for id in [
+            ANYDOC_PLUGIN_ID,
+            UNSTRUCTURED_PLUGIN_ID,
+            DOCLING_PLUGIN_ID,
+            MINERU_PLUGIN_ID,
+        ] {
             assert!(
                 CORE_PLUGINS.contains(&id),
                 "'{id}' must be Core-tier so it is governed and enable-able from the Store"
             );
             assert!(
                 !is_preinstalled(id),
-                "'{id}' is a heavy opt-in backend (GB-scale installs / model downloads) and \
-                 must stay not pre-installed"
+                "'{id}' is an opt-in backend and must stay not pre-installed"
             );
             assert!(
                 !is_load_bearing(id),
@@ -2810,9 +2828,9 @@ mod tests {
     /// **servable**.
     ///
     /// `document.parse` is served by Core calling the provider's sidecar route
-    /// (`crate::document_parse`), never by capability verbs, so all four manifests
+    /// (`crate::document_parse`), never by capability verbs, so all five manifests
     /// declare zero `tools` — correctly. The desktop layer picker read only
-    /// `serves_verbs` and concluded the opposite: it disabled all four rows,
+    /// `serves_verbs` and concluded the opposite: it disabled all five rows,
     /// including the bound default, and labelled working backends "serves no verbs
     /// yet", leaving the layer unswappable from the node dropdown while parsing
     /// worked fine. Nothing failed, because the two halves (a capability with no

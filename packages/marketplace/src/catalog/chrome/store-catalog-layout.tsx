@@ -12,7 +12,8 @@
 // Replaces ResizableMasterDetail for the catalog sections: the right preview only
 // mounts when something is selected, and below a width threshold it becomes a
 // dialog instead of a side pane. The toolbar mirrors the Library page's toolbar
-// (compact search + filter button); the list is a 2-column card grid.
+// (compact search + filter button); the list is a 2-column card grid or a flat
+// list when the Store shell's view preference says so.
 
 import {
 	Cancel01Icon,
@@ -21,6 +22,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { StoreSearchButton } from "@ryu/blocks/desktop/store.tsx";
+import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Dialog,
@@ -32,10 +34,37 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover.tsx";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+	createContext,
+	type ReactNode,
+	useContext,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 
 /** Below this content width the preview opens as a dialog, not a side pane. */
 const NARROW_PX = 880;
+
+const StoreViewModeContext = createContext<{ mode: ViewMode } | null>(null);
+
+export function StoreViewModeProvider({
+	children,
+	mode,
+}: {
+	children: ReactNode;
+	mode: ViewMode;
+}) {
+	return (
+		<StoreViewModeContext.Provider value={{ mode }}>
+			{children}
+		</StoreViewModeContext.Provider>
+	);
+}
+
+export function useStoreViewMode(): { mode: ViewMode } | null {
+	return useContext(StoreViewModeContext);
+}
 
 /** Track a container's width via ResizeObserver (SSR-safe: 0 until measured). */
 function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
@@ -222,11 +251,22 @@ export default function StoreCatalogLayout({
 	);
 }
 
-/** Responsive card grid — mirrors the Library grid (`grid-cols-1 sm:grid-cols-2`)
- *  so the Store reads the same. Arbitrary `repeat(auto-fill,…)` values are NOT
- *  used: Tailwind doesn't always emit them, and a missing class silently
- *  collapses the grid to one full-width column. */
-export function StoreCardGrid({ children }: { children: ReactNode }) {
+/** Responsive card grid/list — mirrors the Library geometry
+ * (`grid-cols-1 sm:grid-cols-2`) so the Store reads the same. Arbitrary
+ * `repeat(auto-fill,…)` values are NOT used: Tailwind doesn't always emit them,
+ * and a missing class silently collapses the grid to one full-width column. */
+export function StoreCardGrid({
+	children,
+	view,
+}: {
+	children: ReactNode;
+	view?: ViewMode;
+}) {
+	const context = useStoreViewMode();
+	const activeView = view ?? context?.mode ?? "grid";
+	if (activeView === "list") {
+		return <div className="flex flex-col gap-1.5">{children}</div>;
+	}
 	return (
 		<div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{children}</div>
 	);

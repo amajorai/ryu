@@ -118,6 +118,7 @@ const LOCAL_ENGINES: ReadonlySet<string> = new Set([
 	"sglang",
 	"mlx",
 	"mlx-vlm",
+	"mlx-serve",
 	"omlx",
 	"docker-model-runner",
 	"apfel",

@@ -206,8 +206,8 @@ pub struct MemorySlot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub space_ids: Vec<String>,
     /// Memory scope levels the agent may recall from: any subset of
-    /// `["user", "node", "project", "org"]`. An **empty** list means the three
-    /// PERSONAL levels — `user`, `node`, `project` (the back-compat default for
+    /// `["agent", "user", "node", "project", "org"]`. An **empty** list means the four
+    /// PERSONAL levels — `agent`, `user`, `node`, `project` (the back-compat default for
     /// agents configured before this existed).
     ///
     /// `"org"` is **not** in that default and must be named explicitly. Every agent

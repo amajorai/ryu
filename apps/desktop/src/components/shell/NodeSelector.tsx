@@ -2645,8 +2645,8 @@ function providerTargetLabel(
  *
  * The verb count is stated only by providers that HAVE verbs. A route-backed
  * provider is served by Core calling its sidecar directly, so it has none by
- * design — `document.parse`'s four parsers all declare zero — and counting them
- * printed "no verbs" on four working backends. An empty detail renders as no detail
+ * design — `document.parse`'s five parsers all declare zero — and counting them
+ * printed "no verbs" on five working backends. An empty detail renders as no detail
  * line at all (`NodeLayerMenu` skips falsy), which is the honest answer when the row
  * has nothing to add beyond its name.
  *
@@ -3032,7 +3032,7 @@ function LayersSection({
 							// "Serves nothing" is `canServe`, not `!servesVerbs`: verbs are
 							// one of two serving surfaces, and gating on them alone marked
 							// every route-backed provider dead. `document.parse` is served
-							// entirely by route, so all four of its parsers — including the
+							// entirely by route, so all five of its parsers — including the
 							// bound default — rendered disabled with "serves no verbs yet"
 							// while parsing worked fine, and the layer could not be swapped
 							// from here at all.

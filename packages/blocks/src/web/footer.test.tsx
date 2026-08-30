@@ -8,6 +8,7 @@ test("footer uses the cursor-aware outline Ryu mark", () => {
 
 	expect(html).toContain('data-testid="footer-ryu-logo"');
 	expect(html).toContain('stroke="currentColor"');
+	expect(html).not.toContain("aurora-container");
 	expect(html).not.toContain(">ryu</div>");
 });
 

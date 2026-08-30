@@ -1,14 +1,14 @@
 import { expect, test } from "@playwright/test";
 
 const PROOF_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/26/01a03e3f-3cef-78b0-ba6f-281d987dc998/ryu-os-mission-control-proof.png";
+	"/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-app-launcher-proof.png";
 const DOCK_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/26/01a03e3f-3cef-78b0-ba6f-281d987dc998/ryu-os-dock-icons-proof.png";
+	"/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-dock-icons-proof.png";
 const MENUBAR_SCREENSHOT =
-	"/Users/jiawei/.codex/visualizations/2026/08/26/01a03e3f-3cef-78b0-ba6f-281d987dc998/ryu-os-menubar-proof.png";
-const OS_DOCK_ICON_COUNT = 7;
+	"/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-menubar-proof.png";
+const OS_DOCK_ICON_COUNT = 8;
 
-test("opens Apps as live windows from the Ryu OS dock and Mission Control", async ({
+test("opens Apps as live windows from the Ryu OS dock and App Launcher", async ({
 	page,
 }) => {
 	await page.setViewportSize({ height: 900, width: 1440 });
@@ -29,7 +29,7 @@ test("opens Apps as live windows from the Ryu OS dock and Mission Control", asyn
 	await expect(
 		page.locator('[data-slot="menubar-trigger"]').first()
 	).toHaveClass(/\bbg-transparent\b/);
-	await expect(page.getByTestId("os-dock-mission-control")).toBeVisible();
+	await expect(page.getByTestId("os-dock-app-launcher")).toBeVisible();
 	const dockItems = page.locator('[data-testid^="os-dock-"]');
 	for (let index = 0; index < OS_DOCK_ICON_COUNT; index++) {
 		const itemBox = await dockItems.nth(index).boundingBox();
@@ -77,24 +77,24 @@ test("opens Apps as live windows from the Ryu OS dock and Mission Control", asyn
 	await page.getByTestId("os-window-window-chat-minimize").click();
 	await expect(chatWindow).toBeHidden();
 	await expect(spacesWindow).toBeVisible();
-	await page.getByTestId("os-dock-mission-control").click();
+	await page.getByTestId("os-dock-app-launcher").click();
 	await expect(
-		page.getByTestId("mission-control-window-window-chat")
+		page.getByTestId("app-launcher-window-window-chat")
 	).toBeVisible();
-	await page.getByTestId("mission-control-window-window-chat").click();
+	await page.getByTestId("app-launcher-window-window-chat").click();
 	await expect(chatWindow).toBeVisible();
 	await expect(spacesWindow).toBeHidden();
-	const missionControlDockItem = page.getByTestId("os-dock-mission-control");
+	const appLauncherDockItem = page.getByTestId("os-dock-app-launcher");
 	const initialDockWidth = Number.parseFloat(
-		(await missionControlDockItem.getAttribute("style"))?.match(
+		(await appLauncherDockItem.getAttribute("style"))?.match(
 			/width:\s*([\d.]+)px/
 		)?.[1] ?? "0"
 	);
-	await missionControlDockItem.hover();
+	await appLauncherDockItem.hover();
 	await expect
 		.poll(async () =>
 			Number.parseFloat(
-				(await missionControlDockItem.getAttribute("style"))?.match(
+				(await appLauncherDockItem.getAttribute("style"))?.match(
 					/width:\s*([\d.]+)px/
 				)?.[1] ?? "0"
 			)
@@ -103,7 +103,7 @@ test("opens Apps as live windows from the Ryu OS dock and Mission Control", asyn
 	await page.screenshot({ path: DOCK_SCREENSHOT, fullPage: true });
 	await page.mouse.move(20, 120);
 	await page.screenshot({
-		path: "/Users/jiawei/.codex/visualizations/2026/08/26/01a03e3f-3cef-78b0-ba6f-281d987dc998/ryu-os-desktop-proof.png",
+		path: "/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-desktop-proof.png",
 		fullPage: true,
 	});
 	const wallpaper = page.locator("[data-wallpaper-id]");
@@ -114,30 +114,54 @@ test("opens Apps as live windows from the Ryu OS dock and Mission Control", asyn
 		initialWallpaper ?? ""
 	);
 
-	await page.getByTestId("os-dock-mission-control").click();
-	await expect(page.getByText("Mission Control").last()).toBeVisible();
-	await expect(page.getByTestId("mission-control-app-tools")).toBeVisible();
+	await page.getByTestId("os-dock-app-launcher").click();
+	await expect(page.getByText("App Launcher").last()).toBeVisible();
+	await expect(page.getByTestId("app-launcher-app-tools")).toBeVisible();
 	await expect(
-		page.getByTestId("mission-control-window-window-spaces")
+		page.getByTestId("app-launcher-app-mission-control")
+	).toBeVisible();
+	await expect(
+		page.getByTestId("app-launcher-app-app__activity")
+	).toBeVisible();
+	const appGrid = page.getByTestId("app-launcher-app-grid");
+	await expect(appGrid).toHaveCSS("display", "grid");
+	const appTiles = appGrid.locator('[data-slot="command-item"]');
+	await expect(appTiles).toHaveCount(8);
+	const firstTile = await appTiles.nth(0).boundingBox();
+	const secondTile = await appTiles.nth(1).boundingBox();
+	expect(firstTile).not.toBeNull();
+	expect(secondTile).not.toBeNull();
+	if (firstTile && secondTile) {
+		expect(secondTile.x).toBeGreaterThan(firstTile.x);
+		expect(Math.abs(secondTile.y - firstTile.y)).toBeLessThan(1);
+	}
+	await expect(
+		page.getByTestId("app-launcher-window-window-spaces")
 	).toBeVisible();
 	await page.screenshot({ path: PROOF_SCREENSHOT, fullPage: true });
 
 	await page.keyboard.press("Escape");
-	await page.getByRole("menuitem", { name: "Window" }).click();
-	await expect(page.getByTestId("mission-control-trigger")).toBeVisible();
-	await page.screenshot({ path: MENUBAR_SCREENSHOT, fullPage: true });
-	await page.getByTestId("mission-control-trigger").click();
-	await expect(page.getByText("Mission Control").last()).toBeVisible();
+	await page.getByRole("menuitem", { name: "Ryu OS" }).click();
+	await expect(page.getByTestId("app-launcher-menu-item")).toBeVisible();
+	await page.getByTestId("app-launcher-menu-item").click();
+	await expect(page.getByText("App Launcher").last()).toBeVisible();
 	await page.keyboard.press("Escape");
 
-	await page.getByTestId("os-dock-mission-control").click();
-	await expect(page.getByTestId("mission-control-app-tools")).toBeVisible();
-	await page.getByTestId("mission-control-app-tools").click();
+	await page.getByRole("menuitem", { name: "Window" }).click();
+	await expect(page.getByTestId("app-launcher-trigger")).toBeVisible();
+	await page.screenshot({ path: MENUBAR_SCREENSHOT, fullPage: true });
+	await page.getByTestId("app-launcher-trigger").click();
+	await expect(page.getByText("App Launcher").last()).toBeVisible();
+	await page.keyboard.press("Escape");
+
+	await page.getByTestId("os-dock-app-launcher").click();
+	await expect(page.getByTestId("app-launcher-app-tools")).toBeVisible();
+	await page.getByTestId("app-launcher-app-tools").click();
 	await expect(page.getByTestId("os-window-window-tools")).toBeVisible();
 	await expect(page.getByTestId("os-window-window-chat")).toBeHidden();
 
 	await page.screenshot({
-		path: "/Users/jiawei/.codex/visualizations/2026/08/26/01a03e3f-3cef-78b0-ba6f-281d987dc998/ryu-os-tools-window-proof.png",
+		path: "/Users/jiawei/.codex/visualizations/2026/08/29/01a04ca7-4b81-7641-80d9-4ee7e405598e/ryu-os-tools-window-proof.png",
 		fullPage: true,
 	});
 	await page.getByTestId("os-window-window-tools-close").click();

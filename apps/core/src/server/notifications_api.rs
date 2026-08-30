@@ -314,7 +314,7 @@ pub async fn unarchive_notification(
 
 /// `POST /api/notifications/:id/ack` — acknowledge a notification. When it is a
 /// workflow HITL gate, this records the member's ack and resumes the run once the
-/// gate's policy (first / all / quorum) is met.
+/// gate's policy (first / all / quorum / percentage) is met.
 ///
 /// Only the notification's own recipient may ack it: the actor is the verified
 /// caller and must equal `row.user_id` (an org-bound node rejects an

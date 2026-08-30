@@ -21,7 +21,9 @@ fn path_locks() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<()>>>> {
 }
 
 fn lock_for(path: &Path) -> Arc<Mutex<()>> {
-    let mut locks = path_locks().lock().unwrap_or_else(|error| error.into_inner());
+    let mut locks = path_locks()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     locks
         .entry(path.to_path_buf())
         .or_insert_with(|| Arc::new(Mutex::new(())))
@@ -39,8 +41,7 @@ where
             return Err(error).with_context(|| format!("reading JSON store {}", path.display()))
         }
     };
-    serde_json::from_str(&raw)
-        .with_context(|| format!("parsing JSON store {}", path.display()))
+    serde_json::from_str(&raw).with_context(|| format!("parsing JSON store {}", path.display()))
 }
 
 fn write_unlocked<T>(path: &Path, value: &T) -> Result<()>

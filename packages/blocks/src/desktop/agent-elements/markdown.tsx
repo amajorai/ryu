@@ -2,7 +2,15 @@
 
 import { cn } from "@ryu/ui/lib/utils";
 import { createCodePlugin } from "@streamdown/code";
-import { type Components, Streamdown } from "streamdown";
+import {
+	type Components,
+	type CustomRendererProps,
+	extractTableDataFromElement,
+	Streamdown,
+	tableDataToCSV,
+	tableDataToMarkdown,
+	tableDataToTSV,
+} from "streamdown";
 import "streamdown/styles.css";
 import { ExpandIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -14,9 +22,22 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@ryu/ui/components/dialog.tsx";
-import { type ReactNode, type TableHTMLAttributes, useState } from "react";
+import {
+	type ImgHTMLAttributes,
+	type ReactNode,
+	type Ref,
+	type TableHTMLAttributes,
+	useEffect,
+	useId,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useChatDisplayPrefs } from "./chat-display-prefs.tsx";
+import { CopyFormatMenu, writeClipboardPayload } from "./copy-format-menu.tsx";
 import { FileTypeIcon } from "./file-type-icon.tsx";
+import { ImageLightbox } from "./image-lightbox.tsx";
+import { InlineImagePreview } from "./image-preview.tsx";
 import { type Citation, CitationMarkLink } from "./inline-citation.tsx";
 import { LinkPreview, type LinkPreviewResolvers } from "./link-preview.tsx";
 import { decodeMentionHref, linkifyAtMentions } from "./linkify-mentions.ts";
@@ -47,6 +68,8 @@ const CODE_FENCE_LANGS = new Set([
 	"jsx",
 	"md",
 	"markdown",
+	"mermaid",
+	"mmd",
 	"sh",
 	"shell",
 	"text",
@@ -58,6 +81,7 @@ const CODE_FENCE_LANGS = new Set([
 const CODE_FENCE_SPLIT_RE = /(```[\s\S]*?```)/g;
 const INLINE_CODE_RE = /`([^`\n]+)`/g;
 const LEADING_DOT_SLASH_RE = /^\.?\//;
+type MarkdownTone = "default" | "primary";
 
 function normalizeCodeFenceLanguages(text: string): string {
 	return text.replace(/```([^\n]*)/g, (_match, langRaw) => {
@@ -91,6 +115,10 @@ export interface MarkdownProps {
 	onOpenMention?: (item: MentionItem) => void;
 	previewResolvers?: LinkPreviewResolvers;
 	textContrast?: "normal" | "high";
+	/** Match Markdown blocks to the surface carrying them. */
+	tone?: MarkdownTone;
+	/** Let dense tables and diagrams use a little more horizontal room. */
+	wideBlocks?: boolean;
 }
 
 export interface FileReference {
@@ -164,51 +192,371 @@ function decodeMentionLabel(value: string): string {
 	}
 }
 
+const DIAGRAM_COPY_OPTIONS = [
+	{ id: "mermaid", label: "Copy as Mermaid" },
+	{ id: "svg", label: "Copy as SVG" },
+	{ id: "png", label: "Copy as PNG" },
+] as const;
+
+function svgToPng(svg: string): Promise<Blob> {
+	return new Promise((resolve, reject) => {
+		const image = new Image();
+		image.onload = () => {
+			const canvas = document.createElement("canvas");
+			const width = image.naturalWidth || image.width;
+			const height = image.naturalHeight || image.height;
+			if (!(width > 0 && height > 0)) {
+				reject(new Error("Diagram has no measurable size"));
+				return;
+			}
+			const scale = Math.min(2, window.devicePixelRatio || 1);
+			canvas.width = Math.ceil(width * scale);
+			canvas.height = Math.ceil(height * scale);
+			const context = canvas.getContext("2d");
+			if (!context) {
+				reject(new Error("Could not create a diagram canvas"));
+				return;
+			}
+			context.scale(scale, scale);
+			context.drawImage(image, 0, 0, width, height);
+			canvas.toBlob((blob) => {
+				if (blob) {
+					resolve(blob);
+					return;
+				}
+				reject(new Error("Could not encode diagram as PNG"));
+			}, "image/png");
+		};
+		image.onerror = () => reject(new Error("Could not load diagram SVG"));
+		image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+	});
+}
+
+function MarkdownImage({
+	alt,
+	className,
+	node: _node,
+	src,
+	...props
+}: ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) {
+	if (typeof src !== "string" || !src) {
+		return null;
+	}
+	return (
+		<InlineImagePreview alt={alt} className={className} src={src} {...props} />
+	);
+}
+
+function MermaidBlock({
+	code,
+	isIncomplete,
+	wideBlocks,
+}: CustomRendererProps & { wideBlocks: boolean }) {
+	const id = useId();
+	const [svg, setSvg] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [lightboxOpen, setLightboxOpen] = useState(false);
+	const originRef = useRef<HTMLButtonElement | null>(null);
+
+	useEffect(() => {
+		if (isIncomplete || !code.trim()) {
+			setSvg(null);
+			setError(null);
+			return;
+		}
+		let cancelled = false;
+		setSvg(null);
+		setError(null);
+
+		const renderDiagram = async () => {
+			const mermaidModule = await import("mermaid");
+			const mermaid = mermaidModule.default;
+			const prefersDark =
+				typeof window !== "undefined" &&
+				typeof window.matchMedia === "function" &&
+				window.matchMedia("(prefers-color-scheme: dark)").matches;
+			mermaid.initialize({
+				fontFamily: "inherit",
+				securityLevel: "strict",
+				startOnLoad: false,
+				theme: prefersDark ? "dark" : "default",
+			});
+			const safeId = `ryu-chat-mermaid-${id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+			const rendered = await mermaid.render(
+				safeId,
+				code.replaceAll("\\n", "\n")
+			);
+			if (!cancelled) {
+				setSvg(rendered.svg);
+			}
+		};
+
+		renderDiagram().catch((reason: unknown) => {
+			if (!cancelled) {
+				setError(
+					reason instanceof Error ? reason.message : "Failed to render diagram"
+				);
+			}
+		});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [code, id, isIncomplete]);
+
+	const diagramUrl = useMemo(
+		() =>
+			svg
+				? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+				: null,
+		[svg]
+	);
+
+	const handleCopy = async (format: string) => {
+		if (format === "mermaid") {
+			await writeClipboardPayload({ "text/plain": code }, code);
+			return;
+		}
+		if (!svg) {
+			throw new Error("Diagram is still rendering");
+		}
+		if (format === "svg") {
+			await writeClipboardPayload(
+				{ "image/svg+xml": svg, "text/plain": svg },
+				svg
+			);
+			return;
+		}
+		if (format === "png") {
+			await writeClipboardPayload({ "image/png": await svgToPng(svg) });
+		}
+	};
+
+	const surfaceClassName = cn(
+		"group/mermaid-block relative my-3 flex min-w-0 flex-col gap-1.5 rounded-xl bg-muted/30 p-2",
+		wideBlocks && "-mx-4 w-[calc(100%+2rem)] max-w-[calc(100vw-2rem)]"
+	);
+
+	if (error) {
+		return (
+			<div className={surfaceClassName} data-streamdown="mermaid-block">
+				<div className="flex items-center justify-between px-1 text-xs">
+					<span className="font-mono text-muted-foreground">Mermaid</span>
+					<CopyFormatMenu
+						ariaLabel="Copy diagram"
+						dataTestId="mermaid-copy"
+						onCopy={handleCopy}
+						options={DIAGRAM_COPY_OPTIONS}
+					/>
+				</div>
+				<p className="px-1 text-destructive text-xs">{error}</p>
+				<pre className="max-h-56 overflow-auto rounded-lg bg-background/70 p-3 text-xs">
+					<code>{code}</code>
+				</pre>
+			</div>
+		);
+	}
+
+	if (!svg) {
+		return (
+			<div className={surfaceClassName} data-streamdown="mermaid-block">
+				<div className="flex items-center justify-between px-1 text-xs">
+					<span className="font-mono text-muted-foreground">Mermaid</span>
+					<span className="text-muted-foreground">Rendering…</span>
+				</div>
+				<pre className="max-h-56 overflow-auto rounded-lg bg-background/70 p-3 text-xs">
+					<code>{code}</code>
+				</pre>
+			</div>
+		);
+	}
+
+	return (
+		<div className={surfaceClassName} data-streamdown="mermaid-block">
+			<div className="flex items-center justify-between px-1 text-xs">
+				<span className="font-mono text-muted-foreground">Mermaid</span>
+				<div className="flex items-center gap-1 opacity-70 transition-opacity group-focus-within/mermaid-block:opacity-100 group-hover/mermaid-block:opacity-100">
+					<CopyFormatMenu
+						ariaLabel="Copy diagram"
+						dataTestId="mermaid-copy"
+						onCopy={handleCopy}
+						options={DIAGRAM_COPY_OPTIONS}
+					/>
+					<Button
+						aria-label="Expand diagram"
+						className="size-7 rounded-md text-muted-foreground hover:text-foreground"
+						data-testid="mermaid-expand"
+						onClick={() => setLightboxOpen(true)}
+						size="icon"
+						title="Expand diagram"
+						type="button"
+						variant="ghost"
+					>
+						<HugeiconsIcon aria-hidden="true" icon={ExpandIcon} size={14} />
+					</Button>
+				</div>
+			</div>
+			<button
+				aria-label="Open Mermaid diagram"
+				className="flex max-h-[32rem] min-h-28 w-full cursor-zoom-in items-center justify-center overflow-auto rounded-lg bg-background/70 p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				onClick={(event) => {
+					originRef.current = event.currentTarget;
+					setLightboxOpen(true);
+				}}
+				ref={originRef}
+				type="button"
+			>
+				{/* Mermaid's strict renderer sanitizes the SVG before it reaches this
+				    surface. The output is still inserted as markup so labels and arrows
+				    remain selectable vectors rather than a screenshot. */}
+				<span
+					className="flex max-w-full items-center justify-center [&>svg]:h-auto [&>svg]:max-h-[28rem] [&>svg]:max-w-full"
+					// biome-ignore lint/security/noDangerouslySetInnerHtml: Mermaid strict mode sanitizes the generated SVG before display.
+					dangerouslySetInnerHTML={{ __html: svg }}
+				/>
+			</button>
+			{diagramUrl ? (
+				<ImageLightbox
+					images={[{ filename: "diagram.svg", id, url: diagramUrl }]}
+					onClose={() => setLightboxOpen(false)}
+					open={lightboxOpen}
+					originRef={originRef}
+				/>
+			) : null}
+		</div>
+	);
+}
+
 function ExpandableMarkdownTable({
 	children,
 	className,
+	tone = "default",
+	wide = false,
 	...props
-}: TableHTMLAttributes<HTMLTableElement> & { children?: ReactNode }) {
+}: TableHTMLAttributes<HTMLTableElement> & {
+	children?: ReactNode;
+	tone?: MarkdownTone;
+	wide?: boolean;
+}) {
 	const [open, setOpen] = useState(false);
-	const tableClassName = cn(
-		"an-md-table w-full min-w-max text-sm [&>thead>tr>th]:bg-muted [&>thead]:bg-muted",
-		className
-	);
+	const tableRef = useRef<HTMLTableElement>(null);
+	const tableClassName = (tableTone: MarkdownTone) =>
+		cn(
+			"an-md-table w-full min-w-max text-sm",
+			tableTone === "primary"
+				? "[&>tbody>tr>td]:border-primary-foreground/20 [&>tbody>tr>td]:text-primary-foreground/90 [&>thead>tr>th]:bg-primary-foreground/10 [&>thead>tr>th]:text-primary-foreground"
+				: "[&>thead>tr>th]:bg-muted [&>thead]:bg-muted",
+			className
+		);
 
-	const table = (extraClassName?: string) => (
-		<table className={cn(tableClassName, extraClassName)} {...props}>
+	const table = (
+		extraClassName?: string,
+		ref?: Ref<HTMLTableElement>,
+		tableTone: MarkdownTone = tone
+	) => (
+		<table
+			{...props}
+			className={cn(tableClassName(tableTone), extraClassName)}
+			ref={ref}
+		>
 			{children}
 		</table>
 	);
 
+	const handleCopy = async (format: string) => {
+		const element = tableRef.current;
+		if (!element) {
+			throw new Error("Table is not ready");
+		}
+		const data = extractTableDataFromElement(element);
+		if (format === "png") {
+			const { default: html2canvas } = await import("html2canvas-pro");
+			const canvas = await html2canvas(element, {
+				backgroundColor: null,
+				scale: Math.min(2, window.devicePixelRatio || 1),
+				useCORS: true,
+			});
+			const blob = await new Promise<Blob>((resolve, reject) => {
+				canvas.toBlob((next) => {
+					if (next) {
+						resolve(next);
+						return;
+					}
+					reject(new Error("Could not encode table as PNG"));
+				}, "image/png");
+			});
+			await writeClipboardPayload({ "image/png": blob });
+			return;
+		}
+
+		const text =
+			format === "csv"
+				? tableDataToCSV(data)
+				: format === "tsv"
+					? tableDataToTSV(data)
+					: tableDataToMarkdown(data);
+		await writeClipboardPayload(
+			{ "text/plain": text, "text/html": element.outerHTML },
+			text
+		);
+	};
+
+	const copyMenu = (testId?: string) => (
+		<CopyFormatMenu
+			ariaLabel="Copy table"
+			dataTestId={testId}
+			onCopy={handleCopy}
+			options={[
+				{ id: "markdown", label: "Copy as Markdown" },
+				{ id: "csv", label: "Copy as CSV" },
+				{ id: "tsv", label: "Copy as TSV" },
+				{ id: "png", label: "Copy as PNG" },
+			]}
+		/>
+	);
+
 	return (
 		<>
-			<div className="group/an-md-table relative my-3">
+			<div
+				className={cn(
+					"group/an-md-table relative my-3 w-full max-w-full",
+					wide && "-mx-4 w-[calc(100%+2rem)] max-w-[calc(100vw-2rem)]"
+				)}
+				data-streamdown="table-wrapper"
+			>
 				<div className="scroll-fade-x overflow-x-auto rounded-[var(--radius)]">
-					{table()}
+					{table(undefined, tableRef)}
 				</div>
-				<Button
-					aria-label="Expand table"
-					className="absolute top-1 right-1 z-10 size-7 bg-background/90 text-muted-foreground opacity-0 shadow-sm transition-opacity focus-visible:opacity-100 group-hover/an-md-table:opacity-100"
-					data-testid="markdown-table-expand"
-					onClick={() => setOpen(true)}
-					size="icon-xs"
-					title="Expand table"
-					variant="ghost"
-				>
-					<HugeiconsIcon icon={ExpandIcon} size={14} />
-				</Button>
+				<div className="pointer-events-none absolute top-1 right-1 z-10 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover/an-md-table:opacity-100">
+					<div className="pointer-events-auto">
+						{copyMenu("markdown-table-copy")}
+					</div>
+					<Button
+						aria-label="Expand table"
+						className="pointer-events-auto size-7 bg-background/90 text-muted-foreground shadow-sm hover:text-foreground"
+						data-testid="markdown-table-expand"
+						onClick={() => setOpen(true)}
+						size="icon-xs"
+						title="Expand table"
+						variant="ghost"
+					>
+						<HugeiconsIcon icon={ExpandIcon} size={14} />
+					</Button>
+				</div>
 			</div>
 			<Dialog onOpenChange={setOpen} open={open}>
 				<DialogContent className="flex max-h-[min(90vh,60rem)] max-w-[min(95vw,90rem)] flex-col gap-3">
-					<DialogHeader>
-						<DialogTitle>Expanded markdown table</DialogTitle>
-						<DialogDescription>
-							Scroll horizontally or vertically to inspect the full table.
-						</DialogDescription>
+					<DialogHeader className="flex-row items-start justify-between gap-4">
+						<div className="min-w-0">
+							<DialogTitle>Expanded markdown table</DialogTitle>
+							<DialogDescription>
+								Scroll horizontally or vertically to inspect the full table.
+							</DialogDescription>
+						</div>
+						{copyMenu("markdown-table-dialog-copy")}
 					</DialogHeader>
 					<div className="min-h-0 overflow-auto rounded-[var(--radius)] border border-border/60">
-						{table("min-w-[72rem]")}
+						{table("min-w-[72rem]", undefined, "default")}
 					</div>
 				</DialogContent>
 			</Dialog>
@@ -227,6 +575,8 @@ export function Markdown({
 	onOpenLink,
 	onOpenMention,
 	previewResolvers,
+	tone = "default",
+	wideBlocks = false,
 }: MarkdownProps) {
 	// Code blocks obey the same "Tool detail" level as tool calls: at anything
 	// below Detailed a long block is capped and scrolls in place. The switch is a
@@ -244,6 +594,13 @@ export function Markdown({
 				citations
 			)
 		)
+	);
+	const mermaidRenderer = useMemo(
+		() =>
+			function MarkdownMermaidRenderer(props: CustomRendererProps) {
+				return <MermaidBlock {...props} wideBlocks={wideBlocks} />;
+			},
+		[wideBlocks]
 	);
 	const components: Components = {
 		h1: ({ children, ...props }) => (
@@ -465,7 +822,10 @@ export function Markdown({
 		hr: ({ ...props }) => (
 			<hr className="an-md-hr my-4 border-border" {...props} />
 		),
-		table: (props) => <ExpandableMarkdownTable {...props} />,
+		table: (props) => (
+			<ExpandableMarkdownTable {...props} tone={tone} wide={wideBlocks} />
+		),
+		img: (props) => <MarkdownImage {...props} />,
 		th: ({ children, ...props }) => (
 			<th className="bg-muted px-3 py-2 text-left font-medium" {...props}>
 				{children}
@@ -495,7 +855,15 @@ export function Markdown({
 				animated={isAnimating ? STREAM_ANIMATION : false}
 				components={components}
 				isAnimating={isAnimating}
-				plugins={{ code }}
+				plugins={{
+					code,
+					renderers: [
+						{
+							component: mermaidRenderer,
+							language: ["mermaid", "mmd"],
+						},
+					],
+				}}
 			>
 				{safeContent}
 			</Streamdown>

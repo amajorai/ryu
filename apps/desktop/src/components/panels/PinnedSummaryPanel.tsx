@@ -43,7 +43,10 @@ import {
 } from "@/src/components/chat/WorkspacePicker.tsx";
 import { WorktreeHandoffControl } from "@/src/components/chat/WorktreeHandoffControl.tsx";
 import type { CoworkContextPanelProps } from "@/src/components/panels/CoworkContextPanel.tsx";
-import { CoworkContextPanel } from "@/src/components/panels/CoworkContextPanel.tsx";
+import {
+	CoworkContextPanel,
+	SectionTitle,
+} from "@/src/components/panels/CoworkContextPanel.tsx";
 import {
 	CreateGitHubRepositoryDialog,
 	GitActionDialog,
@@ -1285,9 +1288,10 @@ export function PinnedSummaryPanel({
 					id: "background-processes",
 					icon: undefined,
 					title: (
-						<span className="font-medium text-foreground text-xs">
-							Background processes
-						</span>
+						<SectionTitle
+							count={backgroundProcesses.length}
+							title="Background processes"
+						/>
 					),
 					description: (
 						<div className="flex flex-col gap-1">

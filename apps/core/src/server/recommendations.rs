@@ -379,7 +379,20 @@ async fn safe_profile_signals(
         caller.as_ref().and_then(|value| value.org_id.as_deref()),
         super::node_org_id().is_some(),
     );
-    if let Ok(entries) = state.memory.list_visible(&filter, visibility).await {
+    let consent_user_id = caller
+        .as_ref()
+        .map(|value| value.user_id.as_str())
+        .unwrap_or(super::memory::LOCAL_USER);
+    let include_sensitive = state
+        .memory
+        .include_sensitive_topics(consent_user_id)
+        .await
+        .unwrap_or(false);
+    if let Ok(entries) = state
+        .memory
+        .list_visible_with_sensitive(&filter, visibility, include_sensitive)
+        .await
+    {
         for entry in entries {
             signals.insert(format!("memory_category:{}", entry.category.as_str()));
         }

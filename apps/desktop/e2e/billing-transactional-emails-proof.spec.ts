@@ -7,27 +7,30 @@ test("renders the billing lifecycle and account-aware invitation proof", async (
 
 	await expect(page.getByTestId("proof-status")).toHaveText("VERIFIED");
 	await expect(page.getByTestId("organization-notification-count")).toHaveText(
-		"8 of 8 enabled"
+		"9 of 9 enabled"
 	);
 	await expect(
 		page.getByTestId("org-notification-toggle-payment-past-due")
 	).toHaveAttribute("aria-pressed", "true");
 	await page.getByTestId("org-notification-toggle-payment-past-due").click();
 	await expect(page.getByTestId("organization-notification-count")).toHaveText(
-		"7 of 8 enabled"
+		"8 of 9 enabled"
 	);
 	await expect(
 		page.getByTestId("org-notification-toggle-payment-past-due")
 	).toHaveAttribute("aria-pressed", "false");
 	await expect(
 		page.getByTestId("transactional-email-grid").locator("[data-email-card]")
-	).toHaveCount(8);
+	).toHaveCount(9);
 	await expect(page.getByText("Your Ryu subscription renewed")).toBeVisible();
 	await expect(
 		page.getByText("A quick fix for your Ryu payment")
 	).toBeVisible();
 	await expect(
 		page.getByText("Your Ryu subscription needs attention")
+	).toBeVisible();
+	await expect(
+		page.getByText("Organization activity", { exact: true }).first()
 	).toBeVisible();
 	await expect(page.getByText("Join Acme on Ryu")).toBeVisible();
 

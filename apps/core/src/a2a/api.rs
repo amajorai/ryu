@@ -1,39 +1,40 @@
 use std::{collections::BTreeSet, convert::Infallible, sync::Arc, time::Duration};
 
 use axum::{
-    Json, Router,
-    body::{Body, Bytes, to_bytes},
+    body::{to_bytes, Body, Bytes},
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::{HeaderMap, HeaderValue, Method, Request, StatusCode, Uri, header},
+    http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
+    Json, Router,
 };
 use chrono::{SecondsFormat, Utc};
 use ryu_a2a::{
-    A2aClient, A2aPeer, A2aPrincipal, A2aScope, A2aServerConfig, ClientLimits, EndpointPolicy,
-    IssuedPrincipalToken, PeerCredential, PeerTrust, PeerUpsert, PublishedAgent,
-    PublishedAgentUpsert, PushConfigInput, StoreError, TaskCreate, TaskDirection, TaskState,
     discover_agent_card, outbound_task_record_id,
     protocol::{
-        AgentCapabilities, AgentCard, AgentInterface, AgentSkill, Artifact, AuthenticationInfo,
-        CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
+        errors::error_code as codes, methods, AgentCapabilities, AgentCard, AgentInterface,
+        AgentSkill, Artifact, AuthenticationInfo, CancelTaskRequest,
+        DeleteTaskPushNotificationConfigRequest, GetExtendedAgentCardRequest,
         GetTaskPushNotificationConfigRequest, GetTaskRequest, HttpAuthSecurityScheme, JsonRpcError,
         JsonRpcId, JsonRpcRequest, JsonRpcResponse, ListTaskPushNotificationConfigsRequest,
         ListTaskPushNotificationConfigsResponse, ListTasksRequest, ListTasksResponse, Message,
         Part, Role, SecurityScheme, SendMessageRequest, SendMessageResponse, StreamResponse,
-        SubscribeToTaskRequest, TRANSPORT_PROTOCOL_HTTP_JSON, TRANSPORT_PROTOCOL_JSONRPC, Task,
-        TaskArtifactUpdateEvent, TaskPushNotificationConfig, TaskState as ProtocolTaskState,
-        TaskStatusUpdateEvent, VERSION, errors::error_code as codes, methods,
+        SubscribeToTaskRequest, Task, TaskArtifactUpdateEvent, TaskPushNotificationConfig,
+        TaskState as ProtocolTaskState, TaskStatusUpdateEvent, TRANSPORT_PROTOCOL_HTTP_JSON,
+        TRANSPORT_PROTOCOL_JSONRPC, VERSION,
     },
-    select_endpoint, validate_endpoint, validate_push_authentication,
+    select_endpoint, validate_endpoint, validate_push_authentication, A2aClient, A2aPeer,
+    A2aPrincipal, A2aScope, A2aServerConfig, ClientLimits, EndpointPolicy, IssuedPrincipalToken,
+    PeerCredential, PeerTrust, PeerUpsert, PublishedAgent, PublishedAgentUpsert, PushConfigInput,
+    StoreError, TaskCreate, TaskDirection, TaskState,
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{Value, json};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use super::runtime::{A2aRuntime, AgentRunEvent, message_to_untrusted_prompt, runtime};
+use super::runtime::{message_to_untrusted_prompt, runtime, A2aRuntime, AgentRunEvent};
 use crate::server::ServerState;
 
 const DEFAULT_TENANT: &str = "default";
@@ -276,7 +277,11 @@ async fn build_agent_card(extended: bool) -> Result<AgentCard, ApiError> {
                     id: format!("{}/{}", action.plugin_id, action.action_id),
                     name: action.name,
                     description: action.description,
-                    tags: vec!["ryu".to_owned(), "action".to_owned(), action.effect.to_owned()],
+                    tags: vec![
+                        "ryu".to_owned(),
+                        "action".to_owned(),
+                        action.effect.to_owned(),
+                    ],
                     examples: None,
                     input_modes: Some(vec!["application/json".to_owned()]),
                     output_modes: Some(vec!["application/json".to_owned()]),

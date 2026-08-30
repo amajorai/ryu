@@ -218,9 +218,18 @@ async fn profile_was_built(
     } else {
         crate::server::memory::MemoryVisibility::unrestricted()
     };
+    let consent_user_id = caller
+        .as_ref()
+        .map(|current| current.user_id.as_str())
+        .unwrap_or(crate::server::memory::LOCAL_USER);
+    let include_sensitive = state
+        .memory
+        .include_sensitive_topics(consent_user_id)
+        .await
+        .unwrap_or(false);
     state
         .memory
-        .list_visible(&filter, visibility)
+        .list_visible_with_sensitive(&filter, visibility, include_sensitive)
         .await
         .map(|entries| {
             entries
@@ -601,6 +610,16 @@ async fn write_memory(
     agent_id: &str,
     memory: crate::server::memory::NewMemory,
 ) -> anyhow::Result<()> {
+    if !crate::server::memory::detect_sensitive_topics(&memory.content).is_empty()
+        && !state
+            .memory
+            .include_sensitive_topics(owner_user_id)
+            .await
+            .unwrap_or(false)
+    {
+        tracing::info!("onboarding: memory capture skipped because sensitive-topic consent is off");
+        return Ok(());
+    }
     let id = state
         .memory
         .record_full(owner_user_id, agent_id, memory)

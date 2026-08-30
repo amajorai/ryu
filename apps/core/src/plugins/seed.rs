@@ -41,9 +41,8 @@
 
 use crate::plugin_manifest::PluginManifest;
 use crate::plugins::{
-	builtins::{CHAT_BROADCAST_PLUGIN_ID, CORE_PREINSTALLED},
-	graph,
-	PluginStore,
+    builtins::{CHAT_BROADCAST_PLUGIN_ID, CORE_PREINSTALLED},
+    graph, PluginStore,
 };
 
 /// One pre-installed plugin and everything the seed must write for it.
@@ -81,16 +80,16 @@ pub struct SeedSpec {
 /// this same table. Adding a 16th companion to a second list is what caused the
 /// original carriage bug; there is no second list.
 fn seed_overrides() -> [SeedSpec; 35] {
-	use crate::plugin_manifest::{
-		ACTIVITY_UI_HTML, APPROVALS_UI_HTML, BLUEPRINT_UI_HTML, CALENDAR_UI_HTML,
-		CHAT_BROADCAST_UI_HTML, CANVAS_PLUGIN_ID,
-        CANVAS_UI_HTML, FINETUNE_PLUGIN_ID, FINETUNE_UI_HTML, HELP_CENTER_UI_HTML,
-        SITES_UI_HTML,
-        LEARNING_UI_HTML, MAIL_UI_HTML,
-        EXPENSES_UI_HTML, INVOICES_UI_HTML, MEETINGS_UI_HTML, MONITORS_UI_HTML, NEWS_UI_HTML, OUTREACH_UI_HTML, PEOPLE_UI_HTML, PROJECTS_UI_HTML, PULL_REQUESTS_UI_HTML, QUESTS_UI_HTML,
-        REASONING_PLUGIN_ID, REASONING_UI_HTML, RLM_UI_HTML, SKILL_EDITOR_UI_HTML, SOCIAL_UI_HTML,
-        SLIDES_PLUGIN_ID, SLIDES_UI_HTML, SUBTITLES_UI_HTML, TIMELINE_UI_HTML, TUITION_UI_HTML, WARMUP_UI_HTML, WEBHOOKS_UI_HTML,
-        WHITEBOARD_PLUGIN_ID, WHITEBOARD_UI_HTML, WORKFLOWS_UI_HTML,
+    use crate::plugin_manifest::{
+        ACTIVITY_UI_HTML, APPROVALS_UI_HTML, BLUEPRINT_UI_HTML, CALENDAR_UI_HTML, CANVAS_PLUGIN_ID,
+        CANVAS_UI_HTML, CHAT_BROADCAST_UI_HTML, EXPENSES_UI_HTML, FINETUNE_PLUGIN_ID,
+        FINETUNE_UI_HTML, HELP_CENTER_UI_HTML, INVOICES_UI_HTML, LEARNING_UI_HTML, MAIL_UI_HTML,
+        MEETINGS_UI_HTML, MONITORS_UI_HTML, NEWS_UI_HTML, OUTREACH_UI_HTML, PEOPLE_UI_HTML,
+        PROJECTS_UI_HTML, PULL_REQUESTS_UI_HTML, QUESTS_UI_HTML, REASONING_PLUGIN_ID,
+        REASONING_UI_HTML, RLM_UI_HTML, SITES_UI_HTML, SKILL_EDITOR_UI_HTML, SLIDES_PLUGIN_ID,
+        SLIDES_UI_HTML, SOCIAL_UI_HTML, SUBTITLES_UI_HTML, TIMELINE_UI_HTML, TUITION_UI_HTML,
+        WARMUP_UI_HTML, WEBHOOKS_UI_HTML, WHITEBOARD_PLUGIN_ID, WHITEBOARD_UI_HTML,
+        WORKFLOWS_UI_HTML,
     };
     [
         SeedSpec {
@@ -573,11 +572,7 @@ fn seed_overrides() -> [SeedSpec; 35] {
             // it up and the opt-in pass writes only `ui_code`, leaving `enable_app` to
             // persist the Gateway-approved set. Recorded anyway, and set-equal to the
             // manifest's `permission_grants`, so a promotion is correct by construction.
-            grants: &[
-                "blueprint:review",
-                "mcp:blueprint",
-                "ui:declarative-http",
-            ],
+            grants: &["blueprint:review", "mcp:blueprint", "ui:declarative-http"],
             ui_code: Some(BLUEPRINT_UI_HTML),
         },
         SeedSpec {
@@ -1190,10 +1185,7 @@ pub async fn run_one_time_migrations(store: &PluginStore, manifests: &[PluginMan
                 // The earlier migrations have completed. Record that prefix so a
                 // later boot retries only the tenant move after an account exists;
                 // otherwise every boot would re-assert v1-v5 user state.
-                if let Err(error) = store
-                    .set_schema_version(STORE_SCHEMA_VERSION - 1)
-                    .await
-                {
+                if let Err(error) = store.set_schema_version(STORE_SCHEMA_VERSION - 1).await {
                     tracing::warn!(
                         "store migration v6: could not record pending account state: {error}"
                     );
@@ -1820,7 +1812,12 @@ mod migration_tests {
 
         assert!(store.get(LEARNING).await.unwrap().unwrap().enabled);
         assert!(
-            !store.get(still_preinstalled).await.unwrap().unwrap().enabled,
+            !store
+                .get(still_preinstalled)
+                .await
+                .unwrap()
+                .unwrap()
+                .enabled,
             "another pre-installed app the user disabled must stay disabled"
         );
         assert!(
@@ -2122,11 +2119,9 @@ mod tests {
                 .all(|seed| seed.id != crate::plugins::builtins::MEMORY_PLUGIN_ID),
             "Memory was skipped during production pre-installed ordering: {skipped:?}"
         );
-        assert!(
-            ordered
-                .iter()
-                .any(|id| id == crate::plugins::builtins::MEMORY_PLUGIN_ID)
-        );
+        assert!(ordered
+            .iter()
+            .any(|id| id == crate::plugins::builtins::MEMORY_PLUGIN_ID));
     }
 
     /// Capability edges (`requires.capabilities`) are lowered at seed time, so the
@@ -2563,7 +2558,10 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap_or_else(|| panic!("pre-installed '{id}' must be seeded"));
-                assert!(record.enabled, "pre-installed '{id}' must be seeded enabled");
+                assert!(
+                    record.enabled,
+                    "pre-installed '{id}' must be seeded enabled"
+                );
             }
         }
     }

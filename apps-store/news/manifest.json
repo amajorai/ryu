@@ -221,6 +221,64 @@
     "icon": "news"
   },
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "news-today",
+        "title": "Today",
+        "icon": "news",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "today" },
+        "order": 70
+      },
+      {
+        "id": "news-stories",
+        "title": "Stories",
+        "icon": "news-02",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "stories" },
+        "order": 71
+      },
+      {
+        "id": "news-feed",
+        "title": "Feed",
+        "icon": "rss",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "feed" },
+        "order": 72
+      },
+      {
+        "id": "news-topics",
+        "title": "Topics",
+        "icon": "hashtag",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "topics" },
+        "order": 73
+      },
+      {
+        "id": "news-sources",
+        "title": "Sources",
+        "icon": "link-01",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "sources" },
+        "order": 74
+      },
+      {
+        "id": "news-saved",
+        "title": "Saved",
+        "icon": "bookmark-02",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "saved" },
+        "order": 75
+      },
+      {
+        "id": "news-settings",
+        "title": "Settings",
+        "icon": "settings-01",
+        "target": "/plugin/app__news-companion",
+        "context": { "tab": "settings" },
+        "order": 76
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "news.chat",

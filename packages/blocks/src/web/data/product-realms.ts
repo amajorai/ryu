@@ -1,5 +1,14 @@
 import type { LucideIcon } from "lucide-react";
-import { Bot, Box, Monitor, Settings2, Shield, Zap } from "lucide-react";
+import {
+	Bell,
+	Bot,
+	Box,
+	Mail,
+	Monitor,
+	Settings2,
+	Shield,
+	Zap,
+} from "lucide-react";
 
 /**
  * The small, public product vocabulary shared by the landing page and the
@@ -12,6 +21,8 @@ export type ProductRealmId =
 	| "console"
 	| "gateway"
 	| "box"
+	| "mail"
+	| "notify"
 	| "hire";
 
 export interface ProductRealm {
@@ -45,7 +56,7 @@ export const PRODUCT_REALMS: readonly ProductRealm[] = [
 	},
 	{
 		description:
-			"The operator surface for nodes, models, permissions, and Apps.",
+			"The operator surface for servers, models, permissions, and Apps.",
 		href: "/console",
 		icon: Settings2,
 		id: "console",
@@ -71,6 +82,25 @@ export const PRODUCT_REALMS: readonly ProductRealm[] = [
 		id: "box",
 		label: "Ryu Box",
 		shortLabel: "Box",
+		type: "service",
+	},
+	{
+		description:
+			"API-first email inboxes for agents, with signed inbound mail.",
+		href: "/products/mail",
+		icon: Mail,
+		id: "mail",
+		label: "Ryu Mail",
+		shortLabel: "Mail",
+		type: "service",
+	},
+	{
+		description: "Durable HTTP events with a tenant-scoped live stream.",
+		href: "/products/notify",
+		icon: Bell,
+		id: "notify",
+		label: "Ryu Notify",
+		shortLabel: "Notify",
 		type: "service",
 	},
 	{

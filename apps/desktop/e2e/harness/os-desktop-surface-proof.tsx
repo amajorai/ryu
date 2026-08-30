@@ -47,7 +47,7 @@ function WindowPreview({ app }: { app: OsApp }) {
 			<div className="mt-8 rounded-2xl border border-border bg-muted/25 p-4">
 				<p className="font-medium text-sm">Keep this window open</p>
 				<p className="mt-1 text-muted-foreground text-sm leading-relaxed">
-					Use Mission Control to switch Apps without losing the work already in
+					Use App Launcher to switch Apps without losing the work already in
 					this window.
 				</p>
 			</div>
@@ -86,6 +86,19 @@ const manifestAppRecords: OsAppRecord[] = [
 	},
 ];
 
+// A contributed companion represents the current enabled-app feed that the
+// production `OsDesktopSurfaceWithApps` adds to the launcher grid.
+const contributedApps: OsApp[] = [
+	{
+		description: "Follow live work from an enabled Ryu App.",
+		iconId: "activity-03",
+		id: "app__activity",
+		label: "Activity",
+		manifestId: "@ryu/activity",
+		path: "/plugin/app__activity",
+	},
+];
+
 function Story() {
 	const [windows, setWindows] = useState<OsWindow[]>(initialWindows);
 	const [activeWindowId, setActiveWindowId] = useState("window-chat");
@@ -121,6 +134,7 @@ function Story() {
 					activeWindowId={activeWindowId}
 					appRecords={manifestAppRecords}
 					canSwitchToConsole
+					contributedApps={contributedApps}
 					onActivateWindow={setActiveWindowId}
 					onCloseWindow={closeWindow}
 					onOpenApp={openApp}

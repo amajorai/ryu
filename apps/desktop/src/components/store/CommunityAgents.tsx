@@ -26,7 +26,11 @@ import {
 	Target01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { StoreCardGrid } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
+import StoreCatalogCard from "@ryu/marketplace/catalog/chrome/store-catalog-card";
+import {
+	StoreCardGrid,
+	useStoreViewMode,
+} from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { storeItemContextMenu } from "@ryu/marketplace/catalog/chrome/store-item-action";
 import StoreShelfHeading from "@ryu/marketplace/catalog/chrome/store-shelf-heading";
 import {
@@ -138,6 +142,7 @@ export function CommunityAgentsShelf({
 	onSelect,
 	selectedId,
 }: CommunityAgentsShelfProps) {
+	const view = useStoreViewMode()?.mode ?? "showcase";
 	if (error || (agents.length === 0 && !loading)) {
 		return null;
 	}
@@ -155,33 +160,52 @@ export function CommunityAgentsShelf({
 				From the community
 			</StoreShelfHeading>
 			<StoreCardGrid>
-				{agents.map((card) => (
-					<AgentBadgeCard
-						action={
-							<CommunityAgentAction
-								busy={busyId === card.id}
-								card={card}
-								onBuy={() => onBuy(card)}
-								onInstall={() => onInstall(card)}
+				{agents.map((card) => {
+					const action = (
+						<CommunityAgentAction
+							busy={busyId === card.id}
+							card={card}
+							onBuy={() => onBuy(card)}
+							onInstall={() => onInstall(card)}
+						/>
+					);
+					const contextMenu = storeItemContextMenu({
+						installed: false,
+						onInstall: () => onInstall(card),
+					});
+					if (view === "showcase") {
+						return (
+							<AgentBadgeCard
+								action={action}
+								contextMenu={contextMenu}
+								employeeId={card.id}
+								footer={
+									<Badge className="font-normal" variant="outline">
+										{card.author ?? "Community"}
+									</Badge>
+								}
+								key={card.id}
+								name={card.name}
+								onOpen={() => onSelect(card)}
+								role={card.description}
+								selected={card.id === selectedId}
 							/>
-						}
-						contextMenu={storeItemContextMenu({
-							installed: false,
-							onInstall: () => onInstall(card),
-						})}
-						employeeId={card.id}
-						footer={
-							<Badge className="font-normal" variant="outline">
-								{card.author ?? "Community"}
-							</Badge>
-						}
-						key={card.id}
-						name={card.name}
-						onOpen={() => onSelect(card)}
-						role={card.description}
-						selected={card.id === selectedId}
-					/>
-				))}
+						);
+					}
+					return (
+						<StoreCatalogCard
+							action={action}
+							contextMenu={contextMenu}
+							description={card.description}
+							iconUrl={card.iconUrl}
+							key={card.id}
+							name={card.name}
+							onClick={() => onSelect(card)}
+							seedId={card.id}
+							selected={card.id === selectedId}
+						/>
+					);
+				})}
 			</StoreCardGrid>
 		</section>
 	);

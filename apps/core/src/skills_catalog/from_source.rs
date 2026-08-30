@@ -637,7 +637,7 @@ pub fn install_from_tarball_bytes(bytes: &[u8]) -> Result<InstallResult> {
     // success or failure, exactly like `install_from_source`'s remote path.
     let result = (|| {
         crate::sidecar::download_manager::extract_tar_gz_to_dir(bytes, &extract_root, None)
-			.context("extracting Marketplace skill bundle")?;
+            .context("extracting Marketplace skill bundle")?;
         // A well-formed skill bundle is either a single top-level dir (as a github
         // tarball expands) or the skill files at the archive root; `resolve_subdir`
         // (no subdir) + `repo_root_name` handle both, reusing the remote path's

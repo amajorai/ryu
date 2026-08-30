@@ -4,20 +4,20 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use axum::{body::Body, response::Response};
 use chrono::Utc;
 use ryu_a2a::{
-    A2aClient, ClientLimits, EndpointPolicy, StoreError, TaskCreate, TaskDirection, TaskState,
     outbound_task_record_id,
     protocol::{
         AgentCard, Artifact, CancelTaskRequest, Message, Part, PartContent, Role,
         SendMessageRequest, SendMessageResponse, StreamResponse, Task, TaskArtifactUpdateEvent,
         TaskState as ProtocolTaskState, TaskStatus, TaskStatusUpdateEvent,
     },
-    select_endpoint,
+    select_endpoint, A2aClient, ClientLimits, EndpointPolicy, StoreError, TaskCreate,
+    TaskDirection, TaskState,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -25,8 +25,8 @@ use super::runtime::runtime;
 use crate::{
     routing_policy::reactive::{FailureKind, TurnWatch},
     sidecar::adapters::{
-        ChatStreamRequest, error_stream, sse_response, ui_finish, ui_message_text, ui_start,
-        ui_text_delta, ui_text_end, ui_text_start,
+        error_stream, sse_response, ui_finish, ui_message_text, ui_start, ui_text_delta,
+        ui_text_end, ui_text_start, ChatStreamRequest,
     },
 };
 

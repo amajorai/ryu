@@ -29,7 +29,7 @@ const PAYMENT_SUCCESS_COPY: Record<PaymentSuccessKind, PaymentSuccessCopy> = {
 		detailLabel: "Cloud purchase",
 		detailValue: "Payment received",
 		description:
-			"Your payment went through. We are sending you back to finish setting up your cloud node.",
+			"Your payment went through. We are sending you back to finish setting up your cloud server.",
 		eyebrow: "Ryu / cloud receipt",
 		nextLabel: "Next",
 		nextValue: "Provisioning",

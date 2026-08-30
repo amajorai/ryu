@@ -84,6 +84,11 @@ describe("extractSources", () => {
 			"application/pdf",
 			"image/jpeg",
 		]);
+		expect(attachments.items.map((item) => item.filePath)).toEqual([
+			"reference.png",
+			"brief.pdf",
+			"legacy-photo.jpg",
+		]);
 	});
 
 	test("does not treat assistant-generated files as input sources", () => {
@@ -120,6 +125,7 @@ describe("extractSources", () => {
 			"lib.rs",
 		]);
 		expect(local.items[0].detail).toBe("/repo/src/main.rs");
+		expect(local.items[0].filePath).toBe("/repo/src/main.rs");
 	});
 
 	test("keeps searches and shell commands beside the files", () => {

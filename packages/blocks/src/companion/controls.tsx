@@ -8,6 +8,7 @@
 
 export { Badge } from "@ryu/ui/components/badge.tsx";
 export { Button } from "@ryu/ui/components/button.tsx";
+export { Checkbox } from "@ryu/ui/components/checkbox.tsx";
 export {
 	Dialog,
 	DialogClose,

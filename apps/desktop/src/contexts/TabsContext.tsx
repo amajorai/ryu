@@ -99,6 +99,8 @@ export interface Tab {
 	initialImages?: AttachedImage[];
 	/** One-shot model selection to carry into a newly opened focused reply thread. */
 	initialModel?: string;
+	/** One-shot composer flags carried from the new-chat launchpad. Runtime-only. */
+	initialPluginFlags?: Record<string, boolean>;
 	/** One-shot Core assistant opening. Unlike `initialSubmit`, this never adds
 	    a synthetic user row and waits for model readiness. Runtime-only. */
 	initialProactiveOpening?: boolean;
@@ -119,6 +121,8 @@ export interface Tab {
 	    `ryu://chat/new` deep link and Inbox suggestions leave this unset so their
 	    attacker-/system-controllable text stays pre-fill-only. Runtime-only. */
 	initialSubmit?: boolean;
+	/** One-shot team target carried from the new-chat launchpad. Runtime-only. */
+	initialTeamId?: string;
 	/** Context from an app-owned sidebar row, forwarded to that app's Companion. */
 	mountContext?: Record<string, unknown> | null;
 	/** Bumped each time this tab is navigated in place ("open in current tab").
@@ -325,7 +329,9 @@ interface TabsContextValue {
 			initialSubmit?: boolean;
 			initialImages?: AttachedImage[];
 			initialAgent?: string;
+			initialTeamId?: string;
 			initialGhost?: boolean;
+			initialPluginFlags?: Record<string, boolean>;
 			initialProject?: string;
 			initialStoreQuery?: string;
 			initialStoreItem?: { id: string; kind: string };
@@ -1285,7 +1291,9 @@ export function TabsProvider({
 				initialSubmit?: boolean;
 				initialImages?: AttachedImage[];
 				initialAgent?: string;
+				initialTeamId?: string;
 				initialGhost?: boolean;
+				initialPluginFlags?: Record<string, boolean>;
 				initialProject?: string;
 				initialStoreQuery?: string;
 				initialStoreItem?: { id: string; kind: string };
@@ -1471,7 +1479,9 @@ export function TabsProvider({
 					initialSubmit: opts?.initialSubmit,
 					initialImages: opts?.initialImages,
 					initialAgent: opts?.initialAgent,
+					initialTeamId: opts?.initialTeamId,
 					initialGhost: opts?.initialGhost,
+					initialPluginFlags: opts?.initialPluginFlags,
 					initialProject: opts?.initialProject,
 					initialStoreQuery: opts?.initialStoreQuery,
 					initialStoreItem: opts?.initialStoreItem,
@@ -1517,7 +1527,9 @@ export function TabsProvider({
 				initialSubmit: opts?.initialSubmit,
 				initialImages: opts?.initialImages,
 				initialAgent: opts?.initialAgent,
+				initialTeamId: opts?.initialTeamId,
 				initialGhost: opts?.initialGhost,
+				initialPluginFlags: opts?.initialPluginFlags,
 				initialProject: opts?.initialProject,
 				initialStoreQuery: opts?.initialStoreQuery,
 				initialStoreItem: opts?.initialStoreItem,
@@ -2479,6 +2491,8 @@ export function TabsProvider({
 				initialSubmit: undefined,
 				initialImages: undefined,
 				initialGhost: undefined,
+				initialTeamId: undefined,
+				initialPluginFlags: undefined,
 				scrollToMessageId: undefined,
 				worktreeMode: undefined,
 				workspaceSession: undefined,

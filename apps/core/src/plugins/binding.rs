@@ -417,7 +417,7 @@ pub struct CapabilityProvider {
     /// refinement of [`Self::serves_verbs`]: the two are alternative serving
     /// surfaces, and a capability may be built entirely on this one. `document.parse`
     /// is — Core resolves the binding and then calls the provider's sidecar route
-    /// directly (`crate::document_parse`), so all four of its providers declare zero
+    /// directly (`crate::document_parse`), so all five of its providers declare zero
     /// `tools` and are perfectly functional. A picker that reads only `serves_verbs`
     /// concluded the opposite and disabled every row, which is the bug this exists to
     /// close; the honest question a picker must ask is `serves_verbs || serves_route`.

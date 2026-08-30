@@ -4,16 +4,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use futures_util::StreamExt;
 use ryu_a2a::{
-    A2aStore, ClientLimits, EndpointPolicy, ResolvedPushConfig, TaskState,
     deliver_push_notification,
     protocol::{
         AuthenticationInfo, Message, PartContent, Role, StreamResponse, Task,
         TaskState as ProtocolTaskState, TaskStatus,
     },
+    A2aStore, ClientLimits, EndpointPolicy, ResolvedPushConfig, TaskState,
 };
 use serde_json::Value;
 use tokio::sync::{broadcast, watch};
@@ -21,7 +21,7 @@ use tokio::sync::{broadcast, watch};
 use crate::{
     routing_policy::reactive::TurnWatch,
     server::ServerState,
-    sidecar::adapters::{ChatStreamRequest, UiContent, UiMessage, route_chat_stream},
+    sidecar::adapters::{route_chat_stream, ChatStreamRequest, UiContent, UiMessage},
 };
 
 const DEFAULT_RATE_LIMIT_PER_MINUTE: usize = 60;
@@ -647,12 +647,10 @@ mod tests {
     #[test]
     fn ui_sse_decoder_handles_fragmented_text_frames() {
         let mut decoder = UiSseDecoder::default();
-        assert!(
-            decoder
-                .push(b"data: {\"type\":\"text-delta\",")
-                .expect("first")
-                .is_empty()
-        );
+        assert!(decoder
+            .push(b"data: {\"type\":\"text-delta\",")
+            .expect("first")
+            .is_empty());
         let frames = decoder.push(b"\"delta\":\"hello\"}\n\n").expect("second");
         assert_eq!(frames.len(), 1);
         assert!(matches!(

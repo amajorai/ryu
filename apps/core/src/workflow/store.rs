@@ -35,11 +35,7 @@ fn source_history_path(workflow_id: &str) -> String {
 /// Record the Git audit projection without turning a successful live workflow
 /// write into a reported failure. The JSON definition is authoritative and Git
 /// history can be repaired after a transient disk or repository failure.
-fn checkpoint_source_history_best_effort(
-    relative_path: &str,
-    content: &str,
-    label: Option<&str>,
-) {
+fn checkpoint_source_history_best_effort(relative_path: &str, content: &str, label: Option<&str>) {
     if let Err(error) = source_history().checkpoint(relative_path, content, label) {
         tracing::warn!(
             path = relative_path,

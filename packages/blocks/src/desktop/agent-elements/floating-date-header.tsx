@@ -3,7 +3,6 @@
 // The sticky date chip that names the day you are currently reading, the way
 // WhatsApp and Telegram do.
 
-import { Marker, MarkerContent } from "@ryu/ui/components/marker";
 import { memo } from "react";
 import { type DayGroup, dayKeyAtTurnIndex, dayLabel } from "./date-groups.ts";
 
@@ -77,19 +76,15 @@ export const FloatingDateHeader = memo(function FloatingDateHeader({
 			className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center"
 			data-slot="chat-floating-date"
 		>
-			{/* The ONE place the transcript still draws a pill, and the reason is
-			    specific: this copy overlays live transcript text, so it needs an
-			    opaque, blurred backing to stay legible. The in-flow separator sits
-			    on the same background and reads better as hairlines, so it is a
-			    plain `Marker variant="separator"` (date-separator.tsx). Same
-			    primitive, same `dayLabel()`, different surface — only the styling
-			    diverges, and it diverges because one floats. */}
-			<Marker
-				className="min-h-0 w-auto select-none rounded-full border border-border/60 bg-background/80 px-2.5 py-0.5 font-medium text-[11px] backdrop-blur-sm"
+			{/* Keep the floating echo as text only. It sits in a dedicated lane, so
+			    it never needs a filled pill to stay legible; the pinned message below
+			    is the only scroll chrome that gets a surface. */}
+			<span
+				className="select-none font-medium text-[11px] text-muted-foreground"
 				data-slot="chat-date-chip"
 			>
-				<MarkerContent>{dayLabel(dayKey, startOfToday)}</MarkerContent>
-			</Marker>
+				{dayLabel(dayKey, startOfToday)}
+			</span>
 		</div>
 	);
 });

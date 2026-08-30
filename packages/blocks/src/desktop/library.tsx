@@ -107,6 +107,7 @@ export function LibraryToolbar({
 	view,
 	onViewChange = noop,
 	showGraph = false,
+	showShowcase = false,
 	ctaLabel,
 	ctaIcon,
 	onCta,
@@ -129,6 +130,8 @@ export function LibraryToolbar({
 	onViewChange?: (mode: LibraryViewMode) => void;
 	/** Skills-only Library extension: show the Relations projection. */
 	showGraph?: boolean;
+	/** Show the collection's richer visual presentation when one exists. */
+	showShowcase?: boolean;
 	ctaLabel?: string;
 	ctaIcon?: IconSvgElement;
 	onCta?: () => void;
@@ -179,8 +182,13 @@ export function LibraryToolbar({
 				</DropdownMenu>
 			) : null}
 			{view ? (
-				showGraph ? (
-					<LibraryViewToggle onChange={onViewChange} value={view} />
+				showGraph || showShowcase ? (
+					<LibraryViewToggle
+						onChange={onViewChange}
+						showGraph={showGraph}
+						showShowcase={showShowcase}
+						value={view}
+					/>
 				) : (
 					<ViewToggle
 						onChange={onViewChange}

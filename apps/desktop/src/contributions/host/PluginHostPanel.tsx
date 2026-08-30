@@ -147,6 +147,7 @@ import { newsRequest } from "@/src/lib/api/news.ts";
 import {
 	ackNotification,
 	archiveNotification,
+	listMentionTargetUsers,
 	listNotifications,
 	markNotificationRead,
 	unarchiveNotification,
@@ -1283,6 +1284,7 @@ export function PluginHostPanel({
 			}),
 			workflowsSkills: () => listSkills(toTarget(node)),
 			workflowsSchedules: () => fetchJobs(toTarget(node)),
+			workflowsNotifyTargets: () => listMentionTargetUsers(toTarget(node)),
 			// The app-event catalog behind the `event` trigger's picker. Served from
 			// the same contributions endpoint the shell already reads, narrowed to the
 			// one family the canvas needs.

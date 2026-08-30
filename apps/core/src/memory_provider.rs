@@ -115,9 +115,9 @@ async fn call_verb_inner(verb: String, arguments: serde_json::Value) -> Option<s
     //
     // It also gives the timeout teeth: on expiry the handle is aborted rather than
     // left running, so a wedged provider cannot accumulate tasks turn after turn.
-    let handle =
+    let mut handle =
         tokio::spawn(async move { registry.call_tool(&owned_verb, arguments, None).await });
-    match tokio::time::timeout(PROVIDER_TIMEOUT, handle).await {
+    match tokio::time::timeout(PROVIDER_TIMEOUT, &mut handle).await {
         Ok(Ok(Ok(value))) => Some(value),
         Ok(Ok(Err(e))) => {
             tracing::debug!("external memory provider '{verb}' failed: {e:#}");
@@ -128,6 +128,11 @@ async fn call_verb_inner(verb: String, arguments: serde_json::Value) -> Option<s
             None
         }
         Err(_) => {
+            // Dropping a Tokio JoinHandle detaches the task; it does not cancel
+            // it. Abort the timed-out provider call explicitly so repeated
+            // turns cannot accumulate one stuck task each.
+            handle.abort();
+            let _ = handle.await;
             tracing::debug!(
                 "external memory provider '{verb}' exceeded {PROVIDER_TIMEOUT:?}; \
                  continuing without it"
@@ -142,8 +147,15 @@ async fn call_verb_inner(verb: String, arguments: serde_json::Value) -> Option<s
 /// Returns already-neutralized fact strings ready to inject, or empty when no
 /// external provider is selected or it had nothing (or failed).
 pub async fn prefetch(query: &str, limit: usize) -> Vec<String> {
+    prefetch_with_consent(query, limit, true).await
+}
+
+async fn prefetch_with_consent(query: &str, limit: usize, include_sensitive: bool) -> Vec<String> {
     let query = query.trim();
-    if query.is_empty() || !is_external().await {
+    if query.is_empty()
+        || (!include_sensitive && !crate::server::memory::detect_sensitive_topics(query).is_empty())
+        || !is_external().await
+    {
         return Vec::new();
     }
     let limit = limit.clamp(1, MAX_INJECTED_FACTS);
@@ -151,7 +163,7 @@ pub async fn prefetch(query: &str, limit: usize) -> Vec<String> {
     else {
         return Vec::new();
     };
-    extract_facts(&raw, limit)
+    extract_facts_with_consent(&raw, limit, include_sensitive)
 }
 
 /// **Context hook** — the provider's own standing summary of this user.
@@ -249,17 +261,36 @@ fn summary_text(value: &serde_json::Value) -> Option<String> {
 /// Returns the blocks to inject, context first: the provider's standing synthesis
 /// reads as background and belongs above the facts matching this particular turn.
 pub async fn read_hooks(query: &str, limit: usize, want_context: bool) -> Vec<String> {
-    if !is_external().await {
+    read_hooks_with_consent(query, limit, want_context, true).await
+}
+
+/// Run the read hooks while applying the local sensitive-topic consent boundary.
+/// A sensitive query is not sent to the external provider at all when consent is
+/// off; returned summaries/facts are filtered as a second defense.
+pub async fn read_hooks_with_consent(
+    query: &str,
+    limit: usize,
+    want_context: bool,
+    include_sensitive: bool,
+) -> Vec<String> {
+    if (!include_sensitive && !crate::server::memory::detect_sensitive_topics(query).is_empty())
+        || !is_external().await
+    {
         return Vec::new();
     }
     let context_fut = async {
         if want_context {
-            context(query).await
+            context(query)
+                .await
+                .filter(|summary| include_sensitive || sensitive_text_allowed(summary))
         } else {
             None
         }
     };
-    let (summary, facts) = tokio::join!(context_fut, prefetch(query, limit));
+    let (summary, facts) = tokio::join!(
+        context_fut,
+        prefetch_with_consent(query, limit, include_sensitive)
+    );
 
     let mut blocks = Vec::new();
     blocks.extend(summary.as_deref().and_then(render_context_block));
@@ -299,6 +330,14 @@ pub fn mirror(content: &str, scope: &str) {
 /// it is returned — this function's output is injected at system rank, so it treats
 /// its input as hostile.
 fn extract_facts(value: &serde_json::Value, limit: usize) -> Vec<String> {
+    extract_facts_with_consent(value, limit, true)
+}
+
+fn extract_facts_with_consent(
+    value: &serde_json::Value,
+    limit: usize,
+    include_sensitive: bool,
+) -> Vec<String> {
     let items = value
         .get("results")
         .and_then(|v| v.as_array())
@@ -323,6 +362,9 @@ fn extract_facts(value: &serde_json::Value, limit: usize) -> Vec<String> {
         if text.is_empty() {
             continue;
         }
+        if !include_sensitive && !sensitive_text_allowed(text) {
+            continue;
+        }
         let clipped: String = text.chars().take(MAX_FACT_CHARS).collect();
         // Provider text is untrusted stored content injected at system rank — the
         // same treatment the built-in recall blocks get.
@@ -337,6 +379,10 @@ fn extract_facts(value: &serde_json::Value, limit: usize) -> Vec<String> {
         }
     }
     out
+}
+
+fn sensitive_text_allowed(text: &str) -> bool {
+    crate::server::memory::detect_sensitive_topics(text).is_empty()
 }
 
 /// The human-readable text of one provider result item, over the field names memory
@@ -453,6 +499,20 @@ mod tests {
                 "provider text must not be injected verbatim"
             );
         }
+    }
+
+    #[test]
+    fn sensitive_provider_facts_are_filtered_without_consent() {
+        let value = json!({
+            "results": [
+                { "content": "I have a medical condition" },
+                { "content": "I prefer concise answers" }
+            ]
+        });
+        let facts = extract_facts_with_consent(&value, 8, false);
+        assert_eq!(facts.len(), 1);
+        assert!(facts[0].contains("concise answers"));
+        assert_eq!(extract_facts_with_consent(&value, 8, true).len(), 2);
     }
 
     #[test]

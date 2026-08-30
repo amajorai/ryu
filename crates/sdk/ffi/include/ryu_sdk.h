@@ -22,6 +22,9 @@ extern "C" {
 /* Opaque model-client handle. */
 typedef struct RyuModelClientHandle RyuModelClientHandle;
 
+/* Opaque embedding-client handle. */
+typedef struct RyuEmbeddingClientHandle RyuEmbeddingClientHandle;
+
 /* ── Error + memory ─────────────────────────────────────────────────────── */
 
 /* Last error for the calling thread, or NULL. Caller frees. */
@@ -64,6 +67,22 @@ void ryu_model_client_free(RyuModelClientHandle *handle);
  * a JSON object {"content","finish_reason","usage"} (caller frees) or NULL. */
 char *ryu_model_client_chat(const RyuModelClientHandle *handle,
                             const char *messages_json);
+
+/* ── Embedding client ───────────────────────────────────────────────────── */
+
+/* Construct an embedding client. base_url/token may be NULL for defaults. */
+RyuEmbeddingClientHandle *ryu_embedding_client_new(const char *model,
+                                                   const char *base_url,
+                                                   const char *token);
+
+/* Free an embedding-client handle. NULL is a no-op. */
+void ryu_embedding_client_free(RyuEmbeddingClientHandle *handle);
+
+/* Blocking embedding. inputs_json is a JSON array of strings. Returns a JSON
+ * object {"embeddings":[{"index","vector"}],"usage"} (caller frees), or
+ * NULL on error. */
+char *ryu_embedding_client_embed(const RyuEmbeddingClientHandle *handle,
+                                 const char *inputs_json);
 
 #ifdef __cplusplus
 } /* extern "C" */

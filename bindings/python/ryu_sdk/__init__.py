@@ -1,7 +1,7 @@
 """Ryu SDK Python binding package.
 
 The importable API lives in the GENERATED sibling module `ryu_sdk.py` (emitted by
-`uniffi-bindgen` from `crates/ryu-sdk-uniffi`; gitignored). This thin, COMMITTED
+`uniffi-bindgen` from `crates/sdk/uniffi`; gitignored). This thin, COMMITTED
 `__init__.py` re-exports it so callers `import ryu_sdk` and reach the surface
 directly (`ryu_sdk.validate_plugin_id`, `ryu_sdk.ModelClient`, `ryu_sdk.RyuError`,
 ...), matching the smoke test + pyproject.

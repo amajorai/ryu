@@ -31,6 +31,8 @@ export interface RouteTab {
 	initialImages?: unknown[];
 	/** One-shot model selection carried into a newly opened focused reply thread. */
 	initialModel?: string;
+	/** One-shot composer flags carried from the new-chat launchpad. */
+	initialPluginFlags?: Record<string, boolean>;
 	/** When true, Core creates the opening as an assistant-only message after
 	 *  model readiness. */
 	initialProactiveOpening?: boolean;
@@ -45,6 +47,8 @@ export interface RouteTab {
 	/** When true, the seeded prompt/images are sent automatically once chat is
 	 *  ready (the `/chat` built-in forwards it to `ChatPage`). */
 	initialSubmit?: boolean;
+	/** One-shot team target carried from the new-chat launchpad. */
+	initialTeamId?: string;
 	/** Context supplied by a Ryu-owned sidebar row to the owning Companion. */
 	mountContext?: Record<string, unknown> | null;
 	path: string;

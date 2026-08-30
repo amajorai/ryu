@@ -269,6 +269,10 @@ export default defineConfig({
 					"appearance-context-menu-proof.html"
 				),
 				markdownTable: path.resolve(harnessDir, "markdown-table-story.html"),
+				chatRichContentProof: path.resolve(
+					harnessDir,
+					"chat-rich-content-proof.html"
+				),
 				chatTypingIndicatorProof: path.resolve(
 					harnessDir,
 					"chat-typing-indicator-proof.html"

@@ -93,5 +93,4 @@ mod tests {
         // Restore the default-ON state so other tests are unaffected.
         set_active("true");
     }
-
 }

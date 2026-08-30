@@ -17,13 +17,29 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
-import { CoworkContextPanel } from "../../src/components/panels/CoworkContextPanel.tsx";
+import {
+	CoworkContextPanel,
+	SourcesWorkspacePanel,
+} from "../../src/components/panels/CoworkContextPanel.tsx";
 import "../../src/index.css";
 
 const MESSAGES = [
 	{
 		role: "user",
-		parts: [{ type: "text", text: "Look into the effort slider colours." }],
+		parts: [
+			{
+				filename: "Startup Runway v2.0.pdf",
+				mediaType: "application/pdf",
+				type: "file",
+			},
+			{
+				filename: "Startup_Runway_Weekly_Template_v2_Original.pptx",
+				mediaType:
+					"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+				type: "file",
+			},
+			{ text: "Look into the effort slider colours.", type: "text" },
+		],
 	},
 	{
 		role: "assistant",
@@ -97,13 +113,25 @@ const queryClient = new QueryClient();
 function Story() {
 	return (
 		<QueryClientProvider client={queryClient}>
-			<div className="h-screen w-[420px] bg-background text-foreground">
-				<CoworkContextPanel
-					maxItemsPerSection={5}
-					messages={MESSAGES}
-					runId={null}
-					target={{ url: "http://localhost:0", token: null }}
-				/>
+			<div className="dark grid h-screen grid-cols-[18rem_minmax(0,1fr)] bg-background text-foreground">
+				<div className="min-w-0 p-2" data-testid="pinned-summary-sources-proof">
+					<CoworkContextPanel
+						maxItemsPerSection={5}
+						messages={MESSAGES}
+						onOpenSources={() => {
+							document.body.dataset.sourcesOpened = "true";
+						}}
+						runId={null}
+						target={{ url: "http://localhost:0", token: null }}
+						variant="summary"
+					/>
+				</div>
+				<div
+					className="min-w-0 border-border border-l"
+					data-testid="workspace-sources-proof"
+				>
+					<SourcesWorkspacePanel messages={MESSAGES} />
+				</div>
 			</div>
 		</QueryClientProvider>
 	);

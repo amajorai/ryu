@@ -81,6 +81,8 @@ function Story() {
 	const [expandedDraft, setExpandedDraft] = useState("");
 	const [ghost, setGhost] = useState(false);
 	const [flag, setFlag] = useState(false);
+	const [temporaryMemory, setTemporaryMemory] = useState(false);
+	const [temporaryChatSaved, setTemporaryChatSaved] = useState(false);
 
 	return (
 		<div className="flex min-h-screen flex-col gap-8 bg-background p-6">
@@ -162,6 +164,7 @@ function Story() {
 				</h2>
 				<InputBar
 					composerMenuGroups={DIRECTORY_GROUPS}
+					ghost={ghost}
 					ghostControls={{ active: ghost, onToggle: () => setGhost((o) => !o) }}
 					onAttach={() => setAttachCount((n) => n + 1)}
 					onSend={noop}
@@ -174,8 +177,25 @@ function Story() {
 							enabled: flag,
 							onToggle: (_f, next) => setFlag(next),
 						},
+						...(ghost
+							? ([
+									{
+										description:
+											"Allow this temporary chat to use personalized memories and personalization. It still will not be saved.",
+										enabled: temporaryMemory,
+										flag: "@ryu/memory/temporary-context",
+										id: "memory.temporary-context",
+										label: "Use memory in temporary chat",
+										onToggle: (_f: string, next: boolean) =>
+											setTemporaryMemory(next),
+									},
+								] as const)
+							: []),
 					]}
 					status="ready"
+					temporaryChatSaveControls={{
+						onSave: () => setTemporaryChatSaved(true),
+					}}
 				/>
 			</section>
 
@@ -221,6 +241,12 @@ function Story() {
 			    reaches the host's handler, not just that a menu rendered. */}
 			<output data-testid="attach-count">{attachCount}</output>
 			<output data-testid="ghost-state">{ghost ? "on" : "off"}</output>
+			<output data-testid="temporary-memory-state">
+				{temporaryMemory ? "on" : "off"}
+			</output>
+			<output data-testid="temporary-chat-saved">
+				{temporaryChatSaved ? "saved" : "not-saved"}
+			</output>
 		</div>
 	);
 }

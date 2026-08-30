@@ -215,7 +215,17 @@ function Band({
 		linearDamping: 4,
 	} as const;
 	const { nodes, materials } = useGLTF(cardGLB) as unknown as CardGLTF;
-	const texture = useTexture(lanyardImage || lanyard);
+	// Next's image declaration exposes the bundled fallback as StaticImageData,
+	// while Vite and the package-local asset declaration expose its URL string.
+	// Normalize both forms before handing the source to drei so the texture stays
+	// a single Three texture in every host.
+	const lanyardAsset = lanyard as unknown as string | { src?: string };
+	const lanyardSource =
+		lanyardImage ??
+		(typeof lanyardAsset === "string"
+			? lanyardAsset
+			: (lanyardAsset.src ?? ""));
+	const texture = useTexture(lanyardSource) as THREE.Texture;
 	// useTexture must be called unconditionally; use a blank pixel when an image
 	// isn't supplied for a given face, then skip compositing it below.
 	const frontTex = useTexture(frontImage || BLANK_PIXEL);

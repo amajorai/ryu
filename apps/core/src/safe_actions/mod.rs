@@ -1887,9 +1887,8 @@ mod tests {
         fn dispatch_tool_result<'a>(
             &'a self,
             ctx: crate::plugin_host::HookContext,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Option<Value>> + Send + 'a>,
-        > {
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Value>> + Send + 'a>>
+        {
             Box::pin(async move {
                 (ctx.tool_name.as_deref() == Some("app.echo")
                     && ctx.tool_input.as_ref().and_then(|value| value.get("hook"))
@@ -2375,11 +2374,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            auth_blocked
-                .to_string()
-                .contains("tool execution did not complete")
-        );
+        assert!(auth_blocked
+            .to_string()
+            .contains("tool execution did not complete"));
         let auth_receipt = store
             .get_receipt(auth_submission_id)
             .await

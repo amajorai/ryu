@@ -2020,6 +2020,9 @@ export interface HostServices {
 	workflowsSave?(input: Record<string, unknown>): Promise<unknown>;
 	/** Node-config picker: schedules/jobs (`GET /api/schedules/jobs`). */
 	workflowsSchedules?(): Promise<unknown>;
+	/** Node-config picker: verified organization members for NotifyUser steps
+	 *  (`GET /api/notifications/mention-targets`). */
+	workflowsNotifyTargets?(): Promise<unknown>;
 	/** Node-config picker: installed skills (`GET /api/skills`). */
 	workflowsSkills?(): Promise<unknown>;
 	/** Fetch one workflow template's detail (`GET /api/workflows/catalog/:id`). */
@@ -3570,6 +3573,14 @@ export async function dispatchRpc(
 				);
 			}
 			return await services.workflowsSchedules();
+		case "workflows.notifyTargets":
+			if (!services.workflowsNotifyTargets) {
+				throw new CodedRpcError(
+					"server_error",
+					"workflows.notifyTargets is not available"
+				);
+			}
+			return await services.workflowsNotifyTargets();
 		case "workflows.hookEvents":
 			if (!services.workflowsHookEvents) {
 				throw new CodedRpcError(

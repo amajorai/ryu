@@ -18,6 +18,7 @@ const memory: Memory = {
 	tags: ["style", "writing"],
 	updatedAt: 2,
 	whenToUse: "When reviewing implementation work",
+	sensitiveTopics: [],
 };
 
 describe("memory Git Markdown", () => {

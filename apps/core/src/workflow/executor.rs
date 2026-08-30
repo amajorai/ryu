@@ -155,6 +155,25 @@ pub async fn run_workflow(
 /// workflow-gate request is approved — so an approved resume is byte-identical to
 /// a manual one.
 pub async fn resume_run(run_id: &str, payload: String) -> Result<WorkflowRun, String> {
+    resume_run_inner(run_id, payload, false).await
+}
+
+/// Resume a `NotifyUser` gate after the notification endpoint has recorded an
+/// authorized member acknowledgement. This is intentionally separate from the
+/// public resume endpoint: a caller must not bypass a multi-person approval by
+/// posting directly to `/workflows/runs/:run_id/resume`.
+pub(crate) async fn resume_run_after_notify_ack(
+    run_id: &str,
+    payload: String,
+) -> Result<WorkflowRun, String> {
+    resume_run_inner(run_id, payload, true).await
+}
+
+async fn resume_run_inner(
+    run_id: &str,
+    payload: String,
+    allow_notify_ack: bool,
+) -> Result<WorkflowRun, String> {
     use store::{NodeRunState, NodeStatus, RunStatus};
 
     let mut run = store::load_run(run_id).map_err(|_| "run not found".to_string())?;
@@ -170,6 +189,17 @@ pub async fn resume_run(run_id: &str, payload: String) -> Result<WorkflowRun, St
         .ok_or_else(|| "run is awaiting_input but awaiting_node is unset".to_string())?;
     let workflow = store::load_workflow(&run.workflow_id)
         .map_err(|_| format!("workflow '{}' not found", run.workflow_id))?;
+
+    if !allow_notify_ack
+        && workflow.nodes.iter().any(|node| {
+            node.id == gate_node_id && matches!(&node.kind, NodeKind::NotifyUser { .. })
+        })
+    {
+        return Err(
+            "run is awaiting member acknowledgements; acknowledge a notification instead"
+                .to_string(),
+        );
+    }
 
     // Preserve the gate's attempts/wake_at (a resume must not reset run-state the
     // retry/durable-timer machinery owns).
@@ -2173,6 +2203,50 @@ mod tests {
         let s: store::NodeRunState = serde_json::from_str(r#"{"status":"completed"}"#).unwrap();
         assert_eq!(s.attempts, 0);
         assert!(s.wake_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_resume_cannot_bypass_notify_user_gate() {
+        use crate::workflow::{AckMode, NotifyTargetSpec, WorkflowEdge, WorkflowNode};
+
+        let workflow = Workflow {
+            id: format!("notify-resume-{}", uuid::Uuid::new_v4().simple()),
+            name: "notify resume guard".into(),
+            description: None,
+            nodes: vec![WorkflowNode {
+                id: "approval".into(),
+                kind: NodeKind::NotifyUser {
+                    target: NotifyTargetSpec::Members {
+                        user_ids: vec!["user-1".into()],
+                    },
+                    title: "Review".into(),
+                    body: "Please approve".into(),
+                    ack_mode: AckMode::First,
+                    ack_timeout_ms: None,
+                },
+                retry: None,
+                timeout_ms: None,
+            }],
+            edges: Vec::<WorkflowEdge>::new(),
+            triggers: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        store::save_workflow(&workflow).expect("workflow should persist");
+
+        let run_id = format!("notify-run-{}", uuid::Uuid::new_v4().simple());
+        let mut run = WorkflowRun::new(run_id.clone(), workflow.id.clone(), empty_input());
+        run.status = RunStatus::AwaitingInput;
+        run.awaiting_node = Some("approval".into());
+        store::save_run(&run).expect("suspended run should persist");
+
+        let error = resume_run(&run_id, "bypass".into())
+            .await
+            .expect_err("a notification gate must require a recipient ack");
+        assert!(error.contains("member acknowledgements"));
+        let persisted = store::load_run(&run_id).expect("run should remain persisted");
+        assert_eq!(persisted.status, RunStatus::AwaitingInput);
+        assert_eq!(persisted.awaiting_node.as_deref(), Some("approval"));
     }
 
     /// A perpetually-failing node with a 3-attempt policy spends its whole

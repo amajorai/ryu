@@ -62,11 +62,10 @@ pub mod uploads;
 /// [`crate::memory_host`]. This alias keeps the ~19 `memory::`-qualified call
 /// sites in Core unchanged (re-export shim, zero business logic).
 pub use ryu_memory as memory;
-pub mod app_notify;
 pub mod app_egress;
 pub mod app_email;
+pub mod app_notify;
 pub mod app_tool_usage;
-pub mod provider_router;
 pub mod notifications_api;
 pub mod onboarding_profile;
 pub mod openapi;
@@ -74,6 +73,7 @@ pub mod plugin_bridge_api;
 pub mod plugin_uninstall;
 pub mod portable_package_runtime;
 pub mod preferences;
+pub mod provider_router;
 pub mod realtime_ws;
 pub mod rules;
 pub mod shadow_proxy;
@@ -613,8 +613,13 @@ mod managed_user_authorization_tests {
 
     #[test]
     fn member_user_jwt_gets_tool_execution_but_not_management() {
-        let resolved = managed_user_jwt_resolution_for(caller(OrgRole::Member, "org_1"), &node(), Some("ryu"), 10)
-            .expect("same-org member should resolve");
+        let resolved = managed_user_jwt_resolution_for(
+            caller(OrgRole::Member, "org_1"),
+            &node(),
+            Some("ryu"),
+            10,
+        )
+        .expect("same-org member should resolve");
 
         assert!(!resolved.context.is_owner());
         assert!(resolved
@@ -626,7 +631,9 @@ mod managed_user_authorization_tests {
             )
             .is_allowed());
         assert_eq!(
-            resolved.context.authorize(&RoutePolicy::OwnerOnly, &resolved.bindings, 10),
+            resolved
+                .context
+                .authorize(&RoutePolicy::OwnerOnly, &resolved.bindings, 10),
             crate::authorization::AuthorizationDecision::Deny(
                 crate::authorization::DenialReason::OwnerRequired
             )
@@ -635,8 +642,13 @@ mod managed_user_authorization_tests {
 
     #[test]
     fn viewer_user_jwt_can_list_tools_but_cannot_execute_them() {
-        let resolved = managed_user_jwt_resolution_for(caller(OrgRole::Viewer, "org_1"), &node(), Some("ryu"), 10)
-            .expect("same-org viewer should resolve");
+        let resolved = managed_user_jwt_resolution_for(
+            caller(OrgRole::Viewer, "org_1"),
+            &node(),
+            Some("ryu"),
+            10,
+        )
+        .expect("same-org viewer should resolve");
 
         assert!(resolved
             .context
@@ -658,34 +670,46 @@ mod managed_user_authorization_tests {
 
     #[test]
     fn a_user_from_another_org_is_not_admitted() {
-        assert!(managed_user_jwt_resolution_for(caller(OrgRole::Owner, "org_other"), &node(), Some("ryu"), 10)
-            .is_none());
+        assert!(managed_user_jwt_resolution_for(
+            caller(OrgRole::Owner, "org_other"),
+            &node(),
+            Some("ryu"),
+            10
+        )
+        .is_none());
     }
 
     #[test]
     fn team_node_requires_membership_in_that_team() {
         let mut member = caller(OrgRole::Member, "org_1");
-        assert!(managed_user_jwt_resolution_for(member.clone(), &team_node(), Some("ryu"), 10)
-            .is_none());
+        assert!(
+            managed_user_jwt_resolution_for(member.clone(), &team_node(), Some("ryu"), 10)
+                .is_none()
+        );
 
         member.teams.push(TeamMembership {
             id: "team_1".to_owned(),
             org_id: "org_1".to_owned(),
             role: "member".to_owned(),
         });
-        assert!(managed_user_jwt_resolution_for(member, &team_node(), Some("ryu"), 10)
-            .is_some());
+        assert!(managed_user_jwt_resolution_for(member, &team_node(), Some("ryu"), 10).is_some());
     }
 
     #[test]
     fn personal_node_requires_the_owner() {
-        assert!(managed_user_jwt_resolution_for(caller(OrgRole::Member, "org_1"), &personal_node(), Some("ryu"), 10)
-            .is_some());
+        assert!(managed_user_jwt_resolution_for(
+            caller(OrgRole::Member, "org_1"),
+            &personal_node(),
+            Some("ryu"),
+            10
+        )
+        .is_some());
 
         let mut other = caller(OrgRole::Member, "org_1");
         other.user_id = "user_2".to_owned();
-        assert!(managed_user_jwt_resolution_for(other, &personal_node(), Some("ryu"), 10)
-            .is_none());
+        assert!(
+            managed_user_jwt_resolution_for(other, &personal_node(), Some("ryu"), 10).is_none()
+        );
     }
 }
 
@@ -771,8 +795,7 @@ fn managed_user_jwt_resolution_for(
                 })
         }
         crate::sidecar::control_plane::NodeScope::Personal => {
-            node.team_id.is_none()
-                && node.owner_user_id.as_deref() == Some(caller.user_id.as_str())
+            node.team_id.is_none() && node.owner_user_id.as_deref() == Some(caller.user_id.as_str())
         }
     };
     if !in_scope {
@@ -919,19 +942,19 @@ fn denial_status(decision: crate::authorization::AuthorizationDecision) -> Optio
 }
 
 async fn require_auth(
-	req: Request<axum::body::Body>,
-	next: middleware::Next,
+    req: Request<axum::body::Body>,
+    next: middleware::Next,
 ) -> Result<axum::response::Response, StatusCode> {
-	let expected = crate::node_token::active_token().filter(|token| !token.is_empty());
-	require_auth_with_token(req, next, expected).await
+    let expected = crate::node_token::active_token().filter(|token| !token.is_empty());
+    require_auth_with_token(req, next, expected).await
 }
 
 async fn require_auth_with_token(
-	mut req: Request<axum::body::Body>,
-	next: middleware::Next,
-	expected: Option<String>,
+    mut req: Request<axum::body::Body>,
+    next: middleware::Next,
+    expected: Option<String>,
 ) -> Result<axum::response::Response, StatusCode> {
-	let provided = req
+    let provided = req
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -1784,10 +1807,9 @@ async fn install_portable_marketplace_package(
             .flatten()
             .is_some_and(|package| package.enabled);
     if was_enabled {
-        if let Err(error) = crate::server::portable_package_runtime::disable_with_owner(
-            state, kind, id, owner,
-        )
-        .await
+        if let Err(error) =
+            crate::server::portable_package_runtime::disable_with_owner(state, kind, id, owner)
+                .await
         {
             return json_error(StatusCode::UNPROCESSABLE_ENTITY, error.to_string());
         }
@@ -1935,13 +1957,8 @@ async fn marketplace_package_enable(
         return response;
     }
     let owner = spaces::owner_of(&caller_tenancy(&caller));
-    match crate::server::portable_package_runtime::enable_with_owner(
-        &state,
-        &kind,
-        &id,
-        &owner,
-    )
-    .await
+    match crate::server::portable_package_runtime::enable_with_owner(&state, &kind, &id, &owner)
+        .await
     {
         Ok(package) => Json(json!({ "success": true, "package": package })).into_response(),
         Err(error) => json_error(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()),
@@ -1963,10 +1980,8 @@ async fn marketplace_package_disable(
         return response;
     }
     let owner = spaces::owner_of(&caller_tenancy(&caller));
-    match crate::server::portable_package_runtime::disable_with_owner(
-        &state, &kind, &id, &owner,
-    )
-    .await
+    match crate::server::portable_package_runtime::disable_with_owner(&state, &kind, &id, &owner)
+        .await
     {
         Ok(package) => Json(json!({ "success": true, "package": package })).into_response(),
         Err(error) => json_error(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()),
@@ -1988,10 +2003,8 @@ async fn marketplace_package_uninstall(
         return response;
     }
     let owner = spaces::owner_of(&caller_tenancy(&caller));
-    match crate::server::portable_package_runtime::uninstall_with_owner(
-        &state, &kind, &id, &owner,
-    )
-    .await
+    match crate::server::portable_package_runtime::uninstall_with_owner(&state, &kind, &id, &owner)
+        .await
     {
         Ok(()) => match crate::portable_packages::uninstall(&kind, &id) {
             Ok(()) => Json(json!({ "success": true, "kind": kind, "id": id })).into_response(),
@@ -2416,7 +2429,7 @@ pub(crate) fn background_memory_user_id() -> String {
 
 /// Whether `caller` may READ/WRITE memory `entry`. UNBOUND node → always (one
 /// principal). BOUND node → `node`/`project`-scope facts are the shared brain (any
-/// member); a `user`-scope fact is private to its owner; an `org`-scope fact is
+/// member); an `agent`/`user`-scope fact is private to its owner; an `org`-scope fact is
 /// readable by any caller in THAT org. Missing owner on a bound user-scope row
 /// (legacy `'local'`/None the backfill has not reached) → denied (fail closed), as
 /// is an org fact with no scope id or a caller with no org.
@@ -2431,8 +2444,13 @@ fn memory_access_ok(
         return true;
     }
     match entry.scope {
-        memory::MemoryScope::Node | memory::MemoryScope::Project => true,
-        memory::MemoryScope::User => matches!(
+        memory::MemoryScope::Node => true,
+        memory::MemoryScope::Project => entry
+            .scope_id
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|scope_id| !scope_id.is_empty()),
+        memory::MemoryScope::Agent | memory::MemoryScope::User => matches!(
             (entry.owner_user_id.as_deref(), caller.as_ref()),
             (Some(owner), Some(c)) if owner == c.user_id
         ),
@@ -3641,11 +3659,8 @@ pub fn create_router(
         // (e.g. mail's `/api/mail/*`). Axum routers are immutable after serve,
         // so use the startup snapshot of installed and bootstrap manifests.
         .merge(
-            crate::sidecar::ext_proxy::public_mount_routes(
-                router_manifests,
-                auth_token.clone(),
-            )
-            .expect("built-in public-mount ownership must be unambiguous"),
+            crate::sidecar::ext_proxy::public_mount_routes(router_manifests, auth_token.clone())
+                .expect("built-in public-mount ownership must be unambiguous"),
         );
 
     let protected = Router::new()
@@ -4204,6 +4219,11 @@ pub fn create_router(
             "/api/conversations/:id",
             get(get_conversation).delete(delete_conversation),
         )
+        // Promote a client-held temporary transcript into a normal saved chat.
+        .route(
+            "/api/conversations/:id/save",
+            post(save_temporary_conversation_handler),
+        )
         .route(
             "/api/conversations/:id/participants",
             get(get_participants_handler).post(add_participant_handler),
@@ -4481,10 +4501,7 @@ pub fn create_router(
         .route("/api/git/init", post(git::git_init_authorized))
         // ── Git branch list + switch (composer branch selector) ─────────────
         .route("/api/git/branches", get(git::git_branches))
-        .route(
-            "/api/git/checkout",
-            post(git::git_checkout_authorized),
-        )
+        .route("/api/git/checkout", post(git::git_checkout_authorized))
         .route(
             "/api/git/create-branch",
             post(git::git_create_branch_authorized),
@@ -4886,8 +4903,9 @@ fn spaces_routes(app_store: &PluginStore) -> Router<ServerState> {
         .merge(space_imports::routes())
         .route(
             "/api/spaces/import",
-            post(import_space_package)
-                .layer(DefaultBodyLimit::max(space_portable::MAX_SPACE_PACKAGE_BODY_BYTES)),
+            post(import_space_package).layer(DefaultBodyLimit::max(
+                space_portable::MAX_SPACE_PACKAGE_BODY_BYTES,
+            )),
         )
         .route("/api/spaces", get(list_spaces).post(create_space))
         .route("/api/spaces/search", get(search_space_documents))
@@ -5620,7 +5638,10 @@ fn voice_routes(app_store: &PluginStore) -> Router<ServerState> {
             "/api/voice/speech-processing-model/install",
             post(voice::speech_processing_model_install),
         )
-        .route("/api/voice/speech-processing", post(voice::speech_processing))
+        .route(
+            "/api/voice/speech-processing",
+            post(voice::speech_processing),
+        )
         // TTS — OuteTTS (built-in) or `?engine=` via the universal Ryu TTS sidecar.
         .route("/api/voice/speak", post(voice::speak))
         .route("/api/voice/tts-engines", get(voice::tts_engines))
@@ -5675,6 +5696,11 @@ fn media_routes(app_store: &PluginStore) -> Router<ServerState> {
 fn memory_routes(app_store: &PluginStore) -> Router<ServerState> {
     Router::new()
         .route("/api/memory", get(list_memory).post(create_memory))
+        .route(
+            "/api/memory/settings",
+            get(get_memory_settings).put(update_memory_settings),
+        )
+        .route("/api/memory/graph", get(get_memory_graph))
         .route(
             "/api/memory/:id",
             get(get_memory).put(update_memory).delete(delete_memory),
@@ -7951,8 +7977,30 @@ async fn chat_stream(
     // through and is CLAIMED for this caller, which is the write that makes every
     // downstream gate on this conversation non-vacuous.
     if let Some(conversation_id) = req.conversation_id.clone() {
-        if let Err(resp) = gate_and_claim_conversation(&state, &caller, &conversation_id).await {
-            return resp;
+        if req.persist {
+            if let Err(resp) = gate_and_claim_conversation(&state, &caller, &conversation_id).await
+            {
+                return resp;
+            }
+        } else {
+            // Temporary/team-member turns must never claim or reuse a durable
+            // conversation id. A fresh client-held id is fine; an existing id
+            // would let a non-persisted turn attach itself to another transcript.
+            match state.conversations.get_access_meta(&conversation_id).await {
+                Ok(Some(_)) => {
+                    return json_error(
+                        StatusCode::CONFLICT,
+                        "temporary chat id is already in use".to_owned(),
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return json_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("conversation access lookup failed: {error}"),
+                    );
+                }
+            }
         }
     }
     // `referenced_conversation_ids` are client supplied too. The active-thread
@@ -8246,20 +8294,68 @@ async fn route_single_turn(
 /// wrapper can re-run a turn during a `continue` loop.
 async fn route_single_turn_once(
     state: &ServerState,
-    req: crate::sidecar::adapters::ChatStreamRequest,
+    mut req: crate::sidecar::adapters::ChatStreamRequest,
     watch: crate::routing_policy::reactive::TurnWatch,
 ) -> axum::response::Response {
+    // Resolve the auto sentinel before deriving memory access, then keep the
+    // concrete id on the request so the router and memory layer use the same
+    // agent and the classifier runs only once for this turn.
+    let auto_target = match (req.target_agent_id.as_deref(), req.agent_id.as_deref()) {
+        (Some(id), _) if id == crate::agent_routing::AUTO_AGENT_ID => Some(true),
+        (None, Some(id)) if id == crate::agent_routing::AUTO_AGENT_ID => Some(false),
+        _ => None,
+    };
+    if let Some(is_target) = auto_target {
+        let user_text = req
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "user")
+            .map(crate::sidecar::adapters::ui_message_text)
+            .unwrap_or_default();
+        let resolved =
+            crate::agent_routing::resolve_auto_agent(&user_text, req.conversation_id.as_deref())
+                .await;
+        if is_target {
+            req.target_agent_id = Some(resolved);
+        } else {
+            req.agent_id = Some(resolved);
+        }
+    }
     // Apply the global skills disclosure mode (progressive vs full) from the pref
     // so the ACP chat path injects the L1 index + loads on demand (default) or the
     // full skill bodies. Cheap pref read; mirrors the per-request recall resolution.
     apply_skills_disclosure(state).await;
     // Resolve auto-recall (U17) config from prefs/env. Default ON; encoded as
     // `Some`/`None` so a disabled feature does zero work inside route_chat_stream.
-    let recall = if resolve_auto_recall_enabled(state).await {
+    let memory_principal_available = node_org_id().is_none() || req.author_user_id.is_some();
+    let temporary_context_enabled = req.persist
+        || req
+            .plugin_flags
+            .get(crate::memory_policy::TEMPORARY_CONTEXT_FLAG)
+            .copied()
+            .unwrap_or(false);
+    let recall = if memory_principal_available
+        && temporary_context_enabled
+        && resolve_auto_recall_enabled(state).await
+    {
+        // A council/mention target takes precedence over the ordinary agent id
+        // during routing. Use the same explicit target for memory access, or an
+        // agent-scoped fact can be recalled for the wrong agent on this turn.
+        let memory_agent_id = req.target_agent_id.clone().or_else(|| req.agent_id.clone());
         // Resolve the active agent's memory access from its MemorySlot: which
         // scope levels it may recall and which Spaces it may inject. Missing agent
         // / slot => empty vecs, which mean "all levels, no Spaces" (back-compat).
-        let (read_levels, space_ids) = resolve_memory_access(state, req.agent_id.as_deref()).await;
+        let (read_levels, space_ids) =
+            resolve_memory_access(state, memory_agent_id.as_deref()).await;
+        let memory_owner = if node_org_id().is_some() {
+            req.author_user_id
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(background_memory_user_id)
+        } else {
+            memory::LOCAL_USER.to_owned()
+        };
         Some(crate::sidecar::adapters::AutoRecallConfig {
             retrieval: state.retrieval.clone(),
             top_k: resolve_auto_recall_top_k(state).await,
@@ -8270,6 +8366,12 @@ async fn route_single_turn_once(
             read_levels,
             space_ids,
             caller_user_id: req.author_user_id.clone(),
+            agent_id: memory_agent_id,
+            include_sensitive_topics: state
+                .memory
+                .include_sensitive_topics(&memory_owner)
+                .await
+                .unwrap_or(false),
         })
     } else {
         None
@@ -9243,22 +9345,20 @@ async fn pi_provider_account_switch(
             )
                 .into_response();
         };
-        let api_key = match crate::pi_config::provider_account_api_key(
-            &provider_id,
-            &body.account_id,
-        ) {
-            Ok(key) => key,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "switched": false,
-                        "error": error.to_string(),
-                    })),
-                )
-                    .into_response();
-            }
-        };
+        let api_key =
+            match crate::pi_config::provider_account_api_key(&provider_id, &body.account_id) {
+                Ok(key) => key,
+                Err(error) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "switched": false,
+                            "error": error.to_string(),
+                        })),
+                    )
+                        .into_response();
+                }
+            };
         let (status, Json(result)) = gateway_set_provider(
             State(state.clone()),
             Extension(caller.clone()),
@@ -11798,6 +11898,25 @@ struct IndexChunkBody {
     content: String,
 }
 
+fn valid_retrieval_chunk_id(id: &str) -> bool {
+    let id = id.trim();
+    !id.is_empty() && id.len() <= 200 && !id.chars().any(char::is_control)
+}
+
+#[cfg(test)]
+mod retrieval_index_contract_tests {
+    use super::valid_retrieval_chunk_id;
+
+    #[test]
+    fn stable_ids_are_bounded_and_control_free() {
+        assert!(valid_retrieval_chunk_id("command-palette-memory"));
+        assert!(valid_retrieval_chunk_id("  trimmed-id  "));
+        assert!(!valid_retrieval_chunk_id(""));
+        assert!(!valid_retrieval_chunk_id("\n"));
+        assert!(!valid_retrieval_chunk_id(&"x".repeat(201)));
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/api/retrieval/index",
@@ -11827,10 +11946,89 @@ async fn index_retrieval_chunk(
     {
         return json_error(status, "forbidden".to_owned());
     }
+    let chunk_id = body.id.trim();
+    if !valid_retrieval_chunk_id(chunk_id) {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "id must be between 1 and 200 bytes and contain no control characters".to_owned(),
+        );
+    }
     let source = match body.source.as_deref() {
         Some("space") => ChunkSource::Space,
         _ => ChunkSource::Memory,
     };
+    if source == ChunkSource::Memory {
+        // Memory content must enter the encrypted source of truth first. The old
+        // endpoint used to create an orphaned plaintext retrieval row, bypassing
+        // memory ownership, sensitivity, lifecycle, and the Memory Library.
+        if !memory::detect_sensitive_topics(&body.content).is_empty()
+            && !sensitive_memory_enabled(&state, &caller).await
+        {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "sensitive topics are disabled in Settings → Memory".to_owned(),
+            );
+        }
+        if body.content.trim().is_empty() {
+            return json_error(StatusCode::BAD_REQUEST, "content is empty".to_owned());
+        }
+        let owner = memory_owner_user_id(&caller);
+        match state.memory.get(chunk_id).await {
+            Ok(Some(existing)) => {
+                if !memory_access_ok(&caller, &existing)
+                    || (!sensitive_memory_enabled(&state, &caller).await
+                        && !existing.sensitive_topics.is_empty())
+                {
+                    return json_error(StatusCode::NOT_FOUND, "memory not found".to_owned());
+                }
+                let updated = state
+                    .memory
+                    .update(
+                        chunk_id,
+                        memory::MemoryPatch {
+                            content: Some(body.content),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                match updated {
+                    Ok(Some(entry)) => {
+                        index_memory_entry(&state, &entry).await;
+                        return Json(json!({ "success": true, "id": chunk_id })).into_response();
+                    }
+                    Ok(None) => {
+                        return json_error(StatusCode::NOT_FOUND, "memory not found".to_owned())
+                    }
+                    Err(error) => {
+                        return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+                    }
+                }
+            }
+            Ok(None) => {
+                let mut memory = memory::NewMemory::user_fact(body.content);
+                memory.author_agent_id = Some("default".to_owned());
+                match state
+                    .memory
+                    .record_full_with_id(chunk_id, &owner, "default", memory)
+                    .await
+                {
+                    Ok(Some(id)) => {
+                        if let Ok(Some(entry)) = state.memory.get(&id).await {
+                            index_memory_entry(&state, &entry).await;
+                        }
+                        return Json(json!({ "success": true, "id": id })).into_response();
+                    }
+                    Ok(None) => {
+                        return json_error(StatusCode::BAD_REQUEST, "content is empty".to_owned())
+                    }
+                    Err(error) => {
+                        return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+                    }
+                }
+            }
+            Err(error) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        }
+    }
     // Stamp the indexing caller as the chunk's owner on a bound node so the
     // retrieval tenancy filter can gate it; unbound → shared (filter is a no-op).
     // A bound node with NO verified caller refuses outright rather than writing an
@@ -11859,7 +12057,7 @@ async fn index_retrieval_chunk(
     match state
         .retrieval
         .index_chunk(
-            &body.id,
+            chunk_id,
             source,
             body.space_id.as_deref(),
             &body.content,
@@ -11867,7 +12065,7 @@ async fn index_retrieval_chunk(
         )
         .await
     {
-        Ok(()) => Json(json!({ "success": true, "id": body.id })).into_response(),
+        Ok(()) => Json(json!({ "success": true, "id": chunk_id })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
@@ -11883,6 +12081,8 @@ struct RetrievalSearchBody {
     include_memory: Option<bool>,
     #[serde(default)]
     min_score: Option<f32>,
+    #[serde(default)]
+    agent_id: Option<String>,
 }
 
 #[utoipa::path(
@@ -11922,26 +12122,312 @@ async fn search_retrieval(
         return json_error(status, "forbidden".to_owned());
     }
     let node_bound = node_org_id().is_some();
+    let include_sensitive = sensitive_memory_enabled(&state, &caller).await;
+    let include_memory = body.include_memory.unwrap_or(true);
+    let agent_id = body.agent_id.clone();
     let opts = retrieval::RetrievalOptions {
         top_k: body.top_k.unwrap_or(retrieval::DEFAULT_TOP_K),
         space_ids: body.space_ids,
-        include_memory: body.include_memory.unwrap_or(true),
+        include_memory,
         min_score: body.min_score.unwrap_or(0.0),
+        agent_id: agent_id.clone(),
+        include_sensitive,
         node_bound,
         caller_user_id: caller.as_ref().map(|c| c.user_id.clone()),
         caller_org_id: caller.as_ref().and_then(|c| c.org_id.clone()),
         ..Default::default()
     };
-    match state.retrieval.retrieve(&body.query, &opts).await {
-        Ok(chunks) => Json(json!({ "chunks": chunks })).into_response(),
-        Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    if include_memory {
+        if let Ok(facts) = state.memory.all_for_backfill(500).await {
+            refresh_memory_retrieval_metadata(&state, &facts).await;
+        }
     }
+    let vector_chunks = match state.retrieval.retrieve(&body.query, &opts).await {
+        Ok(chunks) => chunks,
+        Err(e) => {
+            tracing::warn!("retrieval vector search failed; trying memory graph: {e:#}");
+            Vec::new()
+        }
+    };
+    if !include_memory {
+        return Json(json!({ "chunks": vector_chunks })).into_response();
+    }
+    let graph_chunks = match state.memory.all_for_backfill(500).await {
+        Ok(facts) => {
+            let graph =
+                retrieval::MemoryGraph::from_documents(facts.iter().map(memory_graph_document));
+            let filter = retrieval::MemoryGraphQuery {
+                agent_id: agent_id.as_deref(),
+                include_all_agents: false,
+                allowed_scopes: None,
+                project_id: opts.project_id.as_deref(),
+                include_all_projects: false,
+                node_bound,
+                caller_user_id: opts.caller_user_id.as_deref(),
+                caller_org_id: opts.caller_org_id.as_deref(),
+                include_sensitive,
+            };
+            graph
+                .search(&body.query, &filter, opts.top_k)
+                .into_iter()
+                .filter_map(|hit| {
+                    graph
+                        .document(&hit.memory_id)
+                        .map(|entry| retrieval::ScoredChunk {
+                            id: entry.memory_id.clone(),
+                            source: ChunkSource::Memory,
+                            space_id: None,
+                            content: entry.content.clone(),
+                            score: hit.score,
+                        })
+                })
+                .collect::<Vec<_>>()
+        }
+        Err(error) => {
+            tracing::warn!("memory graph search source scan failed (skipping): {error:#}");
+            Vec::new()
+        }
+    };
+    let chunks = if graph_chunks.is_empty() {
+        vector_chunks
+    } else {
+        retrieval::fuse_ranked_lists(vector_chunks, vec![graph_chunks], opts.top_k)
+    };
+    Json(json!({ "chunks": chunks })).into_response()
 }
 
 // ── Memory management API (/api/memory) ──────────────────────────────────────
 // First-class CRUD over long-term memory so the desktop Memory Library can
 // browse, classify, and curate facts. Writes keep the retrieval index in sync so
 // a created/edited fact is immediately RAG-retrievable (and a deleted one gone).
+
+/// Resolve the principal whose sensitive-memory consent may be read or changed.
+/// A bound node must have a verified user; an unbound node has one local principal.
+fn memory_settings_user_id(
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+) -> Option<String> {
+    if node_org_id().is_some() {
+        caller.as_ref().map(|value| value.user_id.clone())
+    } else {
+        Some(memory::LOCAL_USER.to_owned())
+    }
+}
+
+async fn require_memory_permission(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    permission: &str,
+) -> Result<(), axum::response::Response> {
+    if enforce_permission(state, caller, permission).await.is_err() {
+        return Err(json_error(
+            StatusCode::FORBIDDEN,
+            format!("insufficient permissions: {permission}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Resolve sensitive-memory consent for a request. Missing or unreadable state is
+/// deliberately false: this preference grants access to special-category facts.
+async fn sensitive_memory_enabled(
+    state: &ServerState,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+) -> bool {
+    let Some(user_id) = memory_settings_user_id(caller) else {
+        return false;
+    };
+    state
+        .memory
+        .include_sensitive_topics(&user_id)
+        .await
+        .unwrap_or(false)
+}
+
+#[derive(serde::Deserialize)]
+struct MemorySettingsBody {
+    include_sensitive_topics: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/memory/settings",
+    tag = "Memory",
+    summary = "Get memory privacy settings",
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_memory_settings(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return response;
+    }
+    let Some(user_id) = memory_settings_user_id(&caller) else {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "a verified user is required to read sensitive memory settings".to_owned(),
+        );
+    };
+    let enabled = state
+        .memory
+        .include_sensitive_topics(&user_id)
+        .await
+        .unwrap_or(false);
+    Json(json!({ "include_sensitive_topics": enabled })).into_response()
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/memory/settings",
+    tag = "Memory",
+    summary = "Update memory privacy settings",
+    request_body = serde_json::Value,
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn update_memory_settings(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(body): Json<MemorySettingsBody>,
+) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
+    let Some(user_id) = memory_settings_user_id(&caller) else {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "a verified user is required to change sensitive memory settings".to_owned(),
+        );
+    };
+    match state
+        .memory
+        .set_include_sensitive_topics(&user_id, body.include_sensitive_topics)
+        .await
+    {
+        Ok(()) => {
+            if !body.include_sensitive_topics {
+                // Revoke first, then remove every derived row for this principal.
+                // The set-based cleanup is not capped by the source-store page
+                // size, and every read path also checks consent so a retry after
+                // a cleanup failure remains fail-closed.
+                let owner = node_org_id().is_some().then_some(user_id.as_str());
+                if let Err(error) = state.retrieval.clear_sensitive_memory_chunks(owner).await {
+                    return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+                }
+            }
+            Json(json!({
+                "include_sensitive_topics": body.include_sensitive_topics
+            }))
+            .into_response()
+        }
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+struct MemoryGraphQuery {
+    #[serde(default)]
+    agent_id: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    max_nodes: Option<usize>,
+    #[serde(default)]
+    max_edges: Option<usize>,
+}
+
+fn memory_graph_document(entry: &memory::LongTermEntry) -> retrieval::MemoryGraphDocument {
+    retrieval::MemoryGraphDocument {
+        memory_id: entry.id.clone(),
+        content: entry.content.clone(),
+        scope: entry.scope.as_str().to_owned(),
+        scope_id: entry.scope_id.clone(),
+        category: entry.category.as_str().to_owned(),
+        agent_id: entry.author_agent_id.clone(),
+        owner_user_id: entry.owner_user_id.clone(),
+        owner_org_id: None,
+        importance: entry.importance,
+        tags: entry.tags.clone(),
+        sensitive_topics: entry
+            .sensitive_topics
+            .iter()
+            .map(|topic| topic.as_str().to_owned())
+            .collect(),
+    }
+}
+
+/// Build an access-filtered typed graph from the encrypted memory source. The
+/// graph is a bounded derived projection; it is never treated as an ACL or a
+/// second source of truth.
+#[utoipa::path(
+    get,
+    path = "/api/memory/graph",
+    tag = "Memory",
+    summary = "Get the typed memory graph",
+    params(("agent_id" = Option<String>, Query), ("project_id" = Option<String>, Query), ("max_nodes" = Option<usize>, Query), ("max_edges" = Option<usize>, Query)),
+    responses((status = 200, description = "OK", body = serde_json::Value))
+)]
+async fn get_memory_graph(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Query(query): axum::extract::Query<MemoryGraphQuery>,
+) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return response;
+    }
+    let node_bound = node_org_id().is_some();
+    let caller_user_id = caller.as_ref().map(|value| value.user_id.clone());
+    let caller_org_id = caller.as_ref().and_then(|value| value.org_id.clone());
+    let include_sensitive = sensitive_memory_enabled(&state, &caller).await;
+    let facts = match state.memory.all_for_backfill(500).await {
+        Ok(facts) => facts,
+        Err(error) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+        }
+    };
+    let graph = retrieval::MemoryGraph::from_documents(facts.iter().map(memory_graph_document));
+    let allowed_scopes = [
+        "agent".to_owned(),
+        "user".to_owned(),
+        "node".to_owned(),
+        "project".to_owned(),
+        "org".to_owned(),
+    ];
+    let filter = retrieval::MemoryGraphQuery {
+        agent_id: query.agent_id.as_deref(),
+        include_all_agents: query.agent_id.is_none(),
+        allowed_scopes: Some(&allowed_scopes),
+        project_id: query.project_id.as_deref(),
+        include_all_projects: query.project_id.is_none(),
+        node_bound,
+        caller_user_id: caller_user_id.as_deref(),
+        caller_org_id: caller_org_id.as_deref(),
+        include_sensitive,
+    };
+    let snapshot = graph.snapshot(
+        &filter,
+        query.max_nodes.unwrap_or(160).clamp(1, 500),
+        query.max_edges.unwrap_or(320).clamp(1, 1_000),
+    );
+    Json(snapshot).into_response()
+}
 
 #[derive(serde::Deserialize)]
 struct MemoryListQuery {
@@ -12005,6 +12491,26 @@ where
 /// Best-effort: mirror a memory entry into the retrieval index so it is
 /// immediately RAG-retrievable. Logs and continues on failure (fail-open).
 pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::LongTermEntry) {
+    if entry.lifecycle != memory::MemoryLifecycle::Active {
+        // Inactive rows remain available for audit/rollback, but must never be
+        // reintroduced into the retrieval projection by a stale index request.
+        let _ = state.retrieval.remove_chunk(&entry.id).await;
+        return;
+    }
+    // A revoked consent must not leave a plaintext/vector projection behind.
+    // Read gating below is still authoritative, but removing the derived row
+    // narrows the at-rest exposure as soon as this bridge runs.
+    let consent_user = entry.owner_user_id.as_deref().unwrap_or(memory::LOCAL_USER);
+    if !entry.sensitive_topics.is_empty()
+        && !state
+            .memory
+            .include_sensitive_topics(consent_user)
+            .await
+            .unwrap_or(false)
+    {
+        let _ = state.retrieval.remove_chunk(&entry.id).await;
+        return;
+    }
     // Denormalize the memory's owner onto its retrieval chunk so the per-caller
     // filter (`memory_tenancy_allows`) runs in-process. On an unbound node, or for a
     // legacy `'local'`-owned row, stamp `shared()` — the retrieval memory filter is a
@@ -12018,13 +12524,15 @@ pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::Long
     };
     if let Err(e) = state
         .retrieval
-        .index_memory_chunk(
+        .index_memory_chunk_with_metadata(
             &entry.id,
             &entry.content,
             entry.scope.as_str(),
             entry.scope_id.as_deref(),
             entry.category.as_str(),
             entry.importance,
+            entry.author_agent_id.as_deref(),
+            !entry.sensitive_topics.is_empty(),
             owner,
         )
         .await
@@ -12033,6 +12541,41 @@ pub(crate) async fn index_memory_entry(state: &ServerState, entry: &memory::Long
             "memory: indexing entry {} failed (search may lag): {e:#}",
             entry.id
         );
+    }
+}
+
+/// Refresh metadata for already-indexed memory rows without making a provider
+/// call. This closes the migration window for old retrieval rows that predate
+/// agent and sensitivity fields, so direct search cannot treat an old sensitive
+/// fact as ordinary merely because its projection is stale.
+async fn refresh_memory_retrieval_metadata(state: &ServerState, entries: &[memory::LongTermEntry]) {
+    let node_org = node_org_id();
+    for entry in entries {
+        let owner = match (node_org.as_deref(), entry.owner_user_id.as_deref()) {
+            (Some(org), Some(uid)) if uid != memory::LOCAL_USER => {
+                retrieval::RetrievalOwner::owned(Some(uid), Some(org), None)
+            }
+            _ => retrieval::RetrievalOwner::shared(),
+        };
+        if let Err(error) = state
+            .retrieval
+            .update_memory_metadata(
+                &entry.id,
+                entry.scope.as_str(),
+                entry.scope_id.as_deref(),
+                entry.category.as_str(),
+                entry.importance,
+                entry.author_agent_id.as_deref(),
+                !entry.sensitive_topics.is_empty(),
+                owner,
+            )
+            .await
+        {
+            tracing::warn!(
+                "memory: refreshing retrieval metadata for {} failed: {error:#}",
+                entry.id
+            );
+        }
     }
 }
 
@@ -12049,6 +12592,15 @@ async fn list_memory(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Query(q): axum::extract::Query<MemoryListQuery>,
 ) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return response;
+    }
     let filter = memory::MemoryFilter {
         scope: q.scope.as_deref().map(memory::MemoryScope::from_str),
         scope_id: q.scope_id,
@@ -12063,7 +12615,12 @@ async fn list_memory(
         caller.as_ref().and_then(|c| c.org_id.as_deref()),
         node_org_id().is_some(),
     );
-    match state.memory.list_visible(&filter, vis).await {
+    let include_sensitive = sensitive_memory_enabled(&state, &caller).await;
+    match state
+        .memory
+        .list_visible_with_sensitive(&filter, vis, include_sensitive)
+        .await
+    {
         Ok(entries) => Json(json!({ "memories": entries })).into_response(),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -12074,17 +12631,46 @@ async fn create_memory(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<CreateMemoryBody>,
 ) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     let scope = body
         .scope
         .as_deref()
         .map(memory::MemoryScope::from_str)
         .unwrap_or_default();
+    let agent = body
+        .agent_id
+        .clone()
+        .unwrap_or_else(|| "default".to_owned());
+    let sensitive_topics = memory::detect_sensitive_topics(&body.content);
+    if !sensitive_topics.is_empty() && !sensitive_memory_enabled(&state, &caller).await {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "sensitive topics are disabled in Settings → Memory".to_owned(),
+        );
+    }
+    if !sensitive_topics.is_empty() && scope != memory::MemoryScope::User {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "sensitive memory must use user scope; shared and agent scopes are not supported"
+                .to_owned(),
+        );
+    }
     // An org-scope fact's owning org is SERVER-derived, never client-supplied:
     // accepting a caller's `scope_id` here would let anyone publish a memory into an
     // org they do not belong to. The caller's verified org wins, and with no
     // resolvable org the write is refused rather than silently downgraded to a
     // narrower scope the user did not ask for.
-    let scope_id = if scope == memory::MemoryScope::Org {
+    let scope_id = if scope == memory::MemoryScope::Agent {
+        Some(agent.clone())
+    } else if scope == memory::MemoryScope::Org {
         match caller.as_ref().and_then(|c| c.org_id.clone()) {
             Some(org) => Some(org),
             None => {
@@ -12097,6 +12683,18 @@ async fn create_memory(
     } else {
         body.scope_id
     };
+    if scope == memory::MemoryScope::Project
+        && scope_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "project-scope memory requires a non-empty scope_id".to_owned(),
+        );
+    }
     let new = memory::NewMemory {
         content: body.content,
         scope,
@@ -12109,9 +12707,12 @@ async fn create_memory(
         importance: body.importance.unwrap_or(memory::DEFAULT_IMPORTANCE),
         when_to_use: body.when_to_use,
         tags: body.tags.unwrap_or_default(),
-        author_agent_id: body.agent_id.clone(),
+        author_agent_id: if scope == memory::MemoryScope::Agent {
+            Some(agent.clone())
+        } else {
+            body.agent_id.clone()
+        },
     };
-    let agent = body.agent_id.unwrap_or_else(|| "default".to_string());
     // Stamp the verified caller as the fact's owner on a bound node (the per-user
     // tenancy key); unbound → LOCAL_USER, byte-identical to the pre-ACL build.
     let owner = memory_owner_user_id(&caller);
@@ -12141,11 +12742,23 @@ async fn get_memory(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_READ,
+    )
+    .await
+    {
+        return response;
+    }
     match state.memory.get(&id).await {
         Ok(Some(entry)) => {
             // Per-caller tenancy: another member cannot read a private (user-scope)
             // fact by id. A 404 (not 403) so the id's existence is not confirmed.
-            if !memory_access_ok(&caller, &entry) {
+            if !memory_access_ok(&caller, &entry)
+                || (!sensitive_memory_enabled(&state, &caller).await
+                    && !entry.sensitive_topics.is_empty())
+            {
                 return json_error(StatusCode::NOT_FOUND, "memory not found".to_string());
             }
             Json(json!({ "memory": entry })).into_response()
@@ -12170,15 +12783,38 @@ async fn update_memory(
     Path(id): Path<String>,
     Json(body): Json<UpdateMemoryBody>,
 ) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     // Per-caller tenancy: a member cannot mutate another's private fact. Load first
     // so the gate reads the row's owner + scope (404 hides existence on denial).
-    match state.memory.get(&id).await {
-        Ok(Some(entry)) if !memory_access_ok(&caller, &entry) => {
+    let existing = match state.memory.get(&id).await {
+        Ok(Some(entry))
+            if !memory_access_ok(&caller, &entry)
+                || (!sensitive_memory_enabled(&state, &caller).await
+                    && !entry.sensitive_topics.is_empty()) =>
+        {
             return json_error(StatusCode::NOT_FOUND, "memory not found".to_string());
         }
+        Ok(Some(entry)) => entry,
         Ok(None) => return json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
         Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        Ok(Some(_)) => {}
+    };
+    if let Some(content) = body.content.as_deref() {
+        if !memory::detect_sensitive_topics(content).is_empty()
+            && !sensitive_memory_enabled(&state, &caller).await
+        {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "sensitive topics are disabled in Settings → Memory".to_owned(),
+            );
+        }
     }
     // The gate above checks the row's CURRENT scope, but a patch may CHANGE it —
     // so re-scoping needs its own gate, or any member could promote a personal fact
@@ -12186,9 +12822,32 @@ async fn update_memory(
     // Server-derive the org id on a re-scope to `org` for the same reason
     // `create_memory` does, and refuse when no org is resolvable.
     let new_scope = body.scope.as_deref().map(memory::MemoryScope::from_str);
+    let resulting_scope = new_scope.unwrap_or(existing.scope);
+    let resulting_sensitive = body
+        .content
+        .as_deref()
+        .map(|content| !memory::detect_sensitive_topics(content).is_empty())
+        .unwrap_or(!existing.sensitive_topics.is_empty());
+    if resulting_sensitive && resulting_scope != memory::MemoryScope::User {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "sensitive memory must use user scope; shared and agent scopes are not supported"
+                .to_owned(),
+        );
+    }
     // `MemoryPatch::scope_id` is doubly-optional: `None` leaves it alone, `Some(None)`
     // clears it. A re-scope to org must SET it, hence `Some(Some(org))`.
-    let scope_id = if new_scope == Some(memory::MemoryScope::Org) {
+    let scope_id = if new_scope == Some(memory::MemoryScope::Agent) {
+        match existing.author_agent_id.clone() {
+            Some(agent_id) if !agent_id.trim().is_empty() => Some(Some(agent_id)),
+            _ => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "an agent-scope memory requires an authored agent".to_owned(),
+                )
+            }
+        }
+    } else if new_scope == Some(memory::MemoryScope::Org) {
         match caller.as_ref().and_then(|c| c.org_id.clone()) {
             Some(org) => Some(Some(org)),
             None => {
@@ -12202,6 +12861,23 @@ async fn update_memory(
     } else {
         body.scope_id
     };
+    let effective_project_scope_id = match scope_id.as_ref() {
+        Some(Some(value)) => Some(value.as_str()),
+        Some(None) => None,
+        None if new_scope.is_none() => existing.scope_id.as_deref(),
+        None => None,
+    };
+    if resulting_scope == memory::MemoryScope::Project
+        && effective_project_scope_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "project-scope memory requires a non-empty scope_id".to_owned(),
+        );
+    }
     let patch = memory::MemoryPatch {
         content: body.content,
         scope: new_scope,
@@ -12229,9 +12905,22 @@ async fn delete_memory(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(id): Path<String>,
 ) -> axum::response::Response {
+    if let Err(response) = require_memory_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::SPACE_WRITE,
+    )
+    .await
+    {
+        return response;
+    }
     // Per-caller tenancy: a member cannot delete another's private fact.
     match state.memory.get(&id).await {
-        Ok(Some(entry)) if !memory_access_ok(&caller, &entry) => {
+        Ok(Some(entry))
+            if !memory_access_ok(&caller, &entry)
+                || (!sensitive_memory_enabled(&state, &caller).await
+                    && !entry.sensitive_topics.is_empty()) =>
+        {
             return json_error(StatusCode::NOT_FOUND, "memory not found".to_string());
         }
         Ok(None) => return json_error(StatusCode::NOT_FOUND, "memory not found".to_string()),
@@ -15119,12 +15808,8 @@ async fn install_app_bundle(
     } else {
         crate::identity_verify::permissions::APP_INSTALL
     };
-    if let Err(response) = enforce_app_lifecycle_permission(
-        &state,
-        &caller,
-        lifecycle_permission,
-    )
-    .await
+    if let Err(response) =
+        enforce_app_lifecycle_permission(&state, &caller, lifecycle_permission).await
     {
         return response;
     }
@@ -16284,11 +16969,11 @@ async fn reverify_existing_official_package(state: &ServerState, id: &str) {
 /// trains, and pulling every dependency onto `nightly` because the target is there
 /// would put a user on prereleases they never chose.
 async fn resolve_plugin_from_catalog(
-	state: &ServerState,
-	id: &str,
-	buyer_token: Option<String>,
-	channel: Option<&str>,
-	version: Option<&str>,
+    state: &ServerState,
+    id: &str,
+    buyer_token: Option<String>,
+    channel: Option<&str>,
+    version: Option<&str>,
 ) -> Result<
     (
         crate::plugin_manifest::PluginManifest,
@@ -16393,11 +17078,11 @@ impl std::fmt::Display for CatalogResolveFailed {
 impl std::error::Error for CatalogResolveFailed {}
 
 async fn resolve_plugin_from_catalog_inner(
-	state: &ServerState,
-	id: &str,
-	buyer_token: Option<String>,
-	channel: Option<&str>,
-	version: Option<&str>,
+    state: &ServerState,
+    id: &str,
+    buyer_token: Option<String>,
+    channel: Option<&str>,
+    version: Option<&str>,
 ) -> Result<
     (
         crate::plugin_manifest::PluginManifest,
@@ -16792,21 +17477,17 @@ async fn find_manifest(
     id: &str,
 ) -> Option<crate::plugin_manifest::PluginManifest> {
     let manifests = state.app_manifests.read().await;
-    manifests
-        .iter()
-        .find(|m| m.id == id)
-        .cloned()
-        .or_else(|| {
-            // Opt-in built-in apps are intentionally absent from the runtime
-            // manifest set until installed. They still need to resolve through
-            // the built-in install endpoint. External-repository apps carry their
-            // Companion through the verified package/standalone carriage. Keep
-            // runtime activation unchanged: this is a read-only manifest lookup
-            // for the install/enable handlers.
-            crate::plugin_manifest::PluginManifestLoader::load_builtins()
-                .into_iter()
-                .find(|m| m.id == id)
-        })
+    manifests.iter().find(|m| m.id == id).cloned().or_else(|| {
+        // Opt-in built-in apps are intentionally absent from the runtime
+        // manifest set until installed. They still need to resolve through
+        // the built-in install endpoint. External-repository apps carry their
+        // Companion through the verified package/standalone carriage. Keep
+        // runtime activation unchanged: this is a read-only manifest lookup
+        // for the install/enable handlers.
+        crate::plugin_manifest::PluginManifestLoader::load_builtins()
+            .into_iter()
+            .find(|m| m.id == id)
+    })
 }
 
 /// Load the user's host-access trust policy from preferences.
@@ -16988,8 +17669,7 @@ async fn install_app_handler(
     } else {
         None
     };
-    let provenance = is_compiled_builtin
-        .then(crate::plugins::isolation::PluginProvenance::builtin);
+    let provenance = is_compiled_builtin.then(crate::plugins::isolation::PluginProvenance::builtin);
     let installed = state
         .downloads
         .register_indeterminate_as(
@@ -17908,10 +18588,7 @@ fn stamp_contribution_authority(
         object.insert("plugin".to_string(), serde_json::json!(manifest.id));
         // Always overwrite a publisher-supplied lookalike. This field is an
         // authorization decision made by Core, never manifest data.
-        object.insert(
-            "http_policy".to_string(),
-            serde_json::json!(http_policy),
-        );
+        object.insert("http_policy".to_string(), serde_json::json!(http_policy));
     }
 }
 
@@ -20360,10 +21037,10 @@ async fn update_app_handler(
             format!("catalog returned manifest `{}` for `{id}`", manifest.id),
         );
     }
-	let channel_to_persist = requested_version
-		.as_ref()
-		.map(|_| crate::update::channel_of(&manifest.version))
-		.or_else(|| switching_channel.then(|| target_channel.clone()));
+    let channel_to_persist = requested_version
+        .as_ref()
+        .map(|_| crate::update::channel_of(&manifest.version))
+        .or_else(|| switching_channel.then(|| target_channel.clone()));
 
     // 3. Downgrade / no-op gate BEFORE any mutation (one definition: `plan_update`).
     //    An explicit channel switch carries its own authority: every prerelease
@@ -20381,11 +21058,7 @@ async fn update_app_handler(
             // the NEXT update follows, so persist it before answering.
             let mut app = record.clone();
             if let Some(channel) = channel_to_persist.as_deref() {
-                match state
-                    .app_store
-                    .set_channel(&id, Some(channel))
-                    .await
-                {
+                match state.app_store.set_channel(&id, Some(channel)).await {
                     Ok(Some(updated)) => app = updated,
                     Ok(None) => {}
                     Err(e) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -20475,11 +21148,7 @@ async fn update_app_handler(
             // version off the new train, and leaving the old pin would send the very
             // next update back to the train the user just left.
             let updated = if let Some(channel) = channel_to_persist.as_deref() {
-                match state
-                    .app_store
-                    .set_channel(&id, Some(channel))
-                    .await
-                {
+                match state.app_store.set_channel(&id, Some(channel)).await {
                     Ok(Some(record)) => record,
                     Ok(None) | Err(_) => updated,
                 }
@@ -23448,6 +24117,9 @@ fn binary_installed_on_disk(name: &str) -> bool {
     if name == "mesh-llm" {
         return crate::sidecar::providers::mesh_llm::installer::binary_is_available();
     }
+    if name == "mlx-serve" {
+        return crate::sidecar::providers::mlx_serve::installer::binary_is_available();
+    }
     // llama.cpp (and every tier that shares its binary) installs into a
     // per-variant directory rather than loose in `~/.ryu/bin`, because the CPU,
     // CUDA and Vulkan builds ship different `ggml-*` libraries under the same
@@ -23486,6 +24158,27 @@ struct ConversationMessagesQuery {
     /// Message id at the top of the currently loaded page. The next page is
     /// returned strictly before this message in active chronological order.
     before: Option<String>,
+}
+
+const MAX_TEMPORARY_SNAPSHOT_MESSAGES: usize = 200;
+const MAX_TEMPORARY_SNAPSHOT_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TEMPORARY_SNAPSHOT_PARTS_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(serde::Deserialize)]
+struct SaveTemporaryConversationMessage {
+    content: String,
+    #[serde(default)]
+    parts: Vec<serde_json::Value>,
+    role: String,
+}
+
+#[derive(serde::Deserialize)]
+struct SaveTemporaryConversationBody {
+    #[serde(default)]
+    agent_id: Option<String>,
+    #[serde(default)]
+    folder_path: Option<String>,
+    messages: Vec<SaveTemporaryConversationMessage>,
 }
 
 #[utoipa::path(
@@ -23699,6 +24392,160 @@ async fn get_conversation(
             format!("conversation '{id}' not found"),
         ),
         Err(e) => json_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /api/conversations/:id/save` — promote a temporary chat snapshot into
+/// a normal conversation. Temporary turns stay client-held until this explicit
+/// action, so the endpoint is a creation path rather than an update path.
+#[utoipa::path(
+    post,
+    path = "/api/conversations/{id}/save",
+    tag = "Conversations",
+    summary = "Save a temporary chat",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses((status = 201, description = "Saved conversation", body = serde_json::Value))
+)]
+async fn save_temporary_conversation_handler(
+    State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<SaveTemporaryConversationBody>,
+) -> axum::response::Response {
+    // Saving promotes client-held content into the conversation store. Use the
+    // same agent-run gate as the chat route so an unverified node-token caller or
+    // a valid JWT from another organization cannot mint an owned conversation.
+    if enforce_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_RUN,
+    )
+    .await
+    .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: agent.run".to_owned(),
+        );
+    }
+    let conversation_id = id.trim();
+    if conversation_id.is_empty() || conversation_id.len() > 200 {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "temporary chat id must be between 1 and 200 bytes".to_owned(),
+        );
+    }
+    if body.messages.is_empty() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "a temporary chat must contain at least one message".to_owned(),
+        );
+    }
+    if body.messages.len() > MAX_TEMPORARY_SNAPSHOT_MESSAGES {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "a temporary chat may contain at most {MAX_TEMPORARY_SNAPSHOT_MESSAGES} messages"
+            ),
+        );
+    }
+
+    let agent_id = body
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let folder_path = body
+        .folder_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let caller_user_id = caller.as_ref().map(|value| value.user_id.clone());
+    let created_at = chrono_now_ms();
+    let mut messages = Vec::with_capacity(body.messages.len());
+    for (index, message) in body.messages.into_iter().enumerate() {
+        let role = message.role.trim();
+        if !matches!(role, "user" | "assistant") {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "temporary chat messages must be user or assistant turns".to_owned(),
+            );
+        }
+        if message.content.len() > MAX_TEMPORARY_SNAPSHOT_MESSAGE_BYTES {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "temporary chat message {index} is too large (max {MAX_TEMPORARY_SNAPSHOT_MESSAGE_BYTES} bytes)"
+                ),
+            );
+        }
+        let parts = (!message.parts.is_empty()).then(|| serde_json::Value::Array(message.parts));
+        if let Some(parts) = parts.as_ref() {
+            let parts_bytes = match serde_json::to_vec(parts) {
+                Ok(bytes) => bytes.len(),
+                Err(_) => {
+                    return json_error(
+                        StatusCode::BAD_REQUEST,
+                        format!("temporary chat message {index} has invalid parts"),
+                    );
+                }
+            };
+            if parts_bytes > MAX_TEMPORARY_SNAPSHOT_PARTS_BYTES {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "temporary chat message {index} parts are too large (max {MAX_TEMPORARY_SNAPSHOT_PARTS_BYTES} bytes)"
+                    ),
+                );
+            }
+        }
+        messages.push(conversations::TemporaryConversationMessage {
+            role: role.to_owned(),
+            content: message.content,
+            agent_id: (role == "assistant").then(|| agent_id.clone()).flatten(),
+            author_user_id: (role == "user").then(|| caller_user_id.clone()).flatten(),
+            parts,
+            created_at: created_at + index as i64,
+        });
+    }
+
+    match state.conversations.get_access_meta(conversation_id).await {
+        Ok(Some(_)) => {
+            return json_error(
+                StatusCode::CONFLICT,
+                "conversation already exists".to_owned(),
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+        }
+    }
+
+    match state
+        .conversations
+        .save_temporary_conversation(
+            conversation_id,
+            agent_id.as_deref(),
+            folder_path.as_deref(),
+            &messages,
+            caller_tenancy(&caller),
+        )
+        .await
+    {
+        Ok(conversation) => (
+            StatusCode::CREATED,
+            Json(json!({ "conversation": conversation })),
+        )
+            .into_response(),
+        Err(error) if error.to_string().contains("conversation already exists") => json_error(
+            StatusCode::CONFLICT,
+            "conversation already exists".to_owned(),
+        ),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
 
@@ -24041,7 +24888,14 @@ async fn set_message_feedback_handler(
         );
     }
     // Fan out to the reward + memory sinks (fail-soft; never fails the click).
-    let outcome = crate::learning::apply_message_feedback(&state, &id, &target, rating).await;
+    let outcome = crate::learning::apply_message_feedback(
+        &state,
+        &id,
+        &target,
+        rating,
+        caller.as_ref().map(|value| value.user_id.as_str()),
+    )
+    .await;
     Json(json!({
         "ok": true,
         "rating": rating,
@@ -24744,9 +25598,7 @@ fn goal_state_from_record(record: Option<GoalRecord>) -> GoalState {
     }
 }
 
-fn goal_storage_namespace(
-    caller: Option<&crate::identity_verify::VerifiedCaller>,
-) -> String {
+fn goal_storage_namespace(caller: Option<&crate::identity_verify::VerifiedCaller>) -> String {
     crate::plugin_host::storage_namespace_for_tenant(
         caller.map(|value| value.user_id.as_str()),
         GOAL_STORAGE_NAMESPACE,
@@ -24893,7 +25745,11 @@ async fn clear_goal_handler(
         );
     };
     match storage
-        .delete(GOAL_PLUGIN_ID, &goal_storage_namespace(caller.as_ref()), &id)
+        .delete(
+            GOAL_PLUGIN_ID,
+            &goal_storage_namespace(caller.as_ref()),
+            &id,
+        )
         .await
     {
         Ok(()) => Json(json!({ "success": true })).into_response(),
@@ -27136,6 +27992,16 @@ async fn import_memory_item(
         tags: vec![tag],
         author_agent_id: None,
     };
+    if !memory::detect_sensitive_topics(&mem.content).is_empty()
+        && !sensitive_memory_enabled(&state, caller).await
+    {
+        return crate::import::ImportOutcome::failed(
+            crate::import::kind::MEMORY,
+            &selection.id,
+            &selection.id,
+            "sensitive topics are disabled in Settings → Memory",
+        );
+    }
     match state.memory.record_full(&owner, "default", mem).await {
         Ok(Some(id)) => {
             match state.memory.get(&id).await {
@@ -31773,23 +32639,22 @@ async fn import_space_package(
             "Space package exceeds the archive limit".to_owned(),
         );
     }
-    let archive = match base64::engine::general_purpose::STANDARD
-        .decode(body.archive_base64.as_bytes())
-    {
-        Ok(bytes) if bytes.len() <= space_portable::MAX_SPACE_PACKAGE_ARCHIVE_BYTES => bytes,
-        Ok(_) => {
-            return json_error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "Space package exceeds the archive limit".to_owned(),
-            );
-        }
-        Err(error) => {
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                format!("archive_base64 is invalid: {error}"),
-            );
-        }
-    };
+    let archive =
+        match base64::engine::general_purpose::STANDARD.decode(body.archive_base64.as_bytes()) {
+            Ok(bytes) if bytes.len() <= space_portable::MAX_SPACE_PACKAGE_ARCHIVE_BYTES => bytes,
+            Ok(_) => {
+                return json_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "Space package exceeds the archive limit".to_owned(),
+                );
+            }
+            Err(error) => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("archive_base64 is invalid: {error}"),
+                );
+            }
+        };
     let extracted = match crate::portable_packages::extract_archive(&archive) {
         Ok(package) => package,
         Err(error) => return json_error(StatusCode::BAD_REQUEST, error.to_string()),
@@ -33803,10 +34668,12 @@ async fn get_document_version(
     }
     let version = match state.spaces.get_document_version(&version_id).await {
         Ok(Some(version)) => Ok(Some(version)),
-        Ok(None) => state
-            .spaces
-            .get_source_history_version(&doc_id, &version_id)
-            .await,
+        Ok(None) => {
+            state
+                .spaces
+                .get_source_history_version(&doc_id, &version_id)
+                .await
+        }
         Err(error) => Err(error),
     };
     match version {
@@ -38429,7 +39296,9 @@ async fn install_sidecar(
             .await
         {
             Ok(path) => {
-                install_status.set_installed("island", version.clone()).await;
+                install_status
+                    .set_installed("island", version.clone())
+                    .await;
                 return Json(json!({
                     "success": true,
                     "forced": query.force,
@@ -38438,9 +39307,7 @@ async fn install_sidecar(
                 }));
             }
             Err(error) => {
-                install_status
-                    .set_failed("island", error.to_string())
-                    .await;
+                install_status.set_failed("island", error.to_string()).await;
                 return Json(json!({
                     "success": false,
                     "forced": query.force,
@@ -38564,6 +39431,23 @@ async fn install_sidecar(
                 )
                 .await
                 .map(|_| "installed".to_string()),
+            // mlx-serve is an adopt-or-start native binary. Ryu does not vendor
+            // the executable or its model cache; the installer adopts a PATH
+            // binary or uses the upstream Homebrew formula.
+            "mlx-serve" => {
+                downloads
+                    .register_indeterminate(
+                        "engine:mlx-serve".to_string(),
+                        crate::downloads::DownloadKind::Engine,
+                        "MLX Serve".to_string(),
+                        async {
+                            crate::sidecar::providers::mlx_serve::installer::ensure_installed()
+                                .await
+                                .map(|_| "adopted".to_string())
+                        },
+                    )
+                    .await
+            }
             // apfel is adopt-a-binary (Apple Foundation Models): PATH-detect an
             // existing install, else best-effort `brew install apfel`. Nothing to
             // download — Apple FM ships with the OS.
@@ -38579,18 +39463,20 @@ async fn install_sidecar(
             // Mesh LLM is adopt-or-start: Ryu keeps its config and model cache
             // outside the node data directory, and only records the executable's
             // presence after the operator installs it or Homebrew succeeds.
-            "mesh-llm" => downloads
-                .register_indeterminate(
-                    "engine:mesh-llm".to_string(),
-                    crate::downloads::DownloadKind::Engine,
-                    "Mesh LLM".to_string(),
-                    async {
-                        crate::sidecar::providers::mesh_llm::installer::ensure_installed()
-                            .await
-                            .map(|_| "adopted".to_string())
-                    },
-                )
-                .await,
+            "mesh-llm" => {
+                downloads
+                    .register_indeterminate(
+                        "engine:mesh-llm".to_string(),
+                        crate::downloads::DownloadKind::Engine,
+                        "Mesh LLM".to_string(),
+                        async {
+                            crate::sidecar::providers::mesh_llm::installer::ensure_installed()
+                                .await
+                                .map(|_| "adopted".to_string())
+                        },
+                    )
+                    .await
+            }
             // The mesh client (#478). Two legs by asset reality, not by taste — see
             // `sidecar/tailscale/downloader.rs`: a pinned upstream `.tgz` through the
             // download center where one exists, and Homebrew on macOS, where
@@ -44353,8 +45239,8 @@ mod plugin_catalog_tests {
     /// The rule against the manifests we actually ship. These twelve ids are the
     /// whole argument: seven items claim a destination WITHOUT a companion runnable
     /// (four via `dock_panels`, three via a top-level route) and were filed as
-    /// plugins by the old companion-only test; four document parsers each ship a
-    /// Python sidecar and are still plugins; and `@ryu/memory` targets a sub-path of
+    /// plugins by the old companion-only test; five document parsers each ship a
+    /// sidecar and are still plugins; and `@ryu/memory` targets a sub-path of
     /// a shell-owned surface and is still a plugin.
     #[test]
     fn catalog_taxonomy_classifies_shipped_manifests_by_destination() {
@@ -44390,7 +45276,8 @@ mod plugin_catalog_tests {
         }
 
         for id in [
-            // Four interchangeable `document.parse` providers, each with a sidecar.
+            // Five interchangeable `document.parse` providers, each with a sidecar.
+            "@ryu/anydoc",
             "@ryu/docling",
             "@ryu/markitdown",
             "@ryu/mineru",
@@ -45613,7 +46500,7 @@ mod mcp_plugin_governance_tests {
 // every unbound node stays strictly node-token gated.
 #[cfg(test)]
 mod require_auth_tests {
-	use axum::{
+    use axum::{
         body::Body,
         http::{Request, StatusCode},
         middleware,
@@ -45688,7 +46575,6 @@ mod require_auth_tests {
             StatusCode::UNAUTHORIZED
         );
     }
-
 }
 
 // ── Pure request/parse/format helpers ────────────────────────────────────────

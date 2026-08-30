@@ -24,7 +24,7 @@
   "surfaces": {
     "gateway": { "support": "none" },
     "core": { "support": "none" },
-    "desktop": { "support": "list" },
+    "desktop": { "support": "full" },
     "island": { "support": "none" },
     "mobile": { "support": "none" },
     "extension": { "support": "full" },
@@ -32,7 +32,18 @@
     "cli": { "support": "none" }
   },
   "engines": { "ryu": ">=0.1.0" },
-  "runnables": [],
+  "runnables": [
+    {
+      "id": "bookmarks-companion",
+      "name": "Bookmarks",
+      "kind": "companion",
+      "config": {
+        "label": "Bookmarks",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html"
+      }
+    }
+  ],
   "requires": {
     "apps": [
       {
@@ -56,6 +67,32 @@
     }
   ],
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "bookmarks-all",
+        "title": "All bookmarks",
+        "icon": "bookmark-02",
+        "target": "/plugin/app__bookmarks-companion",
+        "context": { "filter": "all" },
+        "order": 80
+      },
+      {
+        "id": "bookmarks-favorites",
+        "title": "Favorites",
+        "icon": "star-01",
+        "target": "/plugin/app__bookmarks-companion",
+        "context": { "filter": "favorites" },
+        "order": 81
+      },
+      {
+        "id": "bookmarks-recent",
+        "title": "Recently saved",
+        "icon": "clock-01",
+        "target": "/plugin/app__bookmarks-companion",
+        "context": { "filter": "recent" },
+        "order": 82
+      }
+    ],
     "context_menu_items": [
       {
         "id": "bookmarks.save-page",

@@ -749,7 +749,7 @@ function CloudUpgradePanel({
 				/>
 			</button>
 			<p className="mt-1 text-muted-foreground text-xs">
-				Your {planLabel} plan includes a free managed node, so your AI keeps
+				Your {planLabel} plan includes a free managed server, so your AI keeps
 				running 24/7 even when your computer is off. Upgrade for more
 				performance — billed monthly, on top of {planLabel}.
 			</p>
@@ -989,7 +989,7 @@ export function LifetimePlanCard({
 					</li>
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
-						<span>No hosted agents, node, or monthly credits included</span>
+						<span>No hosted agents, server, or monthly credits included</span>
 					</li>
 					<li className="flex items-center">
 						<Calendar className="mr-2 size-4" />
@@ -1102,7 +1102,9 @@ export function MarketplacePassPlanCard({
 					</li>
 					<li className="flex items-center text-muted-foreground">
 						<Cloud className="mr-2 size-4" />
-						<span>No managed AI, cloud node, or monthly credits included</span>
+						<span>
+							No managed AI, cloud server, or monthly credits included
+						</span>
 					</li>
 				</ul>
 			</CardContent>
@@ -1185,10 +1187,10 @@ export function ProPlanCard({
 						<span>Space data limited only by your disk</span>
 					</li>
 					{/* A qualifying hosted plan receives one plan- and region-specific
-					    managed node. The server is the authority for the exact shape. */}
+					    managed server. The server is the authority for the exact shape. */}
 					<li className="flex items-center">
 						<Cloud className="mr-2 size-4" />
-						<span>Managed cloud node (2 vCPU · 4 GB · 40 GB)</span>
+						<span>Managed cloud server (2 vCPU · 4 GB · 40 GB)</span>
 					</li>
 					<li className="flex items-center">
 						<Key className="mr-2 size-4" />
@@ -1256,7 +1258,7 @@ export function MaxPlanCard({
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
 						<span>
-							<strong>Dedicated cloud node</strong> — 2 vCPU · 8 GB · 80 GB
+							<strong>Dedicated cloud server</strong> — 2 vCPU · 8 GB · 80 GB
 						</span>
 					</li>
 					<li className="flex items-center">
@@ -1372,7 +1374,7 @@ export function TeamsPlanCard({
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
 						<span>
-							Managed node for your organization · 2 vCPU · 4 GB; local
+							Managed server for your organization · 2 vCPU · 4 GB; local
 							inference off by default
 						</span>
 					</li>
@@ -1544,10 +1546,10 @@ export function HostedAgentPlanCard({
 						<Server className="mr-2 size-4" />
 						<span>
 							{isBusiness
-								? "Performance managed node · 4 vCPU · 8 GB · 160 GB; local inference off by default"
+								? "Performance managed server · 4 vCPU · 8 GB · 160 GB; local inference off by default"
 								: isTeams || isPro
-									? "Managed node for your organization · 2 vCPU · 4 GB; local inference off by default"
-									: "Dedicated managed node · 2 dedicated vCPU · 8 GB; local inference configurable"}
+									? "Managed server for your organization · 2 vCPU · 4 GB; local inference off by default"
+									: "Dedicated managed server · 2 dedicated vCPU · 8 GB; local inference configurable"}
 						</span>
 					</li>
 					<li className="flex items-center">
@@ -2031,13 +2033,13 @@ export function PricingInstancePicker({
 					Ryu Cloud
 				</h2>
 				<p className="mt-1 text-muted-foreground">
-					We host your node: Core, Gateway, and 24/7 agents. Your hosted plan
-					includes a base node; add a bigger node whenever you need more
+					We host your server: Core, Gateway, and 24/7 agents. Your hosted plan
+					includes a base server; add a bigger server whenever you need more
 					performance.
 				</p>
 				<p className="mt-1 text-muted-foreground text-xs">
-					Nodes are billed monthly at live cost. The yearly toggle doesn&apos;t
-					apply to Cloud nodes.
+					Servers are billed monthly at live cost. The yearly toggle
+					doesn&apos;t apply to Cloud servers.
 				</p>
 			</div>
 			{locations.length > 0 ? (
@@ -2151,7 +2153,7 @@ export function PricingInstancePicker({
 											? "Processing…"
 											: unavailable
 												? "Not in this region"
-												: "Deploy node"}
+												: "Deploy server"}
 									</Button>
 								)}
 							</CardFooter>

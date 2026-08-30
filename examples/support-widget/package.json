@@ -8,7 +8,6 @@
     "build-manifest": "bun run src/app.ts",
     "pack": "ryu pack .",
     "check-types": "tsc --noEmit",
-    "pretest": "bun run --cwd ../../packages/sdk build",
     "test": "bun test"
   },
   "dependencies": {

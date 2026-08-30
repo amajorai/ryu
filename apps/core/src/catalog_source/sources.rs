@@ -789,12 +789,10 @@ impl MarketplacePlugin {
             layers: scrub_marketplace_layers(&self.layers),
             requires: self.requires.clone(),
             targets: self.targets.clone(),
-            surface_support: super::manifest_surface::project_surface_support(
-                &serde_json::json!({
-                    "surfaces": self.surfaces.clone(),
-                    "targets": self.targets.clone(),
-                }),
-            ),
+            surface_support: super::manifest_surface::project_surface_support(&serde_json::json!({
+                "surfaces": self.surfaces.clone(),
+                "targets": self.targets.clone(),
+            })),
         }
     }
 }
@@ -2543,23 +2541,23 @@ fn ryu_marketplace_base() -> String {
 /// still the signed marketplace handoff, so the caller can verify the manifest
 /// before asking for the archive.
 pub async fn fetch_ryu_package_detail(
-	client: &reqwest::Client,
-	kind: &str,
-	id: &str,
-	update: bool,
-	version: Option<&str>,
+    client: &reqwest::Client,
+    kind: &str,
+    id: &str,
+    update: bool,
+    version: Option<&str>,
 ) -> Result<Value> {
-	let version_param = version
-		.map(|value| format!("&version={}", urlencoding::encode(value)))
-		.unwrap_or_default();
-	let url = format!(
-		"{}/api/marketplace/catalog/detail?kind={}&id={}{}{}",
-		ryu_marketplace_base(),
-		urlencoding::encode(kind),
-		urlencoding::encode(id.trim()),
-		if update { "&operation=update" } else { "" },
-		version_param,
-	);
+    let version_param = version
+        .map(|value| format!("&version={}", urlencoding::encode(value)))
+        .unwrap_or_default();
+    let url = format!(
+        "{}/api/marketplace/catalog/detail?kind={}&id={}{}{}",
+        ryu_marketplace_base(),
+        urlencoding::encode(kind),
+        urlencoding::encode(id.trim()),
+        if update { "&operation=update" } else { "" },
+        version_param,
+    );
     let mut request = client.get(&url);
     if let Some(token) = marketplace_buyer_token() {
         request = request.bearer_auth(token);
@@ -3779,7 +3777,8 @@ impl RyuMarketplaceSource {
         channel: Option<&str>,
     ) -> Result<InstallDescriptor> {
         let detail = self.fetch_detail_on_channel(client, id, channel).await?;
-        self.install_descriptor_from_detail(client, id, detail).await
+        self.install_descriptor_from_detail(client, id, detail)
+            .await
     }
 
     /// Resolve one exact historical release selected from the Versions tab.
@@ -3791,7 +3790,8 @@ impl RyuMarketplaceSource {
         version: &str,
     ) -> Result<InstallDescriptor> {
         let detail = self.fetch_detail_on_version(client, id, version).await?;
-        self.install_descriptor_from_detail(client, id, detail).await
+        self.install_descriptor_from_detail(client, id, detail)
+            .await
     }
 
     async fn install_descriptor_from_detail(

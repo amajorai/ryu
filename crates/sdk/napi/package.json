@@ -1,6 +1,6 @@
 {
   "name": "@ryuhq/sdk-native",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Native (napi-rs) Node addon backed by the ryu-sdk Rust core.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -15,6 +15,7 @@
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
+    "test": "bun run build:debug && node smoke.mjs",
     "prepare": "node -e \"try{require('child_process').execSync('napi build --platform',{stdio:'inherit',shell:true})}catch(e){console.log('[sdk-native] napi build skipped (no toolchain or build failed)')}\""
   },
   "devDependencies": {

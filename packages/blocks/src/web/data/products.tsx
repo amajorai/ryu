@@ -1,12 +1,15 @@
 import { buttonVariants } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import {
+	ArrowUpRight,
+	Bell,
 	Blocks,
 	Bot,
 	Box,
 	Boxes,
 	Bug,
 	Cable,
+	Check,
 	Chrome,
 	Cloud,
 	Cpu,
@@ -17,6 +20,7 @@ import {
 	HeartHandshake,
 	Key,
 	Layers,
+	Mail as MailIcon,
 	Mic,
 	Monitor,
 	Plug,
@@ -54,9 +58,11 @@ import {
 	GatewayVisual,
 	HireVisual,
 	IslandVisual,
+	MailVisual,
 	MarketplaceVisual,
 	McpVisual,
 	MobileVisual,
+	NotifyVisual,
 	OsVisual,
 	RedTeamVisual,
 	SdkVisual,
@@ -143,6 +149,7 @@ export interface Product {
 	overviewVisual?: ReactNode;
 	slug: string;
 	splits?: FeatureSplit[];
+	standalone?: boolean;
 	tagline: string;
 }
 
@@ -227,7 +234,7 @@ export const products: Product[] = [
 					icon: Bot,
 				},
 				{
-					title: "Multi-node",
+					title: "Multi-server",
 					description:
 						"Run it on your laptop, your Pi, a Mac mini, a server. Agents live where they need to work.",
 					icon: Globe,
@@ -277,6 +284,7 @@ export const products: Product[] = [
 		name: "Ryu Gateway",
 		navLabel: "Gateway",
 		category: "Platform",
+		standalone: true,
 		tagline:
 			"The governed gateway for model, tool, and Skill calls from any system.",
 		Icon: Shield,
@@ -442,7 +450,7 @@ export const products: Product[] = [
 			{
 				title: "Cross-device fleet",
 				description:
-					"Run on cloud, a Mac mini, a Pi, or your laptop, with node selection and sync.",
+					"Run on cloud, a Mac mini, a Pi, or your laptop, with server selection and sync.",
 				icon: Globe,
 			},
 		],
@@ -471,9 +479,9 @@ export const products: Product[] = [
 					icon: Zap,
 				},
 				{
-					title: "Multi-node fleet",
+					title: "Multi-server fleet",
 					description:
-						"Cross-device sync and node selection: prefer a remote node, else compute locally.",
+						"Cross-device sync and server selection: prefer a remote server, else compute locally.",
 					icon: Globe,
 				},
 				{
@@ -533,6 +541,7 @@ export const products: Product[] = [
 		name: "Ryu Box",
 		navLabel: "Box",
 		category: "Platform",
+		standalone: true,
 		tagline: "A persistent, isolated workspace for agent runs and previews.",
 		Icon: Box,
 		hero: {
@@ -633,6 +642,226 @@ export const products: Product[] = [
 			primaryCta: EARLY_ACCESS,
 			secondaryCta: BOOK_DEMO,
 			note: "Persistent · Isolated · API-first · Previewable",
+		},
+	},
+
+	{
+		slug: "notify",
+		name: "Ryu Notify",
+		navLabel: "Notify",
+		category: "Platform",
+		standalone: true,
+		tagline: "A durable, real-time event inbox for products and agents.",
+		Icon: Bell,
+		hero: {
+			eyebrow: "Ryu Notify · standalone event API",
+			title: "Know when the work changes.",
+			subtitle:
+				"Post structured events from any product, keep a durable history, and let your own dashboard or agent follow the live stream. Tenant-scoped, API-first, and separate from Core's local notification feed.",
+			primaryCta: EARLY_ACCESS,
+			secondaryCta: { label: "Read the API", href: "/docs/standalone/notify" },
+			visual: <NotifyVisual />,
+		},
+		highlights: [
+			{
+				title: "One HTTP request",
+				description:
+					"Publish a title, body, source, and structured data from a job, app, or agent.",
+				icon: Cable,
+			},
+			{
+				title: "Durable by default",
+				description:
+					"Events survive a process restart in a service-owned SQLite store.",
+				icon: RefreshCw,
+			},
+			{
+				title: "Live when you need it",
+				description:
+					"Tail a tenant's events with a bounded Server-Sent Events stream.",
+				icon: Radio,
+			},
+			{
+				title: "Safe retries",
+				description:
+					"Idempotency keys and stable request errors keep retries from duplicating events.",
+				icon: Shield,
+			},
+		],
+		bento: {
+			eyebrow: "The event contract",
+			title: "A small service around important moments.",
+			subtitle:
+				"Notify accepts the event, bounds the payload, redacts common credential-shaped keys, and gives consumers a history and a live edge.",
+			items: [
+				{
+					title: "Structured events",
+					description:
+						"Keep source, type, fingerprint, recipient, action links, and JSON data together.",
+					icon: Bell,
+				},
+				{
+					title: "Cursor reads",
+					description:
+						"Page through bounded history with an opaque cursor instead of relying on offsets.",
+					icon: GitBranch,
+				},
+				{
+					title: "Tenant isolation",
+					description:
+						"Each bearer key maps to one tenant; event reads never cross that binding.",
+					icon: Key,
+				},
+				{
+					title: "Acknowledgements",
+					description:
+						"Mark an event handled without making it part of Core's workflow resume path.",
+					icon: Check,
+				},
+				{
+					title: "Action links",
+					description:
+						"Attach up to three HTTPS links for the run, record, or dashboard a person needs.",
+					icon: ArrowUpRight,
+				},
+				{
+					title: "Service-owned state",
+					description:
+						"Run it beside your product with its own data directory and API credential.",
+					icon: Box,
+				},
+			],
+		},
+		splits: [
+			{
+				eyebrow: "Drop-in integration",
+				title: "Give Box and Mail a shared event surface.",
+				description:
+					"Ryu Notify does not reach into product databases. Agent Mail and Box remain the owners of their work; small adapters publish metadata to the same API so an operator can follow both from one consumer.",
+				bullets: [
+					"Use the same endpoint from any language",
+					"Keep service credentials separate",
+					"Use fingerprints to group related events in your own UI",
+				],
+				visual: <NotifyVisual />,
+			},
+		],
+		faq: [
+			{
+				q: "Is Ryu Notify the same as Core notifications?",
+				a: "No. Core owns the local user inbox, workflow acknowledgements, desktop stream, and node fan-out. Notify is a separately runnable event API for products and agents.",
+			},
+			{
+				q: "Does it send push, email, or SMS?",
+				a: "Not in this first service slice. It stores events and exposes HTTP and SSE; a consumer can add its own delivery channels without giving Notify provider credentials.",
+			},
+			{
+				q: "Can I call it from Box or Agent Mail?",
+				a: "Yes. The repository includes runnable examples that call Box or Agent Mail first and publish a metadata event to Notify with separate API keys.",
+			},
+		],
+		cta: {
+			title: "Put important events somewhere dependable.",
+			subtitle:
+				"Run Ryu Notify beside your product, or ask us about a hosted service built around the same API.",
+			primaryCta: EARLY_ACCESS,
+			secondaryCta: { label: "Read the API", href: "/docs/standalone/notify" },
+			note: "Standalone · Tenant-scoped · SQLite · HTTP + SSE",
+		},
+	},
+
+	{
+		slug: "mail",
+		name: "Ryu Mail",
+		navLabel: "Mail",
+		category: "Platform",
+		standalone: true,
+		tagline: "API-first email inboxes for agents.",
+		Icon: MailIcon,
+		hero: {
+			eyebrow: "Ryu Mail · Agent Inboxes",
+			title: "Give every agent an address.",
+			subtitle:
+				"Receive, store, and send agent email through a focused API. Run Agent Inboxes inside a Ryu node or deploy the Mail service separately with its own bearer and inbound HMAC secrets.",
+			primaryCta: EARLY_ACCESS,
+			secondaryCta: { label: "Read the docs", href: "/docs/standalone/mail" },
+			visual: <MailVisual />,
+		},
+		highlights: [
+			{
+				title: "Real inboxes",
+				description:
+					"Create addresses agents can receive into and send from over an API.",
+				icon: MailIcon,
+			},
+			{
+				title: "Inbound verification",
+				description:
+					"Provider webhooks use a per-inbox HMAC secret before mail is accepted.",
+				icon: Shield,
+			},
+			{
+				title: "Stored messages",
+				description:
+					"Keep message metadata, bodies, and attachment records in the Mail-owned store.",
+				icon: Boxes,
+			},
+			{
+				title: "Notify-ready",
+				description:
+					"Publish a metadata-only event to Ryu Notify when an inbox needs attention.",
+				icon: Bell,
+			},
+		],
+		bento: {
+			eyebrow: "Agent Inboxes",
+			title: "The email boundary stays explicit.",
+			subtitle:
+				"Mail owns inbox state and SMTP hand-off. Your app decides when to notify a person or agent about a message.",
+			items: [
+				{
+					title: "Inbox API",
+					description:
+						"List, create, rename, rotate, and remove inboxes through the service contract.",
+					icon: MailIcon,
+				},
+				{
+					title: "Read messages",
+					description:
+						"Fetch message metadata and bodies only through an authenticated inbox path.",
+					icon: Boxes,
+				},
+				{
+					title: "Send with intent",
+					description:
+						"The send route makes the external side effect visible to the caller and UI.",
+					icon: Cable,
+				},
+				{
+					title: "Pair with Notify",
+					description:
+						"Use the included example to publish a small event without copying mail content into it.",
+					icon: Bell,
+				},
+			],
+		},
+		faq: [
+			{
+				q: "Is Ryu Mail the hosted Agent Inboxes feature?",
+				a: "Ryu has both a hosted control-plane Mail product and a self-host sidecar. Their ownership and request shapes differ; this page describes the standalone/node service path.",
+			},
+			{
+				q: "Does a Mail event include the email body?",
+				a: "The Notify example sends metadata such as the message id, inbox id, sender, recipient, and subject. The message body remains behind the authenticated Mail API.",
+			},
+		],
+		cta: {
+			title: "Give agents a real inbox.",
+			subtitle:
+				"Run Agent Inboxes with Ryu or deploy the service next to the workflow that owns the mail experience.",
+			primaryCta: EARLY_ACCESS,
+			secondaryCta: { label: "Read the docs", href: "/docs/standalone/mail" },
+			note: "Agent Inboxes · HMAC inbound · SMTP hand-off · API-first",
 		},
 	},
 
@@ -1084,7 +1313,7 @@ export const products: Product[] = [
 			eyebrow: "Skills · open standard",
 			title: "Give agents new skills, instantly.",
 			subtitle:
-				"Inside Ryu: search skills.sh and install in one click. Outside: ship SKILL.md files that teach Cursor, Claude Code, and any SKILL.md client how to set up and drive your node.",
+				"Inside Ryu: search skills.sh and install in one click. Outside: ship SKILL.md files that teach Cursor, Claude Code, and any SKILL.md client how to set up and drive your server.",
 			primaryCta: { label: "Browse Skills", href: "/products/marketplace" },
 			secondaryCta: SKILLS_GITHUB,
 			visual: <SkillsVisual />,
@@ -1119,7 +1348,7 @@ export const products: Product[] = [
 			eyebrow: "Two directions",
 			title: "Skills in the app, and skills for the app.",
 			subtitle:
-				"Install Agent Skills into Ryu from skills.sh, or publish SKILL.md instructions that teach external coding agents how to operate a Ryu node.",
+				"Install Agent Skills into Ryu from skills.sh, or publish SKILL.md instructions that teach external coding agents how to operate a Ryu server.",
 			items: [
 				{
 					title: "Browse skills.sh",
@@ -1172,7 +1401,7 @@ export const products: Product[] = [
 				eyebrow: "From Cursor & Claude Code",
 				title: "Teach your coding agent to drive Ryu.",
 				description:
-					"apps/skills is a separate bundle of external skills—not installed into Ryu's registry. They are instructions an outside agent loads to set up a node and drive it through ryu-mcp.",
+					"apps/skills is a separate bundle of external skills—not installed into Ryu's registry. They are instructions an outside agent loads to set up a server and drive it through ryu-mcp.",
 				bullets: [
 					"setup-ryu walks end-to-end install and MCP wiring",
 					"ryu-mcp, ryu-build-agent, and ryu-local-model cover day-two ops",
@@ -1200,7 +1429,7 @@ export const products: Product[] = [
 		cta: {
 			title: "Give your agents a new skill.",
 			subtitle:
-				"Install skills inside Ryu, or ship SKILL.md files that teach external agents how to drive your node.",
+				"Install skills inside Ryu, or ship SKILL.md files that teach external agents how to drive your server.",
 			primaryCta: { label: "Browse Skills", href: "/products/marketplace" },
 			secondaryCta: SKILLS_GITHUB,
 			note: "skills.sh in-app · apps/skills outward · Hot-reload",
@@ -1218,7 +1447,7 @@ export const products: Product[] = [
 			eyebrow: "MCP · Model Context Protocol",
 			title: "Every tool, zero wiring.",
 			subtitle:
-				"Inside Ryu: a 250+ tool registry bridged into agent sessions with Gateway governance. Outside: ryu-mcp exposes your Core node to Claude Desktop, Cursor, and any MCP host.",
+				"Inside Ryu: a 250+ tool registry bridged into agent sessions with Gateway governance. Outside: ryu-mcp exposes your Core server to Claude Desktop, Cursor, and any MCP host.",
 			primaryCta: EARLY_ACCESS,
 			secondaryCta: MCP_GITHUB,
 			visual: <McpVisual />,
@@ -1253,7 +1482,7 @@ export const products: Product[] = [
 			eyebrow: "Two directions",
 			title: "Tools in the app, and Ryu as a tool.",
 			subtitle:
-				"Wire MCP servers into Ryu agent sessions, or expose a running Core node to external MCP hosts through ryu-mcp.",
+				"Wire MCP servers into Ryu agent sessions, or expose a running Core server to external MCP hosts through ryu-mcp.",
 			items: [
 				{
 					title: "250+ tool registry",
@@ -1288,7 +1517,7 @@ export const products: Product[] = [
 				{
 					title: "ryu-mcp server",
 					description:
-						"apps/mcp exposes a running Core node to Claude Desktop, Cursor, and other MCP hosts—with OAuth sign-in and 20+ tools.",
+						"apps/mcp exposes a running Core server to Claude Desktop, Cursor, and other MCP hosts—with OAuth sign-in and 20+ tools.",
 					icon: TerminalIcon,
 					action: githubBentoAction(MCP_GITHUB),
 					span: "md:col-span-2",
@@ -1310,9 +1539,9 @@ export const products: Product[] = [
 			},
 			{
 				eyebrow: "From Claude Desktop & Cursor",
-				title: "Let outside agents drive your node.",
+				title: "Let outside agents drive your server.",
 				description:
-					"apps/mcp is an MCP server that points any host at a running Core node—agents, models, skills, workflows, and registered MCP tools over stdio JSON-RPC.",
+					"apps/mcp is an MCP server that points any host at a running Core server—agents, models, skills, workflows, and registered MCP tools over stdio JSON-RPC.",
 				bullets: [
 					"OAuth device grant shares sign-in with desktop and CLI",
 					"ryu_ask, ryu_list_agents, ryu_call_mcp_tool, and 17 more tools",
@@ -1334,13 +1563,13 @@ export const products: Product[] = [
 			},
 			{
 				q: "How do I connect Ryu to Claude Desktop or Cursor?",
-				a: "Add apps/mcp to your host's MCP config. It exposes your Core node over stdio—health, agents, models, skills, workflows, and bridged MCP tools. See the README in apps/mcp for the exact JSON snippet.",
+				a: "Add apps/mcp to your host's MCP config. It exposes your Core server over stdio—health, agents, models, skills, workflows, and bridged MCP tools. See the README in apps/mcp for the exact JSON snippet.",
 			},
 		],
 		cta: {
 			title: "Plug your agents into everything.",
 			subtitle:
-				"Turn on tools inside Ryu, or expose your node to any MCP host with ryu-mcp.",
+				"Turn on tools inside Ryu, or expose your server to any MCP host with ryu-mcp.",
 			primaryCta: EARLY_ACCESS,
 			secondaryCta: MCP_GITHUB,
 			note: "In-app registry · apps/mcp outward · Gateway-governed",
@@ -1460,13 +1689,13 @@ export const products: Product[] = [
 		name: "CLI",
 		navLabel: "CLI",
 		category: "Developers",
-		tagline: "The full runtime in your terminal: chat, runs, and nodes.",
+		tagline: "The full runtime in your terminal: chat, runs, and servers.",
 		Icon: TerminalIcon,
 		hero: {
 			eyebrow: "Ryu CLI",
 			title: "Ryu, in your terminal.",
 			subtitle:
-				"A fast TUI for chat, sidecar management, sessions, and LAN node discovery. The same Core path the desktop uses, from the command line.",
+				"A fast TUI for chat, sidecar management, sessions, and LAN server discovery. The same Core path the desktop uses, from the command line.",
 			primaryCta: DOWNLOAD,
 			secondaryCta: EARLY_ACCESS,
 			visual: <CliVisual />,
@@ -1484,9 +1713,9 @@ export const products: Product[] = [
 				icon: TerminalIcon,
 			},
 			{
-				title: "Node discovery",
+				title: "Server discovery",
 				description:
-					"Finds Ryu nodes on your LAN and lets you pick where compute runs.",
+					"Finds Ryu servers on your LAN and lets you pick where compute runs.",
 				icon: Globe,
 			},
 			{
@@ -1499,7 +1728,7 @@ export const products: Product[] = [
 			eyebrow: "Headless-first",
 			title: "Built for people who live in a shell.",
 			subtitle:
-				"Routes to Core for real agent runs, manages sidecars, and finds nodes on your network automatically.",
+				"Routes to Core for real agent runs, manages sidecars, and finds servers on your network automatically.",
 			items: [
 				{
 					title: "Chat & runs",
@@ -1514,9 +1743,9 @@ export const products: Product[] = [
 					icon: Cpu,
 				},
 				{
-					title: "Node discovery",
+					title: "Server discovery",
 					description:
-						"Auto-discover Ryu nodes on your LAN and pick where compute runs.",
+						"Auto-discover Ryu servers on your LAN and pick where compute runs.",
 					icon: Globe,
 				},
 				{
@@ -1538,7 +1767,7 @@ export const products: Product[] = [
 			subtitle: "Install the CLI and get the full runtime, no window required.",
 			primaryCta: DOWNLOAD,
 			secondaryCta: BOOK_DEMO,
-			note: "TUI · Core-native · LAN node discovery",
+			note: "TUI · Core-native · LAN server discovery",
 		},
 	},
 
@@ -1656,7 +1885,7 @@ export const products: Product[] = [
 			eyebrow: "Ryu OS · desktop workspace",
 			title: "Your agent work, in one desktop.",
 			subtitle:
-				"Ryu OS turns the desktop into a calm workspace for agent Apps: open them from a dock, switch with Mission Control, and keep each task in its own window.",
+				"Ryu OS turns the desktop into a calm workspace for agent Apps: open them from a dock, switch with App Launcher, and keep each task in its own window.",
 			primaryCta: DOWNLOAD,
 			secondaryCta: EARLY_ACCESS,
 			visual: <OsVisual />,
@@ -1675,7 +1904,7 @@ export const products: Product[] = [
 				icon: Monitor,
 			},
 			{
-				title: "Mission Control",
+				title: "App Launcher",
 				description:
 					"Press ⌘K to find an App or jump back to an open window immediately.",
 				icon: Zap,
@@ -1691,7 +1920,7 @@ export const products: Product[] = [
 			eyebrow: "A desktop for agent work",
 			title: "The tools you need, arranged like a place.",
 			subtitle:
-				"Ryu OS gives the growing App ecosystem a home: windows for active work, a dock for muscle memory, and Mission Control for everything else.",
+				"Ryu OS gives the growing App ecosystem a home: windows for active work, a dock for muscle memory, and App Launcher for everything else.",
 			items: [
 				{
 					title: "Open from the dock",
@@ -1706,8 +1935,9 @@ export const products: Product[] = [
 					icon: Monitor,
 				},
 				{
-					title: "Find with Mission Control",
-					description: "Search Apps and open windows from one command dialog.",
+					title: "Find with App Launcher",
+					description:
+						"Browse current Apps and open windows from one searchable grid.",
 					icon: Sparkles,
 				},
 				{
@@ -1723,10 +1953,10 @@ export const products: Product[] = [
 				eyebrow: "Made for switching",
 				title: "Open the app you need. Keep the work you started.",
 				description:
-					"Ryu OS puts the workspace model in the foreground: windows are live views into the same Core session system, while the dock and Mission Control make the next move obvious.",
+					"Ryu OS puts the workspace model in the foreground: windows are live views into the same Core session system, while the dock and App Launcher make the next move obvious.",
 				bullets: [
 					"Dock shortcuts for the everyday Apps",
-					"⌘K / Ctrl K opens Mission Control",
+					"⌘K / Ctrl K opens App Launcher",
 					"Uses the existing Ryu tabs, permissions, and runtime",
 				],
 				visual: <OsVisual />,
@@ -1739,16 +1969,16 @@ export const products: Product[] = [
 			},
 			{
 				q: "What can I open in Ryu OS?",
-				a: "The dock starts with Chat, Spaces, Tools, Skills, Apps, and Review. Installed Apps can add their own surfaces to the same workspace over time.",
+				a: "The dock starts with App Launcher, Mission Control, Chat, Spaces, Tools, Skills, Apps, and Review. Installed Apps can add their own surfaces to the same workspace over time.",
 			},
 		],
 		cta: {
 			title: "Make Ryu feel like a place to work.",
 			subtitle:
-				"Download the desktop workspace and open the next App from the dock or Mission Control.",
+				"Download the desktop workspace and open the next App from the dock or App Launcher.",
 			primaryCta: DOWNLOAD,
 			secondaryCta: BOOK_DEMO,
-			note: "Desktop workspace · Dock · Mission Control · Live windows",
+			note: "Desktop workspace · Dock · App Launcher · Live windows",
 		},
 	},
 
@@ -1988,13 +2218,13 @@ export const products: Product[] = [
 		name: "Mobile App",
 		navLabel: "Mobile App",
 		category: "Surfaces",
-		tagline: "Ryu in your pocket: on-device, with node selection.",
+		tagline: "Ryu in your pocket: on-device, with server selection.",
 		Icon: Smartphone,
 		hero: {
 			eyebrow: "Ryu Mobile",
 			title: "Your agent, in your pocket.",
 			subtitle:
-				"Chat with your agents on the go. On-device inference with Cactus Compute, or reach a node at home for heavier work.",
+				"Chat with your agents on the go. On-device inference with Cactus Compute, or reach a server at home for heavier work.",
 			primaryCta: EARLY_ACCESS,
 			secondaryCta: BOOK_DEMO,
 			visual: <MobileVisual />,
@@ -2007,9 +2237,9 @@ export const products: Product[] = [
 				icon: Smartphone,
 			},
 			{
-				title: "Node selection",
+				title: "Server selection",
 				description:
-					"Reach a home or cloud node for heavy runs, else compute locally.",
+					"Reach a home or cloud server for heavy runs, else compute locally.",
 				icon: Globe,
 			},
 			{
@@ -2037,9 +2267,9 @@ export const products: Product[] = [
 					icon: Smartphone,
 				},
 				{
-					title: "Node selection",
+					title: "Server selection",
 					description:
-						"Prefer a reachable home or cloud node for heavy runs, else compute locally.",
+						"Prefer a reachable home or cloud server for heavy runs, else compute locally.",
 					icon: Globe,
 				},
 				{
@@ -2059,7 +2289,7 @@ export const products: Product[] = [
 		faq: [
 			{
 				q: "Does it work offline?",
-				a: "Yes, for on-device models via Cactus Compute. For heavier work it can reach a node at home or in the cloud, your choice.",
+				a: "Yes, for on-device models via Cactus Compute. For heavier work it can reach a server at home or in the cloud, your choice.",
 			},
 		],
 		cta: {
@@ -2068,7 +2298,7 @@ export const products: Product[] = [
 				"Join early access for the mobile app and bring your agents everywhere.",
 			primaryCta: EARLY_ACCESS,
 			secondaryCta: BOOK_DEMO,
-			note: "iOS · Android · On-device · Node selection",
+			note: "iOS · Android · On-device · Server selection",
 		},
 	},
 

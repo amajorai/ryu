@@ -1407,11 +1407,7 @@ mod tests {
         };
 
         let s = store();
-        let manifest = make_manifest(
-            "@ryu/__test-verified-official-lifecycle",
-            "1.0.0",
-            vec![],
-        );
+        let manifest = make_manifest("@ryu/__test-verified-official-lifecycle", "1.0.0", vec![]);
         s.insert(&manifest.id, &manifest.version).await.unwrap();
 
         let provenance = capture_provenance(

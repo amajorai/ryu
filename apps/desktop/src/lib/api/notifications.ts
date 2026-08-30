@@ -154,7 +154,7 @@ export async function unarchiveNotification(
 
 /**
  * Acknowledge a HITL notification gate. Returns whether the ack resumed the
- * suspended workflow run (true once the gate's policy — first/all/quorum — is met).
+ * suspended workflow run (true once the gate's policy — first/all/quorum/percentage — is met).
  */
 export async function ackNotification(
 	target: ApiTarget,

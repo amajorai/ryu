@@ -48,7 +48,7 @@ describe("SidebarLibrarySection", () => {
 					label="Skills"
 					query=""
 					variant="books"
-					view="grid"
+					view="showcase"
 				/>
 			);
 		});

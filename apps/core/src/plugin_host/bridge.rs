@@ -223,9 +223,7 @@ impl PluginHookBridge {
             | "storage_set"
             | "storage_delete"
             | "storage_keys"
-            | "storage_compare_and_set" => {
-                self.storage(method, args).await
-            }
+            | "storage_compare_and_set" => self.storage(method, args).await,
             "crypto_seal" | "crypto_open" | "crypto_status" => self.crypto(method, args).await,
             "spaces_ensure_space"
             | "spaces_create_doc"
@@ -728,6 +726,7 @@ impl PluginHookBridge {
             conversation_id,
             message_id,
             rating,
+            None,
         )
         .await;
         ok(json!(outcome))
@@ -1075,7 +1074,9 @@ impl PluginHookBridge {
         caps.max_concurrent = caps.effective_concurrency();
         caps.wall_time_secs = caps.wall_time_secs.clamp(5, 600);
         caps.max_tokens = caps.effective_max_tokens();
-        let read_only = delegates.iter().all(|delegate| !delegate.preset.allows_mutation());
+        let read_only = delegates
+            .iter()
+            .all(|delegate| !delegate.preset.allows_mutation());
         let result = if read_only {
             crate::workflow::delegation::run_read_only_fanout(delegates, caps, 1, None).await
         } else {
@@ -1335,10 +1336,11 @@ impl PluginHookBridge {
     }
 
     fn storage_namespace(&self, namespace: &str) -> String {
-        let tenant = self
-            .storage_tenant
-            .as_deref()
-            .or_else(|| self.verified_caller.as_ref().map(|caller| caller.user_id.as_str()));
+        let tenant = self.storage_tenant.as_deref().or_else(|| {
+            self.verified_caller
+                .as_ref()
+                .map(|caller| caller.user_id.as_str())
+        });
         super::storage_namespace_for_tenant(tenant, namespace)
     }
 

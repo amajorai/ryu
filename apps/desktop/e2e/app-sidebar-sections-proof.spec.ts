@@ -15,6 +15,7 @@ test.describe("app-owned sidebar sections", () => {
 			"Monitors",
 			"Policies",
 			"Contexts",
+			"Campaigns",
 			"Inboxes",
 			"Workflows",
 		]) {
@@ -25,6 +26,7 @@ test.describe("app-owned sidebar sections", () => {
 			"Production API",
 			"Release policy",
 			"Q3 contracts",
+			"Search campaign",
 			"Support",
 			"Release workflow",
 		]) {
@@ -38,5 +40,18 @@ test.describe("app-owned sidebar sections", () => {
 		await page.goto(STORY_URL);
 		await page.getByRole("button", { name: /Release workflow/ }).click();
 		await expect(page.locator("#opened")).toHaveText("/workflows/workflow-1");
+	});
+
+	test("passes a record id through the migrated research target context", async ({
+		page,
+	}) => {
+		await page.goto(STORY_URL);
+		await page.getByRole("button", { name: /Search campaign/ }).click();
+		await expect(page.locator("#opened")).toHaveText(
+			"/plugin/app__research-companion"
+		);
+		await expect(page.locator("#opened-context")).toHaveText(
+			'{"campaignId":"campaign-1"}'
+		);
 	});
 });

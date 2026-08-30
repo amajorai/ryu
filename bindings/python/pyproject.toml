@@ -1,7 +1,7 @@
 [project]
 name = "ryu-sdk"
 version = "0.1.0"
-description = "Ryu developer SDK — Python binding (generated from crates/ryu-sdk-uniffi via UniFFI)."
+description = "Ryu developer SDK — Python binding (generated from crates/sdk/uniffi via UniFFI)."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }

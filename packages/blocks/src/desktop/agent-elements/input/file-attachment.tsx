@@ -59,7 +59,7 @@ export function FileAttachment({
 			className={cn(
 				"relative rounded-md bg-muted/50",
 				isImageOnly
-					? "flex size-10 items-center justify-center"
+					? "flex size-24 shrink-0 items-center justify-center rounded-xl p-1"
 					: "flex min-w-[120px] max-w-[200px] items-center gap-2 py-1 pr-2 pl-1",
 				className
 			)}
@@ -69,7 +69,7 @@ export function FileAttachment({
 			{isImageOnly ? (
 				<div
 					className={cn(
-						"size-8 shrink-0 overflow-hidden rounded-sm",
+						"size-full shrink-0 overflow-hidden rounded-lg",
 						canPreview && "cursor-pointer"
 					)}
 					onClick={canPreview ? openLightbox : undefined}

@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
 	acceptMemoryProposal,
 	getDreamReview,
+	getMemoryGraph,
+	getMemorySettings,
 	getReflectDashboard,
 	rejectMemoryProposal,
 	runDreamReview,
+	setMemorySettings,
 } from "./memory.ts";
 
 const target = { token: null, url: "http://node.test" };
@@ -114,6 +117,58 @@ describe("Dream and Reflect memory clients", () => {
 		});
 		expect(dashboard.insights[0].tone).toBe("positive");
 		expect(dashboard.topics[0].name).toBe("Writing");
+	});
+
+	it("uses the dedicated sensitive-memory settings and graph routes", async () => {
+		const calls: Array<{ body: string; method: string; url: string }> = [];
+		globalThis.fetch = Object.assign(
+			async (
+				input: Parameters<typeof fetch>[0],
+				init?: Parameters<typeof fetch>[1]
+			) => {
+				calls.push({
+					body: String(init?.body ?? ""),
+					method: init?.method ?? "GET",
+					url: String(input),
+				});
+				if (
+					String(input).endsWith("/api/memory/settings") &&
+					init?.method === "PUT"
+				) {
+					return jsonResponse({ include_sensitive_topics: false });
+				}
+				if (String(input).endsWith("/api/memory/settings")) {
+					return jsonResponse({ include_sensitive_topics: true });
+				}
+				return jsonResponse({
+					edges: [],
+					memory_count: 2,
+					nodes: [],
+					truncated: false,
+				});
+			},
+			{ preconnect: nativeFetch.preconnect }
+		);
+
+		await expect(getMemorySettings(target)).resolves.toEqual({
+			includeSensitiveTopics: true,
+		});
+		await expect(
+			setMemorySettings(target, { includeSensitiveTopics: false })
+		).resolves.toEqual({ includeSensitiveTopics: false });
+		await expect(getMemoryGraph(target)).resolves.toMatchObject({
+			memoryCount: 2,
+			truncated: false,
+		});
+
+		expect(calls.map((call) => call.url)).toEqual([
+			"http://node.test/api/memory/settings",
+			"http://node.test/api/memory/settings",
+			"http://node.test/api/memory/graph",
+		]);
+		expect(JSON.parse(calls[1].body)).toEqual({
+			include_sensitive_topics: false,
+		});
 	});
 
 	it("falls back to the privacy-gated usage review route on older nodes", async () => {

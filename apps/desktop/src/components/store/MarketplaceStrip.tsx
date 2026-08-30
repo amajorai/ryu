@@ -12,6 +12,7 @@
 import { Store01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MarketplaceItemCard } from "@ryu/blocks/desktop/marketplace";
+import { StoreCardGrid } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { Spinner } from "@ryu/ui/components/spinner";
 import { useEffect, useRef } from "react";
 import MarketplaceDetailDialog from "@/src/components/marketplace/MarketplaceDetailDialog.tsx";
@@ -75,7 +76,7 @@ export default function MarketplaceStrip({
 			</div>
 
 			{items.length > 0 ? (
-				<div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+				<StoreCardGrid>
 					{items.map((card) => {
 						const data = toCardData(
 							card,
@@ -98,7 +99,7 @@ export default function MarketplaceStrip({
 							/>
 						);
 					})}
-				</div>
+				</StoreCardGrid>
 			) : null}
 
 			{detail ? (

@@ -31,7 +31,7 @@ test("lists saved ACP and Pi plans and opens the selected artifact", async ({
 		page.locator(
 			'[data-testid="pinned-summary-proof"] [data-slot="cowork-section-count"]'
 		)
-	).toHaveCount(0);
+	).toHaveCount(2);
 
 	await planRows.nth(1).click();
 	await expect(page.getByTestId("plan-artifact-empty")).not.toBeVisible();

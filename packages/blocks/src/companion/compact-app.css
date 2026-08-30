@@ -32,12 +32,7 @@
 
 body {
 	margin: 0;
-	font:
-		14px / 1.5 ui-sans-serif,
-		system-ui,
-		-apple-system,
-		"Segoe UI",
-		sans-serif;
+	font: 14px / 1.5 var(--font-sans);
 	color: var(--compact-fg);
 	background: var(--compact-bg);
 }
@@ -48,28 +43,20 @@ body {
 	height: 100vh;
 }
 
-nav {
+.app-context-header {
 	display: flex;
-	gap: 2px;
-	padding: 10px 14px 0;
-	overflow-x: auto;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 14px;
 	border-bottom: 1px solid var(--compact-line);
 }
 
-nav [data-slot="button"] {
-	padding: 8px 12px 10px;
-	font: inherit;
-	color: var(--compact-muted);
-	white-space: nowrap;
-	appearance: none;
-	cursor: pointer;
-	background: none;
-	border: 0;
-	border-bottom: 2px solid transparent;
-}
-nav [data-slot="button"][aria-selected="true"] {
-	color: var(--compact-fg);
-	border-bottom-color: var(--compact-primary);
+.app-context-header h1 {
+	margin: 0;
+	font-family: var(--font-heading);
+	font-size: 15px;
+	font-weight: 600;
 }
 
 main {

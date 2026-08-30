@@ -63,8 +63,8 @@ import {
 	type MarketplaceCard,
 	searchMarketplaceCatalog,
 } from "@/src/lib/api/marketplace.ts";
+import { createMemory } from "@/src/lib/api/memory.ts";
 import { fireActivationEvent } from "@/src/lib/api/plugins.ts";
-import { indexChunk } from "@/src/lib/api/retrieval.ts";
 import { type ShadowSearchResult, searchShadow } from "@/src/lib/api/shadow.ts";
 import {
 	type SpaceLexicalHit,
@@ -112,14 +112,12 @@ type SettingsSection =
  * companion mints. Same reasoning, and the same fix, as the sidebar's
  * `CHROME_ORDER`: the App declares itself; the shell does not enumerate Apps.
  *
- * Inbox and Memory were the last two survivors of that rule, and both were live
- * dead ends: `@ryu/approvals` and `@ryu/memory` are BOTH absent from Core's
- * `CORE_PREINSTALLED`, so on a fresh install "Inbox" opened a tab reading "App not
- * enabled" and "Memory" opened a Memory Library whose `/api/memory` reads 503
- * behind the same app gate. Neither needs a row here: an enabled approvals app is
- * listed by the data-driven sidebar-section index, and an enabled memory app contributes a
- * `sidebar_buttons` entry targeting `/library/memory` that the contributed-button
- * loop lists. Note the dedupe below reads `navTargets` — while a target sat in
+ * Inbox and Memory were the last two survivors of that rule. Approvals remains
+ * opt-in, while Memory is pre-installed so its authenticated Library route is
+ * reachable on a fresh install. Neither needs a row here: an enabled approvals
+ * app is listed by the data-driven sidebar-section index, and the enabled Memory
+ * app contributes a `sidebar_buttons` entry targeting `/library/memory` that the
+ * contributed-button loop lists. Note the dedupe below reads `navTargets` — while a target sat in
  * NAV_ITEMS the shell's dumb copy actively SUPPRESSED the app's own declaration.
  */
 const NAV_ITEMS = [
@@ -441,7 +439,7 @@ export function CommandPalette() {
 			return;
 		}
 		try {
-			await indexChunk(target, { id: crypto.randomUUID(), content });
+			await createMemory(target, { content });
 			toast.success("Saved to memory", { description: content });
 		} catch {
 			toast.error("Couldn't save to memory", {

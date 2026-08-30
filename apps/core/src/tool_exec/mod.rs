@@ -1982,7 +1982,12 @@ mod tests {
         }
         #[cfg(not(windows))]
         {
-            std::path::PathBuf::from(format!("/bin/{_name}"))
+            let path = std::env::var_os("PATH").and_then(|value| {
+                std::env::split_paths(&value)
+                    .map(|dir| dir.join(_name))
+                    .find(|candidate| candidate.is_file())
+            });
+            path.unwrap_or_else(|| std::path::PathBuf::from(format!("/bin/{_name}")))
         }
     }
 
@@ -2058,10 +2063,7 @@ mod tests {
             invalid_name.display(),
             dd.display()
         ));
-        assert_eq!(
-            map.get("echo"),
-            Some(&echo)
-        );
+        assert_eq!(map.get("echo"), Some(&echo));
         assert_eq!(map.get("sleep"), Some(&sleep));
         assert_eq!(map.get("dd"), Some(&dd));
         // Relative path, empty name, and malformed entries are dropped.
@@ -2352,18 +2354,9 @@ mod tests {
     impl Drop for CmdEnvGuard {
         fn drop(&mut self) {
             restore_env("RYU_GATEWAY_URL", self.previous_gateway_url.take());
-            restore_env(
-                "RYU_ALLOW_GATEWAY_FALLBACK",
-                self.previous_fallback.take(),
-            );
-            restore_env(
-                "RYU_EXEC_APPROVAL_MODE",
-                self.previous_exec_mode.take(),
-            );
-            restore_env(
-                ENV_COMMAND_TOOL_ALLOWLIST,
-                self.previous_allowlist.take(),
-            );
+            restore_env("RYU_ALLOW_GATEWAY_FALLBACK", self.previous_fallback.take());
+            restore_env("RYU_EXEC_APPROVAL_MODE", self.previous_exec_mode.take());
+            restore_env(ENV_COMMAND_TOOL_ALLOWLIST, self.previous_allowlist.take());
         }
     }
 
@@ -2566,6 +2559,14 @@ mod tests {
         // The gate's REFUSAL path has its own test
         // (`a_command_tools_child_env_obeys_the_same_namespace_gate_as_headers`).
         std::env::set_var("RYU_PLUGIN_COM_TEST_CMD_SRC", "injected-value");
+        assert_eq!(
+            std::env::var("RYU_PLUGIN_COM_TEST_CMD_SRC").as_deref(),
+            Ok("injected-value")
+        );
+        assert!(may_read_env_secret(
+            "com.test.cmd",
+            "RYU_PLUGIN_COM_TEST_CMD_SRC"
+        ));
         // A secret-shaped inherited var that must be scrubbed from the child.
         std::env::set_var("RYU_CMD_TEST_SECRET_TOKEN", "leak-me");
         let mut env_map = BTreeMap::new();
@@ -2590,6 +2591,11 @@ mod tests {
         )
         .await
         .expect("env runs");
+        assert_eq!(
+            out.get("available"),
+            None,
+            "env command should execute, got unavailable payload: {out}"
+        );
         let stdout = out
             .get("stdout")
             .and_then(|v| v.as_str())
@@ -2602,7 +2608,7 @@ mod tests {
             !stdout.contains("leak-me") && !stdout.contains("RYU_CMD_TEST_SECRET_TOKEN"),
             "secret-shaped inherited var must be scrubbed, got: {stdout}"
         );
-        std::env::remove_var("RYU_CMD_TEST_SRC");
+        std::env::remove_var("RYU_PLUGIN_COM_TEST_CMD_SRC");
         std::env::remove_var("RYU_CMD_TEST_SECRET_TOKEN");
     }
 

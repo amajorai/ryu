@@ -26,7 +26,10 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useComposerAgentControls } from "@/components/agent-elements/input/composer-agent-controls.tsx";
 import type { ComposerSettingsSection } from "@/components/agent-elements/input/composer-settings-menu.tsx";
-import type { GhostControls } from "@/components/agent-elements/input/goal-plus-button.tsx";
+import type {
+	GhostControls,
+	PluginComposerControlRow,
+} from "@/components/agent-elements/input/goal-plus-button.tsx";
 import { useComposerAcpSections } from "@/components/agent-elements/input/use-composer-acp-sections.ts";
 import {
 	type AttachedImage,
@@ -160,7 +163,7 @@ export interface ComposerSlotOptions {
 	/** Bind voice-mode turns to this conversation so history persists. */
 	conversationId?: string;
 	/**
-	 * Temporary-chat ("ghost") toggle for the "+" dropdown. Only a new-chat surface
+	 * Temporary-chat toggle for the "+" dropdown. Only a new-chat surface
 	 * can offer it — an existing thread can't retroactively become unsaved — so it's
 	 * opt-in per surface, not derived here.
 	 */
@@ -191,6 +194,8 @@ export interface ComposerSlotOptions {
 	onSelectTeam?: (teamId: string) => void;
 	/** Composer placeholder override (builders use "Describe what to build…"). */
 	placeholder?: string;
+	/** Plugin-registered toggle rows for this composer. */
+	pluginControls?: PluginComposerControlRow[];
 	/** Browser model-selection namespace for this shared composer surface. */
 	surface?: BrowserSurface;
 	/** Node target for voice STT + realtime voice mode. */
@@ -227,6 +232,7 @@ export function useComposerSlot(
 		isWorking = false,
 		teamId,
 		teams,
+		pluginControls,
 	} = options;
 	const { agents } = useAgents();
 	const interfaceLevel = useInterfaceLevel();
@@ -474,6 +480,7 @@ export function useComposerSlot(
 		onStartVoiceMode: () => void;
 		infoBar: InputBarInfoBar | undefined;
 		placeholder?: string;
+		pluginControls?: PluginComposerControlRow[];
 		right: ReactNode;
 		sections: ComposerSettingsSection[];
 		shortcuts: typeof composerShortcuts;
@@ -488,6 +495,7 @@ export function useComposerSlot(
 		onGenerateImage,
 		onStartVoiceMode: voiceModeState.start,
 		placeholder,
+		pluginControls,
 		right: rightActions,
 		sections,
 		shortcuts: composerShortcuts,
@@ -501,6 +509,7 @@ export function useComposerSlot(
 		onGenerateImage,
 		onStartVoiceMode: voiceModeState.start,
 		placeholder,
+		pluginControls,
 		right: rightActions,
 		sections,
 		shortcuts: composerShortcuts,
@@ -531,6 +540,7 @@ export function useComposerSlot(
 							props.onTextareaKeyDown?.(event);
 						}}
 						placeholder={live.placeholder ?? props.placeholder}
+						pluginControls={live.pluginControls}
 						rightActions={live.minimal ? null : live.right}
 						voice={{ transcribe }}
 						voiceMode={

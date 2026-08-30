@@ -2044,12 +2044,14 @@ async fn dispatch_kernel_capability(
             .await
         }
         "email.status" => crate::server::app_email::host_email_status(State(state), headers).await,
-        "egress.fetch" => crate::server::app_egress::host_egress_fetch(
-            State(state),
-            headers,
-            body!(crate::server::app_egress::FetchBody),
-        )
-        .await,
+        "egress.fetch" => {
+            crate::server::app_egress::host_egress_fetch(
+                State(state),
+                headers,
+                body!(crate::server::app_egress::FetchBody),
+            )
+            .await
+        }
         "billing.recordToolCharge" => {
             crate::server::app_tool_usage::host_tool_usage_record(
                 State(state),
@@ -2466,10 +2468,12 @@ mod tests {
         broad.auth = crate::plugin_manifest::schema::RouteAuth::Public;
         http.routes = vec![broad, route("/admin", None, None)];
 
-        let (_, _, matched) =
-            resolve_route(&manifest, "/admin", "GET").expect("a route resolves");
+        let (_, _, matched) = resolve_route(&manifest, "/admin", "GET").expect("a route resolves");
         assert_eq!(matched.path, "/admin");
-        assert_eq!(matched.auth, crate::plugin_manifest::schema::RouteAuth::Protected);
+        assert_eq!(
+            matched.auth,
+            crate::plugin_manifest::schema::RouteAuth::Protected
+        );
     }
 
     #[test]
@@ -2498,11 +2502,7 @@ mod tests {
         let mut second = manifest.sidecars[0].clone();
         second.name = "other".to_owned();
         second.port = 9100;
-        second
-            .http
-            .as_mut()
-            .expect("provider http")
-            .routes = vec![route("/:slug", None, None)];
+        second.http.as_mut().expect("provider http").routes = vec![route("/:slug", None, None)];
         manifest.sidecars.push(second);
 
         assert!(resolve_route(&manifest, "/admin", "GET").is_none());
@@ -2697,8 +2697,8 @@ mod tests {
             "an un-annotated route must not inherit a sibling's rule"
         );
 
-        let (_, _, close) = resolve_route(&manifest, "/tabs/t-42/close", "POST")
-            .expect("declared route resolves");
+        let (_, _, close) =
+            resolve_route(&manifest, "/tabs/t-42/close", "POST").expect("declared route resolves");
         assert_eq!(
             required_permission_for(close, "/tabs/t-42/close", &manifest.id),
             Some(("tabs.close".to_owned(), "t-42".to_owned()))
@@ -2712,11 +2712,7 @@ mod tests {
     #[test]
     fn one_path_resolves_different_permissions_by_http_method() {
         let mut manifest = provider_manifest(9099, None);
-        manifest.sidecars[0]
-            .http
-            .as_mut()
-            .expect("http")
-            .routes = vec![
+        manifest.sidecars[0].http.as_mut().expect("http").routes = vec![
             route_for_method("/items", "GET", "items.view"),
             route_for_method("/items", "POST", "items.edit"),
         ];

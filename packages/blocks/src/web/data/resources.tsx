@@ -22,10 +22,14 @@ import {
 export type ResourceCategory = "Learn" | "Explore" | "Support";
 
 /* Docs live in a separate Fumadocs app, not a route in this site. The base URL
- * is configurable via NEXT_PUBLIC_DOCS_URL (inlined by Next at build): the local
- * dev server on :4000, or https://docs.ryuhq.com in prod. */
+ * is configurable via NEXT_PUBLIC_DOCS_URL (inlined by Next at build). Local
+ * development can point it at :4000; production uses the canonical docs host. */
 export const DOCS_URL =
-	process.env.NEXT_PUBLIC_DOCS_URL ?? "http://localhost:4000";
+	process.env.NEXT_PUBLIC_DOCS_URL ?? "https://docs.ryuhq.com";
+
+export function docsHref(path: string): string {
+	return `${DOCS_URL.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+}
 
 /**
  * The booking link behind every "book a demo" / "free consultation" CTA.

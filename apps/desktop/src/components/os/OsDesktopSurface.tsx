@@ -9,7 +9,6 @@ import {
 	CommandInput,
 	CommandItem,
 	CommandList,
-	CommandShortcut,
 } from "@ryu/ui/components/command.tsx";
 import {
 	Dock,
@@ -34,7 +33,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	ArrowRight,
 	Bot,
-	Command as CommandIcon,
+	LayoutGrid,
 	Maximize2,
 	Minimize2,
 	Minus,
@@ -51,8 +50,15 @@ import {
 } from "react";
 import { SidebarBrandBadge } from "@/src/components/layout/SidebarBrandBadge.tsx";
 import { useApps } from "@/src/hooks/useApps.ts";
+import {
+	pluginCompanionPath,
+	usePluginContributions,
+} from "@/src/hooks/usePluginContributions.ts";
 
-type OsAppAction = "mission-control" | "open-window";
+type OsAppAction = "app-launcher" | "open-window";
+
+const APP_LAUNCHER_ID = "app-launcher";
+const APP_LAUNCHER_LABEL = "App Launcher";
 
 export interface OsApp {
 	action?: OsAppAction;
@@ -60,7 +66,7 @@ export interface OsApp {
 	description: string;
 	iconBackground?: string | null;
 	iconDither?: CardDither | null;
-	iconId: string;
+	iconId?: string | null;
 	iconPadding?: string | null;
 	iconUrl?: string | null;
 	id: string;
@@ -146,11 +152,18 @@ function randomWallpaper(
 	return pool[Math.floor(Math.random() * pool.length)] ?? OS_WALLPAPERS[0];
 }
 
-/** The first-party Apps that make the Ryu OS dock useful on first launch. */
+/** The first-party surfaces that make the Ryu OS dock useful on first launch. */
 export const OS_APPS: readonly OsApp[] = [
 	{
-		action: "mission-control",
-		description: "Find an App or jump between live workspace windows.",
+		action: "app-launcher",
+		description: "Browse current Apps or jump between live workspace windows.",
+		iconId: "dashboard-square-01",
+		id: APP_LAUNCHER_ID,
+		label: APP_LAUNCHER_LABEL,
+		path: "/app-launcher",
+	},
+	{
+		description: "Review what every chat did, and what is still open.",
 		iconId: "radar-01",
 		id: "mission-control",
 		label: "Mission Control",
@@ -259,7 +272,7 @@ function OsAppIcon({
 	);
 }
 
-function MissionControlDialog({
+function AppLauncherDialog({
 	onActivateWindow,
 	onOpenApp,
 	onOpenChange,
@@ -274,79 +287,142 @@ function MissionControlDialog({
 	open: boolean;
 	windows: OsWindow[];
 }) {
+	const appItems = apps.filter((app) => app.action !== "app-launcher");
+	const appPathSet = new Set(
+		apps.filter((app) => app.path).map((app) => app.path)
+	);
+
 	return (
 		<CommandDialog
-			className="max-w-xl rounded-[1.75rem]!"
-			description="Open a Ryu App or switch to a live workspace window."
+			className="top-[8%]! max-w-3xl! p-0 sm:top-[8%]!"
+			description="Open a current Ryu App or return to a live workspace window."
 			onOpenChange={onOpenChange}
 			open={open}
-			title="Mission Control"
+			title={APP_LAUNCHER_LABEL}
 		>
-			<Command>
-				<CommandInput autoFocus placeholder="Open an app or window…" />
-				<CommandList className="max-h-[min(60vh,28rem)] p-2">
-					<CommandEmpty>No Apps or windows match that search.</CommandEmpty>
-					<CommandGroup heading="Apps">
-						{apps
-							.filter((app) => app.action !== "mission-control")
-							.map((app) => {
+			<Command
+				className="rounded-4xl! bg-transparent p-0"
+				data-testid="app-launcher-dialog"
+			>
+				<header className="border-border border-b px-5 pt-5 pb-4">
+					<div className="flex items-center gap-3">
+						<span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/70 text-primary">
+							<LayoutGrid aria-hidden="true" className="size-5" />
+						</span>
+						<span className="min-w-0 flex-1">
+							<span className="block font-medium text-sm">
+								{APP_LAUNCHER_LABEL}
+							</span>
+							<span className="mt-0.5 block truncate text-muted-foreground text-xs">
+								Current Apps and live workspace windows
+							</span>
+						</span>
+						<kbd className="hidden rounded-lg border border-border bg-muted px-2 py-1 font-medium text-[10px] text-muted-foreground sm:inline-flex">
+							⌘K
+						</kbd>
+					</div>
+					<div className="mt-4 rounded-2xl bg-muted/50 px-2">
+						<CommandInput
+							autoFocus
+							className="text-foreground placeholder:text-muted-foreground"
+							placeholder="Search current Apps and windows…"
+						/>
+					</div>
+				</header>
+				<CommandList className="max-h-[min(70vh,40rem)] p-3 sm:p-4">
+					<CommandEmpty className="py-12 text-muted-foreground">
+						No Apps or windows match that search.
+					</CommandEmpty>
+					<CommandGroup
+						className="p-0 **:[[cmdk-group-heading]]:px-1 **:[[cmdk-group-heading]]:py-2 **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground"
+						heading="Current Apps"
+					>
+						<div
+							className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6"
+							data-testid="app-launcher-app-grid"
+						>
+							{appItems.map((app) => {
+								const open = app.path ? appPathSet.has(app.path) : false;
 								return (
 									<CommandItem
-										data-testid={`mission-control-app-${app.id}`}
+										className="group/app-launcher min-h-28 flex-col justify-center gap-2 rounded-2xl bg-muted/30 px-2 py-3 text-center text-foreground/80 transition-colors hover:bg-muted/70 data-selected:bg-accent data-selected:text-foreground [&>svg:last-child]:hidden"
+										data-open={open ? "true" : "false"}
+										data-testid={`app-launcher-app-${app.id}`}
 										key={app.id}
 										onSelect={() => onOpenApp(app)}
+										title={app.description}
 										value={`${app.label} ${app.description}`}
 									>
-										<OsAppIcon app={app} className="size-8 rounded-xl" />
-										<span className="min-w-0 flex-1">
-											<span className="block truncate font-medium">
-												{app.label}
-											</span>
-											<span className="block truncate text-muted-foreground text-xs">
-												{app.description}
-											</span>
-										</span>
-										<CommandShortcut>↵</CommandShortcut>
-									</CommandItem>
-								);
-							})}
-					</CommandGroup>
-					{windows.length > 0 ? (
-						<CommandGroup heading="Open windows">
-							{windows.map((item) => {
-								const app = appForWindow(item.path, apps);
-								return (
-									<CommandItem
-										data-testid={`mission-control-window-${item.id}`}
-										key={item.id}
-										onSelect={() => {
-											onActivateWindow(item.id);
-											onOpenChange(false);
-										}}
-										value={`${item.title} ${item.path}`}
-									>
-										{app ? (
+										<span className="relative">
 											<OsAppIcon
 												app={app}
-												className="size-8 shrink-0 rounded-xl"
+												className="size-16 rounded-[1.15rem] shadow-xl transition-transform group-active/app-launcher:scale-95"
+												size={28}
 											/>
-										) : (
-											<span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-												<Bot aria-hidden="true" className="size-4" />
-											</span>
-										)}
-										<span className="min-w-0 flex-1">
-											<span className="block truncate font-medium">
-												{item.title}
-											</span>
-											<span className="block truncate text-muted-foreground text-xs">
-												{item.path}
-											</span>
+											<span
+												aria-hidden="true"
+												className={cn(
+													"absolute -bottom-1 left-1/2 size-1.5 -translate-x-1/2 rounded-full",
+													open ? "bg-success" : "bg-transparent"
+												)}
+											/>
 										</span>
-										<CommandShortcut>⌘↵</CommandShortcut>
+										<span className="w-full truncate font-medium text-xs">
+											{app.label}
+										</span>
 									</CommandItem>
 								);
 							})}
+						</div>
+					</CommandGroup>
+					{windows.length > 0 ? (
+						<CommandGroup
+							className="mt-3 p-0 **:[[cmdk-group-heading]]:px-1 **:[[cmdk-group-heading]]:py-2 **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground"
+							heading="Open windows"
+						>
+							<div
+								className="grid gap-2 sm:grid-cols-2"
+								data-testid="app-launcher-window-grid"
+							>
+								{windows.map((item) => {
+									const app = appForWindow(item.path, apps);
+									return (
+										<CommandItem
+											className="min-h-16 justify-start rounded-2xl bg-muted/30 px-3 py-3 text-left text-foreground/80 transition-colors hover:bg-muted/70 data-selected:bg-accent data-selected:text-foreground [&>svg:last-child]:hidden"
+											data-testid={`app-launcher-window-${item.id}`}
+											key={item.id}
+											onSelect={() => {
+												onActivateWindow(item.id);
+												onOpenChange(false);
+											}}
+											value={`${item.title} ${item.path}`}
+										>
+											{app ? (
+												<OsAppIcon
+													app={app}
+													className="size-10 shrink-0 rounded-xl"
+													size={20}
+												/>
+											) : (
+												<span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
+													<Bot aria-hidden="true" className="size-4" />
+												</span>
+											)}
+											<span className="min-w-0 flex-1">
+												<span className="block truncate font-medium text-sm">
+													{item.title}
+												</span>
+												<span className="mt-0.5 block truncate text-muted-foreground text-xs">
+													{app?.label ?? item.path}
+												</span>
+											</span>
+											<span className="shrink-0 rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+												Open
+											</span>
+										</CommandItem>
+									);
+								})}
+							</div>
 						</CommandGroup>
 					) : null}
 				</CommandList>
@@ -442,6 +518,10 @@ export interface OsDesktopSurfaceProps {
 	activeWindowId: string;
 	appRecords?: readonly OsAppRecord[];
 	canSwitchToConsole?: boolean;
+	/** Enabled app companions from the live contributions feed. Shell-owned pages
+	 * remain in {@link OS_APPS}; these entries keep the launcher current as apps add
+	 * their own full-page surfaces. */
+	contributedApps?: readonly OsApp[];
 	onActivateWindow: (id: string) => void;
 	onCloseWindow: (id: string) => void;
 	onOpenApp: (app: OsApp) => void;
@@ -452,12 +532,13 @@ export function OsDesktopSurface({
 	activeWindowId,
 	appRecords = [],
 	canSwitchToConsole = true,
+	contributedApps = [],
 	onActivateWindow,
 	onCloseWindow,
 	onOpenApp,
 	windows,
 }: OsDesktopSurfaceProps) {
-	const [missionControlOpen, setMissionControlOpen] = useState(false);
+	const [appLauncherOpen, setAppLauncherOpen] = useState(false);
 	const [minimizedWindowIds, setMinimizedWindowIds] = useState<Set<string>>(
 		() => new Set()
 	);
@@ -466,6 +547,13 @@ export function OsDesktopSurface({
 	);
 	const [wallpaperSet, setWallpaperSet] = useState("all");
 	const osApps = useMemo(
+		() =>
+			[...OS_APPS, ...contributedApps].map((app) =>
+				resolveOsApp(app, appRecords)
+			),
+		[appRecords, contributedApps]
+	);
+	const dockApps = useMemo(
 		() => OS_APPS.map((app) => resolveOsApp(app, appRecords)),
 		[appRecords]
 	);
@@ -527,7 +615,7 @@ export function OsDesktopSurface({
 		const onKeyDown = (event: KeyboardEvent) => {
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
 				event.preventDefault();
-				setMissionControlOpen((open) => !open);
+				setAppLauncherOpen((open) => !open);
 			}
 		};
 		window.addEventListener("keydown", onKeyDown);
@@ -554,10 +642,6 @@ export function OsDesktopSurface({
 				<div
 					aria-hidden="true"
 					className="absolute inset-0 bg-gradient-to-br from-[#121126]/35 via-transparent to-[#121126]/5"
-				/>
-				<div
-					aria-hidden="true"
-					className="absolute inset-0 bg-[radial-gradient(circle_at_75%_12%,rgba(143,123,242,0.34),transparent_34%),radial-gradient(circle_at_10%_88%,rgba(45,212,191,0.18),transparent_40%)]"
 				/>
 			</div>
 			<div
@@ -586,11 +670,11 @@ export function OsDesktopSurface({
 							<MenubarGroup>
 								<MenubarLabel>Ryu OS</MenubarLabel>
 								<MenubarItem
-									data-testid="mission-control-menu-item"
-									onClick={() => setMissionControlOpen(true)}
+									data-testid="app-launcher-menu-item"
+									onClick={() => setAppLauncherOpen(true)}
 								>
-									<CommandIcon aria-hidden="true" />
-									Mission Control
+									<LayoutGrid aria-hidden="true" />
+									{APP_LAUNCHER_LABEL}
 									<MenubarShortcut>⌘K</MenubarShortcut>
 								</MenubarItem>
 							</MenubarGroup>
@@ -603,11 +687,11 @@ export function OsDesktopSurface({
 						<MenubarContent className="min-w-64" withBackdrop={false}>
 							<MenubarGroup>
 								<MenubarItem
-									data-testid="mission-control-trigger"
-									onClick={() => setMissionControlOpen(true)}
+									data-testid="app-launcher-trigger"
+									onClick={() => setAppLauncherOpen(true)}
 								>
-									<CommandIcon aria-hidden="true" />
-									Mission Control
+									<LayoutGrid aria-hidden="true" />
+									{APP_LAUNCHER_LABEL}
 									<MenubarShortcut>⌘K</MenubarShortcut>
 								</MenubarItem>
 							</MenubarGroup>
@@ -678,7 +762,7 @@ export function OsDesktopSurface({
 					</span>
 				</button>
 				<div className="hidden items-center gap-2 text-white/45 text-xs md:flex">
-					<span className="size-1.5 rounded-full bg-emerald-300" />
+					<span className="size-1.5 rounded-full bg-success" />
 					Ready
 				</div>
 			</div>
@@ -699,7 +783,7 @@ export function OsDesktopSurface({
 					<div className="absolute inset-0 flex items-center justify-center p-6 pb-28">
 						<div className="max-w-md text-center">
 							<div className="mx-auto flex size-16 items-center justify-center rounded-[1.5rem] border border-white/15 bg-white/10 shadow-2xl backdrop-blur">
-								<Bot aria-hidden="true" className="size-7 text-[#c4b5fd]" />
+								<Bot aria-hidden="true" className="size-7 text-white/80" />
 							</div>
 							<p className="mt-6 font-medium text-3xl tracking-[-0.04em]">
 								Welcome to Ryu OS
@@ -709,11 +793,11 @@ export function OsDesktopSurface({
 								keep your workspace moving.
 							</p>
 							<button
-								className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 font-medium text-[#17152a] text-sm transition-colors hover:bg-white/90"
-								onClick={() => setMissionControlOpen(true)}
+								className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 font-medium text-background text-sm transition-colors hover:bg-white/90"
+								onClick={() => setAppLauncherOpen(true)}
 								type="button"
 							>
-								Open Mission Control
+								Open {APP_LAUNCHER_LABEL}
 								<ArrowRight aria-hidden="true" className="size-4" />
 							</button>
 						</div>
@@ -731,9 +815,9 @@ export function OsDesktopSurface({
 					magnification={72}
 					panelHeight={58}
 				>
-					{osApps.map((app, index) => {
+					{dockApps.map((app, index) => {
 						const open =
-							app.action !== "mission-control" && openPaths.has(app.path);
+							app.action !== "app-launcher" && openPaths.has(app.path);
 						return (
 							<Fragment key={app.id}>
 								{index === 1 ? (
@@ -744,16 +828,16 @@ export function OsDesktopSurface({
 								) : null}
 								<DockItem
 									aria-label={
-										app.action === "mission-control"
-											? "Open Mission Control"
+										app.action === "app-launcher"
+											? `Open ${APP_LAUNCHER_LABEL}`
 											: `Open ${app.label}`
 									}
 									className="text-white/65 hover:text-white"
 									data-open={open ? "true" : "false"}
 									data-testid={`os-dock-${app.id}`}
 									onClick={() => {
-										if (app.action === "mission-control") {
-											setMissionControlOpen(true);
+										if (app.action === "app-launcher") {
+											setAppLauncherOpen(true);
 											return;
 										}
 										openOsApp(app);
@@ -783,15 +867,15 @@ export function OsDesktopSurface({
 				</Dock>
 			</div>
 
-			<MissionControlDialog
+			<AppLauncherDialog
 				apps={osApps}
 				onActivateWindow={activateWindow}
 				onOpenApp={(app) => {
 					openOsApp(app);
-					setMissionControlOpen(false);
+					setAppLauncherOpen(false);
 				}}
-				onOpenChange={setMissionControlOpen}
-				open={missionControlOpen}
+				onOpenChange={setAppLauncherOpen}
+				open={appLauncherOpen}
 				windows={windows}
 			/>
 		</div>
@@ -801,5 +885,41 @@ export function OsDesktopSurface({
 /** Connect the pure OS surface to the authoritative installed-app manifest feed. */
 export function OsDesktopSurfaceWithApps(props: OsDesktopSurfaceProps) {
 	const { apps } = useApps();
-	return <OsDesktopSurface {...props} appRecords={apps} />;
+	const { companions } = usePluginContributions();
+	const appsById = useMemo(
+		() => new Map(apps.map((app) => [app.id, app])),
+		[apps]
+	);
+	const contributedApps = useMemo<OsApp[]>(
+		() =>
+			companions
+				.filter(
+					(companion) =>
+						companion.hasUi !== false &&
+						!OS_APPS.some((app) => app.id === companion.id)
+				)
+				.map((companion) => {
+					const owner = appsById.get(companion.pluginId);
+					return {
+						description:
+							owner?.tagline ??
+							owner?.description ??
+							"Open this App surface in a live workspace window.",
+						iconId: companion.icon ?? owner?.companion?.icon ?? owner?.icon,
+						id: companion.id,
+						label: companion.label || companion.name,
+						manifestId: companion.pluginId || undefined,
+						path: pluginCompanionPath(companion.id),
+					};
+				}),
+		[appsById, companions]
+	);
+
+	return (
+		<OsDesktopSurface
+			{...props}
+			appRecords={apps}
+			contributedApps={contributedApps}
+		/>
+	);
 }

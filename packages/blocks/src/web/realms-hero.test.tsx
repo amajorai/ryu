@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { DOCS_URL } from "./data/resources.tsx";
 import RealmsHero from "./realms-hero.tsx";
 
 test("landing page carries the composable cloud positioning", () => {
@@ -13,6 +14,13 @@ test("landing page carries the composable cloud positioning", () => {
 	expect(html).toContain('data-testid="product-realm-selector"');
 	expect(html).toContain('aria-label="Ryu surfaces"');
 	expect(html).toContain('data-testid="managed-deployment"');
+	expect(html).toContain('data-testid="standalone-services"');
+	for (const slug of ["gateway", "box", "notify", "mail"]) {
+		expect(html).toContain(`data-testid="standalone-service-${slug}"`);
+	}
+	for (const label of ["Ryu Gateway", "Ryu Box", "Ryu Notify", "Ryu Mail"]) {
+		expect(html).toContain(label);
+	}
 	expect(html).toContain('id="integration-layer"');
 	for (const label of ["Ryu Apps", "Ryu Bot", "Ryu Console"]) {
 		expect(html).toContain(label);
@@ -31,7 +39,9 @@ test("landing page carries the composable cloud positioning", () => {
 	expect(html).toContain('aria-label="More download options"');
 	expect(html).not.toContain("Explore Ryu Apps");
 	expect(html).not.toContain("Book a Demo");
-	expect(html).toContain('href="/help"');
+	expect(html).not.toContain('href="/help"');
+	expect(html).toContain(`href="${DOCS_URL}"`);
+	expect(html).toContain('target="_blank"');
 	expect(html.indexOf("We deploy and run AI agents<br/>")).toBeLessThan(
 		html.indexOf('data-testid="hero-workflow-stage"')
 	);

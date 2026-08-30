@@ -94,6 +94,7 @@ import type {
 	AttachedImage,
 	InputBarInfoBar,
 	InputBarProps,
+	TemporaryChatSaveControls,
 } from "@/components/agent-elements/input-bar.tsx";
 import { InputBar } from "@/components/agent-elements/input-bar.tsx";
 import type { QueueBarProps } from "@/components/agent-elements/queue/queue-bar.tsx";
@@ -252,6 +253,10 @@ import {
 	updateDocument,
 } from "@/src/lib/api/spaces.ts";
 import type { Team } from "@/src/lib/api/teams.ts";
+import {
+	saveTemporaryChat,
+	TEMPORARY_CONTEXT_FLAG,
+} from "@/src/lib/api/temporary-chat.ts";
 import { stageImageUpload } from "@/src/lib/api/uploads.ts";
 import { generateVideo } from "@/src/lib/api/video.ts";
 import { speakText, transcribeAudio } from "@/src/lib/api/voice.ts";
@@ -1113,7 +1118,9 @@ export default function ChatPage({
 	initialSubmit,
 	initialImages,
 	initialAgent,
+	initialTeamId,
 	initialGhost,
+	initialPluginFlags,
 	initialProject,
 	mergedAgentId,
 	tabWorktreeMode,
@@ -1146,10 +1153,14 @@ export default function ChatPage({
 	 * conversation existed, carried into this fresh tab. Consumed once on mount. */
 	initialImages?: AttachedImage[];
 	initialAgent?: string;
+	/** One-shot team target carried from the new-chat launchpad. */
+	initialTeamId?: string;
 	/** Open this thread already temporary — the launchpad's "+" offers the toggle
 	 * before a conversation exists, so the pick arrives as a seed rather than as a
 	 * click on this page's own row. Consumed once on mount. */
 	initialGhost?: boolean;
+	/** One-shot composer flags carried from the new-chat launchpad. */
+	initialPluginFlags?: Record<string, boolean>;
 	initialProject?: string;
 	/** Per-tab isolation requested by a fork destination or workspace handoff. */
 	tabWorktreeMode?: boolean;
@@ -1229,7 +1240,7 @@ export default function ChatPage({
 	// Persistent group selection from the composer target picker. When set, every
 	// turn fans out to the group's members (Core's `team_id` takes precedence over
 	// `agent_id`). Session-only — distinct from the transient `@group` mention ref.
-	const [teamId, setTeamId] = useState<string | null>(null);
+	const [teamId, setTeamId] = useState<string | null>(initialTeamId ?? null);
 	const [agentTools, setAgentTools] = useState<string[]>([]);
 
 	// One-shot seed from a `ryu://chat/new` deep link: pre-fill the composer and
@@ -1745,6 +1756,7 @@ export default function ChatPage({
 		createConversation,
 		getConversation,
 		loadMessages,
+		loadMessagesResult,
 		loadMessagesPageResult,
 		forkConversation,
 		editMessage,
@@ -2046,7 +2058,9 @@ export default function ChatPage({
 	// each control's `flag`. Held in state (drives the toggle's rendered `enabled`)
 	// plus a ref the once-created transport body closure reads when merging the
 	// per-request `plugin_flags` — same pattern as the double-check flag above.
-	const [pluginFlags, setPluginFlags] = useState<Record<string, boolean>>({});
+	const [pluginFlags, setPluginFlags] = useState<Record<string, boolean>>(
+		() => ({ ...initialPluginFlags })
+	);
 	const pluginFlagsRef = useRef<Record<string, boolean>>({});
 	pluginFlagsRef.current = pluginFlags;
 
@@ -2062,8 +2076,8 @@ export default function ChatPage({
 		};
 	}, []);
 
-	// Ghost (temporary) chat: when on, every turn is sent with `persist: false` so
-	// Core writes nothing to the conversation store, and a new ghost chat is never
+	// Temporary chat: when on, every turn is sent with `persist: false` so Core
+	// writes nothing to the conversation store, and a temporary chat is never
 	// registered in the sidebar history — it lives only in this tab's memory and is
 	// gone on close or when a fresh chat starts. Ryu's incognito thread. A ref
 	// mirrors the toggle so the once-created transport body closure reads the live
@@ -2072,7 +2086,7 @@ export default function ChatPage({
 	// existed, so the very first turn is already unsaved (flipping it after mount
 	// would be too late — the turn would have persisted).
 	const [ghostMode, setGhostMode] = useState(Boolean(initialGhost));
-	// A launchpad-seeded ghost chat may render before the contribution fetch lands.
+	// A launchpad-seeded temporary chat may render before the contribution fetch lands.
 	// Keep that initial privacy behavior until the feed settles, then require the
 	// plugin declaration for every subsequent temporary-chat turn.
 	const ghostChatActive =
@@ -2097,7 +2111,7 @@ export default function ChatPage({
 	// blank state clobbers the live one and both stop updating — the "opened it
 	// again and the new tab is broken" report.
 	//
-	// A ghost (temporary) thread never binds: it must leave no durable trace, and
+	// A temporary thread never binds: it must leave no durable trace, and
 	// a persisted binding would restore a tab pointing at a conversation Core
 	// never wrote. Unbinding is equally load-bearing — a tab that starts a fresh
 	// thread must drop its old id, or a click on the OLD conversation would dedup
@@ -2202,7 +2216,7 @@ export default function ChatPage({
 						referencedConversationIds.length > 0
 							? referencedConversationIds
 							: undefined,
-					// A ghost (temporary) chat must leave no durable trace, so it never
+					// A temporary chat must leave no durable trace, so it never
 					// records the turn into long-term cross-session memory — regardless of
 					// the user's standing long-term-memory preference.
 					enable_long_term: ghostModeRef.current
@@ -2250,7 +2264,7 @@ export default function ChatPage({
 						...pluginFlagsRef.current,
 						...firedActionFlags,
 					}),
-					// Ghost (temporary) chat: never write this turn to the conversation
+					// Temporary chat: never write this turn to the conversation
 					// store. Omitted otherwise so Core applies its default (persist=true).
 					persist: ghostModeRef.current ? false : undefined,
 					// Version-tree edit/regenerate re-run: the edited user sibling is
@@ -4139,7 +4153,7 @@ export default function ChatPage({
 		[contributedMessageActions]
 	);
 
-	// Emoji reactions for this conversation. A ghost chat is never persisted, so
+	// Emoji reactions for this conversation. A temporary chat is never persisted, so
 	// there is nothing to react TO and no room to fan reactions out over — the
 	// null conversation id disables the query the same way it skips presence.
 	const {
@@ -4405,7 +4419,7 @@ export default function ChatPage({
 		});
 	}, []);
 
-	// A ghost (temporary) chat never opens a realtime room: its turns are never
+	// A temporary chat never opens a realtime room: its turns are never
 	// persisted (so Core fans out nothing), and we also skip presence so a
 	// temporary thread stays fully private. `null` room id = no join.
 	const { publishPresence: publishRoomPresence } = useRealtimeRoom(
@@ -4771,6 +4785,10 @@ export default function ChatPage({
 				browserSnapshot?.activeSurface === "dashboard" &&
 				browserSnapshot.activeAgentId === agentId &&
 				browserModel?.capabilities.chatSupport === true &&
+				!(
+					ghostChatActive &&
+					pluginFlagsRef.current[TEMPORARY_CONTEXT_FLAG] === true
+				) &&
 				(message.attachments?.length ?? 0) === 0;
 			if (browserLocalActive) {
 				forceCoreNextRef.current = false;
@@ -4884,7 +4902,7 @@ export default function ChatPage({
 			const sendFolder = chatFolderRef.current ?? undefined;
 			if (!convId) {
 				const newId = draftConvId.current;
-				// A ghost (temporary) chat is never registered in the sidebar history:
+				// A temporary chat is never registered in the sidebar history:
 				// skip `createConversation` so it leaves no trace in the thread list.
 				// The turn still streams (useChat keys off the local id) and Core
 				// persists nothing because the transport sends `persist: false`.
@@ -4915,7 +4933,7 @@ export default function ChatPage({
 			// wait — without it the row reads "New Chat" for the whole first reply
 			// (the list is only re-fetched once the turn completes). The chat-title
 			// plugin replaces it with a model-written name after that reply lands.
-			// Ghost chats are absent from the list, so the seed is a no-op for them.
+			// Temporary chats are absent from the list, so the seed is a no-op for them.
 			if (!ghostChatActive) {
 				const titleTargetId = convIdRef.current ?? draftConvId.current;
 				if (titleTargetId) {
@@ -5030,6 +5048,103 @@ export default function ChatPage({
 		startFreshThread();
 		setGhostMode((on) => !on);
 	}, [ghostChatsPluginEnabled, startFreshThread]);
+
+	const [savingTemporaryChat, setSavingTemporaryChat] = useState(false);
+	const handleSaveTemporaryChat = useCallback(async () => {
+		if (
+			!ghostChatActive ||
+			savingTemporaryChat ||
+			status === "submitted" ||
+			status === "streaming"
+		) {
+			return;
+		}
+		const conversationId = convIdRef.current ?? draftConvId.current;
+		const snapshot = messages.flatMap((message) => {
+			if (message.role !== "user" && message.role !== "assistant") {
+				return [];
+			}
+			return [
+				{
+					content: extractAssistantText(message),
+					parts: Array.isArray(message.parts) ? [...message.parts] : undefined,
+					role: message.role,
+				},
+			];
+		});
+		if (snapshot.length === 0) {
+			return;
+		}
+
+		setSavingTemporaryChat(true);
+		try {
+			const folderPath = chatFolderRef.current ?? folder ?? undefined;
+			await saveTemporaryChat(chatTarget, conversationId, {
+				agentId: agentId ?? undefined,
+				folderPath,
+				messages: snapshot,
+			});
+			createConversation(conversationId, {
+				agentId: agentId ?? undefined,
+				folderPath,
+			});
+			if (folderPath) {
+				setConversationFolder(conversationId, folderPath);
+			}
+			const firstUserMessage = snapshot.find(
+				(message) => message.role === "user"
+			);
+			if (firstUserMessage) {
+				seedTitleFromFirstMessage(conversationId, firstUserMessage.content);
+			}
+			setConvId(conversationId);
+			setGhostMode(false);
+			setActiveConversationId(conversationId);
+
+			const saved = await loadMessagesResult(conversationId);
+			if (saved.status === "ok" && saved.messages.length > 0) {
+				const now = Date.now();
+				for (const message of saved.messages) {
+					if (typeof message.timestamp === "number") {
+						messageSentAtRef.current.set(message.id, message.timestamp);
+					}
+				}
+				setVersions(buildVersions(saved.messages));
+				setMessages(
+					saved.messages.map((message) => hydrateHistoryMessage(message, now))
+				);
+			}
+			clearError();
+			refresh();
+			toast.success("Chat saved", {
+				description: "This temporary chat is now in your history.",
+			});
+		} catch {
+			toast.error("Couldn’t save temporary chat", {
+				description: "The chat is still temporary. Try saving again.",
+			});
+		} finally {
+			setSavingTemporaryChat(false);
+		}
+	}, [
+		agentId,
+		chatFolderRef,
+		chatTarget,
+		clearError,
+		createConversation,
+		folder,
+		ghostChatActive,
+		loadMessagesResult,
+		messages,
+		refresh,
+		savingTemporaryChat,
+		seedTitleFromFirstMessage,
+		setConvId,
+		setActiveConversationId,
+		setConversationFolder,
+		setMessages,
+		status,
+	]);
 
 	// `/btw` side question: an ephemeral question about the current conversation
 	// shown in a dismissible overlay and never added to the chat history (modeled
@@ -6691,33 +6806,48 @@ export default function ChatPage({
 	// InputBar slot) so a toggle re-renders the composer without rebuilding the slot.
 	const pluginComposerControls = useMemo<PluginComposerControlRow[]>(
 		() =>
-			partitionedComposerControls.toggles.map((c) => ({
-				id: c.id,
-				flag: c.flag,
-				label: c.label,
-				description: c.description,
-				enabled: Boolean(pluginFlags[c.flag]),
-				onToggle: (flag: string, next: boolean) =>
-					setPluginFlags((m) => ({ ...m, [flag]: next })),
-			})),
-		[partitionedComposerControls.toggles, pluginFlags]
+			partitionedComposerControls.toggles
+				.filter((c) => c.flag !== TEMPORARY_CONTEXT_FLAG || ghostChatActive)
+				.map((c) => ({
+					id: c.id,
+					flag: c.flag,
+					label: c.label,
+					description: c.description,
+					enabled: Boolean(pluginFlags[c.flag]),
+					onToggle: (flag: string, next: boolean) =>
+						setPluginFlags((m) => ({ ...m, [flag]: next })),
+				})),
+		[ghostChatActive, partitionedComposerControls.toggles, pluginFlags]
 	);
 	const pluginComposerControlsRef = useRef<PluginComposerControlRow[]>([]);
 	pluginComposerControlsRef.current = pluginComposerControls;
 	const expandedComposerPluginEnabledRef = useRef(false);
 	expandedComposerPluginEnabledRef.current = expandedComposerPluginEnabled;
 
-	// Ghost (temporary) chat toggle, now a row in the composer "+" dropdown rather
+	// Temporary chat toggle, now a row in the composer "+" dropdown rather
 	// than a standalone toolbar button. Held in a ref (assigned every render) so
 	// the memoized InputBar slot stays stable. Only offered on the new-chat surface
 	// (no rendered messages) — an existing conversation can't retroactively become
-	// temporary — but it stays available during an active ghost chat so the user
+	// temporary — but it stays available during an active temporary chat so the user
 	// can see and exit the temporary state. `undefined` hides the row entirely.
 	const ghostControlsRef = useRef<GhostControls | undefined>(undefined);
 	ghostControlsRef.current =
 		ghostChatsPluginEnabled &&
 		(processedMessages.length === 0 || ghostChatActive)
 			? { active: ghostChatActive, onToggle: toggleGhostMode }
+			: undefined;
+	const temporaryChatSaveControlsRef = useRef<
+		TemporaryChatSaveControls | undefined
+	>(undefined);
+	temporaryChatSaveControlsRef.current =
+		ghostChatActive && messages.length > 0
+			? {
+					disabled: status === "submitted" || status === "streaming",
+					onSave: () => {
+						void handleSaveTemporaryChat();
+					},
+					saving: savingTemporaryChat,
+				}
 			: undefined;
 
 	const councilInputBar = useMemo(() => {
@@ -6740,7 +6870,7 @@ export default function ChatPage({
 					expandComposer={
 						botProduct ? false : expandedComposerPluginEnabledRef.current
 					}
-					// Dashed violet composer treatment while a ghost (temporary) chat is
+					// Dashed violet composer treatment while a temporary chat is
 					// active. `ghostMode` is a dep of this memo, so the closure value is
 					// always current (no ref needed).
 					ghost={botProduct ? false : ghostChatActive}
@@ -6779,6 +6909,9 @@ export default function ChatPage({
 					}
 					queueBar={queueBarRef.current}
 					rightActions={composerControlsRef.current.right}
+					temporaryChatSaveControls={
+						botProduct ? undefined : temporaryChatSaveControlsRef.current
+					}
 					turnProgress={turnProgressRef.current}
 					voice={{
 						transcribe: voiceTranscribe,
@@ -7332,7 +7465,7 @@ export default function ChatPage({
 										// summarises exactly what the composer's own trigger does.
 										sections={composerTriggerSections}
 										showProjectPicker={!botProduct}
-										// Ghost (temporary) chat: the empty-state greeting whispers
+										// Temporary chat: the empty-state greeting whispers
 										// "secretly" so it's obvious this thread won't be saved.
 										title={
 											ghostChatActive

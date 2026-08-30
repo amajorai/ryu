@@ -32,6 +32,13 @@ use ryu_kernel_contracts::ResourceKey;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+mod memory_graph;
+
+pub use memory_graph::{
+    MemoryGraph, MemoryGraphDocument, MemoryGraphEdge, MemoryGraphHit, MemoryGraphNode,
+    MemoryGraphNodeKind, MemoryGraphQuery, MemoryGraphSnapshot,
+};
+
 /// The active RAG provider contract: embed a query, retrieve grounding chunks, and
 /// rerank candidates. The in-process [`RetrievalStore`] is the default impl; a
 /// future out-of-process provider (e.g. a GraphRAG sidecar) implements the same
@@ -328,7 +335,7 @@ pub struct RetrievableChunk {
     /// Space identifier when `source == Space`; `None` for memory.
     pub space_id: Option<String>,
     pub content: String,
-    /// Memory scope level (`"user"`/`"node"`/`"project"`) for `Memory` chunks;
+    /// Memory scope level (`"agent"`/`"user"`/`"node"`/`"project"`/`"org"`) for `Memory` chunks;
     /// `None` for Space/OKF. Legacy memory chunks (pre-scoping) are treated as
     /// `"user"` by the level filter.
     #[serde(default)]
@@ -336,9 +343,21 @@ pub struct RetrievableChunk {
     /// Project folder path when `mem_scope == "project"`.
     #[serde(default)]
     pub mem_scope_id: Option<String>,
+    /// Agent id used by the memory graph and `agent` scope filter.
+    #[serde(default)]
+    pub mem_agent_id: Option<String>,
     /// 1..=5 importance for `Memory` chunks; used to boost ranking.
     #[serde(default)]
     pub mem_importance: i32,
+    /// Whether the source memory was classified as a sensitive topic.
+    #[serde(default)]
+    pub mem_sensitive: bool,
+    /// Whether the denormalized memory metadata has been refreshed from the
+    /// encrypted source of truth. Legacy rows default to false and are hidden
+    /// when sensitive-memory consent is disabled rather than being treated as
+    /// ordinary non-sensitive facts.
+    #[serde(default)]
+    pub mem_metadata_ready: bool,
     /// Denormalized owner (the source document's / memory's `owner_user_id`), so the
     /// per-caller tenancy filter runs in-process without a cross-store join. `None`
     /// is fail-closed for BOTH sources on a bound node: owner-only (invisible to a
@@ -392,8 +411,9 @@ pub struct RetrievalOptions {
     pub space_ids: Option<Vec<String>>,
     /// Whether to include memory (U11) in the search.
     pub include_memory: bool,
-    /// Memory scope levels the caller (agent) may read (`"user"`/`"node"`/
-    /// `"project"`). `None` searches every level (unconfigured / back-compat);
+    /// Memory scope levels the caller (agent) may read (`"agent"`/`"user"`/
+    /// `"node"`/`"project"`/`"org"`). `None` searches every personal level
+    /// (unconfigured / back-compat) but excludes organization memory;
     /// `Some` restricts memory chunks to the listed levels.
     #[serde(default)]
     pub read_levels: Option<Vec<String>>,
@@ -402,6 +422,13 @@ pub struct RetrievalOptions {
     /// project-scoped memory.
     #[serde(default)]
     pub project_id: Option<String>,
+    /// Active agent id. Agent-scoped memory requires this exact scope id.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// Whether this caller's server-resolved consent allows sensitive memories.
+    /// This is never taken from an untrusted retrieval request on the server.
+    #[serde(default)]
+    pub include_sensitive: bool,
     /// Drop chunks whose relevance falls below this score (0.0 keeps everything).
     ///
     /// **Scope: this store's own chunks only.** A hit delegated to the Spaces store
@@ -441,6 +468,8 @@ impl Default for RetrievalOptions {
             include_memory: true,
             read_levels: None,
             project_id: None,
+            agent_id: None,
+            include_sensitive: false,
             min_score: 0.0,
             rerank_candidates: None,
             node_bound: false,
@@ -1283,8 +1312,11 @@ impl RetrievalStore {
                  -- from `memory_entries` so the level/project filter runs in-query.
                  mem_scope       TEXT,
                  mem_scope_id    TEXT,
+                 mem_agent_id    TEXT,
                  mem_category    TEXT,
-                 mem_importance  INTEGER NOT NULL DEFAULT 3
+                 mem_importance  INTEGER NOT NULL DEFAULT 3,
+                 mem_sensitive   INTEGER NOT NULL DEFAULT 0,
+                 mem_metadata_ready INTEGER NOT NULL DEFAULT 0
              );
              CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source);
              CREATE INDEX IF NOT EXISTS idx_chunks_space  ON chunks(space_id);
@@ -1325,9 +1357,18 @@ impl RetrievalStore {
         // Duplicate-column errors on fresh DBs (CREATE above) are ignored.
         let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_scope TEXT", []);
         let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_scope_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_agent_id TEXT", []);
         let _ = conn.execute("ALTER TABLE chunks ADD COLUMN mem_category TEXT", []);
         let _ = conn.execute(
             "ALTER TABLE chunks ADD COLUMN mem_importance INTEGER NOT NULL DEFAULT 3",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE chunks ADD COLUMN mem_sensitive INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE chunks ADD COLUMN mem_metadata_ready INTEGER NOT NULL DEFAULT 0",
             [],
         );
 
@@ -1344,7 +1385,7 @@ impl RetrievalStore {
         // no-ops and the columns only appear via the migrations, so indexing
         // them inside the initial batch would fail with "no such column".
         conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_chunks_mem_scope ON chunks(mem_scope, mem_scope_id);",
+            "CREATE INDEX IF NOT EXISTS idx_chunks_mem_scope ON chunks(mem_scope, mem_scope_id, mem_agent_id, mem_sensitive);",
         )
         .context("indexing chunks.mem_scope")?;
         Ok(())
@@ -1369,16 +1410,17 @@ impl RetrievalStore {
         conn.execute(
             "INSERT INTO chunks
                 (id, source, space_id, content, embedding, embedding_model, created_at,
-                 owner_user_id, owner_org_id, visibility)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 mem_metadata_ready, owner_user_id, owner_org_id, visibility)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CASE WHEN ?2 = 'memory' THEN 1 ELSE 0 END, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
-                 source          = excluded.source,
-                 space_id        = excluded.space_id,
-                 content         = excluded.content,
-                 embedding       = excluded.embedding,
-                 embedding_model = excluded.embedding_model,
-                 created_at      = excluded.created_at,
-                 owner_user_id   = excluded.owner_user_id,
+                source          = excluded.source,
+                space_id        = excluded.space_id,
+                content         = excluded.content,
+                embedding       = excluded.embedding,
+                embedding_model = excluded.embedding_model,
+                created_at      = excluded.created_at,
+                mem_metadata_ready = excluded.mem_metadata_ready,
+                owner_user_id   = excluded.owner_user_id,
                  owner_org_id    = excluded.owner_org_id,
                  visibility      = excluded.visibility",
             params![
@@ -1412,6 +1454,27 @@ impl RetrievalStore {
         importance: i32,
         owner: RetrievalOwner<'_>,
     ) -> Result<()> {
+        self.index_memory_chunk_with_metadata(
+            id, content, scope, scope_id, category, importance, None, false, owner,
+        )
+        .await
+    }
+
+    /// Index a memory fact with the agent and sensitivity metadata needed by
+    /// typed GraphRAG and server-side consent filtering. The legacy wrapper above
+    /// remains for external callers that only have the original metadata.
+    pub async fn index_memory_chunk_with_metadata(
+        &self,
+        id: &str,
+        content: &str,
+        scope: &str,
+        scope_id: Option<&str>,
+        category: &str,
+        importance: i32,
+        agent_id: Option<&str>,
+        sensitive: bool,
+        owner: RetrievalOwner<'_>,
+    ) -> Result<()> {
         let embedder = self.embedder_snapshot();
         let embedding = embedder.embed(content).await?;
         let blob = encode_embedding(&embedding);
@@ -1421,9 +1484,9 @@ impl RetrievalStore {
         conn.execute(
             "INSERT INTO chunks
                 (id, source, space_id, content, embedding, embedding_model, created_at,
-                 mem_scope, mem_scope_id, mem_category, mem_importance,
-                 owner_user_id, owner_org_id, visibility)
-             VALUES (?1, 'memory', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)
+                 mem_scope, mem_scope_id, mem_agent_id, mem_category, mem_importance, mem_sensitive,
+                 mem_metadata_ready, owner_user_id, owner_org_id, visibility)
+             VALUES (?1, 'memory', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, NULL)
              ON CONFLICT(id) DO UPDATE SET
                  source          = 'memory',
                  space_id        = NULL,
@@ -1433,8 +1496,11 @@ impl RetrievalStore {
                  created_at      = excluded.created_at,
                  mem_scope       = excluded.mem_scope,
                  mem_scope_id    = excluded.mem_scope_id,
+                 mem_agent_id    = excluded.mem_agent_id,
                  mem_category    = excluded.mem_category,
                  mem_importance  = excluded.mem_importance,
+                 mem_sensitive   = excluded.mem_sensitive,
+                 mem_metadata_ready = excluded.mem_metadata_ready,
                  owner_user_id   = excluded.owner_user_id,
                  owner_org_id    = excluded.owner_org_id",
             params![
@@ -1445,14 +1511,58 @@ impl RetrievalStore {
                 now,
                 scope,
                 scope_id,
+                agent_id,
                 category,
                 importance.clamp(1, 5),
+                if sensitive { 1_i64 } else { 0_i64 },
                 owner.user_id,
                 owner.org_id,
             ],
         )
         .context("indexing memory chunk")?;
         Ok(())
+    }
+
+    /// Refresh denormalized memory metadata without re-embedding the content.
+    /// This repairs rows written before agent/sensitivity fields existed and keeps
+    /// the retrieval copy aligned when a source fact changes classification.
+    pub async fn update_memory_metadata(
+        &self,
+        id: &str,
+        scope: &str,
+        scope_id: Option<&str>,
+        category: &str,
+        importance: i32,
+        agent_id: Option<&str>,
+        sensitive: bool,
+        owner: RetrievalOwner<'_>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let updated = conn.execute(
+            "UPDATE chunks
+             SET mem_scope = ?1,
+                 mem_scope_id = ?2,
+                 mem_agent_id = ?3,
+                 mem_category = ?4,
+                 mem_importance = ?5,
+                 mem_sensitive = ?6,
+                 mem_metadata_ready = 1,
+                 owner_user_id = ?7,
+                 owner_org_id = ?8
+             WHERE id = ?9 AND source = 'memory'",
+            params![
+                scope,
+                scope_id,
+                agent_id,
+                category,
+                importance.clamp(1, 5),
+                if sensitive { 1_i64 } else { 0_i64 },
+                owner.user_id,
+                owner.org_id,
+                id,
+            ],
+        )?;
+        Ok(updated > 0)
     }
 
     /// Ingest a parsed OKF [`Bundle`](ryu_knowledge::Bundle) into the retrieval
@@ -1628,6 +1738,35 @@ impl RetrievalStore {
         let conn = self.conn.lock().await;
         let removed = conn.execute("DELETE FROM chunks WHERE id = ?1", params![id])?;
         Ok(removed > 0)
+    }
+
+    /// Remove every derived memory chunk. The encrypted MemoryStore remains the
+    /// authority; this clears only its vector/retrieval projection after a full
+    /// memory wipe.
+    pub async fn clear_memory_chunks(&self) -> Result<u64> {
+        let conn = self.conn.lock().await;
+        let removed = conn.execute("DELETE FROM chunks WHERE source = 'memory'", [])?;
+        Ok(removed as u64)
+    }
+
+    /// Remove sensitive memory projections for one owner, or all sensitive
+    /// memory projections when the node is unbound. This is used when consent
+    /// is revoked; it is deliberately set-based so cleanup is not capped by a
+    /// source-store page size.
+    pub async fn clear_sensitive_memory_chunks(&self, owner_user_id: Option<&str>) -> Result<u64> {
+        let conn = self.conn.lock().await;
+        let removed = match owner_user_id {
+            Some(owner) => conn.execute(
+                "DELETE FROM chunks
+                 WHERE source = 'memory' AND mem_sensitive = 1 AND owner_user_id = ?1",
+                params![owner],
+            )?,
+            None => conn.execute(
+                "DELETE FROM chunks WHERE source = 'memory' AND mem_sensitive = 1",
+                [],
+            )?,
+        };
+        Ok(removed as u64)
     }
 
     /// Return the cross-link edges preserved for a bundle: `(concept_path,
@@ -2158,8 +2297,8 @@ impl RetrievalStore {
         let mut stmt = conn
             .prepare(
                 "SELECT id, source, space_id, content, embedding, \
-                        mem_scope, mem_scope_id, mem_importance, \
-                        owner_user_id, owner_org_id, visibility FROM chunks \
+                        mem_scope, mem_scope_id, mem_agent_id, mem_importance, mem_sensitive, \
+                        mem_metadata_ready, owner_user_id, owner_org_id, visibility FROM chunks \
                  WHERE embedding_model = ?1",
             )
             .context("preparing candidate query")?;
@@ -2176,12 +2315,15 @@ impl RetrievalStore {
                         content: row.get(3)?,
                         mem_scope: row.get(5)?,
                         mem_scope_id: row.get(6)?,
+                        mem_agent_id: row.get(7)?,
                         mem_importance: row
-                            .get::<_, Option<i32>>(7)?
+                            .get::<_, Option<i32>>(8)?
                             .unwrap_or(DEFAULT_MEM_IMPORTANCE),
-                        owner_user_id: row.get(8)?,
-                        owner_org_id: row.get(9)?,
-                        visibility: row.get(10)?,
+                        mem_sensitive: row.get::<_, Option<i64>>(9)?.unwrap_or(0) == 1,
+                        mem_metadata_ready: row.get::<_, Option<i64>>(10)?.unwrap_or(0) == 1,
+                        owner_user_id: row.get(11)?,
+                        owner_org_id: row.get(12)?,
+                        visibility: row.get(13)?,
                     },
                     decode_embedding(&blob),
                 ))
@@ -2242,6 +2384,7 @@ fn chunk_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
     match chunk.source {
         ChunkSource::Memory => {
             opts.include_memory
+                && (opts.include_sensitive || (chunk.mem_metadata_ready && !chunk.mem_sensitive))
                 && memory_level_matches(chunk, opts)
                 && memory_tenancy_allows(chunk, opts)
         }
@@ -2263,7 +2406,7 @@ fn chunk_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bool {
 /// Per-caller tenancy for a MEMORY chunk — the retrieval twin of the memory-store
 /// visibility predicate. On an UNBOUND node (`node_bound = false`) it is a no-op
 /// (byte-identical). On a BOUND node: `node`/`project` scopes are the shared "company
-/// brain" (visible to every member), while `user`-scope facts are PRIVATE — returned
+/// brain" (visible to every member), while `agent`/`user`-scope facts are PRIVATE — returned
 /// only to their owner. A user-scope chunk whose owner does not equal the caller
 /// (including legacy NULL/`'local'` owners the backfill has not yet reached) is
 /// hidden. This is the filter that stops one member retrieving another's private
@@ -2325,10 +2468,11 @@ fn space_tenancy_allows(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bo
     )
 }
 
-/// Whether a `Memory` chunk passes the caller's level + active-project filter.
+/// Whether a `Memory` chunk passes the caller's level + active-agent/project filter.
 /// Legacy chunks with no `mem_scope` are treated as `"user"` (broadly visible).
 /// `read_levels == None` allows every level EXCEPT `"org"` (see below).
-/// Project-scoped chunks require `mem_scope_id == opts.project_id`.
+/// Agent-scoped chunks require `mem_scope_id == opts.agent_id`; project-scoped
+/// chunks require `mem_scope_id == opts.project_id`.
 ///
 /// **Org is opt-in.** `read_levels == None` means "unconfigured", and every agent
 /// that predates org scope is unconfigured. Letting the permissive default cover
@@ -2348,6 +2492,12 @@ fn memory_level_matches(chunk: &RetrievableChunk, opts: &RetrievalOptions) -> bo
         }
         None if scope == "org" => return false,
         None => {}
+    }
+    if scope == "agent" {
+        return match (chunk.mem_scope_id.as_deref(), opts.agent_id.as_deref()) {
+            (Some(memory_agent), Some(active_agent)) => memory_agent == active_agent,
+            _ => false,
+        };
     }
     if scope == "project" {
         return match (chunk.mem_scope_id.as_deref(), opts.project_id.as_deref()) {
@@ -3424,6 +3574,38 @@ mod tests {
         assert!(ids.contains(&"shared-node-mem"));
     }
 
+    #[tokio::test]
+    async fn sensitive_memory_cleanup_can_be_scoped_without_a_page_limit() {
+        let store = mem_store();
+        for (id, owner) in [("alice-sensitive", "alice"), ("bob-sensitive", "bob")] {
+            store
+                .index_memory_chunk_with_metadata(
+                    id,
+                    "health condition requires a private note",
+                    "user",
+                    None,
+                    "user_fact",
+                    3,
+                    Some("default"),
+                    true,
+                    RetrievalOwner::owned(Some(owner), Some("org1"), None),
+                )
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            store
+                .clear_sensitive_memory_chunks(Some("alice"))
+                .await
+                .unwrap(),
+            1
+        );
+        let remaining = store.indexed_memory_ids().await.unwrap();
+        assert!(!remaining.contains("alice-sensitive"));
+        assert!(remaining.contains("bob-sensitive"));
+    }
+
     /// A Space chunk owned by Alice (visibility private) does not escape to Bob —
     /// pins the OWNED branch of `space_tenancy_allows` on its own, independent of
     /// the unowned/explicit-shared cases below.
@@ -3587,7 +3769,10 @@ mod tests {
             content: String::new(),
             mem_scope: Some("user".into()),
             mem_scope_id: None,
+            mem_agent_id: None,
             mem_importance: 3,
+            mem_sensitive: false,
+            mem_metadata_ready: true,
             owner_user_id: Some("alice".into()),
             owner_org_id: Some("org1".into()),
             visibility: None,
@@ -3606,6 +3791,59 @@ mod tests {
         // unbound: everything.
         let unbound = RetrievalOptions::default();
         assert!(memory_tenancy_allows(&base, &unbound));
+
+        let legacy = RetrievableChunk {
+            mem_metadata_ready: false,
+            ..base
+        };
+        assert!(
+            !chunk_matches(&legacy, &RetrievalOptions::default()),
+            "legacy memory metadata must fail closed while sensitive consent is off"
+        );
+        assert!(chunk_matches(
+            &legacy,
+            &RetrievalOptions {
+                include_sensitive: true,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn memory_agent_and_sensitive_filters_are_independent() {
+        let agent_fact = RetrievableChunk {
+            mem_scope: Some("agent".into()),
+            mem_scope_id: Some("agent-a".into()),
+            mem_agent_id: Some("agent-a".into()),
+            mem_sensitive: true,
+            ..RetrievableChunk {
+                id: "agent-fact".into(),
+                source: ChunkSource::Memory,
+                space_id: None,
+                content: "health fact".into(),
+                mem_scope: None,
+                mem_scope_id: None,
+                mem_agent_id: None,
+                mem_importance: 3,
+                mem_sensitive: false,
+                mem_metadata_ready: true,
+                owner_user_id: Some("alice".into()),
+                owner_org_id: Some("org1".into()),
+                visibility: None,
+            }
+        };
+        let mut opts = RetrievalOptions {
+            read_levels: Some(vec!["agent".into()]),
+            agent_id: Some("agent-a".into()),
+            caller_user_id: Some("alice".into()),
+            node_bound: true,
+            ..Default::default()
+        };
+        assert!(!chunk_matches(&agent_fact, &opts));
+        opts.include_sensitive = true;
+        assert!(chunk_matches(&agent_fact, &opts));
+        opts.agent_id = Some("agent-b".into());
+        assert!(!chunk_matches(&agent_fact, &opts));
     }
 
     // ── Spaces delegation (`SpaceRecall`) + rank fusion ───────────────────────

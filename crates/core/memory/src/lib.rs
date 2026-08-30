@@ -24,7 +24,8 @@
 //! Long-term facts carry a **scope level** — [`MemoryScope`] — describing how
 //! broadly they apply:
 //!
-//! * `User`    — facts about the user, visible everywhere (broadest).
+//! * `Agent`   — facts for one agent (`scope_id` = the agent id).
+//! * `User`    — facts about the user, visible across agents (broadest personal level).
 //! * `Node`    — facts scoped to this Core node / machine.
 //! * `Project` — facts scoped to one working folder (`scope_id` = the folder path).
 //! * `Org`     — facts shared across an organization (`scope_id` = the org id).
@@ -64,6 +65,9 @@ use tokio::sync::Mutex;
 pub const DEFAULT_SHORT_TERM_LIMIT: usize = 10;
 /// Default number of long-term entries recalled per request.
 pub const DEFAULT_LONG_TERM_LIMIT: usize = 5;
+/// Hard cap for source-store list/recall calls so a client cannot turn a memory
+/// endpoint into an unbounded allocation request.
+pub const MAX_MEMORY_QUERY_LIMIT: usize = 500;
 /// Default importance for a fact when none is supplied (1..=5 scale).
 pub const DEFAULT_IMPORTANCE: i32 = 3;
 /// Sentinel user id used while Core is local-first/single-user.
@@ -94,7 +98,7 @@ pub fn memory_user_from_key(key: &ResourceKey) -> &str {
 /// but keyed on SCOPE, since memory sharing is scope-based, not org/visibility-based):
 ///   - `:bound = 0` (node UNBOUND / personal): no restriction. One principal; the
 ///     node token is the boundary — byte-identical to the pre-ACL behaviour.
-///   - node ORG-BOUND: a `user`-scope fact is PRIVATE — visible only to its owner
+///   - node ORG-BOUND: an `agent`/`user`-scope fact is PRIVATE — visible only to its owner
 ///     (`user_id = :uid`). `node`/`project`-scope facts are the shared "company
 ///     brain" — visible to every member. A `user`-scope row whose `user_id` is the
 ///     legacy `'local'` sentinel matches no real caller (fail closed) until the
@@ -109,8 +113,9 @@ pub fn memory_user_from_key(key: &ResourceKey) -> &str {
 ///     be created in the first place.
 const MEMORY_VISIBLE_PREDICATE: &str = "(
         :bound = 0
-        OR scope IN ('node', 'project')
-        OR (:uid IS NOT NULL AND scope = 'user' AND user_id = :uid)
+        OR scope = 'node'
+        OR (scope = 'project' AND scope_id IS NOT NULL AND trim(scope_id) <> '')
+        OR (:uid IS NOT NULL AND scope IN ('agent', 'user') AND user_id = :uid)
         OR (:org IS NOT NULL AND scope = 'org' AND scope_id = :org)
      )";
 
@@ -167,11 +172,12 @@ impl<'a> MemoryVisibility<'a> {
     }
 }
 
-/// How broadly a long-term fact applies. Serialized snake_case (`"user"`,
-/// `"node"`, `"project"`).
+/// How broadly a long-term fact applies. Serialized snake_case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryScope {
+    /// Facts for one agent; `scope_id` holds the stable agent id.
+    Agent,
     /// About the user; visible across every node and project.
     User,
     /// Scoped to this Core node / machine.
@@ -186,6 +192,7 @@ pub enum MemoryScope {
 impl MemoryScope {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Agent => "agent",
             Self::User => "user",
             Self::Node => "node",
             Self::Project => "project",
@@ -195,6 +202,7 @@ impl MemoryScope {
 
     pub fn from_str(s: &str) -> Self {
         match s {
+            "agent" => Self::Agent,
             "node" => Self::Node,
             "project" => Self::Project,
             "org" => Self::Org,
@@ -210,6 +218,163 @@ impl Default for MemoryScope {
     fn default() -> Self {
         Self::User
     }
+}
+
+/// A special-category topic that is kept out of memory unless the owning user
+/// has explicitly enabled sensitive-topic memory for the current node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SensitiveTopic {
+    HealthCondition,
+    ReligiousBelief,
+    PoliticalBelief,
+    SexualOrientation,
+    Financial,
+    Legal,
+    Biometric,
+}
+
+impl SensitiveTopic {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HealthCondition => "health_condition",
+            Self::ReligiousBelief => "religious_belief",
+            Self::PoliticalBelief => "political_belief",
+            Self::SexualOrientation => "sexual_orientation",
+            Self::Financial => "financial",
+            Self::Legal => "legal",
+            Self::Biometric => "biometric",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "health_condition" => Some(Self::HealthCondition),
+            "religious_belief" => Some(Self::ReligiousBelief),
+            "political_belief" => Some(Self::PoliticalBelief),
+            "sexual_orientation" => Some(Self::SexualOrientation),
+            "financial" => Some(Self::Financial),
+            "legal" => Some(Self::Legal),
+            "biometric" => Some(Self::Biometric),
+            _ => None,
+        }
+    }
+}
+
+/// Deterministically identify the special-category topics covered by the
+/// sensitive-memory consent. This is an admission guard, not a claim that the
+/// text is medically, religiously, or legally classified with certainty.
+pub fn detect_sensitive_topics(content: &str) -> Vec<SensitiveTopic> {
+    let normalized = content.to_lowercase();
+    let tokens: std::collections::HashSet<String> = normalized
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let contains_any = |phrases: &[&str]| {
+        phrases.iter().any(|phrase| {
+            if phrase.contains(' ') {
+                normalized.contains(phrase)
+            } else {
+                tokens.contains(*phrase)
+            }
+        })
+    };
+    let mut topics = Vec::new();
+    let checks = [
+        (
+            SensitiveTopic::HealthCondition,
+            &[
+                "health",
+                "medical condition",
+                "health condition",
+                "diagnosis",
+                "disease",
+                "disability",
+                "medication",
+                "therapy",
+                "hospital",
+                "illness",
+                "surgery",
+                "allergy",
+                "doctor",
+            ][..],
+        ),
+        (
+            SensitiveTopic::ReligiousBelief,
+            &[
+                "religion",
+                "religious",
+                "faith",
+                "prayer",
+                "church",
+                "mosque",
+                "synagogue",
+                "temple",
+                "christian",
+                "muslim",
+                "islam",
+                "jewish",
+                "judaism",
+                "hindu",
+                "buddhist",
+                "atheist",
+            ][..],
+        ),
+        (
+            SensitiveTopic::PoliticalBelief,
+            &[
+                "politics",
+                "political",
+                "vote",
+                "election",
+                "political party",
+                "democrat",
+                "republican",
+            ][..],
+        ),
+        (
+            SensitiveTopic::SexualOrientation,
+            &[
+                "sexual orientation",
+                "gay",
+                "lesbian",
+                "bisexual",
+                "transgender",
+            ][..],
+        ),
+        (
+            SensitiveTopic::Financial,
+            &[
+                "bank account",
+                "income",
+                "salary",
+                "debt",
+                "credit card",
+                "financial",
+            ][..],
+        ),
+        (
+            SensitiveTopic::Legal,
+            &[
+                "criminal record",
+                "legal case",
+                "lawsuit",
+                "conviction",
+                "immigration status",
+            ][..],
+        ),
+        (
+            SensitiveTopic::Biometric,
+            &["fingerprint", "face scan", "retina scan", "biometric"][..],
+        ),
+    ];
+    for (topic, phrases) in checks {
+        if contains_any(phrases) {
+            topics.push(topic);
+        }
+    }
+    topics
 }
 
 /// What kind of fact a memory holds. Drives filtering and how the model is told
@@ -380,11 +545,11 @@ impl Default for MemoryCategory {
 pub struct LongTermEntry {
     pub id: String,
     pub content: String,
-    /// Breadth of applicability (user / node / project).
+    /// Breadth of applicability (agent / user / node / project / org).
     #[serde(default)]
     pub scope: MemoryScope,
     /// Project folder path when `scope == Project`; node id when `Node`; `None`
-    /// for `User`.
+    /// for `User`; agent and org scope ids hold the selected agent or org.
     #[serde(default)]
     pub scope_id: Option<String>,
     /// Classification of the fact.
@@ -412,6 +577,10 @@ pub struct LongTermEntry {
     /// Why this row exists and which encrypted source references support it.
     #[serde(default)]
     pub provenance: MemoryProvenance,
+    /// Special-category topics detected in the encrypted content. These are an
+    /// orthogonal privacy dimension, not a replacement for `category`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sensitive_topics: Vec<SensitiveTopic>,
     /// Active rows participate in recall. Other states remain reviewable for
     /// audit and rollback but are never silently injected into a prompt.
     #[serde(default)]
@@ -633,6 +802,8 @@ struct MemoryPayload {
     when_to_use: Option<String>,
     #[serde(default)]
     provenance: MemoryProvenance,
+    #[serde(default)]
+    sensitive_topics: Vec<SensitiveTopic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -641,16 +812,19 @@ struct MemoryProposalPayload {
     rationale: String,
 }
 
-/// Serialize sensitive content and source references to JSON for encryption.
+/// Serialize sensitive content, source references, and sensitive-topic metadata
+/// to JSON for encryption.
 fn encode_payload(
     content: &str,
     when_to_use: Option<&str>,
     provenance: &MemoryProvenance,
+    sensitive_topics: &[SensitiveTopic],
 ) -> Vec<u8> {
     serde_json::to_vec(&MemoryPayload {
         content: content.to_owned(),
         when_to_use: when_to_use.map(str::to_owned),
         provenance: provenance.clone(),
+        sensitive_topics: sensitive_topics.to_vec(),
     })
     .unwrap_or_else(|_| content.as_bytes().to_vec())
 }
@@ -660,13 +834,20 @@ fn encode_payload(
 /// string (pre-JSON payloads).
 fn decode_payload(plain: &[u8]) -> MemoryPayload {
     let text = String::from_utf8_lossy(plain).into_owned();
-    if let Ok(payload) = serde_json::from_str::<MemoryPayload>(&text) {
+    if let Ok(mut payload) = serde_json::from_str::<MemoryPayload>(&text) {
+        if payload.sensitive_topics.is_empty() {
+            // Legacy payloads had no classification. Re-run the local guard when
+            // they are read so a pre-toggle health/religion fact is not widened
+            // into recall merely because it predates the field.
+            payload.sensitive_topics = detect_sensitive_topics(&payload.content);
+        }
         return payload;
     }
     MemoryPayload {
         content: text,
         when_to_use: None,
         provenance: MemoryProvenance::default(),
+        sensitive_topics: detect_sensitive_topics(&String::from_utf8_lossy(plain)),
     }
 }
 
@@ -782,6 +963,47 @@ impl MemoryStore {
         })
     }
 
+    /// Read the owning user's sensitive-topic consent for this node.
+    ///
+    /// The setting is deliberately stored beside the encrypted memory authority
+    /// rather than in the node-global generic preferences table. A missing row is
+    /// the safe default: sensitive memory is disabled.
+    pub async fn include_sensitive_topics(&self, user_id: &str) -> Result<bool> {
+        let user_id = user_id.trim();
+        if user_id.is_empty() {
+            return Ok(false);
+        }
+        let conn = self.conn.lock().await;
+        let enabled: Option<i64> = conn
+            .query_row(
+                "SELECT include_sensitive_topics FROM memory_settings WHERE user_id = ?1",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("reading sensitive memory setting")?;
+        Ok(enabled == Some(1))
+    }
+
+    /// Persist the owning user's sensitive-topic consent for this node.
+    pub async fn set_include_sensitive_topics(&self, user_id: &str, enabled: bool) -> Result<()> {
+        let user_id = user_id.trim();
+        if user_id.is_empty() {
+            anyhow::bail!("a memory setting requires a user id");
+        }
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO memory_settings (user_id, include_sensitive_topics, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(user_id) DO UPDATE SET
+                 include_sensitive_topics = excluded.include_sensitive_topics,
+                 updated_at = excluded.updated_at",
+            params![user_id, i64::from(enabled), now_millis()],
+        )
+        .context("writing sensitive memory setting")?;
+        Ok(())
+    }
+
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -813,7 +1035,12 @@ impl MemoryStore {
                  applied_memory_id TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_memory_proposals_owner
-                 ON memory_proposals(owner_user_id, status, created_at);",
+                 ON memory_proposals(owner_user_id, status, created_at);
+             CREATE TABLE IF NOT EXISTS memory_settings (
+                 user_id                   TEXT PRIMARY KEY,
+                 include_sensitive_topics INTEGER NOT NULL DEFAULT 0,
+                 updated_at               INTEGER NOT NULL
+             );",
         )
         .context("initializing memory schema")?;
 
@@ -900,25 +1127,63 @@ impl MemoryStore {
         mem: NewMemory,
         metadata: MemoryMetadata,
     ) -> Result<Option<String>> {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.record_full_with_id_and_metadata(&id, user_id, agent_id, mem, metadata)
+            .await
+    }
+
+    /// Record a fully-classified fact under a caller-provided stable id. This is
+    /// used by compatibility APIs whose contract is idempotent re-indexing; the
+    /// normal memory-authoring path should continue using [`Self::record_full`].
+    pub async fn record_full_with_id(
+        &self,
+        id: &str,
+        user_id: &str,
+        agent_id: &str,
+        mem: NewMemory,
+    ) -> Result<Option<String>> {
+        self.record_full_with_id_and_metadata(id, user_id, agent_id, mem, MemoryMetadata::default())
+            .await
+    }
+
+    async fn record_full_with_id_and_metadata(
+        &self,
+        id: &str,
+        user_id: &str,
+        agent_id: &str,
+        mem: NewMemory,
+        metadata: MemoryMetadata,
+    ) -> Result<Option<String>> {
+        let id = id.trim();
+        if id.is_empty() {
+            anyhow::bail!("a memory id cannot be empty");
+        }
         let trimmed = mem.content.trim();
         if trimmed.is_empty() {
             return Ok(None);
         }
-        // An org-scope fact is read back by matching `scope_id` against the caller's
-        // org, so one written without a `scope_id` would be visible to nobody — a
-        // silent black hole rather than an error. Refuse it at the write instead, so
-        // the caller learns immediately that no org is resolvable.
-        if mem.scope == MemoryScope::Org
-            && mem
-                .scope_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .is_none()
+        // Agent/project/org-scoped facts are read back by matching `scope_id`
+        // against the active qualifier. A missing qualifier would be a silent
+        // black hole rather than an error, so refuse it at the write instead.
+        if matches!(
+            mem.scope,
+            MemoryScope::Agent | MemoryScope::Project | MemoryScope::Org
+        ) && mem
+            .scope_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_none()
         {
             anyhow::bail!(
-                "an org-scope memory requires a scope_id (the owning org id); \
-                 without one the fact would be readable by nobody"
+                "an agent-, project-, or org-scope memory requires a scope_id; without one \
+                 the fact would be readable by nobody"
+            );
+        }
+        let sensitive_topics = detect_sensitive_topics(trimmed);
+        if !sensitive_topics.is_empty() && mem.scope != MemoryScope::User {
+            anyhow::bail!(
+                "sensitive memory must use user scope; shared and agent scopes are not supported"
             );
         }
         let when = mem
@@ -926,9 +1191,12 @@ impl MemoryStore {
             .as_deref()
             .map(str::trim)
             .filter(|w| !w.is_empty());
-        let (nonce, ciphertext) =
-            self.encrypt(&encode_payload(trimmed, when, &metadata.provenance))?;
-        let id = uuid::Uuid::new_v4().to_string();
+        let (nonce, ciphertext) = self.encrypt(&encode_payload(
+            trimmed,
+            when,
+            &metadata.provenance,
+            &sensitive_topics,
+        ))?;
         let now = now_millis();
         let importance = mem.importance.clamp(1, 5);
         let tags = encode_tags(&mem.tags);
@@ -957,7 +1225,7 @@ impl MemoryStore {
             ],
         )
         .context("inserting memory entry")?;
-        Ok(Some(id))
+        Ok(Some(id.to_owned()))
     }
 
     /// Recall the most recent `limit` long-term entries for `(user_id, agent_id)`,
@@ -969,36 +1237,100 @@ impl MemoryStore {
         agent_id: &str,
         limit: usize,
     ) -> Result<Vec<LongTermEntry>> {
-        let rows = {
-            let conn = self.conn.lock().await;
-            let mut stmt = conn.prepare(
-                "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
-                        category, importance, tags, agent_id, updated_at, user_id,
-                        lifecycle, supersedes_id
-                 FROM memory_entries
-                 WHERE user_id = ?1 AND agent_id = ?2 AND lifecycle = 'active'
-                 ORDER BY created_at DESC, rowid DESC
-                 LIMIT ?3",
-            )?;
-            Self::collect_rows(&mut stmt, params![user_id, agent_id, limit as i64])?
-        };
-        Ok(self.decrypt_rows(rows))
+        self.recall_with_sensitive(user_id, agent_id, limit, true)
+            .await
+    }
+
+    /// Recall recent entries while applying the sensitive-topic consent gate.
+    /// The legacy `recall` method remains an unrestricted crate-level primitive;
+    /// Core chat paths use this method with the caller's resolved consent.
+    pub async fn recall_with_sensitive(
+        &self,
+        user_id: &str,
+        agent_id: &str,
+        limit: usize,
+        include_sensitive: bool,
+    ) -> Result<Vec<LongTermEntry>> {
+        let limit = limit.min(MAX_MEMORY_QUERY_LIMIT);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        // Sensitive classification lives inside the encrypted payload, so it
+        // cannot be expressed in the SQL WHERE clause. Page through the source
+        // rows until the caller has `limit` visible facts; a fixed multiplier
+        // would return too few (or no) ordinary facts when many sensitive facts
+        // happen to be newer.
+        let page_size = if include_sensitive { limit } else { 128 };
+        let mut offset = 0usize;
+        let mut entries = Vec::with_capacity(limit);
+        loop {
+            let rows = {
+                let conn = self.conn.lock().await;
+                let mut stmt = conn.prepare(
+                    "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
+                            category, importance, tags, agent_id, updated_at, user_id,
+                            lifecycle, supersedes_id
+                     FROM memory_entries
+                     WHERE user_id = ?1 AND agent_id = ?2 AND lifecycle = 'active'
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT ?3 OFFSET ?4",
+                )?;
+                Self::collect_rows(
+                    &mut stmt,
+                    params![user_id, agent_id, page_size as i64, offset as i64],
+                )?
+            };
+            let row_count = rows.len();
+            if row_count == 0 {
+                break;
+            }
+            offset += row_count;
+            let page = self.decrypt_rows(rows);
+            if include_sensitive {
+                entries = page;
+                break;
+            }
+            entries.extend(
+                page.into_iter()
+                    .filter(|entry| entry.sensitive_topics.is_empty()),
+            );
+            if entries.len() >= limit {
+                break;
+            }
+        }
+        entries.truncate(limit);
+        Ok(entries)
     }
 
     /// Recall recent entries visible to an agent granted `read_levels`, within the
-    /// active `project_id`. Ordered by importance then recency. When `read_levels`
-    /// is empty all three levels are visible (back-compat / unconfigured agent).
-    /// Project-scoped facts are only returned when their `scope_id` matches the
-    /// active project.
+    /// active `project_id`/`agent_id`. Ordered by importance then recency. When
+    /// `read_levels` is empty all personal levels are visible.
+    /// Project- and agent-scoped facts are only returned when their `scope_id`
+    /// matches the active project or agent.
     pub async fn recall_scoped(
         &self,
         read_levels: &[MemoryScope],
         project_id: Option<&str>,
         limit: usize,
     ) -> Result<Vec<LongTermEntry>> {
+        self.recall_scoped_for_agent(read_levels, None, project_id, limit)
+            .await
+    }
+
+    /// Recall recent entries across the requested levels, including the narrow
+    /// `agent` level when `agent_id` matches its `scope_id`.
+    pub async fn recall_scoped_for_agent(
+        &self,
+        read_levels: &[MemoryScope],
+        agent_id: Option<&str>,
+        project_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<LongTermEntry>> {
+        let limit = limit.min(MAX_MEMORY_QUERY_LIMIT);
         let levels = Self::effective_levels(read_levels);
         // Inline the level set as quoted literals. Values come from
-        // `MemoryScope::as_str()` (a closed set of `'user'/'node'/'project'`), so
+        // `MemoryScope::as_str()` (a closed set of `'agent'/'user'/'node'/'project'/'org'`), so
         // this is injection-safe and avoids depending on the json1 extension.
         let level_list = levels
             .iter()
@@ -1011,21 +1343,122 @@ impl MemoryStore {
                     lifecycle, supersedes_id
              FROM memory_entries
              WHERE scope IN ({level_list}) AND lifecycle = 'active'
-               AND (scope != 'project' OR scope_id IS ?1)
+               AND (scope != 'agent' OR (?1 IS NOT NULL AND scope_id = ?1))
+               AND (scope != 'project' OR (?2 IS NOT NULL AND scope_id = ?2))
              ORDER BY importance DESC, created_at DESC, rowid DESC
-             LIMIT ?2"
+             LIMIT ?3"
         );
         let rows = {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(&sql)?;
-            Self::collect_rows(&mut stmt, params![project_id, limit as i64])?
+            Self::collect_rows(&mut stmt, params![agent_id, project_id, limit as i64])?
         };
         Ok(self.decrypt_rows(rows))
+    }
+
+    /// Recall recent entries across the requested levels while applying the
+    /// caller's node-tenancy visibility and sensitive-topic consent. This is
+    /// the source-store counterpart to the retrieval layer's memory filters:
+    /// recency context must not bypass an agent's read levels, active project,
+    /// owner, or organization boundary merely because it is assembled before
+    /// vector/graph retrieval.
+    pub async fn recall_visible_scoped_for_agent(
+        &self,
+        user_id: &str,
+        read_levels: &[MemoryScope],
+        agent_id: Option<&str>,
+        project_id: Option<&str>,
+        visibility: MemoryVisibility<'_>,
+        limit: usize,
+        include_sensitive: bool,
+    ) -> Result<Vec<LongTermEntry>> {
+        let limit = limit.min(MAX_MEMORY_QUERY_LIMIT);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let levels = Self::effective_levels(read_levels);
+        // Values come from the closed MemoryScope enum, so inlining the level
+        // literals is injection-safe and keeps this query independent of json1.
+        let level_list = levels
+            .iter()
+            .map(|level| format!("'{}'", level.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
+                    category, importance, tags, agent_id, updated_at, user_id,
+                    lifecycle, supersedes_id
+             FROM memory_entries
+             WHERE scope IN ({level_list})
+               AND lifecycle = 'active'
+               AND (scope != 'agent' OR (:agent IS NOT NULL AND scope_id = :agent))
+               AND (scope != 'project' OR (:project IS NOT NULL AND scope_id = :project))
+               AND (:bound = 1 OR user_id = :owner)
+               AND {MEMORY_VISIBLE_PREDICATE}
+             ORDER BY created_at DESC, rowid DESC
+             LIMIT :limit OFFSET :offset"
+        );
+        // Sensitive classification is encrypted, so page through source rows
+        // until the caller has enough non-sensitive entries instead of allowing
+        // newer sensitive rows to starve ordinary context.
+        let page_size = if include_sensitive { limit } else { 128 };
+        let mut offset = 0usize;
+        let mut entries = Vec::with_capacity(limit);
+        loop {
+            let rows = {
+                let conn = self.conn.lock().await;
+                let mut stmt = conn.prepare(&sql)?;
+                Self::collect_rows(
+                    &mut stmt,
+                    rusqlite::named_params! {
+                        ":owner": user_id,
+                        ":agent": agent_id,
+                        ":project": project_id,
+                        ":bound": i64::from(visibility.node_bound),
+                        ":uid": visibility.caller_user_id,
+                        ":org": visibility.caller_org_id,
+                        ":limit": page_size as i64,
+                        ":offset": offset as i64,
+                    },
+                )?
+            };
+            let row_count = rows.len();
+            if row_count == 0 {
+                break;
+            }
+            offset += row_count;
+            let page = self.decrypt_rows(rows);
+            if include_sensitive {
+                entries = page;
+                break;
+            }
+            entries.extend(
+                page.into_iter()
+                    .filter(|entry| entry.sensitive_topics.is_empty()),
+            );
+            if entries.len() >= limit {
+                break;
+            }
+        }
+        entries.truncate(limit);
+        Ok(entries)
     }
 
     /// Enumerate up to `limit` entries (all scopes) for backfilling the retrieval
     /// index; per-agent filtering happens at retrieve time.
     pub async fn all_for_backfill(&self, limit: usize) -> Result<Vec<LongTermEntry>> {
+        self.all_for_backfill_page(limit, 0).await
+    }
+
+    /// Enumerate one stable page of active entries for a bounded backfill pass.
+    /// The ordering matches [`Self::all_for_backfill`], so callers can walk past
+    /// an already-indexed head and eventually reach older facts.
+    pub async fn all_for_backfill_page(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<LongTermEntry>> {
+        let limit = limit.min(MAX_MEMORY_QUERY_LIMIT);
         let rows = {
             let conn = self.conn.lock().await;
             let mut stmt = conn.prepare(
@@ -1035,9 +1468,9 @@ impl MemoryStore {
                  FROM memory_entries
                  WHERE lifecycle = 'active'
                  ORDER BY created_at DESC, rowid DESC
-                 LIMIT ?1",
+                 LIMIT ?1 OFFSET ?2",
             )?;
-            Self::collect_rows(&mut stmt, params![limit as i64])?
+            Self::collect_rows(&mut stmt, params![limit as i64, offset as i64])?
         };
         Ok(self.decrypt_rows(rows))
     }
@@ -1061,7 +1494,25 @@ impl MemoryStore {
         filter: &MemoryFilter,
         vis: MemoryVisibility<'_>,
     ) -> Result<Vec<LongTermEntry>> {
-        let limit = filter.limit.unwrap_or(500) as i64;
+        self.list_visible_with_sensitive(filter, vis, true).await
+    }
+
+    /// List visible entries while omitting special-category facts unless the
+    /// caller's current consent allows them. The source rows stay encrypted; the
+    /// filter runs after decryption so legacy rows are classified conservatively.
+    pub async fn list_visible_with_sensitive(
+        &self,
+        filter: &MemoryFilter,
+        vis: MemoryVisibility<'_>,
+        include_sensitive: bool,
+    ) -> Result<Vec<LongTermEntry>> {
+        let limit = filter
+            .limit
+            .unwrap_or(MAX_MEMORY_QUERY_LIMIT)
+            .min(MAX_MEMORY_QUERY_LIMIT);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let sql = format!(
             "SELECT id, nonce, ciphertext, created_at, scope, scope_id,
                     category, importance, tags, agent_id, updated_at, user_id,
@@ -1071,28 +1522,52 @@ impl MemoryStore {
                AND (:scope_id IS NULL OR scope_id = :scope_id)
                AND (:category IS NULL OR category = :category)
                AND (:lifecycle IS NULL OR lifecycle = :lifecycle)
-               AND {MEMORY_VISIBLE_PREDICATE}
+             AND {MEMORY_VISIBLE_PREDICATE}
              ORDER BY created_at DESC, rowid DESC
-             LIMIT :limit"
+             LIMIT :limit OFFSET :offset"
         );
-        let rows = {
-            let conn = self.conn.lock().await;
-            let mut stmt = conn.prepare(&sql)?;
-            Self::collect_rows(
-                &mut stmt,
-                rusqlite::named_params! {
-                    ":scope": filter.scope.map(|s| s.as_str()),
-                    ":scope_id": filter.scope_id,
-                    ":category": filter.category.map(|c| c.as_str()),
-                    ":lifecycle": filter.lifecycle.map(|l| l.as_str()),
-                    ":bound": i64::from(vis.node_bound),
-                    ":uid": vis.caller_user_id,
-                    ":org": vis.caller_org_id,
-                    ":limit": limit,
-                },
-            )?
-        };
-        Ok(self.decrypt_rows(rows))
+        let page_size = if include_sensitive { limit } else { 128 };
+        let mut offset = 0usize;
+        let mut entries = Vec::with_capacity(limit);
+        loop {
+            let rows = {
+                let conn = self.conn.lock().await;
+                let mut stmt = conn.prepare(&sql)?;
+                Self::collect_rows(
+                    &mut stmt,
+                    rusqlite::named_params! {
+                        ":scope": filter.scope.map(|s| s.as_str()),
+                        ":scope_id": filter.scope_id.as_deref(),
+                        ":category": filter.category.map(|c| c.as_str()),
+                        ":lifecycle": filter.lifecycle.map(|l| l.as_str()),
+                        ":bound": i64::from(vis.node_bound),
+                        ":uid": vis.caller_user_id,
+                        ":org": vis.caller_org_id,
+                        ":limit": page_size as i64,
+                        ":offset": offset as i64,
+                    },
+                )?
+            };
+            let row_count = rows.len();
+            if row_count == 0 {
+                break;
+            }
+            offset += row_count;
+            let page = self.decrypt_rows(rows);
+            if include_sensitive {
+                entries = page;
+                break;
+            }
+            entries.extend(
+                page.into_iter()
+                    .filter(|entry| entry.sensitive_topics.is_empty()),
+            );
+            if entries.len() >= limit {
+                break;
+            }
+        }
+        entries.truncate(limit);
+        Ok(entries)
     }
 
     /// Fetch a single entry by id.
@@ -1116,6 +1591,12 @@ impl MemoryStore {
         let Some(existing) = self.get(id).await? else {
             return Ok(None);
         };
+        if existing.lifecycle != MemoryLifecycle::Active {
+            // Revisions and retractions are immutable audit records. Updating one
+            // in place would let a stale retrieval/index request resurrect it or
+            // mutate the history that rollback relies on.
+            return Ok(None);
+        }
         let content = patch.content.unwrap_or(existing.content);
         let when_to_use = match patch.when_to_use {
             Some(w) => w,
@@ -1126,6 +1607,17 @@ impl MemoryStore {
             Some(s) => s,
             None => existing.scope_id,
         };
+        if matches!(
+            scope,
+            MemoryScope::Agent | MemoryScope::Project | MemoryScope::Org
+        ) && scope_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            anyhow::bail!("an agent-, project-, or org-scope memory requires a scope_id");
+        }
         let category = patch.category.unwrap_or(existing.category);
         let importance = patch.importance.unwrap_or(existing.importance).clamp(1, 5);
         let tags = patch.tags.unwrap_or(existing.tags);
@@ -1134,8 +1626,18 @@ impl MemoryStore {
             .as_deref()
             .map(str::trim)
             .filter(|w| !w.is_empty());
-        let (nonce, ciphertext) =
-            self.encrypt(&encode_payload(content.trim(), when, &existing.provenance))?;
+        let sensitive_topics = detect_sensitive_topics(content.trim());
+        if !sensitive_topics.is_empty() && scope != MemoryScope::User {
+            anyhow::bail!(
+                "sensitive memory must use user scope; shared and agent scopes are not supported"
+            );
+        }
+        let (nonce, ciphertext) = self.encrypt(&encode_payload(
+            content.trim(),
+            when,
+            &existing.provenance,
+            &sensitive_topics,
+        ))?;
         let now = now_millis();
         {
             let conn = self.conn.lock().await;
@@ -1173,16 +1675,25 @@ impl MemoryStore {
         {
             anyhow::bail!("a revision proposal requires a target memory id");
         }
-        if proposal.draft.scope == MemoryScope::Org
-            && proposal
-                .draft
-                .scope_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .is_none()
+        if matches!(
+            proposal.draft.scope,
+            MemoryScope::Agent | MemoryScope::Project | MemoryScope::Org
+        ) && proposal
+            .draft
+            .scope_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_none()
         {
-            anyhow::bail!("an org-scope proposal requires a scope id");
+            anyhow::bail!("an agent-, project-, or org-scope proposal requires a scope id");
+        }
+        if !detect_sensitive_topics(&proposal.draft.content).is_empty()
+            && proposal.draft.scope != MemoryScope::User
+        {
+            anyhow::bail!(
+                "sensitive memory must use user scope; shared and agent scopes are not supported"
+            );
         }
         let payload = serde_json::to_vec(&MemoryProposalPayload {
             draft: proposal.draft,
@@ -1299,6 +1810,25 @@ impl MemoryStore {
         } else {
             None
         };
+        let proposed_sensitive = detect_sensitive_topics(&proposal.draft.content);
+        if matches!(
+            proposal.draft.scope,
+            MemoryScope::Agent | MemoryScope::Project | MemoryScope::Org
+        ) && proposal
+            .draft
+            .scope_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            anyhow::bail!("an agent-, project-, or org-scope proposal requires a scope id");
+        }
+        if !proposed_sensitive.is_empty() && proposal.draft.scope != MemoryScope::User {
+            anyhow::bail!(
+                "sensitive memory must use user scope; shared and agent scopes are not supported"
+            );
+        }
         if proposal.operation == MemoryProposalOperation::Revise && target.is_none() {
             anyhow::bail!("revision proposal target is missing");
         }
@@ -1327,8 +1857,13 @@ impl MemoryStore {
                     .as_deref()
                     .map(str::trim)
                     .filter(|value| !value.is_empty());
-                let (nonce, ciphertext) =
-                    self.encrypt(&encode_payload(content, when, &draft.metadata.provenance))?;
+                let sensitive_topics = detect_sensitive_topics(content);
+                let (nonce, ciphertext) = self.encrypt(&encode_payload(
+                    content,
+                    when,
+                    &draft.metadata.provenance,
+                    &sensitive_topics,
+                ))?;
                 let supersedes_id = target.as_ref().map(|entry| entry.id.clone());
                 tx.execute(
                     "INSERT INTO memory_entries
@@ -1450,10 +1985,12 @@ impl MemoryStore {
     pub async fn clear_all(&self) -> Result<u64> {
         let conn = self.conn.lock().await;
         let removed = conn.execute("DELETE FROM memory_entries", [])?;
+        conn.execute("DELETE FROM memory_proposals", [])?;
+        conn.execute("DELETE FROM memory_settings", [])?;
         Ok(removed as u64)
     }
 
-    /// Empty `read_levels` means the three PERSONAL levels (unconfigured agent).
+    /// Empty `read_levels` means the four PERSONAL levels (unconfigured agent).
     ///
     /// [`MemoryScope::Org`] is deliberately excluded from this default. Every agent
     /// created before org scope existed has an empty slot, so including it would
@@ -1462,7 +1999,12 @@ impl MemoryStore {
     /// addition. An agent must name `org` in its `read_levels` to see org facts.
     fn effective_levels(read_levels: &[MemoryScope]) -> Vec<MemoryScope> {
         if read_levels.is_empty() {
-            vec![MemoryScope::User, MemoryScope::Node, MemoryScope::Project]
+            vec![
+                MemoryScope::Agent,
+                MemoryScope::User,
+                MemoryScope::Node,
+                MemoryScope::Project,
+            ]
         } else {
             read_levels.to_vec()
         }
@@ -1517,6 +2059,7 @@ impl MemoryStore {
                         author_agent_id: r.author_agent_id,
                         owner_user_id: r.owner_user_id,
                         provenance: payload.provenance,
+                        sensitive_topics: payload.sensitive_topics,
                         lifecycle: MemoryLifecycle::from_str(&r.lifecycle),
                         supersedes_id: r.supersedes_id,
                         created_at: r.created_at,
@@ -1706,11 +2249,33 @@ mod tests {
         let store = MemoryStore::open_in_memory().unwrap();
         store.record(LOCAL_USER, "agent-a", "fact a").await.unwrap();
         store.record(LOCAL_USER, "agent-b", "fact b").await.unwrap();
+        let proposal_id = store
+            .create_proposal(NewMemoryProposal {
+                owner_user_id: LOCAL_USER.to_owned(),
+                agent_id: "agent-a".to_owned(),
+                target_memory_id: None,
+                operation: MemoryProposalOperation::Create,
+                draft: MemoryProposalDraft {
+                    content: "proposal to forget".to_owned(),
+                    scope: MemoryScope::User,
+                    scope_id: None,
+                    category: MemoryCategory::UserFact,
+                    importance: DEFAULT_IMPORTANCE,
+                    when_to_use: None,
+                    tags: Vec::new(),
+                    author_agent_id: Some("agent-a".to_owned()),
+                    metadata: MemoryMetadata::default(),
+                },
+                rationale: "test".to_owned(),
+            })
+            .await
+            .unwrap();
         assert_eq!(store.count().await.unwrap(), 2);
 
         let removed = store.clear_all().await.unwrap();
         assert_eq!(removed, 2);
         assert_eq!(store.count().await.unwrap(), 0);
+        assert!(store.get_proposal(&proposal_id).await.unwrap().is_none());
         // The key is intact, so new memories still record + recall afterward.
         store.record(LOCAL_USER, "agent-a", "fresh").await.unwrap();
         let recalled = store.recall(LOCAL_USER, "agent-a", 10).await.unwrap();
@@ -1762,6 +2327,137 @@ mod tests {
         assert_eq!(got.importance, 5);
         assert_eq!(got.when_to_use.as_deref(), Some("when installing deps"));
         assert_eq!(got.tags, vec!["tooling".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn record_full_with_id_preserves_a_stable_identifier() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let id = store
+            .record_full_with_id(
+                "remembered-command",
+                LOCAL_USER,
+                "default",
+                NewMemory::user_fact("Use the focused test command"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(id.as_deref(), Some("remembered-command"));
+        assert_eq!(
+            store.get("remembered-command").await.unwrap().unwrap().id,
+            "remembered-command"
+        );
+    }
+
+    #[test]
+    fn sensitive_topic_detection_covers_health_and_religion() {
+        let health = detect_sensitive_topics("I have a peanut allergy and take medication");
+        assert!(health.contains(&SensitiveTopic::HealthCondition));
+        let religion = detect_sensitive_topics("I practice Buddhism and attend temple");
+        assert!(religion.contains(&SensitiveTopic::ReligiousBelief));
+        assert!(detect_sensitive_topics("I prefer concise release notes").is_empty());
+        assert!(detect_sensitive_topics("Please review the terms and conditions").is_empty());
+        assert!(detect_sensitive_topics("I went to a birthday party").is_empty());
+        assert!(detect_sensitive_topics("I have a medical condition")
+            .contains(&SensitiveTopic::HealthCondition));
+    }
+
+    #[tokio::test]
+    async fn sensitive_memory_recall_is_off_until_user_consent() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        store
+            .record(LOCAL_USER, "agent-a", "User prefers short answers")
+            .await
+            .unwrap();
+        store
+            .record(LOCAL_USER, "agent-a", "User has a diabetes diagnosis")
+            .await
+            .unwrap();
+
+        assert!(!store.include_sensitive_topics(LOCAL_USER).await.unwrap());
+        let hidden = store
+            .recall_with_sensitive(LOCAL_USER, "agent-a", 10, false)
+            .await
+            .unwrap();
+        assert_eq!(hidden.len(), 1);
+        assert_eq!(hidden[0].content, "User prefers short answers");
+
+        store
+            .set_include_sensitive_topics(LOCAL_USER, true)
+            .await
+            .unwrap();
+        let visible = store
+            .recall_with_sensitive(LOCAL_USER, "agent-a", 10, true)
+            .await
+            .unwrap();
+        assert_eq!(visible.len(), 2);
+        assert!(visible.iter().any(|entry| {
+            entry
+                .sensitive_topics
+                .contains(&SensitiveTopic::HealthCondition)
+        }));
+    }
+
+    #[tokio::test]
+    async fn sensitive_filter_pages_until_it_finds_visible_facts() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        store
+            .record(LOCAL_USER, "agent-a", "ordinary preference")
+            .await
+            .unwrap();
+        for index in 0..129 {
+            store
+                .record(
+                    LOCAL_USER,
+                    "agent-a",
+                    &format!("I have a diagnosis number {index}"),
+                )
+                .await
+                .unwrap();
+        }
+
+        let visible = store
+            .recall_with_sensitive(LOCAL_USER, "agent-a", 1, false)
+            .await
+            .unwrap();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].content, "ordinary preference");
+
+        let listed = store
+            .list_visible_with_sensitive(
+                &MemoryFilter {
+                    limit: Some(1),
+                    ..Default::default()
+                },
+                MemoryVisibility::unrestricted(),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].content, "ordinary preference");
+    }
+
+    #[tokio::test]
+    async fn agent_scope_requires_and_matches_its_agent_id() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let mut memory = NewMemory::user_fact("agent-only fact");
+        memory.scope = MemoryScope::Agent;
+        memory.scope_id = Some("agent-a".to_owned());
+        store
+            .record_full(LOCAL_USER, "agent-a", memory)
+            .await
+            .unwrap();
+
+        let a = store
+            .recall_scoped_for_agent(&[MemoryScope::Agent], Some("agent-a"), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(a.len(), 1);
+        let b = store
+            .recall_scoped_for_agent(&[MemoryScope::Agent], Some("agent-b"), None, 10)
+            .await
+            .unwrap();
+        assert!(b.is_empty());
     }
 
     #[tokio::test]
@@ -1818,6 +2514,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn visible_scoped_recall_applies_levels_project_and_owner() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        store
+            .record_full(
+                "alice",
+                "agent-a",
+                NewMemory::user_fact("alice private fact"),
+            )
+            .await
+            .unwrap();
+        store
+            .record_full("bob", "agent-a", NewMemory::user_fact("bob private fact"))
+            .await
+            .unwrap();
+        store
+            .record_full("alice", "agent-a", {
+                let mut memory = NewMemory::user_fact("project X fact");
+                memory.scope = MemoryScope::Project;
+                memory.scope_id = Some("/proj/x".to_owned());
+                memory
+            })
+            .await
+            .unwrap();
+        store
+            .record_full("alice", "agent-a", {
+                let mut memory = NewMemory::user_fact("project Y fact");
+                memory.scope = MemoryScope::Project;
+                memory.scope_id = Some("/proj/y".to_owned());
+                memory
+            })
+            .await
+            .unwrap();
+        store
+            .record_full("alice", "agent-a", {
+                let mut memory = NewMemory::user_fact("shared node fact");
+                memory.scope = MemoryScope::Node;
+                memory
+            })
+            .await
+            .unwrap();
+
+        let entries = store
+            .recall_visible_scoped_for_agent(
+                "bob",
+                &[MemoryScope::User, MemoryScope::Project],
+                Some("agent-a"),
+                Some("/proj/x"),
+                MemoryVisibility::for_caller_in_org(Some("bob"), Some("acme"), true),
+                10,
+                false,
+            )
+            .await
+            .unwrap();
+        let contents: Vec<&str> = entries.iter().map(|entry| entry.content.as_str()).collect();
+        assert!(contents.contains(&"bob private fact"));
+        assert!(!contents.contains(&"alice private fact"));
+        assert!(contents.contains(&"project X fact"));
+        assert!(!contents.contains(&"project Y fact"));
+        assert!(!contents.contains(&"shared node fact"));
+    }
+
+    #[tokio::test]
     async fn update_and_delete() {
         let store = MemoryStore::open_in_memory().unwrap();
         let id = store
@@ -1844,6 +2602,81 @@ mod tests {
 
         assert!(store.delete(&id).await.unwrap());
         assert!(store.get(&id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn inactive_entries_cannot_be_updated_in_place() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let id = store
+            .record(LOCAL_USER, "a", "immutable revision")
+            .await
+            .unwrap()
+            .unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "UPDATE memory_entries SET lifecycle = 'superseded' WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+        }
+
+        assert!(store
+            .update(
+                &id,
+                MemoryPatch {
+                    content: Some("must not change".to_owned()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store.get(&id).await.unwrap().unwrap().content,
+            "immutable revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_refuses_sensitive_content_in_shared_scopes() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let id = store
+            .record(LOCAL_USER, "a", "ordinary preference")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let error = store
+            .update(
+                &id,
+                MemoryPatch {
+                    content: Some("I have a diabetes diagnosis".into()),
+                    scope: Some(MemoryScope::Node),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("user scope"));
+
+        let existing_sensitive = store
+            .record(LOCAL_USER, "a", "I have a peanut allergy")
+            .await
+            .unwrap()
+            .unwrap();
+        let error = store
+            .update(
+                &existing_sensitive,
+                MemoryPatch {
+                    scope: Some(MemoryScope::Project),
+                    scope_id: Some(Some("/work/ryu".to_owned())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("user scope"));
     }
 
     /// Per-caller tenancy (the `MEMORY_VISIBLE_PREDICATE`): on a bound node a
@@ -1942,6 +2775,15 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_project_fact_without_a_scope_id_is_refused_at_write() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let mut memory = NewMemory::user_fact("orphan project fact");
+        memory.scope = MemoryScope::Project;
+        let error = store.record_full("alice", "a", memory).await.unwrap_err();
+        assert!(error.to_string().contains("scope_id"));
+    }
+
     #[test]
     fn org_is_not_in_the_default_read_levels() {
         // An unconfigured agent must NOT silently gain organization-wide reads.
@@ -1949,7 +2791,12 @@ mod tests {
         assert!(!levels.contains(&MemoryScope::Org));
         assert_eq!(
             levels,
-            vec![MemoryScope::User, MemoryScope::Node, MemoryScope::Project]
+            vec![
+                MemoryScope::Agent,
+                MemoryScope::User,
+                MemoryScope::Node,
+                MemoryScope::Project,
+            ]
         );
         // But an agent that explicitly asks for it gets it.
         assert!(MemoryStore::effective_levels(&[MemoryScope::Org]).contains(&MemoryScope::Org));

@@ -220,6 +220,7 @@ use utoipa::OpenApi;
         super::search_conversations_handler,
         super::get_conversation,
         super::delete_conversation,
+        super::save_temporary_conversation_handler,
         super::fork_conversation,
         super::set_conversation_pinned_handler,
         super::set_conversation_archived_handler,
@@ -479,9 +480,12 @@ use utoipa::OpenApi;
         // so it is NOT merged into Core's spec — same posture as monitors/quests.
         // Memory
         super::get_memory,
+        super::get_memory_graph,
+        super::get_memory_settings,
         super::list_memory,
         super::memory_git::trace,
         super::update_memory,
+        super::update_memory_settings,
         super::memory_dream::accept_dream_proposal,
         super::memory_dream::get_dream_review,
         super::memory_dream::get_dream_settings,

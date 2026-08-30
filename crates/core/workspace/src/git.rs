@@ -276,8 +276,11 @@ fn repository_paths(cwd: &str) -> Result<RepositoryPaths, String> {
     if !cwd.is_dir() {
         return Err("cwd is not a directory".to_string());
     }
-    let root = run_git(cwd.to_string_lossy().as_ref(), &["rev-parse", "--show-toplevel"])
-        .ok_or_else(|| "not a git repository".to_string())?;
+    let root = run_git(
+        cwd.to_string_lossy().as_ref(),
+        &["rev-parse", "--show-toplevel"],
+    )
+    .ok_or_else(|| "not a git repository".to_string())?;
     let root = std::fs::canonicalize(root)
         .map_err(|_| "repository root could not be resolved".to_string())?;
     if !cwd.starts_with(&root) {
@@ -487,15 +490,16 @@ pub fn reverse_text_edits(
 }
 
 fn untracked_file_patch(relative: &Path, absolute: &Path) -> Result<String, String> {
-    let bytes = std::fs::read(absolute).map_err(|_| "untracked file could not be read".to_string())?;
+    let bytes =
+        std::fs::read(absolute).map_err(|_| "untracked file could not be read".to_string())?;
     let path = git_path(relative);
     if bytes.len() > MAX_FILE_DIFF_BYTES || bytes.contains(&0) {
         return Ok(format!(
             "diff --git a/{path} b/{path}\nnew file mode 100644\nBinary files /dev/null and b/{path} differ\n"
         ));
     }
-    let content = String::from_utf8(bytes)
-        .map_err(|_| "untracked file is not valid UTF-8".to_string())?;
+    let content =
+        String::from_utf8(bytes).map_err(|_| "untracked file is not valid UTF-8".to_string())?;
     let line_count = content.lines().count();
     let mut patch = format!(
         "diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{line_count} @@\n"
@@ -1668,8 +1672,11 @@ mod tests {
     fn reverse_text_edits_preserves_unrelated_changes_and_reverses_in_order() {
         let dir = tempfile::tempdir().unwrap();
         initialize_reverse_repo(dir.path());
-        std::fs::write(dir.path().join("first.txt"), "user note\nalpha\nthree\nomega\n")
-            .unwrap();
+        std::fs::write(
+            dir.path().join("first.txt"),
+            "user note\nalpha\nthree\nomega\n",
+        )
+        .unwrap();
 
         let result = reverse_text_edits(
             dir.path().to_str().unwrap(),
@@ -1704,7 +1711,11 @@ mod tests {
     fn reverse_text_edits_conflicts_without_writing_any_file() {
         let dir = tempfile::tempdir().unwrap();
         initialize_reverse_repo(dir.path());
-        std::fs::write(dir.path().join("first.txt"), "alpha\nchanged later\nomega\n").unwrap();
+        std::fs::write(
+            dir.path().join("first.txt"),
+            "alpha\nchanged later\nomega\n",
+        )
+        .unwrap();
         std::fs::write(dir.path().join("second.txt"), "LEFT\nright\n").unwrap();
 
         let result = reverse_text_edits(
@@ -1928,7 +1939,12 @@ mod tests {
         let temporary_leftovers = std::fs::read_dir(destination_parent.path())
             .unwrap()
             .filter_map(Result::ok)
-            .any(|entry| entry.file_name().to_string_lossy().starts_with(".ryu-clone-"));
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".ryu-clone-")
+            });
         assert!(!temporary_leftovers);
     }
 
@@ -1953,7 +1969,12 @@ mod tests {
         let temporary_leftovers = std::fs::read_dir(parent.path())
             .unwrap()
             .filter_map(Result::ok)
-            .any(|entry| entry.file_name().to_string_lossy().starts_with(".ryu-clone-"));
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".ryu-clone-")
+            });
         assert!(!temporary_leftovers);
     }
 }

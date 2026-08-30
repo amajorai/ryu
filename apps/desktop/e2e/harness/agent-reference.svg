@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420">
+  <rect width="640" height="420" rx="34" fill="#0f766e"/>
+  <circle cx="518" cy="100" r="138" fill="#fff" fill-opacity=".18"/>
+  <path d="M74 250c70-96 128-18 190-76 60-56 106 30 176-20 48-34 78-7 126 42" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="10"/>
+  <text x="72" y="220" fill="#fff" font-family="sans-serif" font-size="36">Agent reference</text>
+</svg>

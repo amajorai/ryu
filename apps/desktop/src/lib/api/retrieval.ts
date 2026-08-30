@@ -22,6 +22,8 @@ export interface ScoredChunk {
 }
 
 export interface RetrievalSearchInput {
+	/** Optional exact agent scope for agent-level memory facts. */
+	agentId?: string;
 	/** Whether to include memory in the search (defaults to true on Core). */
 	includeMemory?: boolean;
 	/** Drop chunks scoring below this threshold (0 keeps everything). */
@@ -59,6 +61,7 @@ export async function searchRetrieval(
 			method: "POST",
 			body: {
 				query: input.query,
+				agent_id: input.agentId,
 				top_k: input.topK,
 				space_ids: input.spaceIds,
 				include_memory: input.includeMemory,
@@ -77,15 +80,17 @@ export async function searchRetrieval(
 
 export interface IndexChunkInput {
 	content: string;
-	/** Stable identifier; re-indexing the same id replaces the prior chunk. */
+	/** Stable identifier; re-indexing the same id replaces the prior chunk or memory. */
 	id: string;
-	/** Defaults to "memory"; pass "space" with a `spaceId` to attach to a Space. */
+	/** Defaults to encrypted durable memory; pass "space" with a `spaceId` to attach to a Space. */
 	source?: ChunkSource;
 	spaceId?: string;
 }
 
 /**
- * Index a single chunk into memory (or a Space) so future searches can recall it.
+ * Index a single chunk into encrypted memory (or a Space) so future searches can
+ * recall it. Reusing the same id is an idempotent replacement. Use `createMemory`
+ * when the entry needs explicit scope, category, or other Memory Library metadata.
  * Resolves to the indexed id on success.
  */
 export async function indexChunk(

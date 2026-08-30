@@ -5,7 +5,7 @@
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
 [![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
 
-`ryu-memory` owns the durable, cross-conversation facts an agent recalls (spec unit U11). It is the SQLite-backed, encryption-at-rest `MemoryStore` plus the multi-level scope model, category/importance/tags metadata, and scoped recall/CRUD. Long-term memory is **opt-in** (privacy-by-default): nothing is recorded or recalled unless the request enables it. Short-term memory (recent turns of the current conversation) is derived from the conversation store and needs no storage here.
+`ryu-memory` owns the durable, cross-conversation facts an agent recalls (spec unit U11). It is the SQLite-backed, encryption-at-rest `MemoryStore` plus the multi-level scope model, category/importance/tags metadata, sensitive-topic consent, and scoped recall/CRUD. Long-term memory is **opt-in** (privacy-by-default): nothing is recorded or recalled unless the request enables it. Short-term memory (recent turns of the current conversation) is derived from the conversation store and needs no storage here.
 
 ## Role in the decomposition
 
@@ -16,8 +16,9 @@ Extracted from `apps/core/src/server/memory.rs` as an in-process capability crat
 ## What it provides
 
 - **`MemoryStore`** — SQLite store; rows encrypted with the shared `ryu-crypto` master key.
-- **`MemoryScope`** — multi-level scoping: `User` (visible everywhere) / `Node` (this machine) / `Project` (one working folder, `scope_id` = folder path). Which levels an agent may read is governed Core-side by its `MemorySlot.read_levels`.
+- **`MemoryScope`** — multi-level scoping: `Agent` (one agent) / `User` (the user) / `Node` (this machine) / `Project` (one working folder) / `Org` (one organization). Which levels an agent may read is governed Core-side by its `MemorySlot.read_levels`.
 - **`MemoryCategory`**, `importance`, `when_to_use` hint, free-form `tags` — all editable metadata.
+- **`SensitiveTopic`** — deterministic special-category detection for health, religious, and related topics. Core keeps these out of capture and recall until the owning user grants consent for the node.
 - **`MemoryVisibility`** — caller/tenancy filter derived from `ryu-kernel-contracts` `ResourceKey`.
 
 Placement (CLAUDE.md §1): durable facts are *what runs* (orchestration context), so Core.

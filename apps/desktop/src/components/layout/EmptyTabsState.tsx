@@ -30,6 +30,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import type { PluginComposerControlRow } from "@/components/agent-elements/input/goal-plus-button.tsx";
 import { useSession } from "@/lib/auth-client.ts";
 import { useComposerSlot } from "@/src/components/assistant/useComposerSlot.tsx";
 import { GettingStartedChecklist } from "@/src/components/chat/GettingStartedChecklist.tsx";
@@ -45,8 +46,10 @@ import { useEngineModels } from "@/src/hooks/useEngineModels.ts";
 import { useGettingStarted } from "@/src/hooks/useGettingStarted.ts";
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { useNodeDefaultAgentId } from "@/src/hooks/useNodeDefaultAgent.ts";
+import { usePluginContributions } from "@/src/hooks/usePluginContributions.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
 import { AgentAvatar, engineForAgent } from "@/src/lib/agent-logos.tsx";
+import { TEMPORARY_CONTEXT_FLAG } from "@/src/lib/api/temporary-chat.ts";
 import {
 	readLastUsedAgentId,
 	rememberLastUsedAgent,
@@ -380,6 +383,7 @@ function LaunchpadComposer() {
 	const engineModels = useEngineModels();
 	const activeNode = useActiveNode();
 	const interfaceLevel = useInterfaceLevel();
+	const pluginContributions = usePluginContributions();
 
 	// The launchpad is always a BRAND NEW chat, so it runs the same seed chain a
 	// fresh ChatPage does — minus the conversation link, which does not exist yet.
@@ -408,7 +412,26 @@ function LaunchpadComposer() {
 	// new-chat surface, which is the only place ChatPage offers the toggle too. It
 	// rides the tab seed so the spawned chat opens already unsaved.
 	const [ghost, setGhost] = useState(false);
+	const [temporaryMemory, setTemporaryMemory] = useState(false);
 	const [isDragOver, setIsDragOver] = useState(false);
+	const temporaryMemoryControl =
+		useMemo<PluginComposerControlRow | null>(() => {
+			const contribution = pluginContributions.composer_controls.find(
+				(control) =>
+					control.type === "toggle" && control.flag === TEMPORARY_CONTEXT_FLAG
+			);
+			if (!contribution) {
+				return null;
+			}
+			return {
+				description: contribution.description,
+				enabled: temporaryMemory,
+				flag: contribution.flag,
+				id: contribution.id,
+				label: contribution.label,
+				onToggle: (_flag, next) => setTemporaryMemory(next),
+			};
+		}, [pluginContributions.composer_controls, temporaryMemory]);
 
 	const modelOptions = useMemo(
 		() => modelsForAgent(agentId, agents, engineModels),
@@ -481,6 +504,8 @@ function LaunchpadComposer() {
 		onSelectTeam: setTeamId,
 		onCreateAgent: () => openCreateAgent(),
 		ghost: { active: ghost, onToggle: () => setGhost((on) => !on) },
+		pluginControls:
+			ghost && temporaryMemoryControl ? [temporaryMemoryControl] : undefined,
 	});
 	const { addFiles, clear, images, onAttach, onPaste, onRemoveImage } =
 		composer.attachments;
@@ -514,10 +539,14 @@ function LaunchpadComposer() {
 					// just pre-fill the composer (that's the deep-link/Inbox behavior).
 					// A team target isn't carried into the tab, so for a team pick we
 					// fall back to pre-fill rather than auto-send to the wrong agent.
-					initialSubmit: teamId ? undefined : true,
+					initialSubmit: true,
 					initialImages: images.length > 0 ? images : undefined,
 					initialAgent: teamId ? undefined : (agentId ?? undefined),
+					initialTeamId: teamId ?? undefined,
 					initialGhost: ghost ? true : undefined,
+					initialPluginFlags: temporaryMemory
+						? { [TEMPORARY_CONTEXT_FLAG]: true }
+						: undefined,
 				});
 				// The images now live on the tab seed; drop them here so they don't
 				// re-attach to the next thing typed on the launchpad.

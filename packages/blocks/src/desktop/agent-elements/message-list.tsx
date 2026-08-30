@@ -99,6 +99,8 @@ import {
 } from "./goal-message.ts";
 import { usePinnedUserMessage } from "./hooks/use-pinned-user-message.ts";
 import { useTranscriptAnchor } from "./hooks/use-transcript-anchor.ts";
+import { InlineImagePreview } from "./image-preview.tsx";
+import { FileAttachment } from "./input/file-attachment.tsx";
 import type { LinkPreviewResolvers } from "./link-preview.tsx";
 import { Markdown } from "./markdown.tsx";
 import type { MemoryCitation } from "./memory-citations.ts";
@@ -527,33 +529,56 @@ function isErrorPart(
 	);
 }
 
-/**
- * An assistant image part — a standard AI SDK `file` part whose media type is an
- * image, carrying a `url` (a data: URL for generated images, or a remote URL).
- * Generated images are appended in this exact shape (see ChatPage's
- * handleGenerateImage), so the producer and this consumer agree.
- */
-function getAssistantImageUrl(part: unknown): string | null {
-	if (!isRecord(part) || part.type !== "file") {
+/** An assistant image part, including the filename used by the lightbox. */
+function getAssistantImageMeta(
+	part: unknown
+): { filename?: string; url: string } | null {
+	if (!isRecord(part)) {
 		return null;
 	}
-	const filePart = part as {
-		mediaType?: string;
-		mimeType?: string;
-		url?: string;
-		data?: string;
-	};
-	const media = filePart.mediaType ?? filePart.mimeType;
-	if (!media?.startsWith("image/")) {
+	const type = part.type;
+	const media =
+		typeof part.mediaType === "string"
+			? part.mediaType
+			: typeof part.mimeType === "string"
+				? part.mimeType
+				: undefined;
+	const filename =
+		typeof part.filename === "string"
+			? part.filename
+			: typeof part.fileName === "string"
+				? part.fileName
+				: typeof part.name === "string"
+					? part.name
+					: undefined;
+
+	const rawUrl =
+		type === "image"
+			? typeof part.url === "string"
+				? part.url
+				: typeof part.image === "string"
+					? part.image
+					: undefined
+			: type === "data-image" && isRecord(part.data)
+				? typeof part.data.url === "string"
+					? part.data.url
+					: undefined
+				: typeof part.url === "string"
+					? part.url
+					: undefined;
+	const rawData =
+		type === "file" && typeof part.data === "string" ? part.data : undefined;
+	const url =
+		rawUrl ?? (rawData && media ? `data:${media};base64,${rawData}` : null);
+	if (
+		!(
+			url &&
+			(type === "image" || type === "data-image" || media?.startsWith("image/"))
+		)
+	) {
 		return null;
 	}
-	if (filePart.url) {
-		return filePart.url;
-	}
-	if (filePart.data) {
-		return `data:${media};base64,${filePart.data}`;
-	}
-	return null;
+	return { filename, url };
 }
 
 /** Longest edge, in px, a generated image occupies in the transcript. */
@@ -618,6 +643,7 @@ function getImageGenerationPart(part: unknown): ImageGenerationPartData | null {
  * describing work that never happened here.
  */
 function AssistantGeneratedImage({
+	filename,
 	onRetry,
 	prompt,
 	showStatus,
@@ -625,6 +651,7 @@ function AssistantGeneratedImage({
 	statusText,
 	url,
 }: ImageGenerationPartData & {
+	filename?: string;
 	onRetry?: () => void;
 	showStatus: boolean;
 }) {
@@ -666,8 +693,10 @@ function AssistantGeneratedImage({
 				statusText={statusText}
 			>
 				{url ? (
-					<img
+					<InlineImagePreview
 						alt={prompt ?? "Generated image"}
+						filename={filename ?? prompt ?? "Generated image"}
+						imageClassName="size-full object-contain"
 						onLoad={handleLoad}
 						src={url}
 					/>
@@ -854,31 +883,41 @@ function getAssistantVideoUrl(part: unknown): string | null {
 /**
  * A NON-image, NON-video assistant `file` part (audio, or any other mime),
  * resolved to a playable/downloadable url + its media type. Images and videos
- * are handled separately by {@link getAssistantImageUrl} and
+ * are handled separately by {@link getAssistantImageMeta} and
  * {@link getAssistantVideoUrl}; this covers the rest so inline audio (and other
  * attachments Core streams) isn't silently dropped.
  */
 function getAssistantFileMeta(
 	part: unknown
-): { media: string; url: string } | null {
+): { filename: string; media: string; size?: number; url: string } | null {
 	if (!isRecord(part) || part.type !== "file") {
 		return null;
 	}
 	const filePart = part as {
+		data?: string;
+		fileName?: string;
+		filename?: string;
 		mediaType?: string;
 		mimeType?: string;
+		name?: string;
+		size?: number;
 		url?: string;
-		data?: string;
 	};
 	const media = filePart.mediaType ?? filePart.mimeType;
 	if (!media || media.startsWith("image/") || media.startsWith("video/")) {
 		return null;
 	}
-	if (filePart.url) {
-		return { url: filePart.url, media };
-	}
-	if (filePart.data) {
-		return { url: `data:${media};base64,${filePart.data}`, media };
+	const url =
+		filePart.url ??
+		(filePart.data ? `data:${media};base64,${filePart.data}` : undefined);
+	if (url) {
+		return {
+			filename:
+				filePart.filename ?? filePart.fileName ?? filePart.name ?? "Attachment",
+			media,
+			size: typeof filePart.size === "number" ? filePart.size : undefined,
+			url,
+		};
 	}
 	return null;
 }
@@ -1787,12 +1826,17 @@ export const MessageList = memo(function MessageList({
 		}
 	}, [clearUnreadMessages, followOutput]);
 
-	const { pinnedMessage, registerAnchor, scrollToPinned } =
-		usePinnedUserMessage({
-			enabled: pinUserMessage && !isCompact,
-			messages,
-			scrollerRef,
-		});
+	const {
+		isScrollingUp,
+		pinnedMessage,
+		registerAnchor,
+		scrollToPinned,
+		setScrollDirection,
+	} = usePinnedUserMessage({
+		enabled: pinUserMessage && !isCompact,
+		messages,
+		scrollerRef,
+	});
 
 	const CustomUserMessage = slots?.UserMessage || UserMessage;
 	const CustomToolRenderer = slots?.ToolRenderer || DefaultToolRenderer;
@@ -2233,7 +2277,7 @@ export const MessageList = memo(function MessageList({
 							: "Scroll up for older messages"}
 					</div>
 				) : null}
-				{pinUserMessage && !isCompact && pinnedMessage ? (
+				{pinUserMessage && !isCompact && isScrollingUp && pinnedMessage ? (
 					// `data-slot` is load-bearing: the pin bar sits IN FLOW, so
 					// mounting it pushes every anchor below it down by its own
 					// height. usePinnedUserMessage measures this element to size the
@@ -2551,10 +2595,14 @@ export const MessageList = memo(function MessageList({
 													</MessageAvatar>
 												) : null}
 												<MessageContent className="gap-1.5">
-													{assistantName ? (
+													{assistantName || assistantTimestamp ? (
 														<MessageHeader className="gap-2 px-0">
-															<span>{assistantName}</span>
-															<AgentTitleBadge title={assistantTitle ?? ""} />
+															{assistantName ? (
+																<span>{assistantName}</span>
+															) : null}
+															{assistantName && assistantTitle ? (
+																<AgentTitleBadge title={assistantTitle} />
+															) : null}
 															{assistantTimestamp && (
 																<TooltipProvider delay={0}>
 																	<Tooltip>
@@ -2917,6 +2965,7 @@ export const MessageList = memo(function MessageList({
 					)}
 					onClick={() => {
 						preserveUnreadBoundaryRef.current = false;
+						setScrollDirection("down");
 						const viewport = viewportRef.current;
 						if (!viewport) {
 							return;
@@ -3183,7 +3232,7 @@ function AssistantParts({
 						// one-line reply a small pill and a long one fill the column.
 						<BubbleContent
 							className={cn(
-								"group/assistant-text text-[14px]",
+								"group/assistant-text overflow-visible text-[14px]",
 								messageBubbleRadius("start", groupPosition)
 							)}
 							key={`${msg.id}-text-${i}`}
@@ -3198,6 +3247,7 @@ function AssistantParts({
 								onOpenLink={onOpenLink}
 								onOpenMention={onOpenMention}
 								previewResolvers={previewResolvers}
+								wideBlocks
 							/>
 						</BubbleContent>,
 						true
@@ -3255,14 +3305,15 @@ function AssistantParts({
 				continue;
 			}
 
-			const imageUrl = getAssistantImageUrl(part);
-			if (imageUrl) {
+			const image = getAssistantImageMeta(part);
+			if (image) {
 				pushPart(
 					<AssistantGeneratedImage
+						filename={image.filename}
 						key={`${msg.id}-image-${i}`}
 						showStatus={false}
 						status="complete"
-						url={imageUrl}
+						url={image.url}
 					/>
 				);
 				i++;
@@ -3297,15 +3348,13 @@ function AssistantParts({
 							<a href={fileMeta.url}>Download audio</a>
 						</audio>
 					) : (
-						<a
-							className="inline-flex max-w-[360px] items-center gap-2 rounded-xl bg-foreground/4 px-3 py-2 text-sm hover:bg-foreground/8"
-							download
-							href={fileMeta.url}
+						<FileAttachment
+							filename={fileMeta.filename}
+							id={`${msg.id}-file-${i}`}
 							key={`${msg.id}-file-${i}`}
-							rel="noopener"
-						>
-							Download attachment ({fileMeta.media})
-						</a>
+							size={fileMeta.size}
+							url={fileMeta.url}
+						/>
 					)
 				);
 				i++;

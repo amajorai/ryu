@@ -336,7 +336,7 @@ pub enum NodeKind {
     /// `ack_mode` decides the node's shape:
     /// - `None` (default) → **fire-and-forget**: deliver, emit a JSON receipt as
     ///   the node output, and continue downstream.
-    /// - `First | All | Quorum` → **HITL gate**: deliver, then suspend the run
+    /// - `First | All | Quorum | Percentage` → **HITL gate**: deliver, then suspend the run
     ///   (`AwaitingInput`) until the ack policy is met; each acking member's inbox
     ///   Ack resumes the run once the threshold is reached.
     ///
@@ -416,7 +416,8 @@ pub enum NotifyTargetSpec {
     Org,
     /// Every member of a specific team within the org.
     Team { team_id: String },
-    /// A hand-picked set of member user ids (no roster lookup needed).
+    /// A hand-picked set of member user ids. Managed nodes verify every id against
+    /// the bound organization when the workflow reaches the node.
     Members { user_ids: Vec<String> },
 }
 
@@ -433,6 +434,10 @@ pub enum AckMode {
     All,
     /// Resume once at least `n` members acknowledge.
     Quorum { n: u32 },
+    /// Resume once at least the configured percentage of members acknowledge.
+    /// The effective threshold is rounded up and always requires at least one
+    /// acknowledgement.
+    Percentage { percent: u32 },
 }
 
 fn default_webhook_method() -> String {

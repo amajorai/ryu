@@ -331,6 +331,7 @@ pub async fn apply_message_feedback(
     conversation_id: &str,
     message_id: &str,
     rating: Option<&str>,
+    caller_user_id: Option<&str>,
 ) -> FeedbackOutcome {
     let mut outcome = FeedbackOutcome::default();
     let ctx = learning_ctx(state);
@@ -447,11 +448,36 @@ pub async fn apply_message_feedback(
             // `msg_tag` lets a later change/clear find and remove this exact fact.
             mem.tags = vec!["feedback".to_string(), tag.to_string(), msg_tag.clone()];
             mem.author_agent_id = Some(agent.to_string());
-            match state
+            let owner = if crate::server::node_org_id().is_some() {
+                if let Some(caller_user_id) = caller_user_id {
+                    caller_user_id.to_owned()
+                } else {
+                    state
+                        .conversations
+                        .get_access_meta(conversation_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|meta| meta.owner_user_id)
+                        .unwrap_or_else(crate::server::background_memory_user_id)
+                }
+            } else {
+                crate::server::memory::LOCAL_USER.to_owned()
+            };
+            let sensitive =
+                !crate::server::memory::detect_sensitive_topics(&mem.content).is_empty();
+            let sensitive_allowed = state
                 .memory
-                .record_full(&crate::server::background_memory_user_id(), agent, mem)
+                .include_sensitive_topics(&owner)
                 .await
-            {
+                .unwrap_or(false);
+            if sensitive && !sensitive_allowed {
+                tracing::info!(
+                    "feedback: memory capture skipped because sensitive-topic consent is off"
+                );
+                return outcome;
+            }
+            match state.memory.record_full(&owner, agent, mem).await {
                 Ok(Some(id)) => {
                     outcome.memory_captured = true;
                     // Index now so semantic recall/search sees it immediately

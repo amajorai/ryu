@@ -6,7 +6,7 @@ import {
 	resolveOsApp,
 } from "./OsDesktopSurface.tsx";
 
-test("Ryu OS exposes the dock and Mission Control entry point", () => {
+test("Ryu OS exposes the dock and App Launcher entry point", () => {
 	const html = renderToStaticMarkup(
 		<OsDesktopSurface
 			activeWindowId="chat-window"
@@ -26,6 +26,9 @@ test("Ryu OS exposes the dock and Mission Control entry point", () => {
 
 	expect(html).toContain('data-testid="ryu-os-desktop"');
 	expect(html).toContain('data-testid="ryu-os-dock"');
+	expect(html).not.toContain("rgba(143,123,242");
+	expect(html).not.toContain("rgba(45,212,191");
+	expect(html).toContain("bg-success");
 	const menubar =
 		html.match(/<div[^>]*data-testid="ryu-os-menubar"[^>]*>/)?.[0] ?? "";
 	expect(menubar).toContain("bg-transparent");
@@ -34,8 +37,10 @@ test("Ryu OS exposes the dock and Mission Control entry point", () => {
 		html.match(/<div[^>]*data-tauri-drag-region="true"[^>]*>/)?.[0] ?? "";
 	expect(topbar).not.toContain("border-b");
 	expect(html).toContain("aspect-square");
-	expect(html).toContain('data-testid="os-dock-mission-control"');
+	expect(html).toContain('data-testid="os-dock-app-launcher"');
+	expect(html).toContain("hugeicons/dashboard-square-01.svg");
 	expect(html).toContain("hugeicons/radar-01.svg");
+	expect(html).toContain("App Launcher");
 	expect(html).toContain("Mission Control");
 	expect(OS_APPS.every((app) => app.iconBackground == null)).toBe(true);
 	for (const app of OS_APPS) {

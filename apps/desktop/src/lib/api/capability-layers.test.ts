@@ -4,7 +4,7 @@
 // capability serve?**
 //
 // It shipped answered wrong. `canServe` did not exist and every picker read
-// `servesVerbs` alone, so the four `document.parse` backends — which are served by
+// `servesVerbs` alone, so the five `document.parse` backends — which are served by
 // Core calling their sidecar route directly and therefore declare zero verbs BY
 // DESIGN — rendered disabled with "serves no verbs yet", including the bound
 // default. Parsing worked the whole time; only the picker claimed otherwise, so

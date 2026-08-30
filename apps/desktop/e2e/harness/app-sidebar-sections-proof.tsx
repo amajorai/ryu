@@ -96,6 +96,26 @@ const APP_SECTIONS: Array<{
 		},
 	},
 	{
+		id: "campaigns",
+		icon: "microscope",
+		plugin: "com.ryu.research",
+		title: "Campaigns",
+		spec: {
+			source: {
+				http: { method: "GET", path: "/api/research/campaigns" },
+				items: "campaigns",
+				map: {
+					accessory: "attemptCount",
+					id: "id",
+					subtitle: "status",
+					title: "name",
+				},
+			},
+			itemTarget: "/plugin/app__research-companion",
+			context: { campaignId: "id" },
+		},
+	},
+	{
 		id: "inboxes",
 		icon: "mail-01",
 		plugin: "com.ryu.mail",
@@ -167,6 +187,16 @@ const PAYLOADS: Record<string, unknown> = {
 			{ chunks: 4, id: "context-1", name: "Q3 contracts", total_chars: 12_000 },
 		],
 	},
+	"/api/research/campaigns": {
+		campaigns: [
+			{
+				attemptCount: 3,
+				id: "campaign-1",
+				name: "Search campaign",
+				status: "active",
+			},
+		],
+	},
 	"/workflows": {
 		workflows: [
 			{
@@ -178,10 +208,17 @@ const PAYLOADS: Record<string, unknown> = {
 	},
 };
 
-function recordOpenTab(path: string): string {
+function recordOpenTab(
+	path: string,
+	options?: { mountContext?: Record<string, unknown> }
+): string {
 	const opened = document.getElementById("opened");
 	if (opened) {
 		opened.textContent = path;
+	}
+	const context = document.getElementById("opened-context");
+	if (context) {
+		context.textContent = JSON.stringify(options?.mountContext ?? null);
 	}
 	return "proof-tab";
 }
@@ -237,7 +274,7 @@ function Story() {
 					style={{
 						background: "#0b0d12",
 						color: "#e6e9f0",
-						fontFamily: "ui-sans-serif, system-ui, sans-serif",
+						fontFamily: "var(--font-sans)",
 						minHeight: "100vh",
 						padding: "24px 32px",
 					}}
@@ -246,7 +283,7 @@ function Story() {
 						App-contributed sidebar sections
 					</h1>
 					<p style={{ color: "#8a91a3", fontSize: 13, margin: "0 0 18px" }}>
-						Six app-owned record pickers rendered by one desktop primitive.
+						Seven app-owned record pickers rendered by one desktop primitive.
 					</p>
 					<div
 						style={{
@@ -259,7 +296,11 @@ function Story() {
 						{APP_SECTIONS.map((section) => (
 							<DynamicSidebarSection
 								collapsed={false}
-								contribution={section}
+								contribution={{
+									...section,
+									approved_grants: ["ui:declarative-http"],
+									http_policy: "core",
+								}}
 								dnd={noopDnd}
 								key={`${section.plugin}:${section.id}`}
 								menu={noopMenu}
@@ -270,6 +311,7 @@ function Story() {
 						))}
 					</div>
 					<pre id="opened" style={{ color: "#8a91a3", fontSize: 12 }} />
+					<pre id="opened-context" style={{ color: "#8a91a3", fontSize: 12 }} />
 				</main>
 			</TabsContext.Provider>
 		</QueryClientProvider>

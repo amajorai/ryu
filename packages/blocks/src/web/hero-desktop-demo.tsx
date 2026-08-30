@@ -58,11 +58,11 @@ export default function HeroDesktopDemo() {
 		>
 			<div
 				aria-hidden="true"
-				className="pointer-events-none absolute inset-0 opacity-80"
+				className="pointer-events-none absolute inset-0"
 				style={{
 					backgroundImage:
-						"radial-gradient(circle at 50% 20%, rgba(139,92,246,0.1), transparent 34%), linear-gradient(rgba(15,23,42,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.035) 1px, transparent 1px)",
-					backgroundSize: "100% 100%, 28px 28px, 28px 28px",
+						"linear-gradient(rgba(15,23,42,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.035) 1px, transparent 1px)",
+					backgroundSize: "28px 28px",
 				}}
 			/>
 			<div className="relative z-10 flex items-center justify-between px-1 pb-3 text-[10px] text-muted-foreground/75 uppercase tracking-[0.18em]">

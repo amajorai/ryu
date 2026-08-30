@@ -24,8 +24,11 @@ test("keeps pinned-summary headers text-only", async ({ page }) => {
 		page.locator('[data-slot="bouncy-accordion-item-icon"]')
 	).toHaveCount(0);
 	await expect(page.locator('[data-slot="cowork-section-count"]')).toHaveCount(
-		0
+		1
 	);
+	await expect(
+		page.getByRole("button", { name: /^Background processes 2/ })
+	).toBeVisible();
 });
 
 test("lists every running background process in the pinned summary", async ({

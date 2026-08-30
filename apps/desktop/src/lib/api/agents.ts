@@ -166,7 +166,7 @@ export interface AgentTemplate {
  */
 export interface MemorySlot {
 	/** Memory scope levels the agent may recall from: any subset of
-	 * `["user", "node", "project"]`. Empty = "all three levels" (the back-compat
+	 * `["agent", "user", "node", "project", "org"]`. Empty = "all personal levels" (the back-compat
 	 * default for agents configured before this slot existed). */
 	read_levels: string[];
 	/** Space IDs the agent may inject into chat during retrieval. Empty = no

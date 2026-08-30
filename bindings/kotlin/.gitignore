@@ -1,0 +1,6 @@
+.gradle/
+build/
+src/main/kotlin/com/ryu/sdk/ryu_sdk.kt
+*.so
+*.dylib
+*.dll

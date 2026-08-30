@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { StoreComingSoon } from "@ryu/blocks/desktop/store";
+import { type ViewMode, ViewToggle } from "@ryu/blocks/desktop/view-toggle";
 import MarketplaceHelpDialog from "@ryu/marketplace/catalog/chrome/marketplace-help-dialog";
 import {
 	MARKETPLACE_SECTION_TABS,
@@ -14,6 +15,7 @@ import {
 } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
 import type { StoreSectionTab } from "@ryu/marketplace/catalog/chrome/marketplace-surface";
 import MarketplaceSurface from "@ryu/marketplace/catalog/chrome/marketplace-surface";
+import { StoreViewModeProvider } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
 import { InstalledOnlyProvider } from "@ryu/marketplace/catalog/installed-filter";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -64,6 +66,7 @@ import {
 	useStoreSearch,
 } from "@/src/hooks/useStoreSearch.ts";
 import { useStoreSectionCounts } from "@/src/hooks/useStoreSectionCounts.ts";
+import { useStoreViewMode } from "@/src/hooks/useStoreViewMode.ts";
 import type { PluginStoreTab } from "@/src/lib/api/plugins.ts";
 
 /** The built-in section values are shared with the web Marketplace. Everything
@@ -76,6 +79,27 @@ type BuiltinStoreSection = MarketplaceSection;
 type StoreSection = string;
 
 const BUILTIN_SECTION_VALUES = MARKETPLACE_SECTION_VALUES;
+
+/** Store sections whose content uses the shared catalog grid/list geometry. */
+const STORE_VIEW_SECTIONS: ReadonlySet<string> = new Set([
+	"apps",
+	"plugins",
+	"skills",
+	"mcp",
+	"agents",
+	"engines",
+	"integrations",
+	"workflows",
+	"themes",
+	"browse",
+]);
+
+function storeShowcaseSupported(section: string): boolean {
+	// The Agents tab owns the employee-badge renderer. Other Store tabs keep the
+	// compact catalog card in both Grid and List modes until they gain a real
+	// alternate presentation of their own.
+	return section === "agents";
+}
 
 /** Preserve old `/store/account` deep links while the visible nav uses the same
  * individual money tabs as the web surface. */
@@ -167,6 +191,14 @@ export default function StorePage({
 				: null),
 		[section, contributedTabs]
 	);
+	const [storedStoreView, setStoredStoreView] = useStoreViewMode(
+		section,
+		storeShowcaseSupported(section) ? "showcase" : "grid"
+	);
+	const storeView: ViewMode =
+		storedStoreView === "showcase" && !storeShowcaseSupported(section)
+			? "grid"
+			: storedStoreView;
 
 	// The built-in list is the shared web/desktop contract. Contributed tabs are
 	// appended only when their id is not already represented by that contract, so
@@ -293,6 +325,9 @@ export default function StorePage({
 	// master-detail pane is the one place the shell visibly stopped being one
 	// page.
 	const fullBleed = section === "models";
+	const showStoreView =
+		!searching &&
+		(STORE_VIEW_SECTIONS.has(section) || activeContributedTab !== null);
 
 	return (
 		<DesktopMarketplaceHost>
@@ -310,6 +345,13 @@ export default function StorePage({
 							sections={navSections}
 							trailing={
 								<>
+									{showStoreView ? (
+										<ViewToggle
+											onChange={setStoredStoreView}
+											showShowcase={storeShowcaseSupported(section)}
+											value={storeView}
+										/>
+									) : null}
 									{sectionFilters?.panel ? (
 										<Popover>
 											<PopoverTrigger
@@ -409,17 +451,19 @@ export default function StorePage({
 									onOpenRealm={(realm) => openRealm(realm, searchQuery)}
 								/>
 							) : (
-								<StoreContent
-									contributedTab={activeContributedTab}
-									initialMarketplaceItem={marketplaceItem}
-									initialQuery={sectionInitialQuery}
-									initialSelectedId={sectionInitialSelectedId}
-									onBrowseHome={() => setSection("home")}
-									onOpenConnections={openConnections}
-									onOpenInstallChat={openInstallChat}
-									onOpenRealm={openRealm}
-									section={section}
-								/>
+								<StoreViewModeProvider mode={storeView}>
+									<StoreContent
+										contributedTab={activeContributedTab}
+										initialMarketplaceItem={marketplaceItem}
+										initialQuery={sectionInitialQuery}
+										initialSelectedId={sectionInitialSelectedId}
+										onBrowseHome={() => setSection("home")}
+										onOpenConnections={openConnections}
+										onOpenInstallChat={openInstallChat}
+										onOpenRealm={openRealm}
+										section={section}
+									/>
+								</StoreViewModeProvider>
 							)}
 						</MarketplaceSurface>
 					</InstalledOnlyProvider>

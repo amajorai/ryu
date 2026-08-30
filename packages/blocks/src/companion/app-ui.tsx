@@ -7,6 +7,9 @@
  * stay on one Ryu-owned visual contract.
  */
 
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "@fontsource-variable/inter";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ComponentProps, ReactNode } from "react";
 
@@ -34,6 +37,7 @@ export const RYU_APP_UI_AGENT_RULES = [
 	"Use RyuAppShell and the Ryu App UI primitives for every Companion surface.",
 	"Use @ryu/ui controls for buttons, inputs, dialogs, menus, badges, and status.",
 	"Use semantic Ryu tokens; do not invent raw colors, radii, shadows, or typography scales.",
+	"Keep Marketplace listing copy out of the Companion; open directly into the working surface.",
 	"Every async surface must provide loading, empty, error, and disabled states.",
 	"Keep domain-specific layout inside standard, editor, or canvas surface modes.",
 ] as const;

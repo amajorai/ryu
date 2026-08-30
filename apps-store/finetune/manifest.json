@@ -53,6 +53,32 @@
     }
   ],
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "finetune-configure",
+        "title": "Configure",
+        "icon": "settings-01",
+        "target": "/plugin/app__finetune-companion",
+        "context": { "view": "configure" },
+        "order": 50
+      },
+      {
+        "id": "finetune-run",
+        "title": "Current Run",
+        "icon": "play-circle",
+        "target": "/plugin/app__finetune-companion",
+        "context": { "view": "run" },
+        "order": 51
+      },
+      {
+        "id": "finetune-history",
+        "title": "History",
+        "icon": "clock-01",
+        "target": "/plugin/app__finetune-companion",
+        "context": { "view": "history" },
+        "order": 52
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "finetune.chat",

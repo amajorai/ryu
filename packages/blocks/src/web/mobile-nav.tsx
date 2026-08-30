@@ -50,7 +50,9 @@ const PRODUCT_SHEET = [
 		title: "Products",
 		links: [
 			...PRODUCT_REALMS.filter((realm) =>
-				["os", "bot", "console", "box", "hire"].includes(realm.id)
+				["os", "bot", "console", "box", "mail", "notify", "hire"].includes(
+					realm.id
+				)
 			).map(({ label, href }) => ({ label, href, external: false })),
 			{
 				label: "Ryu Apps",

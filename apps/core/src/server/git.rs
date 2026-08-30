@@ -58,9 +58,9 @@ fn json_rejection_response(rejection: &JsonRejection) -> Response {
 // The git engine (everything that shells `git`) lives in the `ryu-workspace`
 // crate; these handlers are the thin axum surface over it.
 use ryu_workspace::git::{
-    checkout_branch, clone_repository, create_branch, create_pull_request,
-    initialize_repository, list_branches, query_file_diff, query_git_state, reverse_text_edits,
-    run_git_action, run_git_remote_action, ReverseEditsOutcome, TextReplacement,
+    checkout_branch, clone_repository, create_branch, create_pull_request, initialize_repository,
+    list_branches, query_file_diff, query_git_state, reverse_text_edits, run_git_action,
+    run_git_remote_action, ReverseEditsOutcome, TextReplacement,
 };
 
 const MAX_FILE_REVIEW_PATHS: usize = 64;
@@ -1655,7 +1655,10 @@ mod tests {
         let resp = list_directory(Query(ListDirQuery { path: Some(root) })).await;
         let (status, json) = body_json(resp).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(json["error"], "workspace path must stay inside the node home directory");
+        assert_eq!(
+            json["error"],
+            "workspace path must stay inside the node home directory"
+        );
     }
 
     // ── Handler validation paths ──────────────────────────────────────────────

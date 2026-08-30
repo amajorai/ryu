@@ -717,6 +717,13 @@
     {
       "capability": "workflows.catalogs",
       "grant": "workflows:catalogs",
+      "method": "workflows.notifyTargets",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "workflows.catalogs",
+      "grant": "workflows:catalogs",
       "method": "workflows.composio",
       "streaming": false,
       "tsHost": true
@@ -1394,5 +1401,5 @@
       "tsHost": false
     }
   ],
-  "version": "1.8.0"
+  "version": "1.9.0"
 }

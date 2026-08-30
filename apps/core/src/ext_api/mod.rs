@@ -303,8 +303,7 @@ pub fn lower(
                     .method
                     .as_deref()
                     .is_none_or(|declared| declared.eq_ignore_ascii_case(&tool.method))
-        })
-        {
+        }) {
             dropped_undeclared += 1;
             continue;
         }

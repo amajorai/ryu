@@ -22,6 +22,7 @@
 import {
 	ArrowDown01Icon,
 	ArrowLeft01Icon,
+	ArrowUpRight01Icon,
 	BrowserIcon,
 	CheckmarkCircle02Icon,
 	ComputerTerminal01Icon,
@@ -44,6 +45,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { FileTypeIcon } from "@ryu/blocks/desktop/agent-elements/file-type-icon.tsx";
 import { TextShimmer } from "@ryu/blocks/desktop/agent-elements/text-shimmer";
 import {
 	formatToolDuration,
@@ -179,6 +181,8 @@ function isToolPart(part: StreamPart): boolean {
 export interface SourceItem {
 	/** Secondary line: the full path, the URL, the search root. */
 	detail?: string;
+	/** Filename/path used to resolve the same colored icon as the Files tree. */
+	filePath?: string;
 	icon: IconSvgElement;
 	/** Dedupe key within its group. */
 	id: string;
@@ -262,7 +266,12 @@ function attachmentItem(
 		return null;
 	}
 	const part = value as Record<string, unknown>;
-	if (!legacy && part.type !== "file") {
+	if (
+		!legacy &&
+		part.type !== "file" &&
+		part.type !== "image" &&
+		part.type !== "data-image"
+	) {
 		return null;
 	}
 	const mediaType =
@@ -272,7 +281,12 @@ function attachmentItem(
 		nonEmptyString(part.name) ??
 		nonEmptyString(part.fileName);
 	const contentType = nonEmptyString(part.contentType);
-	const resolvedMediaType = mediaType ?? contentType;
+	const resolvedMediaType =
+		mediaType ??
+		contentType ??
+		(part.type === "image" || part.type === "data-image"
+			? "image/*"
+			: undefined);
 	if (!(resolvedMediaType || filename || nonEmptyString(part.url))) {
 		return null;
 	}
@@ -281,6 +295,7 @@ function attachmentItem(
 		id,
 		label: filename ?? `${isImage ? "Image" : "Attachment"} ${fallbackNumber}`,
 		detail: resolvedMediaType,
+		filePath: filename,
 		icon: isImage ? Image02Icon : File01Icon,
 	};
 }
@@ -329,6 +344,7 @@ function itemForTool(tool: string, part: StreamPart): SourceItem | null {
 					id: `file:${path}`,
 					label: baseName(path),
 					detail: path,
+					filePath: path,
 					icon: File01Icon,
 				}
 			: null;
@@ -1069,6 +1085,33 @@ function SectionIcon({ icon }: { icon: IconSvgElement }) {
 	return <HugeiconsIcon aria-hidden className="size-4" icon={icon} />;
 }
 
+function SectionActionButton({
+	label,
+	onClick,
+}: {
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			aria-label={label}
+			className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			onClick={(event) => {
+				event.stopPropagation();
+				onClick();
+			}}
+			title={label}
+			type="button"
+		>
+			<HugeiconsIcon
+				aria-hidden
+				className="size-3.5"
+				icon={ArrowUpRight01Icon}
+			/>
+		</button>
+	);
+}
+
 // ── One row geometry for every subsection list ────────────────────────────────
 //
 // Sources, source items, Subagents, Rendered artifacts and Side chats were five
@@ -1091,7 +1134,13 @@ const PANEL_ROW_ICON =
 const PANEL_ROW_BADGE =
 	"shrink-0 rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums";
 
-function SectionTitle({ title, count }: { count?: number; title: string }) {
+export function SectionTitle({
+	count,
+	title,
+}: {
+	count?: number;
+	title: string;
+}) {
 	return (
 		<span className="flex items-center gap-2">
 			<span className="font-medium text-foreground text-xs">{title}</span>
@@ -1245,10 +1294,19 @@ function FileRow({ file }: { file: FileSummary }) {
 // the `+N more` cap by count.
 
 function SourceItemRow({ item }: { item: SourceItem }) {
+	const icon = item.filePath ? (
+		<FileTypeIcon className="size-3.5" path={item.filePath} />
+	) : (
+		<HugeiconsIcon className="size-3.5" icon={item.icon} />
+	);
 	const body = (
 		<>
-			<span aria-hidden className={PANEL_ROW_ICON}>
-				<HugeiconsIcon className="size-3.5" icon={item.icon} />
+			<span
+				aria-hidden
+				className={PANEL_ROW_ICON}
+				data-file-path={item.filePath}
+			>
+				{icon}
 			</span>
 			<span className="flex min-w-0 flex-1 flex-col">
 				<span className="truncate text-foreground">{item.label}</span>
@@ -1822,12 +1880,7 @@ export function CoworkContextPanel({
 		items.push({
 			id: "plans",
 			icon: summary ? undefined : <SectionIcon icon={File01Icon} />,
-			title: (
-				<SectionTitle
-					count={summary ? undefined : planArtifacts.length}
-					title="Plans"
-				/>
-			),
+			title: <SectionTitle count={planArtifacts.length} title="Plans" />,
 			description: <PlansList onOpen={onOpenArtifact} plans={planArtifacts} />,
 		});
 	}
@@ -1836,12 +1889,7 @@ export function CoworkContextPanel({
 		items.push({
 			id: "progress",
 			icon: summary ? undefined : <SectionIcon icon={Target02Icon} />,
-			title: (
-				<SectionTitle
-					count={summary ? undefined : todos.length}
-					title="Progress"
-				/>
-			),
+			title: <SectionTitle count={todos.length} title="Progress" />,
 			description: (
 				<ProgressSection
 					chatStatus={chatStatus}
@@ -1856,12 +1904,7 @@ export function CoworkContextPanel({
 		items.push({
 			id: "artifacts",
 			icon: summary ? undefined : <SectionIcon icon={PlusSignIcon} />,
-			title: (
-				<SectionTitle
-					count={summary ? undefined : createdFiles.length}
-					title="Artifacts"
-				/>
-			),
+			title: <SectionTitle count={createdFiles.length} title="Artifacts" />,
 			description: (
 				<div className="flex flex-col">
 					{createdFiles.slice(0, maxItemsPerSection).map((file) => (
@@ -1885,7 +1928,7 @@ export function CoworkContextPanel({
 		items.push({
 			id: "changes",
 			icon: summary ? undefined : <SectionIcon icon={GitBranchIcon} />,
-			title: <SectionTitle title="Changes" />,
+			title: <SectionTitle count={diff.files.length} title="Changes" />,
 			description: <DiffReviewPane runId={runId} target={target} />,
 		});
 	}
@@ -1895,10 +1938,7 @@ export function CoworkContextPanel({
 			id: "rendered-artifacts",
 			icon: summary ? undefined : <SectionIcon icon={BrowserIcon} />,
 			title: (
-				<SectionTitle
-					count={summary ? undefined : artifacts.length}
-					title="Rendered artifacts"
-				/>
+				<SectionTitle count={artifacts.length} title="Rendered artifacts" />
 			),
 			description: (
 				<RenderedArtifactsList
@@ -1914,12 +1954,14 @@ export function CoworkContextPanel({
 		items.push({
 			id: "sources",
 			icon: summary ? undefined : <SectionIcon icon={Globe02Icon} />,
-			title: (
-				<SectionTitle
-					count={summary ? undefined : sources.length}
-					title="Sources"
-				/>
-			),
+			action:
+				summary && onOpenSources ? (
+					<SectionActionButton
+						label="Open all sources"
+						onClick={onOpenSources}
+					/>
+				) : undefined,
+			title: <SectionTitle count={sources.length} title="Sources" />,
 			description: (
 				<SourcesList
 					limit={maxItemsPerSection}
@@ -1934,12 +1976,14 @@ export function CoworkContextPanel({
 		items.push({
 			id: "subagents",
 			icon: summary ? undefined : <SectionIcon icon={Robot01Icon} />,
-			title: (
-				<SectionTitle
-					count={summary ? undefined : subagents.length}
-					title="Subagents"
-				/>
-			),
+			action:
+				summary && onOpenSubagents ? (
+					<SectionActionButton
+						label="Open all subagents"
+						onClick={onOpenSubagents}
+					/>
+				) : undefined,
+			title: <SectionTitle count={subagents.length} title="Subagents" />,
 			description: (
 				<SubagentsList
 					limit={maxItemsPerSection}
@@ -1955,12 +1999,7 @@ export function CoworkContextPanel({
 		items.push({
 			id: "side-chats",
 			icon: summary ? undefined : <SectionIcon icon={MessageQuestionIcon} />,
-			title: (
-				<SectionTitle
-					count={summary ? undefined : sideChats.length}
-					title="Side chats"
-				/>
-			),
+			title: <SectionTitle count={sideChats.length} title="Side chats" />,
 			description: (
 				<SideChatsList
 					entries={sideChats}
@@ -1982,6 +2021,9 @@ export function CoworkContextPanel({
 				"h-full overflow-y-auto",
 				variant === "cards" ? "p-2" : "p-0"
 			)}
+			data-testid={
+				variant === "summary" ? "pinned-summary" : "cowork-context-panel"
+			}
 		>
 			<BouncyAccordion
 				// No `description` size override: every section body now declares its
@@ -1994,7 +2036,7 @@ export function CoworkContextPanel({
 								root: "rounded-3xl border border-border/70 bg-card/95 p-1 shadow-xl shadow-black/10 backdrop-blur-xl [&>div]:!mt-0 [&>div+div]:border-border/60 [&>div+div]:border-t",
 								item: "!w-full !rounded-none !bg-transparent",
 								trigger:
-									"min-h-11 w-full rounded-2xl px-2 py-2 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+									"min-h-11 min-w-0 flex-1 rounded-2xl px-2 py-2 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
 								icon: "h-6 w-6",
 								title: "truncate",
 								content: "px-0",

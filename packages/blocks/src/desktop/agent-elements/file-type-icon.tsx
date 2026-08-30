@@ -1,6 +1,18 @@
 "use client";
 
 import {
+	Doc01Icon,
+	FileArchiveIcon,
+	FileAudioIcon,
+	FileImageIcon,
+	FileVideoIcon,
+	Pdf01Icon,
+	Ppt01Icon,
+	Xls01Icon,
+} from "@hugeicons/core-free-icons";
+import type { IconSvgElement } from "@hugeicons/react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
 	createFileTreeIconResolver,
 	getBuiltInSpriteSheet,
 } from "@pierre/trees";
@@ -10,6 +22,58 @@ const COMPLETE_ICONS = { set: "complete", colored: true } as const;
 const resolver = createFileTreeIconResolver(COMPLETE_ICONS);
 const spriteSheet = getBuiltInSpriteSheet("complete");
 const symbolCache = new Map<string, string>();
+
+const SPECIAL_FILE_ICONS: Record<
+	string,
+	{ className: string; icon: IconSvgElement }
+> = {
+	"7z": { className: "text-amber-500", icon: FileArchiveIcon },
+	csv: { className: "text-emerald-600 dark:text-emerald-400", icon: Xls01Icon },
+	doc: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+	docx: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+	gif: {
+		className: "text-violet-600 dark:text-violet-400",
+		icon: FileImageIcon,
+	},
+	jpeg: {
+		className: "text-violet-600 dark:text-violet-400",
+		icon: FileImageIcon,
+	},
+	jpg: {
+		className: "text-violet-600 dark:text-violet-400",
+		icon: FileImageIcon,
+	},
+	m4a: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
+	mkv: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
+	mp3: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
+	mp4: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
+	odt: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+	pdf: { className: "text-red-500", icon: Pdf01Icon },
+	png: {
+		className: "text-violet-600 dark:text-violet-400",
+		icon: FileImageIcon,
+	},
+	ppt: { className: "text-orange-600 dark:text-orange-400", icon: Ppt01Icon },
+	pptx: { className: "text-orange-600 dark:text-orange-400", icon: Ppt01Icon },
+	rtf: { className: "text-blue-600 dark:text-blue-400", icon: Doc01Icon },
+	rar: { className: "text-amber-500", icon: FileArchiveIcon },
+	svg: {
+		className: "text-violet-600 dark:text-violet-400",
+		icon: FileImageIcon,
+	},
+	tsv: { className: "text-emerald-600 dark:text-emerald-400", icon: Xls01Icon },
+	wav: { className: "text-cyan-600 dark:text-cyan-400", icon: FileAudioIcon },
+	webm: { className: "text-rose-600 dark:text-rose-400", icon: FileVideoIcon },
+	webp: {
+		className: "text-violet-600 dark:text-violet-400",
+		icon: FileImageIcon,
+	},
+	xls: { className: "text-emerald-600 dark:text-emerald-400", icon: Xls01Icon },
+	xlsx: {
+		className: "text-emerald-600 dark:text-emerald-400",
+		icon: Xls01Icon,
+	},
+};
 
 function getScopedSymbol(name: string, scopedName: string): string {
 	const cached = symbolCache.get(name);
@@ -31,8 +95,10 @@ function getScopedSymbol(name: string, scopedName: string): string {
 }
 
 /**
- * The same complete @pierre/trees file icon used by the workspace Files tree,
- * rendered in chat mentions, previews, change lists, and attachment rows.
+ * File-tree languages use the same complete @pierre/trees icon as the workspace
+ * Files tree. Common document/media formats use the corresponding colored
+ * Hugeicons mark, so PDFs and Office files remain identifiable in chat and
+ * source lists as well.
  */
 export function FileTypeIcon({
 	className,
@@ -42,6 +108,22 @@ export function FileTypeIcon({
 	path: string;
 }) {
 	const instanceId = useId().replaceAll(":", "");
+	const extension =
+		path
+			.split(/[./\\]/)
+			.pop()
+			?.toLowerCase() ?? "";
+	const special = SPECIAL_FILE_ICONS[extension];
+	if (special) {
+		return (
+			<HugeiconsIcon
+				aria-hidden="true"
+				className={`${className ?? "size-4 shrink-0"} ${special.className}`}
+				icon={special.icon}
+			/>
+		);
+	}
+
 	const icon = resolver.resolveIcon("file-tree-icon-file", path);
 	const symbolId = `${instanceId}-${icon.name}`;
 	const scopedSymbol = getScopedSymbol(icon.name, symbolId);

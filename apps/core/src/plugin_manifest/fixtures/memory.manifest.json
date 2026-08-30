@@ -2,7 +2,7 @@
   "id": "@ryu/memory",
   "name": "Memory",
   "version": "1.0.0",
-  "description": "Long-term memory CRUD: the multi-level (user/node/project/org) memory store surfaced in the Memory Library. Governance shell over the in-crate memory module — the in-process chat auto-recall path is KERNEL: it always reads the built-in store directly and never routes through this HTTP surface, so no provider selection can swap it. What IS swappable is the model-facing `memory` layer — the stable `memory.search` / `memory.store` / `memory.forget` verbs. Those resolve to exactly ONE provider at a time and default to this built-in store, so an external memory provider AUGMENTS the built-in store (which the kernel keeps recalling from regardless) rather than replacing it. The verbs are backed by declarative HTTP tools that loop back through Core's own authenticated `/api/memory` CRUD surface and its memory-only retrieval search.",
+  "description": "Long-term memory CRUD: the multi-level (agent/user/node/project/org) memory store surfaced in the Memory Library. Governance shell over the in-crate memory module — the in-process chat auto-recall path is KERNEL: it always reads the built-in store directly and never routes through this HTTP surface, so no provider selection can swap it. What IS swappable is the model-facing `memory` layer — the stable `memory.search` / `memory.store` / `memory.forget` verbs. Those resolve to exactly ONE provider at a time and default to this built-in store, so an external memory provider AUGMENTS the built-in store (which the kernel keeps recalling from regardless) rather than replacing it. The built-in verbs are declarative HTTP loopbacks through Core's authenticated `/api/memory` CRUD surface and memory-only retrieval search; because the loopback presents the node token rather than a verified human identity, these built-in model-facing tools are unavailable on organization-bound nodes while kernel auto-recall remains scoped and available there.",
   "tagline": "Durable facts the agent can recall, store, and forget",
   "keywords": ["memory", "recall", "facts"],
   "category": "Knowledge & Memory",
@@ -29,7 +29,7 @@
           "include_memory": true,
           "top_k": 5
         },
-        "description": "Semantically recall durable facts from the built-in long-term memory store, ranked by embedding similarity with an importance boost. Searches MEMORY ONLY — the empty Space filter matches no Space, so every document chunk is excluded. Reaches `user`- and `node`-scope facts ONLY: this route pins no active project and passes no read levels, so `project`- and `org`-scope facts are never returned. To reach those, or to filter by scope or category instead of by meaning, use `memorystore.list`. NOTE: on a node bound to an organization this tool returns {available:false} on every call — semantic recall requires a verified user and this tool authenticates as the node. Use memorystore.list there, which is scope-filtered and does not require one.",
+        "description": "Semantically recall durable facts from the built-in long-term memory store, ranked by embedding similarity with an importance boost. Searches MEMORY ONLY — the empty Space filter matches no Space, so every document chunk is excluded. Reaches `agent`-, `user`-, and `node`-scope facts: this route pins no active project and passes no read levels, so `project`- and `org`-scope facts are never returned. Sensitive topics stay excluded unless the owning user enabled them in Memory settings. To filter by scope or category instead of by meaning, use `memorystore.list`. On an organization-bound node this node-token loopback is unavailable; use kernel auto-recall or the Memory Library's verified-user surface.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -66,7 +66,7 @@
         },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "Remember a durable fact in the built-in long-term memory store. The entry is mirrored into the retrieval index on write, so it is recallable on the next turn. An unrecognized scope decodes to the NARROWEST level (`user`), never a broader one.",
+        "description": "Remember a durable fact in the built-in long-term memory store. The entry is mirrored into the retrieval index on write, so it is recallable on the next turn. Sensitive topics such as health conditions and religious beliefs require the user's Memory setting. An unrecognized scope decodes to the NARROWEST level (`user`), never a broader one. On an organization-bound node this node-token loopback is unavailable; save the fact through the Memory Library's verified-user surface.",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -76,12 +76,12 @@
             },
             "scope": {
               "type": "string",
-              "description": "How broadly the fact applies. Anything unrecognized narrows to `user`. Organization scope is NOT writable through this tool: the owning org is derived from a verified user, and this tool authenticates as the node, so use the Memory Library (or the HTTP API with a user token) to publish an org-wide fact.",
-              "enum": ["user", "node", "project"]
+              "description": "How broadly the fact applies. `agent` uses the selected agent, `user` follows the user across nodes, `node` stays on this machine, and `project` follows one folder. Anything unrecognized narrows to `user`. Organization scope is NOT writable through this tool: the owning org is derived from a verified user.",
+              "enum": ["agent", "user", "node", "project"]
             },
             "scope_id": {
               "type": "string",
-              "description": "The project folder path for a `project`-scope fact. Omit for `user` and `node`. Never set it for an org fact — the server derives the org id from the verified caller and refuses a client-supplied one."
+              "description": "The agent id for an `agent`-scope fact or project folder path for a `project`-scope fact. Omit for `user` and `node`. Never set it for an org fact — the server derives the org id from the verified caller and refuses a client-supplied one."
             },
             "category": {
               "type": "string",
@@ -162,14 +162,14 @@
         },
         "fail_open": true,
         "unwrap_body": true,
-        "description": "Browse remembered facts by scope and category rather than by meaning. This is the scope-filtered counterpart to `memorystore.recall`, which cannot filter by level — and the only route that reaches project-scope facts.",
+        "description": "Browse remembered facts by scope and category rather than by meaning. This is the scope-filtered counterpart to `memorystore.recall`, which cannot filter by level — and the only route that reaches project-scope facts. On an organization-bound node this node-token loopback is unavailable; browse through the Memory Library's verified-user surface.",
         "input_schema": {
           "type": "object",
           "properties": {
             "scope": {
               "type": "string",
               "description": "Restrict to one scope level. `org` returns rows only when the caller has a verified organization; a node-authenticated call sees none, which is the fail-closed direction rather than an error.",
-              "enum": ["user", "node", "project", "org"]
+              "enum": ["agent", "user", "node", "project", "org"]
             },
             "scope_id": {
               "type": "string",
@@ -255,6 +255,16 @@
     }
   ],
   "contributes": {
+    "composer_controls": [
+      {
+        "id": "memory.temporary-context",
+        "type": "toggle",
+        "flag": "@ryu/memory/temporary-context",
+        "label": "Use memory in temporary chat",
+        "description": "Allow this temporary chat to use personalized memories and personalization. It still will not be saved.",
+        "order": 30
+      }
+    ],
     "message_actions": [
       {
         "id": "memory.citations",

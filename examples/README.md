@@ -30,6 +30,7 @@ bun run --cwd examples/support-widget dev
 | [`workflow/summarize-and-rate.ts`](./workflow/summarize-and-rate.ts) | `defineWorkflow` — compose a tool + a model call; agents/tools/workflows are peers under one `run(input, ctx)` contract |
 | [`gateway/openai-compat-smoke.ts`](./gateway/openai-compat-smoke.ts) | Hit the gateway's OpenAI-compatible `/v1/chat/completions` directly |
 | [`support-widget/`](./support-widget/) | A complete SDK-built customer-support app: executable `defineTool`, `defineApp` widget, packed HTML, and a browser preview |
+| [`notifications/`](./notifications/) | Call Agent Mail or Ryu Box, then publish a metadata-only event to the standalone Ryu Notify API |
 
 ## The one rule
 

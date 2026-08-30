@@ -31,7 +31,7 @@ const PLACES = [
 		id: "macmini",
 		Icon: HardDrive,
 		place: "Mac mini",
-		use: "Keep a private node running for background work.",
+		use: "Keep a private server running for background work.",
 	},
 	{
 		id: "pi",

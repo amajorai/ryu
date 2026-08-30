@@ -26,6 +26,7 @@ pub const LOCAL_ENGINES: &[&str] = &[
     "sglang",
     "mlx",
     "mlx-vlm",
+    "mlx-serve",
     "omlx",
     "docker-model-runner",
     // Apple Foundation Models via the `apfel` server (Apple Silicon macOS 26+).
@@ -66,6 +67,12 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
             "http://127.0.0.1:{}",
             crate::sidecar::providers::mlx_vlm::process::default_port()
         )),
+        // mlx-serve is a native, model-directory server. It accepts an explicit
+        // profile-aware port so development and release nodes never contend.
+        "mlx-serve" => Some(format!(
+            "http://127.0.0.1:{}",
+            crate::sidecar::providers::mlx_serve::default_port()
+        )),
         // omlx serve (DEFAULT_PORT = 8000 — shared with vLLM; mutually exclusive).
         "omlx" => Some("http://127.0.0.1:8000".to_owned()),
         // Docker Model Runner serves its OpenAI-compat API under `/engines/v1`
@@ -97,6 +104,7 @@ pub fn local_engine_base_url(name: &str) -> Option<String> {
 ///   - `vllm`     → `vllm serve --port 8000` (`providers/vllm/process.rs`)
 ///   - `sglang`   → `sglang.launch_server --port 30000` (`providers/sglang/process.rs`)
 ///   - `mlx`      → `mlx_lm server --port 8086` (`providers/mlx/process.rs`, Apple Silicon only)
+///   - `mlx-serve` → `mlx-serve --serve --port 11234` (`providers/mlx_serve`, Apple Silicon only)
 ///
 /// Returns `None` for names that are not managed local engines.
 pub fn local_engine_url(name: &str) -> Option<String> {
@@ -116,6 +124,10 @@ pub fn local_engine_url(name: &str) -> Option<String> {
         "mlx-vlm" => Some(format!(
             "http://127.0.0.1:{}/v1",
             crate::sidecar::providers::mlx_vlm::process::default_port()
+        )),
+        "mlx-serve" => Some(format!(
+            "http://127.0.0.1:{}/v1",
+            crate::sidecar::providers::mlx_serve::default_port()
         )),
         // oMLX shares vLLM's :8000 — safe, the two never reside at once.
         "omlx" => Some("http://127.0.0.1:8000/v1".to_owned()),
@@ -185,6 +197,7 @@ mod tests {
         assert!(is_local_engine("sglang"));
         assert!(is_local_engine("mlx"));
         assert!(is_local_engine("mlx-vlm"));
+        assert!(is_local_engine("mlx-serve"));
         assert!(is_local_engine("omlx"));
         assert!(is_local_engine("docker-model-runner"));
         assert!(is_local_engine("apfel"));
@@ -218,6 +231,7 @@ mod tests {
             local_engine_base_url("sglang").as_deref(),
             Some("http://127.0.0.1:30000")
         );
+        assert!(local_engine_base_url("mlx-serve").is_some_and(|url| url.contains("127.0.0.1:")));
         // mlx is profile-aware; 8086 is the release-profile base port (moved off
         // 8082 to free the reranker's port).
         assert_eq!(
@@ -233,8 +247,7 @@ mod tests {
         // Non-engines (agents/tools) have no local inference endpoint.
         assert_eq!(local_engine_base_url("zeroclaw"), None);
         assert_eq!(local_engine_base_url(""), None);
-        assert!(local_engine_base_url("mesh-llm")
-            .is_some_and(|url| url.contains("127.0.0.1:")));
+        assert!(local_engine_base_url("mesh-llm").is_some_and(|url| url.contains("127.0.0.1:")));
     }
 
     #[test]

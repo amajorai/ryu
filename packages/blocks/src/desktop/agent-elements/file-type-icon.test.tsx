@@ -10,3 +10,12 @@ test("renders the matching complete icon symbol without the full sprite sheet", 
 	expect(markup).toContain("<symbol");
 	expect(markup.match(/<symbol/g)).toHaveLength(1);
 });
+
+test("uses colored document icons for common attachment formats", () => {
+	const markup = renderToStaticMarkup(
+		<FileTypeIcon className="size-4" path="Startup Runway v2.0.pdf" />
+	);
+
+	expect(markup).toContain("text-red-500");
+	expect(markup).not.toContain("file-tree-builtin-file");
+});

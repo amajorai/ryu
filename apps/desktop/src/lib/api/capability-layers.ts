@@ -216,7 +216,7 @@ export function describeBindingFailure(
  * re-derive: a capability is served EITHER by verb bindings (`web.search` and
  * friends) OR by a broker-proxyable sidecar route (`document.parse`), and a picker
  * that checks only the first disables every provider of the second — which is what
- * shipped, greying out all four document parsers and leaving that layer unswappable.
+ * shipped, greying out all five document parsers and leaving that layer unswappable.
  *
  * False is reachable today, and not only by a third-party manifest: the news and
  * tuition apps each provide a capability with no `route` and no `tools`, so both come

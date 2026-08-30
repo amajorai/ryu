@@ -483,10 +483,7 @@ pub async fn call_managed_provider(
     let status = response.status().as_u16();
     let text = response.text().await.unwrap_or_default();
     if !(200..300).contains(&status) {
-        return Err(ryu_app_events::ProviderRouterError::Rejected {
-            status,
-            body: text,
-        });
+        return Err(ryu_app_events::ProviderRouterError::Rejected { status, body: text });
     }
     serde_json::from_str(&text).map_err(|error| {
         ryu_app_events::ProviderRouterError::Invalid(format!(

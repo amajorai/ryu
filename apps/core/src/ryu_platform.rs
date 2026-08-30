@@ -175,9 +175,7 @@ mod tests {
 
     #[test]
     fn contract_is_reserved_for_the_flagship_entry_point() {
-        assert!(
-            operating_contract(Some("ryu"), false, RyuResponseMode::Everyday).is_some()
-        );
+        assert!(operating_contract(Some("ryu"), false, RyuResponseMode::Everyday).is_some());
         assert!(
             operating_contract(Some("specialist"), false, RyuResponseMode::Developer).is_none()
         );

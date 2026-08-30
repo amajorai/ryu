@@ -785,12 +785,7 @@ impl OpenApiImport {
     /// (`trim_end_matches('/')`). If the two normalisations disagreed, the prefix
     /// stripped at lowering would stop matching the one the proxy re-adds, and the
     /// mismatch would appear only *after* an update — the same window this fixes.
-    async fn lowering_inputs(
-        &self,
-    ) -> (
-        String,
-        Vec<crate::plugin_manifest::schema::RouteSpec>,
-    ) {
+    async fn lowering_inputs(&self) -> (String, Vec<crate::plugin_manifest::schema::RouteSpec>) {
         let fallback = || (self.upstream_mount.clone(), self.declared_routes.clone());
         let Some(store) = self.manifests.as_ref() else {
             return fallback();
@@ -4014,7 +4009,13 @@ mod tests {
         };
         let (mount, routes) = live.lowering_inputs().await;
         assert_eq!(mount, "/api/new");
-        assert_eq!(routes.iter().map(|route| route.path.as_str()).collect::<Vec<_>>(), ["/added"]);
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.path.as_str())
+                .collect::<Vec<_>>(),
+            ["/added"]
+        );
 
         // A sidecar the live manifest does not describe (renamed, or the app was
         // uninstalled mid-fetch) falls back rather than lowering against nothing.

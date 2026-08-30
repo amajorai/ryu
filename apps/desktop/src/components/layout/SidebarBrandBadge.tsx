@@ -169,7 +169,7 @@ export function SidebarBrandBadge({
 								<span>
 									<span className="block font-medium">OS</span>
 									<span className="block text-muted-foreground text-xs">
-										Dock, windows, and Mission Control for Ryu Apps
+										Dock, windows, and App Launcher for Ryu Apps
 									</span>
 								</span>
 							</DropdownMenuRadioItem>

@@ -102,10 +102,16 @@ import {
 
 // ── Memory / Spaces slot (live) ────────────────────────────────────────────────
 
-/** The three memory scope levels an agent may recall from. Leaving all three
- * unchecked means "all levels" — the back-compat default Core applies for
- * agents configured before this slot existed. */
+/** The five memory scope levels an agent may recall from. Leaving all personal
+ * levels unchecked means "all personal levels" — the back-compat default Core
+ * applies for agents configured before this slot existed. Organization memory
+ * stays explicit because it is shared with every member of the organization. */
 const MEMORY_READ_LEVELS: { hint: string; label: string; value: string }[] = [
+	{
+		value: "agent",
+		label: "Agent",
+		hint: "Memories scoped to this agent.",
+	},
 	{
 		value: "user",
 		label: "User",
@@ -120,6 +126,11 @@ const MEMORY_READ_LEVELS: { hint: string; label: string; value: string }[] = [
 		value: "project",
 		label: "Project",
 		hint: "Memories scoped to the active project.",
+	},
+	{
+		value: "org",
+		label: "Organization",
+		hint: "Memories shared across this organization.",
 	},
 ];
 
@@ -199,7 +210,7 @@ export function MemorySpacesCard({
 					<span className="font-medium text-sm">Memory levels</span>
 					<p className="text-muted-foreground text-xs">
 						Which memory scopes this agent may recall from. Leave all unchecked
-						to allow all three levels.
+						to allow all personal levels (agent, user, node, and project).
 					</p>
 					<div className="flex flex-col gap-2">
 						{MEMORY_READ_LEVELS.map((level) => {
@@ -1833,8 +1844,9 @@ export interface AgentSettingsFormProps {
 	launchConfig?: ReactNode;
 
 	// Memory / Spaces slot
-	/** Memory scope levels the agent may recall from (subset of user/node/project).
-	 * Empty = all three levels (the back-compat default). */
+	/** Memory scope levels the agent may recall from (subset of
+	 * agent/user/node/project/org). Empty = all personal levels (the back-compat
+	 * default); organization memory must be explicit. */
 	memoryReadLevels: Set<string>;
 	/** Space IDs the agent may read for retrieval. Empty = no Spaces injected. */
 	memorySpaceIds: Set<string>;

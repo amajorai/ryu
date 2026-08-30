@@ -300,6 +300,56 @@
     "icon": "mortarboard-01"
   },
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "tuition-study",
+        "title": "Study",
+        "icon": "book-02",
+        "target": "/plugin/app__tuition-companion",
+        "context": { "tab": "study" },
+        "order": 90
+      },
+      {
+        "id": "tuition-skills",
+        "title": "Skills",
+        "icon": "bulb",
+        "target": "/plugin/app__tuition-companion",
+        "context": { "tab": "skills" },
+        "order": 91
+      },
+      {
+        "id": "tuition-materials",
+        "title": "Materials",
+        "icon": "file-02",
+        "target": "/plugin/app__tuition-companion",
+        "context": { "tab": "materials" },
+        "order": 92
+      },
+      {
+        "id": "tuition-review",
+        "title": "Review queue",
+        "icon": "task-01",
+        "target": "/plugin/app__tuition-companion",
+        "context": { "tab": "review" },
+        "order": 93
+      },
+      {
+        "id": "tuition-subjects",
+        "title": "Subjects",
+        "icon": "folder-01",
+        "target": "/plugin/app__tuition-companion",
+        "context": { "tab": "subjects" },
+        "order": 94
+      },
+      {
+        "id": "tuition-settings",
+        "title": "Settings",
+        "icon": "settings-01",
+        "target": "/plugin/app__tuition-companion",
+        "context": { "tab": "settings" },
+        "order": 95
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "tuition.chat",

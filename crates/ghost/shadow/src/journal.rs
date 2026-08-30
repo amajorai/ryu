@@ -771,11 +771,15 @@ mod tests {
         let snapshot = build_journal_snapshot(0, MICROS_PER_MINUTE, &entries);
         let apps = &snapshot.cards[0].apps;
 
-        assert_eq!(apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>(), [
-            "Slack", "WhatsApp"
-        ]);
+        assert_eq!(
+            apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>(),
+            ["Slack", "WhatsApp"]
+        );
         assert_eq!(apps[0].bundle_id.as_deref(), Some("com.slack.Slack"));
-        assert_eq!(apps[1].app_path.as_deref(), Some("/Applications/WhatsApp.app"));
+        assert_eq!(
+            apps[1].app_path.as_deref(),
+            Some("/Applications/WhatsApp.app")
+        );
     }
 
     fn card(start_ts: u64, minutes: u64, category: &str, distraction: bool) -> JournalCard {

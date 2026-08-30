@@ -6,7 +6,10 @@ import {
 	LibraryEmpty,
 	LibraryGrid,
 } from "@ryu/blocks/desktop/library";
-import type { ViewMode } from "@ryu/blocks/desktop/view-toggle";
+import type {
+	LibraryViewMode,
+	ViewMode,
+} from "@ryu/blocks/desktop/view-toggle";
 import { BookCard } from "@ryu/ui/components/book-card.tsx";
 import { useMemo } from "react";
 
@@ -34,7 +37,7 @@ export default function SidebarLibrarySection({
 	loading?: boolean;
 	query: string;
 	variant?: "cards" | "books";
-	view: ViewMode;
+	view: LibraryViewMode;
 }) {
 	const visible = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -72,7 +75,7 @@ export default function SidebarLibrarySection({
 		);
 	}
 
-	if (variant === "books" && view === "grid") {
+	if (variant === "books" && view === "showcase") {
 		return (
 			<div className="flex flex-wrap gap-6 pt-1">
 				{visible.map((item) => (
@@ -103,8 +106,9 @@ export default function SidebarLibrarySection({
 		);
 	}
 
+	const standardView: ViewMode = view === "list" ? "list" : "grid";
 	return (
-		<LibraryGrid columns={2} view={view}>
+		<LibraryGrid columns={2} view={standardView}>
 			{visible.map((item) => {
 				const card: LibraryCardData = {
 					favorited: false,
@@ -118,7 +122,7 @@ export default function SidebarLibrarySection({
 						item={card}
 						key={item.id}
 						onOpen={item.onOpen}
-						view={view}
+						view={standardView}
 					/>
 				);
 			})}

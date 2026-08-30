@@ -8,6 +8,8 @@ test("the product realm keeps the public product names and destinations together
 		"console",
 		"gateway",
 		"box",
+		"mail",
+		"notify",
 		"hire",
 	]);
 	expect(PRODUCT_REALMS.map((realm) => realm.label)).toEqual([
@@ -16,6 +18,8 @@ test("the product realm keeps the public product names and destinations together
 		"Ryu Console",
 		"Ryu Gateway",
 		"Ryu Box",
+		"Ryu Mail",
+		"Ryu Notify",
 		"Ryu Hire",
 	]);
 	for (const realm of PRODUCT_REALMS) {

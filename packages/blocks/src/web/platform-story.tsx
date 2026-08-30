@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
+import { docsHref } from "./data/resources.tsx";
 import { landingSurfaceCardFlexXlClass } from "./landing-card-tones.ts";
 import { landingSubheadlineClass } from "./landing-typography.ts";
 import { SectionTitle } from "./section-title.tsx";
@@ -118,7 +119,7 @@ const PRIMITIVES = [
 	"RAG",
 	"Workflows",
 	"Policies",
-	"Nodes",
+	"Servers",
 	"Surfaces",
 	"Apps",
 ] as const;
@@ -143,15 +144,15 @@ const INTEGRATION_PATHS: readonly IntegrationPath[] = [
 	{
 		description:
 			"Author typed agents, workflows, tools, and skills, or embed chat in your own UI.",
-		href: "/docs/extend/develop/sdk",
+		href: docsHref("/docs/extend/develop/sdk"),
 		icon: Blocks,
 		label: "SDK",
 		token: "@ryuhq/sdk",
 	},
 	{
 		description:
-			"Expose a Core node to MCP hosts or bring external MCP servers into the tool catalog.",
-		href: "/docs/extend/integrate/mcp-integration",
+			"Expose a Core server to MCP hosts or bring external MCP servers into the tool catalog.",
+		href: docsHref("/docs/extend/integrate/mcp-integration"),
 		icon: Link2,
 		label: "MCP",
 		token: "ryu-mcp",
@@ -159,7 +160,7 @@ const INTEGRATION_PATHS: readonly IntegrationPath[] = [
 	{
 		description:
 			"Drive agent subprocesses with ACP or connect remote agents with A2A.",
-		href: "/docs/extend/integrate/acp-integration",
+		href: docsHref("/docs/extend/integrate/acp-integration"),
 		icon: Bot,
 		label: "ACP + A2A",
 		token: "agent protocols",
@@ -167,15 +168,15 @@ const INTEGRATION_PATHS: readonly IntegrationPath[] = [
 	{
 		description:
 			"Package capabilities as Apps, sandboxed iframe widgets, standalone companions, or plugins from a starter project.",
-		href: "/docs/extend/develop/extensions/ryu-apps",
+		href: docsHref("/docs/extend/develop/extensions/ryu-apps"),
 		icon: Workflow,
 		label: "Apps + widgets",
 		token: "manifest.json · create-ryu-app",
 	},
 	{
 		description:
-			"Run the same work from Desktop, mobile, browser, terminal, or a website's local node.",
-		href: "/docs/surfaces",
+			"Run the same work from Desktop, mobile, browser, terminal, or a website's local server.",
+		href: docsHref("/docs/surfaces"),
 		icon: MonitorSmartphone,
 		label: "Every surface",
 		token: "local → cloud",
@@ -183,14 +184,14 @@ const INTEGRATION_PATHS: readonly IntegrationPath[] = [
 	{
 		description:
 			"Run saved agents and allowlisted tools inside a GitHub workflow.",
-		href: "/docs/ci/github-actions",
+		href: docsHref("/docs/ci/github-actions"),
 		icon: GitBranch,
 		label: "GitHub Actions",
 		token: "amajorai/ryu@v1",
 	},
 	{
 		description:
-			"Use a managed Ryu or provider subscription, bring provider keys, or self-host the node in your environment.",
+			"Use a managed Ryu or provider subscription, bring provider keys, or self-host the server in your environment.",
 		href: "/platform#infra",
 		icon: Globe2,
 		label: "Managed or self-hosted",
@@ -216,28 +217,28 @@ const CAPABILITIES: readonly Capability[] = [
 	{
 		description:
 			"Agents, sub-agents, teams, workflows, sessions, durable runs, and human approvals.",
-		href: "/docs/core/workflows",
+		href: docsHref("/docs/core/workflows"),
 		icon: Bot,
 		name: "Agents + orchestration",
 	},
 	{
 		description:
 			"Spaces, long-term memory, embeddings, retrieval, conversation search, and RAG.",
-		href: "/docs/core/memory",
+		href: docsHref("/docs/core/memory"),
 		icon: Layers3,
 		name: "Knowledge + memory",
 	},
 	{
 		description:
 			"Vision models, OCR, document parsing, image and media workflows, voice, and transcription.",
-		href: "/docs/core/mcp-registry",
+		href: docsHref("/docs/core/mcp-registry"),
 		icon: ScanSearch,
 		name: "Multimodal + OCR",
 	},
 	{
 		description:
 			"Train LoRA or QLoRA adapters locally or remotely, then merge the result into a model you can run.",
-		href: "/docs/apps/finetune",
+		href: docsHref("/docs/apps/finetune"),
 		icon: Terminal,
 		name: "Fine-tuning",
 	},
@@ -250,15 +251,15 @@ const CAPABILITIES: readonly Capability[] = [
 	},
 	{
 		description:
-			"Browser-local models, in-page tools, and an explicit path to a visitor's own Ryu node.",
-		href: "/docs/browser-extension",
+			"Browser-local models, in-page tools, and an explicit path to a visitor's own Ryu server.",
+		href: docsHref("/docs/surfaces/browser-extension"),
 		icon: Globe2,
 		name: "Browser + local AI",
 	},
 	{
 		description:
 			"On-device mobile models plus native notifications, files, camera, haptics, and background status.",
-		href: "/docs/mobile",
+		href: docsHref("/docs/surfaces/mobile"),
 		icon: Smartphone,
 		name: "Mobile + device AI",
 	},
@@ -286,15 +287,15 @@ const SHOWCASE: readonly ShowcaseItem[] = [
 	{
 		description:
 			"Ryu's own app catalog: focused workflows backed by sidecars, companions, and shared platform seams.",
-		href: "/docs/apps",
+		href: docsHref("/docs/apps"),
 		icon: Workflow,
 		label: "Ryu-built software",
 		name: "Ryu Apps",
 	},
 	{
 		description:
-			"A website or browser extension can run a small model locally or call a node the visitor controls.",
-		href: "/docs/browser-extension",
+			"A website or browser extension can run a small model locally or call a server the visitor controls.",
+		href: docsHref("/docs/surfaces/browser-extension"),
 		icon: MonitorSmartphone,
 		label: "Web + browser",
 		name: "Local AI in the tab",
@@ -302,7 +303,7 @@ const SHOWCASE: readonly ShowcaseItem[] = [
 	{
 		description:
 			"Agents and allowlisted tools become steps in a repeatable CI workflow with the same Core contract.",
-		href: "/docs/ci/github-actions",
+		href: docsHref("/docs/ci/github-actions"),
 		icon: GitBranch,
 		label: "Automation",
 		name: "Ryu in GitHub",
@@ -621,7 +622,7 @@ export function PlatformStory({ compact = false }: { compact?: boolean }) {
 						<p className={cn(landingSubheadlineClass, "max-w-2xl")}>
 							One endpoint for an existing product. A typed SDK for a new
 							extension. A protocol bridge for another agent. A managed or
-							self-hosted node when you need the runtime itself.
+							self-hosted server when you need the runtime itself.
 						</p>
 						<ul className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 							{INTEGRATION_PATHS.map((path) => (
@@ -664,7 +665,7 @@ export function PlatformStory({ compact = false }: { compact?: boolean }) {
 							</div>
 							<Link
 								className="inline-flex items-center gap-2 font-medium text-foreground text-sm underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								href={"/docs/showcase" as Route}
+								href={docsHref("/docs/showcase") as Route}
 							>
 								Read the showcase guide
 								<ArrowUpRight aria-hidden="true" className="size-4" />

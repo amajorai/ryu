@@ -441,7 +441,9 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
     (
         "@ryu/ego-browser",
         "adapters/browser.screenshot.js",
-        include_str!("../../../../plugins-store/plugins/ego-browser/adapters/browser.screenshot.js"),
+        include_str!(
+            "../../../../plugins-store/plugins/ego-browser/adapters/browser.screenshot.js"
+        ),
     ),
     (
         "@ryu/ego-browser",
@@ -647,13 +649,11 @@ pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[
 ];
 
 #[cfg(not(test))]
-pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[
-    (
-        "@ryu/blueprint",
-        "output-styles/visual-planning.md",
-        include_str!("../../../../apps-store/blueprint/output-styles/visual-planning.md"),
-    ),
-];
+pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[(
+    "@ryu/blueprint",
+    "output-styles/visual-planning.md",
+    include_str!("../../../../apps-store/blueprint/output-styles/visual-planning.md"),
+)];
 
 /// The embedded contents of `rel` for built-in plugin `plugin_id`, or `None` when
 /// nothing in [`BUILTIN_OUTPUT_STYLES`] matches.

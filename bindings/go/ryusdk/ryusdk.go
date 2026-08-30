@@ -1,26 +1,26 @@
 // Package ryusdk is the Go binding for the Ryu SDK. It calls the shared
-// `ryu-sdk` Rust core through its C-ABI (crates/ryu-sdk-ffi) via cgo, so Go gets
+// `ryu-sdk` Rust core through its C-ABI (crates/sdk/ffi) via cgo, so Go gets
 // the exact same manifest validation, gateway egress rules, and
-// gateway-mandatory model client as every other binding.
+// gateway-mandatory model and embedding clients as every other binding.
 //
 // # Build prerequisites
 //
 //  1. Build the C-ABI core (release):
-//     cargo build --release --manifest-path crates/ryu-sdk-ffi/Cargo.toml
+//     cargo build --release --manifest-path crates/sdk/ffi/Cargo.toml
 //  2. A cgo-compatible C toolchain must be on PATH (gcc/clang; on Windows the
 //     Rust staticlib is MSVC-format, so prefer the cdylib import lib or build
 //     the FFI crate with the gnu toolchain to match mingw cgo).
 //
-// The cgo directives below link the static library from the FFI crate's
+// The cgo directives below link the static library from the workspace's
 // `target/release`. Adjust the paths/flags for your platform and link mode
 // (static `.a`/`.lib` vs dynamic `.so`/`.dylib`/`.dll`).
 package ryusdk
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../../crates/ryu-sdk-ffi/include
-#cgo linux LDFLAGS: -L${SRCDIR}/../../../crates/ryu-sdk-ffi/target/release -lryu_sdk_ffi -lm -ldl -lpthread
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../../crates/ryu-sdk-ffi/target/release -lryu_sdk_ffi -framework CoreFoundation -framework Security
-#cgo windows LDFLAGS: -L${SRCDIR}/../../../crates/ryu-sdk-ffi/target/release -lryu_sdk_ffi -lws2_32 -luserenv -lbcrypt -lntdll
+#cgo CFLAGS: -I${SRCDIR}/../../../crates/sdk/ffi/include
+#cgo linux LDFLAGS: -L${SRCDIR}/../../../target/release -lryu_sdk_ffi -lm -ldl -lpthread
+#cgo darwin LDFLAGS: -L${SRCDIR}/../../../target/release -lryu_sdk_ffi -framework CoreFoundation -framework Security
+#cgo windows LDFLAGS: -L${SRCDIR}/../../../target/release -lryu_sdk_ffi -lws2_32 -luserenv -lbcrypt -lntdll
 #include <stdlib.h>
 #include "ryu_sdk.h"
 */
@@ -155,6 +155,59 @@ func (c *ModelClient) Chat(messagesJSON string) (string, error) {
 	out := C.ryu_model_client_chat(c.handle, cmsgs)
 	if out == nil {
 		return "", lastError("chat failed")
+	}
+	return takeString(out), nil
+}
+
+// EmbeddingClient is a gateway-mandatory embedding client. It uses the same
+// C-ABI handle as the Rust core and returns the JSON response unchanged so Go
+// callers can choose their own typed vector representation.
+type EmbeddingClient struct {
+	handle *C.RyuEmbeddingClientHandle
+}
+
+// NewEmbeddingClient constructs an embedding client. Empty baseURL/token values
+// use the RYU_GATEWAY_URL / RYU_GATEWAY_TOKEN defaults from the Rust core.
+func NewEmbeddingClient(model, baseURL, token string) (*EmbeddingClient, error) {
+	cmodel := C.CString(model)
+	defer C.free(unsafe.Pointer(cmodel))
+
+	var cbase, ctoken *C.char
+	if baseURL != "" {
+		cbase = C.CString(baseURL)
+		defer C.free(unsafe.Pointer(cbase))
+	}
+	if token != "" {
+		ctoken = C.CString(token)
+		defer C.free(unsafe.Pointer(ctoken))
+	}
+
+	h := C.ryu_embedding_client_new(cmodel, cbase, ctoken)
+	if h == nil {
+		return nil, lastError("failed to construct embedding client")
+	}
+	return &EmbeddingClient{handle: h}, nil
+}
+
+// Close releases the underlying Rust handle. Safe to call more than once.
+func (c *EmbeddingClient) Close() {
+	if c.handle != nil {
+		C.ryu_embedding_client_free(c.handle)
+		c.handle = nil
+	}
+}
+
+// Embed sends a blocking embedding request. inputsJSON is a JSON array of
+// strings; the returned JSON object contains embeddings and optional usage.
+func (c *EmbeddingClient) Embed(inputsJSON string) (string, error) {
+	if c.handle == nil {
+		return "", errors.New("embedding client is closed")
+	}
+	cinputs := C.CString(inputsJSON)
+	defer C.free(unsafe.Pointer(cinputs))
+	out := C.ryu_embedding_client_embed(c.handle, cinputs)
+	if out == nil {
+		return "", lastError("embedding failed")
 	}
 	return takeString(out), nil
 }

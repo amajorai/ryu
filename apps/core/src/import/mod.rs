@@ -1093,10 +1093,7 @@ fn is_valid_command_name(stem: &str) -> bool {
 fn rel_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .ok()
-        .map(|p| {
-            p.to_string_lossy()
-                .replace(std::path::MAIN_SEPARATOR, "/")
-        })
+        .map(|p| p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
         .filter(|r| !r.is_empty())
         .or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()))
         .unwrap_or_else(|| {

@@ -15,6 +15,7 @@ import { type ReactNode, useCallback, useId, useRef, useState } from "react";
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
 export interface BouncyAccordionItem {
+	action?: ReactNode;
 	description?: ReactNode;
 	disabled?: boolean;
 	icon?: ReactNode;
@@ -23,6 +24,7 @@ export interface BouncyAccordionItem {
 }
 
 export interface BouncyAccordionClassNames {
+	action?: string;
 	chevron?: string;
 	content?: string;
 	description?: string;
@@ -178,54 +180,64 @@ function BouncyAccordionRow({
 				initial={false}
 				transition={reduce ? { duration: 0 } : ROW_TRANSITION}
 			>
-				<button
-					aria-controls={contentId}
-					aria-expanded={open}
-					className={cn(
-						"flex min-h-[40px] w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors",
-						"focus-visible:bg-muted/25",
-						"disabled:pointer-events-none",
-						classNames?.trigger
-					)}
-					disabled={item.disabled}
-					id={triggerId}
-					onClick={onToggle}
-					type="button"
-				>
-					{item.icon ? (
+				<div className="flex min-w-0 items-center">
+					<button
+						aria-controls={contentId}
+						aria-expanded={open}
+						className={cn(
+							"flex min-h-[40px] min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left outline-none transition-colors",
+							"focus-visible:bg-muted/25",
+							"disabled:pointer-events-none",
+							classNames?.trigger
+						)}
+						disabled={item.disabled}
+						id={triggerId}
+						onClick={onToggle}
+						type="button"
+					>
+						{item.icon ? (
+							<span
+								className={cn(
+									"grid h-7 w-7 shrink-0 place-items-center text-muted-foreground",
+									classNames?.icon
+								)}
+								data-slot="bouncy-accordion-item-icon"
+							>
+								{item.icon}
+							</span>
+						) : null}
+						{/* No `truncate` in the base: long-form titles (marketing FAQ
+						    questions) must wrap. Narrow surfaces opt in via
+						    `classNames.title`. */}
 						<span
 							className={cn(
-								"grid h-7 w-7 shrink-0 place-items-center text-muted-foreground",
-								classNames?.icon
+								"min-w-0 flex-1 text-foreground text-sm",
+								classNames?.title
 							)}
-							data-slot="bouncy-accordion-item-icon"
 						>
-							{item.icon}
+							{item.title}
 						</span>
+						<motion.span
+							animate={{ rotate: open ? 180 : 0 }}
+							aria-hidden
+							className={cn(
+								"grid h-6 w-6 shrink-0 place-items-center text-muted-foreground",
+								classNames?.chevron
+							)}
+							transition={reduce ? { duration: 0 } : CHEVRON_TRANSITION}
+						>
+							<ChevronDown className="h-4 w-4" />
+						</motion.span>
+					</button>
+					{item.action ? (
+						<div
+							className={cn("flex shrink-0 items-center", classNames?.action)}
+							data-slot="bouncy-accordion-item-action"
+						>
+							{item.action}
+						</div>
 					) : null}
-					{/* No `truncate` in the base: long-form titles (marketing FAQ
-					    questions) must wrap. Narrow surfaces opt in via
-					    `classNames.title`. */}
-					<span
-						className={cn(
-							"min-w-0 flex-1 text-foreground text-sm",
-							classNames?.title
-						)}
-					>
-						{item.title}
-					</span>
-					<motion.span
-						animate={{ rotate: open ? 180 : 0 }}
-						aria-hidden
-						className={cn(
-							"grid h-6 w-6 shrink-0 place-items-center text-muted-foreground",
-							classNames?.chevron
-						)}
-						transition={reduce ? { duration: 0 } : CHEVRON_TRANSITION}
-					>
-						<ChevronDown className="h-4 w-4" />
-					</motion.span>
-				</button>
+				</div>
 
 				<motion.div
 					animate={{

@@ -177,6 +177,40 @@
     "icon": "checkmark-badge-03"
   },
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "reasoning-rules",
+        "title": "Rules",
+        "icon": "file-script",
+        "target": "/plugin/app__reasoning-companion",
+        "context": { "tab": "rules" },
+        "order": 49
+      },
+      {
+        "id": "reasoning-variables",
+        "title": "Variables",
+        "icon": "code",
+        "target": "/plugin/app__reasoning-companion",
+        "context": { "tab": "variables" },
+        "order": 50
+      },
+      {
+        "id": "reasoning-playground",
+        "title": "Playground",
+        "icon": "play-circle",
+        "target": "/plugin/app__reasoning-companion",
+        "context": { "tab": "playground" },
+        "order": 51
+      },
+      {
+        "id": "reasoning-tests",
+        "title": "Tests",
+        "icon": "test-tube",
+        "target": "/plugin/app__reasoning-companion",
+        "context": { "tab": "tests" },
+        "order": 52
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "reasoning.chat",

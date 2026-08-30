@@ -1,15 +1,34 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+	authBackendUrl,
 	pollDeviceToken,
 	requestDeviceCode,
 	safeAuthBackendUrl,
 	safeBrowserUrl,
 } from "./auth.ts";
 
+const previousAuthUrl = process.env.RYU_AUTH_URL;
 const realFetch = globalThis.fetch;
 
 afterEach(() => {
+	if (previousAuthUrl === undefined) {
+		delete process.env.RYU_AUTH_URL;
+	} else {
+		process.env.RYU_AUTH_URL = previousAuthUrl;
+	}
 	globalThis.fetch = realFetch;
+});
+
+describe("MCP authentication target", () => {
+	test("defaults to the local control plane", () => {
+		delete process.env.RYU_AUTH_URL;
+		expect(authBackendUrl()).toBe("http://localhost:3000");
+	});
+
+	test("trims an explicit control-plane URL", () => {
+		process.env.RYU_AUTH_URL = "  https://account.example.test  ";
+		expect(authBackendUrl()).toBe("https://account.example.test");
+	});
 });
 
 describe("MCP device authentication", () => {
@@ -24,6 +43,7 @@ describe("MCP device authentication", () => {
 			/HTTPS unless it targets loopback/
 		);
 	});
+
 	test("accepts only browser-safe HTTP(S) verification URLs", () => {
 		expect(safeBrowserUrl("https://ryu.example/device?code=%22safe%22")).toBe(
 			"https://ryu.example/device?code=%22safe%22"

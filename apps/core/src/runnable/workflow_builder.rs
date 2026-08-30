@@ -71,7 +71,7 @@ Node object shape: { \"id\": \"unique_id\", \"type\": \"<kind>\", ...fields }. K
 - plugin { plugin_id: string, runnable_id: string, args?: object }  (runs a runnable an installed plugin/app bundles; args leaves are templates)\n\
 - notify_user { target: object, title?: string, body?: string, ack_mode?: object, ack_timeout_ms?: number }  \
 (pings org/team/members; target = { kind: \"org\" } | { kind: \"team\", team_id } | { kind: \"members\", user_ids: string[] }; \
-ack_mode = { mode: \"none\" } (default, fire-and-forget) | { mode: \"first\" } | { mode: \"all\" } | { mode: \"quorum\", n }; title/body are templates)\n\
+ack_mode = { mode: \"none\" } (default, fire-and-forget) | { mode: \"first\" } | { mode: \"all\" } | { mode: \"quorum\", n } | { mode: \"percentage\", percent }; title/body are templates)\n\
 Edge object shape: { \"from\": \"node_id\", \"to\": \"node_id\", \"branch\": null|\"true\"|\"false\" }.\n\
 Trigger object shape (the `triggers` array; omit for manual-only). One of:\n\
 - { \"type\": \"manual\" }  (runs only on explicit Run / the run endpoint)\n\

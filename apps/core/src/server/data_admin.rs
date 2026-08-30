@@ -427,7 +427,22 @@ pub async fn data_clear(
             .clear_all_spaces()
             .await
             .map_err(|e| e.to_string()),
-        (DataCategory::Memory, None) => state.memory.clear_all().await.map_err(|e| e.to_string()),
+        (DataCategory::Memory, None) => {
+            // Remove the derived plaintext index first. If either operation
+            // fails, the encrypted source remains available for a retry and a
+            // failed cleanup can never leave deleted memory searchable.
+            if let Err(error) = state.retrieval.clear_memory_chunks().await {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": error.to_string() })),
+                );
+            }
+            state
+                .memory
+                .clear_all()
+                .await
+                .map_err(|error| error.to_string())
+        }
         (DataCategory::Monitors, None) => clear_all_monitors(&state).await,
         (DataCategory::Meetings, None) => clear_all_meetings(&state).await,
 

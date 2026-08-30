@@ -88,6 +88,10 @@ import {
 	PERSONAL_ORGANIZATION_KIND,
 	TEAMS_ORGANIZATION_KIND,
 } from "./lib/organization-kind.ts";
+import {
+	notifyOrganizationEvent,
+	organizationAppUrl,
+} from "./lib/organization-notifications.ts";
 import { activeTeamsSeatAllowance } from "./lib/organization-seat-entitlement.ts";
 import { decideSeatAdmission } from "./lib/organization-seat-gate.ts";
 import {
@@ -2229,6 +2233,18 @@ export const auth = betterAuth({
 							},
 						}
 					);
+					await notifyOrganizationEvent({
+						actionLabel: "Manage organization members",
+						actionUrl: organizationAppUrl("/organizations/members"),
+						body: `An invitation was sent to ${normalizeInvitationEmail(invitation.email)}.`,
+						dedupeKey: `organization-invitation:${invitation.id}:created`,
+						kind: "organization-invitation",
+						organizationIds: [String(invitation.organizationId)],
+						sourceId: String(invitation.id),
+						sourceType: "organization-invitation",
+						subject: "Organization invitation sent",
+						title: "Organization invitation sent",
+					});
 				},
 				afterAcceptInvitation: async ({ invitation }) => {
 					await OrganizationSeatReservation.deleteOne({
@@ -2242,6 +2258,27 @@ export const auth = betterAuth({
 						},
 						{ $set: { acceptedAt: new Date() } }
 					);
+					await notifyOrganizationEvent({
+						actionLabel: "Open organization invitations",
+						actionUrl: organizationAppUrl("/organizations/invitations"),
+						actionUrlForOrganization: () =>
+							organizationAppUrl("/organizations/members"),
+						body: `${normalizeInvitationEmail(invitation.email)} accepted the organization invitation.`,
+						dedupeKey: `organization-invitation:${invitation.id}:accepted`,
+						extraRecipients: [
+							{
+								actionLabel: "Open invitations",
+								actionUrl: organizationAppUrl("/organizations/invitations"),
+								email: invitation.email,
+							},
+						],
+						kind: "organization-invitation",
+						organizationIds: [String(invitation.organizationId)],
+						sourceId: String(invitation.id),
+						sourceType: "organization-invitation",
+						subject: "Organization invitation accepted",
+						title: "Organization invitation accepted",
+					});
 				},
 				beforeAcceptInvitation: async ({ invitation, user }) => {
 					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
@@ -2271,11 +2308,53 @@ export const auth = betterAuth({
 						},
 						{ upsert: true }
 					);
+					await notifyOrganizationEvent({
+						actionLabel: "Open organization invitations",
+						actionUrl: organizationAppUrl("/organizations/invitations"),
+						actionUrlForOrganization: () =>
+							organizationAppUrl("/organizations/members"),
+						body: `${normalizeInvitationEmail(invitation.email)} declined the organization invitation.`,
+						dedupeKey: `organization-invitation:${invitation.id}:rejected`,
+						extraRecipients: [
+							{
+								actionLabel: "Open invitations",
+								actionUrl: organizationAppUrl("/organizations/invitations"),
+								email: invitation.email,
+							},
+						],
+						kind: "organization-invitation",
+						organizationIds: [String(invitation.organizationId)],
+						sourceId: String(invitation.id),
+						sourceType: "organization-invitation",
+						subject: "Organization invitation declined",
+						title: "Organization invitation declined",
+					});
 				},
 				afterCancelInvitation: async ({ invitation }) => {
 					await OrganizationSeatReservation.deleteOne({
 						invitationId: invitation.id,
 						organizationId: invitation.organizationId,
+					});
+					await notifyOrganizationEvent({
+						actionLabel: "Manage organization members",
+						actionUrl: organizationAppUrl("/organizations/invitations"),
+						actionUrlForOrganization: () =>
+							organizationAppUrl("/organizations/members"),
+						body: `The invitation for ${normalizeInvitationEmail(invitation.email)} was cancelled.`,
+						dedupeKey: `organization-invitation:${invitation.id}:cancelled`,
+						extraRecipients: [
+							{
+								actionLabel: "Open invitations",
+								actionUrl: organizationAppUrl("/organizations/invitations"),
+								email: invitation.email,
+							},
+						],
+						kind: "organization-invitation",
+						organizationIds: [String(invitation.organizationId)],
+						sourceId: String(invitation.id),
+						sourceType: "organization-invitation",
+						subject: "Organization invitation cancelled",
+						title: "Organization invitation cancelled",
 					});
 				},
 			},

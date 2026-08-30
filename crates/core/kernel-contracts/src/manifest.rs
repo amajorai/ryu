@@ -1435,19 +1435,12 @@ impl PluginManifest {
     /// `allow_core_routes` is a Core-owned provenance decision. `true` is reserved
     /// for an exact compiled/verified Core-tier manifest; `false` confines every
     /// source/action to this plugin's generic `/api/ext/<id>` owner mount.
-    pub fn validate_declarative_http_policy(
-        &self,
-        allow_core_routes: bool,
-    ) -> Result<(), String> {
+    pub fn validate_declarative_http_policy(&self, allow_core_routes: bool) -> Result<(), String> {
         let Some(contributes) = &self.contributes else {
             return Ok(());
         };
-        validate_declarative_http_contributions(
-            &self.id,
-            contributes,
-            allow_core_routes,
-        )
-        .map_err(|error| format!("plugin '{}': {error}", self.id))
+        validate_declarative_http_contributions(&self.id, contributes, allow_core_routes)
+            .map_err(|error| format!("plugin '{}': {error}", self.id))
     }
 
     /// Validate the publisher-controlled half of remote MCP OAuth.
@@ -5707,7 +5700,10 @@ fn validate_declarative_http_value(
                 )?;
             }
             for (key, child) in object {
-                if matches!(key.as_str(), "http" | "body" | "args" | "payload" | "map" | "filter" | "cells") {
+                if matches!(
+                    key.as_str(),
+                    "http" | "body" | "args" | "payload" | "map" | "filter" | "cells"
+                ) {
                     continue;
                 }
                 let child_usage = if matches!(key.as_str(), "source" | "state_source") {
@@ -9023,7 +9019,10 @@ mod tests {
         }"#;
         let error = PluginManifest::parse_and_validate(raw)
             .expect_err("a protected data route cannot bypass the declared vocabulary");
-        assert!(error.contains("route '/items' has no permission"), "got: {error}");
+        assert!(
+            error.contains("route '/items' has no permission"),
+            "got: {error}"
+        );
     }
 
     /// Two levels with one id make a grant ambiguous: whichever the reader

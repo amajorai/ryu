@@ -34,7 +34,7 @@ body,
 }
 
 body {
-	font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	font-family: var(--font-sans);
 	font-size: 14px;
 	line-height: 1.45;
 	color: var(--foreground);
@@ -48,13 +48,17 @@ body {
 	min-width: 0;
 	height: 100%;
 	min-height: 100%;
-	font-family: inherit;
+	font-family: var(--font-sans);
 	font-size: inherit;
 	-webkit-font-smoothing: antialiased;
 	font-synthesis: none;
 	line-height: inherit;
 	color: var(--foreground);
 	background: var(--background);
+}
+
+:where([data-ryu-app-ui="v1"], .ryu-app-shell) :where(h1, h2, h3, h4) {
+	font-family: var(--font-heading);
 }
 
 :where([data-ryu-app-ui="v1"], .ryu-app-shell) *,

@@ -51,7 +51,7 @@ const MARKETING_LINKS: readonly HeaderLink[] = [
 
 const SURFACE_LINKS = [
 	...PRODUCT_REALMS.filter((realm) =>
-		["os", "bot", "console", "box", "hire"].includes(realm.id)
+		["os", "bot", "console", "box", "mail", "notify", "hire"].includes(realm.id)
 	).map(({ href, shortLabel }) => ({ href, label: shortLabel })),
 	{ href: "/marketplace/apps", label: "Apps" },
 ];

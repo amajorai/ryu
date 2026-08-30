@@ -939,8 +939,7 @@ async fn hook_should_run(state: &ServerState, hook: &HookPlugin, ctx: &HookConte
             let Some(store) = crate::plugin_storage::global() else {
                 return false;
             };
-            let namespace =
-                storage_namespace_for_tenant(ctx.caller_user_id.as_deref(), "default");
+            let namespace = storage_namespace_for_tenant(ctx.caller_user_id.as_deref(), "default");
             match store.get(&hook.plugin_id, &namespace, conv).await {
                 Ok(Some(_)) => true,
                 Ok(None) => false,
@@ -963,7 +962,7 @@ enum GateVerdict {
     CheckStateful,
 }
 
-    fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext) -> GateVerdict {
+fn gate_without_storage(m: &crate::plugin_manifest::HookMatch, ctx: &HookContext) -> GateVerdict {
     let mut declared = false;
 
     if let Some(flag) = m.flag.as_deref().filter(|f| !f.is_empty()) {

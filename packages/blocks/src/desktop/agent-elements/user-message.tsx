@@ -11,6 +11,7 @@ import {
 	Message,
 	MessageAvatar,
 	MessageContent,
+	MessageFooter,
 	MessageHeader,
 } from "@ryu/ui/components/message";
 import {
@@ -28,6 +29,7 @@ import { ImageLightbox } from "./image-lightbox.tsx";
 import { FileAttachment } from "./input/file-attachment.tsx";
 import type { LinkPreviewResolvers } from "./link-preview.tsx";
 import { Markdown } from "./markdown.tsx";
+import { getMessageAttachments } from "./message-attachments.ts";
 import {
 	type MessageGroupPosition,
 	messageBubbleRadius,
@@ -123,61 +125,12 @@ export function GoalMessageAnnotation() {
 
 type MessagePart = UIMessage["parts"][number];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
-
 function isTextPart(part: MessagePart): part is { type: "text"; text: string } {
 	return (
 		part.type === "text" &&
 		typeof (part as { text?: unknown }).text === "string"
 	);
 }
-
-function getImageUrlFromPart(part: unknown): string | null {
-	if (!isRecord(part)) {
-		return null;
-	}
-	const type = part.type;
-	if (typeof type !== "string") {
-		return null;
-	}
-
-	if (type === "image") {
-		const imagePart = part as { url?: string; image?: string };
-		return imagePart.url ?? imagePart.image ?? null;
-	}
-
-	if (type === "data-image") {
-		const dataPart = part as { data?: { url?: string } };
-		return dataPart.data?.url ?? null;
-	}
-
-	if (type === "file") {
-		const filePart = part as { mimeType?: string; url?: string; data?: string };
-		if (filePart.mimeType?.startsWith("image/")) {
-			if (filePart.url) {
-				return filePart.url;
-			}
-			if (filePart.data) {
-				return `data:${filePart.mimeType};base64,${filePart.data}`;
-			}
-		}
-	}
-
-	return null;
-}
-
-/**
- * The `type: "file"` message part, as it arrives on the wire.
- *
- * Documentation only — `getFileFromPart` type-tests each field it reads rather
- * than asserting an unknown part into this shape. The name is spelled three
- * different ways by different producers, hence the trio below.
- *
- * `{ fileName?: string; filename?: string; mimeType?: string; name?: string;
- *    size?: number; type: "file"; url?: string }`
- */
 
 /**
  * Sender attribution for a user bubble, carried on the AI SDK message's
@@ -232,34 +185,6 @@ function getAuthor(message: UIMessage): MessageAuthor | null {
 		return null;
 	}
 	return author;
-}
-
-function getFileFromPart(part: unknown) {
-	if (!isRecord(part)) {
-		return null;
-	}
-	if (part.type !== "file") {
-		return null;
-	}
-	// Each field is read off the checked record and type-tested individually,
-	// rather than asserting the whole thing into FilePart — a
-	// `Record<string, unknown>` does not overlap that interface, so the old
-	// `part as FilePart` was an unchecked assertion over upstream data.
-	// `nonEmpty` reproduces the previous `||` chain: a blank name falls through.
-	const nonEmpty = (value: unknown): string | undefined =>
-		typeof value === "string" && value.length > 0 ? value : undefined;
-	const mimeType = nonEmpty(part.mimeType);
-	if (mimeType?.startsWith("image/")) {
-		return null;
-	}
-	return {
-		filename:
-			nonEmpty(part.filename) ??
-			nonEmpty(part.name) ??
-			nonEmpty(part.fileName) ??
-			"Attachment",
-		size: typeof part.size === "number" ? part.size : undefined,
-	};
 }
 
 /**
@@ -376,42 +301,22 @@ export const UserMessage = memo(function UserMessage({
 	// A message sent with a quote carries it as a leading markdown blockquote;
 	// peel it back off so it renders as a styled QuoteBlock, not raw `> …` text.
 	const { quote, body } = splitLeadingQuote(text);
-
-	const images: string[] = [];
-	const files: Array<{ filename: string; size?: number }> = [];
-	for (const part of message.parts ?? []) {
-		const imageUrl = getImageUrlFromPart(part);
-		if (imageUrl) {
-			images.push(imageUrl);
-		}
-		const file = getFileFromPart(part);
-		if (file) {
-			files.push(file);
-		}
-	}
-	if (isRecord(message) && Array.isArray(message.experimental_attachments)) {
-		for (const att of message.experimental_attachments as Array<{
-			contentType?: string;
-			url?: string;
-		}>) {
-			if (att.contentType?.startsWith("image/") && att.url) {
-				images.push(att.url);
-			}
-		}
-	}
+	const attachments = getMessageAttachments(message);
+	const imageAttachments = attachments.filter(
+		(attachment) => attachment.isImage && attachment.url
+	);
+	const lightboxImages = imageAttachments.map((attachment) => ({
+		filename: attachment.filename,
+		id: attachment.id,
+		url: attachment.url ?? "",
+	}));
 
 	// `editing` keeps an otherwise-empty message mounted: a turn that is only
 	// attachments still has an editor to show, and returning null here would
 	// unmount it mid-edit.
-	if (!(text || images.length > 0 || files.length > 0 || editing)) {
+	if (!(text || attachments.length > 0 || editing)) {
 		return null;
 	}
-
-	const lightboxImages = images.map((url, i) => ({
-		id: `${message.id}-img-${i}`,
-		url,
-		filename: `image-${i + 1}`,
-	}));
 
 	const remoteAuthor = getAuthor(message);
 	const widgetAttribution = getWidgetMessageAttribution(message);
@@ -423,7 +328,10 @@ export const UserMessage = memo(function UserMessage({
 	const TimestampNode = timestamp ? (
 		<TooltipProvider delay={0}>
 			<Tooltip>
-				<TooltipTrigger className="text-muted-foreground/70 text-xs">
+				<TooltipTrigger
+					className="text-muted-foreground/70 text-xs"
+					data-slot="message-timestamp"
+				>
 					{formatTime(timestamp, MESSAGE_TIME_OPTIONS)}
 				</TooltipTrigger>
 				<TooltipContent>
@@ -435,31 +343,57 @@ export const UserMessage = memo(function UserMessage({
 
 	const MessageBubble = (
 		<>
-			{images.length > 0 && (
-				<div className="flex flex-col gap-1">
-					{images.map((url, i) => (
-						<div
-							className={cn(
-								"max-w-[200px] rounded-2xl bg-foreground/4 p-1.5",
-								enableImagePreview && "cursor-pointer"
-							)}
-							key={i}
-							onClick={
-								enableImagePreview
-									? (event) => {
-											lightboxOriginRef.current = event.currentTarget;
-											setLightboxIndex(i);
-										}
-									: undefined
-							}
-						>
-							<img
-								alt="attachment"
-								className="block max-h-[120px] max-w-[184px] rounded-xl object-cover"
-								src={url}
+			{attachments.length > 0 && (
+				<div
+					className={cn(
+						"flex max-w-full flex-wrap items-end gap-2",
+						isOwnMessage ? "justify-end" : "justify-start"
+					)}
+					data-slot="message-attachments"
+				>
+					{attachments.map((attachment) => {
+						if (attachment.isImage && attachment.url) {
+							const imageIndex = imageAttachments.findIndex(
+								(image) => image.id === attachment.id
+							);
+							return (
+								<button
+									aria-label={`Open ${attachment.filename}`}
+									className={cn(
+										"group/message-image relative size-[104px] shrink-0 overflow-hidden rounded-xl bg-muted/50 p-1 outline-none transition-[filter,transform] hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring",
+										enableImagePreview && "cursor-zoom-in"
+									)}
+									data-testid="message-image-attachment"
+									key={attachment.id}
+									onClick={
+										enableImagePreview
+											? (event) => {
+													lightboxOriginRef.current = event.currentTarget;
+													setLightboxIndex(imageIndex);
+												}
+											: undefined
+									}
+									type="button"
+								>
+									<img
+										alt={attachment.filename}
+										className="block size-full rounded-[10px] object-cover"
+										src={attachment.url}
+									/>
+								</button>
+							);
+						}
+
+						return (
+							<FileAttachment
+								filename={attachment.filename}
+								id={attachment.id}
+								key={attachment.id}
+								size={attachment.size}
+								url={attachment.url}
 							/>
-						</div>
-					))}
+						);
+					})}
 				</div>
 			)}
 			{enableImagePreview && lightboxImages.length > 0 && (
@@ -470,18 +404,6 @@ export const UserMessage = memo(function UserMessage({
 					open={lightboxIndex !== null}
 					originRef={lightboxOriginRef}
 				/>
-			)}
-			{files.length > 0 && (
-				<div className="flex flex-col gap-2">
-					{files.map((file, i) => (
-						<FileAttachment
-							filename={file.filename}
-							id={`${file.filename}-${i}`}
-							key={`${file.filename}-${i}`}
-							size={file.size}
-						/>
-					))}
-				</div>
 			)}
 			{text && (
 				// `Bubble` + `BubbleContent` (@ryu/ui/components/bubble), overridden
@@ -536,6 +458,8 @@ export const UserMessage = memo(function UserMessage({
 										onOpenLink={onOpenLink}
 										onOpenMention={onOpenMention}
 										previewResolvers={previewResolvers}
+										tone="primary"
+										wideBlocks
 									/>
 								</div>
 							</CollapsibleText>
@@ -601,25 +525,15 @@ export const UserMessage = memo(function UserMessage({
 	const showWidgetAttribution =
 		Boolean(widgetAttribution) &&
 		(groupPosition === "single" || groupPosition === "first");
-	// The clock collapses with the avatar — same rows, same reason. This header
-	// sits ABOVE the bubble, so leaving it on every row puts a 16px band plus its
-	// gap between each pair of grouped messages: ~24px of chrome inside a run that
-	// is only 2px apart, which reads as three unrelated messages and undoes the
-	// grouping the run exists to express. Messaging clients all collapse it the
-	// same way, and the time it drops is never far off — a run has, by
-	// definition, no reply and no day boundary inside it, so the closing row's
-	// timestamp speaks for the whole block.
-	//
-	// The name is on the OPENING row and the time on the CLOSING one on purpose:
-	// a run of one carries both, and a longer run is introduced by who is talking
-	// and closed by when they stopped.
+	// The name is on the OPENING row and the time is on the CLOSING row. The time
+	// sits below the message body, which keeps the attachment strip and the text
+	// easy to scan while matching the usual messaging-app reading order.
 	const showTimestamp =
 		Boolean(TimestampNode) &&
 		(groupPosition === "single" || groupPosition === "last");
-	// Gated as a whole — an empty `MessageHeader` still renders a 16px gapped row
-	// above the bubble, which is the very chrome this is removing.
+	// Gated as a whole — an empty `MessageHeader` still renders a 16px gapped row.
 	const HeaderNode =
-		showName || showWidgetAttribution || showTimestamp ? (
+		showName || showWidgetAttribution ? (
 			<MessageHeader className="h-4 gap-2 px-0">
 				{showName && <span>{author?.name}</span>}
 				{showWidgetAttribution && widgetAttribution ? (
@@ -631,7 +545,6 @@ export const UserMessage = memo(function UserMessage({
 						Widget · {widgetAttribution.origin_server}
 					</span>
 				) : null}
-				{showTimestamp && TimestampNode}
 			</MessageHeader>
 		) : null;
 
@@ -670,9 +583,9 @@ export const UserMessage = memo(function UserMessage({
 	// `items-start` overrides the primitive's default stretch, which is what the
 	// hand-rolled row carried before this port.
 	//
-	// The header (name + clock) sits inside `MessageContent`, not above the whole
-	// row, so it aligns to the bubble column rather than to the transcript's
-	// edge. `items-end`/`items-start` on Content is what keeps `BubbleColumn`
+	// The header (name) and footer (clock) sit inside `MessageContent`, not above
+	// the whole row, so they align to the bubble column rather than to the
+	// transcript's edge. `items-end`/`items-start` on Content is what keeps `BubbleColumn`
 	// shrink-to-fit: the percentage cap then resolves against the row's known
 	// width, not against a parent the editor's textarea would get to decide.
 	return (
@@ -686,6 +599,11 @@ export const UserMessage = memo(function UserMessage({
 			>
 				{HeaderNode}
 				{MessageRow}
+				{showTimestamp ? (
+					<MessageFooter className="h-4 gap-2 px-0">
+						{TimestampNode}
+					</MessageFooter>
+				) : null}
 			</MessageContent>
 		</Message>
 	);

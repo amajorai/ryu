@@ -8,6 +8,15 @@
 
 import { type ApiTarget, request } from "./client.ts";
 
+/** A human the active node has scoped to the caller's organization. */
+export interface MentionTargetUser {
+	email: string | null;
+	id: string;
+	image: string | null;
+	name: string;
+	role: string | null;
+}
+
 /** A stored inbox notification row (newest first from the list endpoint). */
 export interface AppNotification {
 	ack_required: boolean;
@@ -24,6 +33,54 @@ export interface AppNotification {
 }
 
 const DEFAULT_LIMIT = 50;
+
+/** Read the verified, node-scoped organization roster for workflow recipient pickers. */
+export async function listMentionTargetUsers(
+	target: ApiTarget
+): Promise<MentionTargetUser[]> {
+	try {
+		const json = await request<{
+			users?: Array<{
+				email?: unknown;
+				image?: unknown;
+				name?: unknown;
+				role?: unknown;
+				userId?: unknown;
+			}>;
+		}>(target, "/api/notifications/mention-targets");
+		return (json.users ?? []).flatMap((user) => {
+			const id = typeof user.userId === "string" ? user.userId.trim() : "";
+			if (!id) {
+				return [];
+			}
+			const email =
+				typeof user.email === "string" && user.email.trim()
+					? user.email.trim()
+					: null;
+			const name =
+				typeof user.name === "string" && user.name.trim()
+					? user.name.trim()
+					: (email?.split("@")[0] ?? id);
+			return [
+				{
+					email,
+					id,
+					image:
+						typeof user.image === "string" && user.image.trim()
+							? user.image.trim()
+							: null,
+					name,
+					role:
+						typeof user.role === "string" && user.role.trim()
+							? user.role.trim()
+							: null,
+				},
+			];
+		});
+	} catch {
+		return [];
+	}
+}
 
 /** List the signed-in user's inbox notifications (newest first). */
 export async function listNotifications(
@@ -52,7 +109,7 @@ export async function markNotificationRead(
 
 /**
  * Acknowledge a HITL notification gate. Returns whether the ack resumed the
- * suspended workflow run (true once the gate's policy — first/all/quorum — is met).
+ * suspended workflow run (true once the gate's policy — first/all/quorum/percentage — is met).
  */
 export async function ackNotification(
 	target: ApiTarget,

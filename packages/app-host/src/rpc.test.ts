@@ -110,6 +110,18 @@ describe("dispatchRpc capability gate", () => {
 		});
 	});
 
+	it("dispatches the scoped NotifyUser recipient roster through the catalog grant", async () => {
+		const catalogGrant = new Set<Capability>(["workflows.catalogs"]);
+		const svc: HostServices = {
+			...services(),
+			workflowsNotifyTargets: () =>
+				Promise.resolve([{ id: "user-ada", name: "Ada Lovelace" }]),
+		};
+		await expect(
+			dispatchRpc("workflows.notifyTargets", [], catalogGrant, svc)
+		).resolves.toEqual([{ id: "user-ada", name: "Ada Lovelace" }]);
+	});
+
 	it("dispatches Chat Broadcast list and send through the explicit grant", async () => {
 		const chatGrant = new Set<Capability>(["chat.broadcast"]);
 		await expect(

@@ -42,7 +42,7 @@ test.describe("shared command palette — real component in isolation", () => {
 
 	test("actions render under their first-seen group headings", async ({
 		page,
-	}) => {
+	}, testInfo) => {
 		await openPalette(page);
 		await expect(page.getByText("Navigation")).toBeVisible();
 		await expect(page.getByText("Chat", { exact: true })).toBeVisible();
@@ -51,6 +51,10 @@ test.describe("shared command palette — real component in isolation", () => {
 			page.getByRole("option", { name: "Open Settings" })
 		).toBeVisible();
 		await expect(page.getByRole("option", { name: "Dark Mode" })).toBeVisible();
+		await page.screenshot({
+			path: testInfo.outputPath("command-palette-proof.png"),
+			fullPage: true,
+		});
 	});
 
 	test("result tabs filter built-ins and app-contributed sections", async ({

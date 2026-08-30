@@ -18,11 +18,12 @@ export type ReflectPeriod = "7d" | "30d" | "90d";
 export const REFLECT_PERIODS: ReflectPeriod[] = ["7d", "30d", "90d"];
 
 /**
- * Scope level a memory lives at. `user` = every node/project this user touches;
+ * Scope level a memory lives at. `agent` = one agent; `user` = every
+ * node/project this user touches;
  * `node` = this machine only; `project` = a specific project/folder (paired with
  * a `scopeId`).
  */
-export type MemoryScope = "user" | "node" | "project" | "org";
+export type MemoryScope = "agent" | "user" | "node" | "project" | "org";
 
 /** The classification of a memory, driving how/when it's recalled. */
 export type MemoryCategory =
@@ -38,7 +39,13 @@ export type MemoryCategory =
 	| "other";
 
 /** Selectable scope levels, in display order. */
-export const MEMORY_SCOPES: MemoryScope[] = ["user", "node", "project", "org"];
+export const MEMORY_SCOPES: MemoryScope[] = [
+	"agent",
+	"user",
+	"node",
+	"project",
+	"org",
+];
 
 /** Selectable categories, in display order. */
 export const MEMORY_CATEGORIES: MemoryCategory[] = [
@@ -56,6 +63,7 @@ export const MEMORY_CATEGORIES: MemoryCategory[] = [
 
 /** Human labels for the scope levels. */
 export const MEMORY_SCOPE_LABELS: Record<MemoryScope, string> = {
+	agent: "Agent",
 	user: "User",
 	node: "Node",
 	project: "Project",
@@ -73,6 +81,7 @@ export const MEMORY_SCOPE_LABELS: Record<MemoryScope, string> = {
  * rest are already plain and change only enough to read as a set.
  */
 export const MEMORY_SCOPE_FRIENDLY_LABELS: Record<MemoryScope, string> = {
+	agent: "This agent",
 	user: "Just me",
 	node: "This device",
 	project: "This project",
@@ -148,6 +157,8 @@ export interface Memory {
 	scope: MemoryScope;
 	/** The project/folder id when `scope === "project"`, else null. */
 	scopeId: string | null;
+	/** Special-category topics detected in this memory, if any. */
+	sensitiveTopics: string[];
 	tags: string[];
 	/** Unix milliseconds. */
 	updatedAt: number;
@@ -272,9 +283,62 @@ interface MemoryWire {
 	importance?: number;
 	scope?: string;
 	scope_id?: string | null;
+	sensitive_topics?: string[];
 	tags?: string[];
 	updated_at?: number;
 	when_to_use?: string | null;
+}
+
+/** Per-user, per-node memory privacy settings. */
+export interface MemorySettings {
+	includeSensitiveTopics: boolean;
+}
+
+interface MemorySettingsWire {
+	include_sensitive_topics?: boolean;
+}
+
+/** Typed graph projection returned by Core's memory graph endpoint. */
+export type MemoryGraphNodeKind =
+	| "memory"
+	| "topic"
+	| "person"
+	| "category"
+	| "scope"
+	| "agent";
+
+export interface MemoryGraphNode {
+	agent_id?: string;
+	id: string;
+	kind: MemoryGraphNodeKind;
+	label: string;
+	memory_id?: string;
+	normalized: string;
+	scope?: string;
+	scope_id?: string;
+	sensitive: boolean;
+}
+
+export interface MemoryGraphEdge {
+	kind: string;
+	memory_id: string;
+	source: string;
+	target: string;
+	weight: number;
+}
+
+export interface MemoryGraphSnapshot {
+	edges: MemoryGraphEdge[];
+	memoryCount: number;
+	nodes: MemoryGraphNode[];
+	truncated: boolean;
+}
+
+interface MemoryGraphWire {
+	edges?: MemoryGraphEdge[];
+	memory_count?: number;
+	nodes?: MemoryGraphNode[];
+	truncated?: boolean;
 }
 
 interface MemoryProposalWire {
@@ -388,6 +452,7 @@ function toMemory(m: MemoryWire): Memory {
 		authorAgentId: m.author_agent_id ?? null,
 		createdAt: m.created_at ?? 0,
 		updatedAt: m.updated_at ?? 0,
+		sensitiveTopics: m.sensitive_topics ?? [],
 	};
 }
 
@@ -416,6 +481,74 @@ function toPeriod(value: string | undefined): ReflectPeriod {
 
 function toTone(value: string | undefined): ReflectInsight["tone"] {
 	return value === "positive" || value === "notice" ? value : "neutral";
+}
+
+/** Read the server-authoritative sensitive-topic consent for this node/user. */
+export async function getMemorySettings(
+	target: ApiTarget
+): Promise<MemorySettings> {
+	const json = await request<MemorySettingsWire>(
+		target,
+		"/api/memory/settings"
+	);
+	return { includeSensitiveTopics: json.include_sensitive_topics ?? false };
+}
+
+/** Persist the server-authoritative sensitive-topic consent for this node/user. */
+export async function setMemorySettings(
+	target: ApiTarget,
+	settings: Partial<MemorySettings>
+): Promise<MemorySettings> {
+	const json = await request<MemorySettingsWire>(
+		target,
+		"/api/memory/settings",
+		{
+			method: "PUT",
+			body: {
+				include_sensitive_topics: settings.includeSensitiveTopics ?? false,
+			},
+		}
+	);
+	return {
+		includeSensitiveTopics:
+			json.include_sensitive_topics ?? settings.includeSensitiveTopics ?? false,
+	};
+}
+
+/** Fetch the access-filtered typed graph used by the Memory Library. */
+export async function getMemoryGraph(
+	target: ApiTarget,
+	query: {
+		agentId?: string;
+		maxEdges?: number;
+		maxNodes?: number;
+		projectId?: string;
+	} = {}
+): Promise<MemoryGraphSnapshot> {
+	const params = new URLSearchParams();
+	if (query.agentId) {
+		params.set("agent_id", query.agentId);
+	}
+	if (query.projectId) {
+		params.set("project_id", query.projectId);
+	}
+	if (query.maxNodes !== undefined) {
+		params.set("max_nodes", String(query.maxNodes));
+	}
+	if (query.maxEdges !== undefined) {
+		params.set("max_edges", String(query.maxEdges));
+	}
+	const suffix = params.toString();
+	const graph = await request<MemoryGraphWire>(
+		target,
+		suffix ? `/api/memory/graph?${suffix}` : "/api/memory/graph"
+	);
+	return {
+		edges: graph.edges ?? [],
+		memoryCount: graph.memory_count ?? 0,
+		nodes: graph.nodes ?? [],
+		truncated: graph.truncated ?? false,
+	};
 }
 
 /** List memories, most-recently-updated first, optionally filtered. */

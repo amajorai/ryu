@@ -1,12 +1,13 @@
 {
   "name": "core",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "scripts": {
     "dev": "node scripts/dev.js",
     "dev:watch": "cargo watch -x 'run --features sandbox-wasmtime,voice-parakeet,voice-vad'",
     "build": "cargo build --release --features sandbox-wasmtime,voice-parakeet,voice-vad",
     "check": "cargo check",
+    "test": "cargo test --manifest-path Cargo.toml -- --test-threads=1",
     "generate:openapi": "python3 ../../scripts/postprocess-core-openapi.py --generate"
   }
 }

@@ -451,6 +451,7 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
           mcp: function () { return call("workflows.mcp", []); },
           skills: function () { return call("workflows.skills", []); },
           schedules: function () { return call("workflows.schedules", []); },
+          notifyTargets: function () { return call("workflows.notifyTargets", []); },
           hookEvents: function () { return call("workflows.hookEvents", []); },
           composio: function (a) { return call("workflows.composio", [a || {}]); }
         },
@@ -1043,6 +1044,7 @@ function htmlCompanionHeadFragment(
         mcp: function () { return call("workflows.mcp", []); },
         skills: function () { return call("workflows.skills", []); },
         schedules: function () { return call("workflows.schedules", []); },
+        notifyTargets: function () { return call("workflows.notifyTargets", []); },
         hookEvents: function () { return call("workflows.hookEvents", []); },
         composio: function (a) { return call("workflows.composio", [a || {}]); }
       },
