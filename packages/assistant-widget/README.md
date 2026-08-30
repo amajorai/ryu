@@ -57,6 +57,11 @@ import { RyuAssistantWidget } from "@ryu/assistant-widget";
 <RyuAssistantWidget docsBaseUrl="https://docs.ryuhq.com" />;
 ```
 
+If the host page registers same-origin WebMCP tools, the widget also exposes a **Page tools**
+action. It renders bounded arguments from the registered schemas, requires a second review click
+for write tools, and marks returned page content as untrusted. The widget does not invent a tool
+implementation or auto-execute a local model response.
+
 Use `inline openOnMount showLauncher={false}` for an expanded page section. For a custom trigger
 or a host-owned runtime, compose `RyuAssistantMorph` with `RyuAssistantChat` instead.
 

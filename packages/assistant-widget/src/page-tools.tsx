@@ -109,10 +109,15 @@ function buildToolInput(
 			}
 			continue;
 		}
-		if (field.type === "number") {
+		if (field.type === "number" || field.type === "integer") {
 			const number = Number(value);
 			if (!Number.isFinite(number)) {
 				throw new Error(`${fieldLabel(field.key)} must be a number.`);
+			}
+			if (field.type === "integer" && !Number.isSafeInteger(number)) {
+				throw new Error(
+					`The value for ${fieldLabel(field.key)} must be a whole number.`
+				);
 			}
 			if (
 				(field.minimum !== undefined && number < field.minimum) ||
@@ -173,15 +178,15 @@ function PageToolForm({
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		setError(null);
-		if (isWrite && !confirming) {
-			setConfirming(true);
-			return;
-		}
 		let input: Record<string, unknown>;
 		try {
 			input = buildToolInput(fields, values);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "Check the arguments.");
+			return;
+		}
+		if (isWrite && !confirming) {
+			setConfirming(true);
 			return;
 		}
 		setBusy(true);
@@ -318,7 +323,11 @@ function PageToolForm({
 									}))
 								}
 								placeholder={field.description ?? label}
-								type={field.type === "number" ? "number" : "text"}
+								type={
+									field.type === "number" || field.type === "integer"
+										? "number"
+										: "text"
+								}
 								value={typeof value === "string" ? value : ""}
 							/>
 							{field.description ? (
