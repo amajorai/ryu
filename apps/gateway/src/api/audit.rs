@@ -698,7 +698,7 @@ mod tests {
         AuditQueryParams, AuditUsageQueryParams, ExecAuditBody, ExecBudgetCheckBody,
         WidgetRateLimiter,
     };
-    use crate::audit::{AuditLogger, AuditRecord};
+    use crate::audit::{AuditLogger, AuditQuery, AuditRecord};
     use crate::config::{
         ApiKeyConfig, AuditConfig, AuthConfig, EvalsConfig, GatewayConfig, ProviderBillingMode,
         ProviderBillingPolicy, ProviderId,
@@ -1014,6 +1014,18 @@ mod tests {
         Query(serde_json::from_value(serde_json::json!({})).unwrap())
     }
 
+    async fn wait_for_audit_entries(state: &SharedState, expected: usize) {
+        let query = AuditQuery::default();
+        for _ in 0..200 {
+            let count = state.audit.query(&query).expect("audit query").len();
+            if count >= expected {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("audit writer did not persist {expected} entries in time");
+    }
+
     #[tokio::test]
     async fn query_audit_errors_when_logging_is_disabled() {
         let state = state_with(false);
@@ -1063,10 +1075,9 @@ mod tests {
             exit_code: None,
             widget_instance_id: None,
         });
-        // The writer is a background thread over a bounded channel; give it a beat
-        // to persist before the read connection queries (mirrors the audit crate's
-        // own test pattern).
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // The writer is a background thread over a bounded channel; wait for the
+        // row rather than depending on a fixed scheduler-dependent delay.
+        wait_for_audit_entries(&state, 1).await;
 
         let Json(body) = query_audit(
             State(Arc::clone(&state)),
@@ -1120,7 +1131,7 @@ mod tests {
         record.provider_cost_micro_usd = None;
         record.error = Some("provider failed".to_owned());
         state.log_audit(record);
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        wait_for_audit_entries(&state, 2).await;
 
         let Json(body) = query_audit_usage(
             State(state),
@@ -1200,7 +1211,7 @@ mod tests {
             exit_code: None,
             widget_instance_id: None,
         });
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        wait_for_audit_entries(&state, 1).await;
 
         let Json(body) = query_audit(
             State(Arc::clone(&state)),
@@ -1255,7 +1266,7 @@ mod tests {
             exit_code: None,
             widget_instance_id: None,
         });
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        wait_for_audit_entries(&state, 1).await;
 
         let Json(body) = query_audit(
             State(Arc::clone(&state)),
