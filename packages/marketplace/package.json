@@ -65,7 +65,7 @@
   },
   "scripts": {
     "check-types": "tsc --noEmit",
-    "test": "bun test src"
+    "test": "bun test --isolate src"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.2.0",
