@@ -9,6 +9,7 @@
 // build came from.
 //
 //   node scripts/release-notes.mjs --tag v0.0.6 [--prev v0.0.5] [--channel release]
+//     [--no-changelog] [--no-changelog-placeholder]
 //
 // Reads git history only — no network, no tokens — so it behaves identically
 // in CI and locally.
@@ -36,10 +37,13 @@ const repo = args.get("repo") || "amajorai/ryu";
 // changelog is the valuable part, so render bare shas instead.
 const noCommitLinks = args.get("no-commit-links") === true;
 // CI runs this ON the mirror, whose history is only "mirror: sync from monorepo
-// @ <sha>" commits — a changelog computed there is noise. CI seeds the release
-// with a short seed only; tools/publish-release-notes.sh fills in the real
-// changelog afterwards from this repo's history.
+// @ <sha>" commits — a deterministic changelog computed there is limited. The
+// private train can seed a release for tools/publish-release-notes.sh, while the
+// public fallback can keep only this banner and append rolling-notes.mjs output.
 const noChangelog = args.get("no-changelog") === true;
+// A public fallback can append the public-safe AI changelog immediately, so it
+// needs the built-from banner without the private-train placeholder.
+const noChangelogPlaceholder = args.get("no-changelog-placeholder") === true;
 const commitRef = (sha, short) =>
 	noCommitLinks
 		? `\`${short}\``
@@ -187,7 +191,10 @@ if (noChangelog) {
 	// Release/beta seed this placeholder for tools/publish-release-notes.sh to
 	// fill in from private history later. Rolling canary/nightly builds have no
 	// such follow-up step, so they show just the banner — no dangling promise.
-	if (channel === "release" || channel === "beta") {
+	if (
+		(channel === "release" || channel === "beta") &&
+		!noChangelogPlaceholder
+	) {
 		out.push("_Changelog is being generated._", "");
 	}
 } else {

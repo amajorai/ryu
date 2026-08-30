@@ -99,9 +99,9 @@ jobs:
           fi
 
   # Comes FIRST so the release exists before any binary is attached to it. It
-  # only SEEDS the notes (short banner, no changelog) — the real changelog is
-  # generated from the private monorepo by tools/publish-release-notes.sh, since
-  # this repo's history is nothing but "mirror: sync from monorepo @ <sha>".
+  # writes the built-from banner plus a public-safe AI changelog from the
+  # summaries stored in mirror commit bodies. The private train can later replace
+  # this with its richer package-scoped notes when that path is available.
   notes:
     needs: version-guard
     name: Release notes
@@ -110,24 +110,40 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The changelog diffs against the previous tag — needs full history.
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
       - name: Generate + publish standardized notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_MODEL: mimo-v2.5
+          OPENCODE_MAX_TOKENS: "8000"
         run: |
           set -euo pipefail
-          # NOTE: this repo's history is mirror commits ("mirror: sync from
-          # monorepo @ <sha>"), so a changelog generated HERE is meaningless.
-          # Real notes are generated from the PRIVATE monorepo's history and
-          # pushed by tools/publish-release-notes.sh. So: never clobber notes
-          # that already exist — only seed a placeholder when the release does
-          # not exist yet, so the binaries have somewhere to attach.
+          # The public repo has no private package history. Its mirror commit
+          # bodies are the public-safe source for AI summaries, exactly as they
+          # are for canary/nightly. Stable tags use the stable model explicitly.
+          previous="$(git tag --merged "$TAG" --sort=-v:refname \
+            --list 'v[0-9]*.[0-9]*.[0-9]*' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -Fvx "$TAG" \
+            | sed -n '1p' || true)"
+          if [ -z "$previous" ]; then
+            echo "::error::Could not resolve the previous stable tag before $TAG."
+            exit 1
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — leaving its notes alone."
             exit 0
           fi
-          node scripts/release-notes.mjs --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" --no-changelog > notes.md
+          node scripts/release-notes.mjs \
+            --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" \
+            --no-changelog --no-changelog-placeholder > notes.md
+          node scripts/rolling-notes.mjs \
+            --tag "$TAG" --channel release --repo "$GITHUB_REPOSITORY" \
+            --prev "$previous" --require-ai > ai-notes.md
+          cat ai-notes.md >> notes.md
           # Created as a PRERELEASE on purpose. The release exists from the very
           # first job so the binaries have somewhere to attach, but at that point
           # nothing is built yet — and a non-prerelease immediately becomes

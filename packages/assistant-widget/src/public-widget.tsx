@@ -29,6 +29,12 @@ import {
 	validateNodeUrl,
 } from "./local-node";
 import { RyuAssistantMorph } from "./morph";
+import { PageToolsPopover } from "./page-tools";
+import {
+	useWebMcpPageTools,
+	type WebMcpPageTool,
+	type WebMcpPageToolsState,
+} from "./webmcp";
 
 export type AssistantMode = "browser" | "node";
 
@@ -420,7 +426,13 @@ function RuntimeSetup({
 	);
 }
 
-function AssistantIntro({ mode }: { mode: AssistantMode }) {
+function AssistantIntro({
+	mode,
+	pageToolCount,
+}: {
+	mode: AssistantMode;
+	pageToolCount: number;
+}) {
 	return (
 		<div className="flex items-center gap-3 px-1 text-left">
 			<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
@@ -429,9 +441,11 @@ function AssistantIntro({ mode }: { mode: AssistantMode }) {
 			<div>
 				<p className="font-medium text-foreground text-sm">Choose a runtime</p>
 				<p className="mt-0.5 max-w-[280px] text-muted-foreground text-xs leading-relaxed">
-					{mode === "browser"
-						? "Run a small model in this tab, or switch to your own Ryu Core node."
-						: "Connect a running Ryu Core node, or switch to browser-local mode."}
+					{pageToolCount > 0
+						? `${pageToolCount} page tool${pageToolCount === 1 ? "" : "s"} available above. Run one when you need the current page to act.`
+						: mode === "browser"
+							? "Run a small model in this tab, or switch to your own Ryu Core node."
+							: "Connect a running Ryu Core node, or switch to browser-local mode."}
 				</p>
 			</div>
 		</div>
@@ -462,9 +476,11 @@ interface AssistantPanelProps {
 	onDisconnect: () => void;
 	onNodeTokenChange: (value: string) => void;
 	onNodeUrlChange: (value: string) => void;
+	onPageToolResult: (tool: WebMcpPageTool, result: string) => void;
 	onRememberNodeChange: (value: boolean) => void;
 	onSend: (message: { content: string; role: "user" }) => void;
 	onStop: () => void;
+	pageTools: WebMcpPageToolsState;
 	rememberNode: boolean;
 	status: ChatStatus;
 }
@@ -492,6 +508,8 @@ function AssistantPanel({
 	onRememberNodeChange,
 	onSend,
 	onStop,
+	onPageToolResult,
+	pageTools,
 	rememberNode,
 	status,
 }: AssistantPanelProps) {
@@ -517,7 +535,16 @@ function AssistantPanel({
 	return (
 		<div className="dark h-full w-full">
 			<RyuAssistantChat
-				actions={actions}
+				actions={
+					<div className="flex items-center gap-1">
+						<PageToolsPopover
+							onExecute={(tool, input) => pageTools.execute(tool.name, input)}
+							onResult={onPageToolResult}
+							tools={pageTools.tools}
+						/>
+						{actions}
+					</div>
+				}
 				assistantAvatar={<Logo size="20px" variant="eyes" />}
 				assistantName="Ryu"
 				assistantTitle={mode === "browser" ? "Browser-local" : "Local node"}
@@ -529,7 +556,9 @@ function AssistantPanel({
 				}
 				composerFooter={<RuntimeSetup {...setupProps} compact />}
 				density="compact"
-				emptyStateHeader={<AssistantIntro mode={mode} />}
+				emptyStateHeader={
+					<AssistantIntro mode={mode} pageToolCount={pageTools.tools.length} />
+				}
 				emptyStatePosition="center"
 				error={error}
 				footer={<RuntimeSetup {...setupProps} />}
@@ -572,6 +601,7 @@ export function RyuAssistantWidget({
 	const [runtime] = useState(() =>
 		createBrowserLocalRuntime({ onStatus: setRuntimeStatus })
 	);
+	const pageTools = useWebMcpPageTools();
 
 	useEffect(
 		() => () => {
@@ -677,6 +707,23 @@ export function RyuAssistantWidget({
 		clearStoredNode();
 		setNotice("The local node token was removed from this tab.");
 	}, []);
+
+	const handlePageToolResult = useCallback(
+		(tool: WebMcpPageTool, result: string) => {
+			setMessages((current) => [
+				...current,
+				{
+					id: messageId("page-tool"),
+					role: "assistant",
+					text: `${tool.title ?? tool.name} result (untrusted page content):\n${result}`,
+				},
+			]);
+			setNotice(
+				`Ran page tool ${tool.name}. Review its result as page content.`
+			);
+		},
+		[]
+	);
 
 	const submitQuestion = useCallback(
 		async (content: string) => {
@@ -873,9 +920,11 @@ export function RyuAssistantWidget({
 			onDisconnect={disconnectNode}
 			onNodeTokenChange={setNodeToken}
 			onNodeUrlChange={setNodeUrl}
+			onPageToolResult={handlePageToolResult}
 			onRememberNodeChange={setRememberNode}
 			onSend={({ content }) => void submitQuestion(content)}
 			onStop={stop}
+			pageTools={pageTools}
 			rememberNode={rememberNode}
 			status={(busy ? "streaming" : "ready") as ChatStatus}
 		/>
