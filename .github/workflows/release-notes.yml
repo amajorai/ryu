@@ -1,0 +1,59 @@
+name: release-notes
+
+# Regenerate the public release body without rebuilding assets. This is the
+# repair path for a release that was created by the public fallback before its
+# AI notes were available, such as v0.2.3.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing public release tag to backfill (e.g. v0.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Generate and publish Mimo release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_MODEL: mimo-v2.5
+          OPENCODE_MAX_TOKENS: "8000"
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::error::Public release $TAG does not exist."
+            exit 1
+          fi
+          previous="$(git tag --merged "$TAG" --sort=-v:refname \
+            --list 'v[0-9]*.[0-9]*.[0-9]*' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -Fvx "$TAG" \
+            | sed -n '1p' || true)"
+          if [ -z "$previous" ]; then
+            echo "::error::Could not resolve the previous stable tag before $TAG."
+            exit 1
+          fi
+          node scripts/release-notes.mjs \
+            --tag "$TAG" --channel release --repo "$REPO" \
+            --no-changelog --no-changelog-placeholder > notes.md
+          node scripts/rolling-notes.mjs \
+            --tag "$TAG" --channel release --repo "$REPO" \
+            --prev "$previous" --require-ai > ai-notes.md
+          cat ai-notes.md >> notes.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+          echo "Published Mimo notes for $TAG from $previous."
