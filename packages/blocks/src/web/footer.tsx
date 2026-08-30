@@ -28,9 +28,8 @@ export default function Footer({
 							The universal AI integration layer
 						</h3>
 						<p className="max-w-md text-muted-foreground">
-							Ryu is the integration layer for AI. We deploy it, keep it
-							running, and connect the tools, models, and workflows you already
-							use.
+							We deploy it, keep it running, and connect the tools, models, and
+							workflows you already use.
 						</p>
 						<BackedBy className="pt-2" />
 					</div>

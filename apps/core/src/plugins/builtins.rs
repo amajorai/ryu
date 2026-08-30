@@ -892,6 +892,11 @@ pub const CORE_PLUGINS: &[&str] = &[
     // sidecar to spawn, while the absence from CORE_PREINSTALLED keeps a normal
     // install from starting an unrequested game service.
     TOKEN_TABLE_PLUGIN_ID,
+    // Rooms — opt-in like Token Table: the Core-tier classification lets the
+    // active-node room sidecar spawn without the Gateway-denied sidecar:process
+    // grant, while the absence from CORE_PREINSTALLED keeps invited-device
+    // hosting an explicit user action.
+    "@ryu/rooms",
     // Subtitles — same posture as Outpost: Core-tier and installable, not pre-installed,
     // because the
     // `ryu-subtitles` binary is not on a normal install. Core-tier is what actually

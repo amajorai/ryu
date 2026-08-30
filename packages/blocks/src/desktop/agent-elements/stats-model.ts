@@ -730,7 +730,7 @@ function modelContextHint(modelName: string | undefined): number | undefined {
 		return undefined;
 	}
 	const amount = Number(match[1]);
-	const unit = match[2].toLowerCase();
+	const unit = (match[2] ?? "").toLowerCase();
 	const multiplier =
 		unit === "m" ? 1_000_000 : unit === "b" ? 1_000_000_000 : 1000;
 	return Number.isFinite(amount) && amount > 0

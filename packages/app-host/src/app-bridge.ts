@@ -121,7 +121,7 @@ export interface RyuCatalogModels {
 export interface RyuNodeShareOrigin {
 	origin: string;
 	reachable: true;
-	source: "active" | "mesh";
+	source: "active" | "lan" | "mesh";
 }
 
 /** The host-installed bridge surface consumed by full-page Companion apps. */

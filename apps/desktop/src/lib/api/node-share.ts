@@ -2,6 +2,7 @@ import type { RyuNodeShareOrigin } from "@ryu/app-host/app-bridge";
 import { type ApiTarget, toTarget } from "@/src/lib/api/client.ts";
 import type { MeshStatus } from "@/src/lib/api/mesh.ts";
 import { fetchMeshStatus } from "@/src/lib/api/mesh.ts";
+import { invokeWhenReady } from "@/src/lib/tauri-ready.ts";
 import type { Node } from "@/src/store/useNodeStore.ts";
 
 /** A node URL is shareable only when it is a bare HTTP(S) origin. */
@@ -44,6 +45,35 @@ function isLocalHost(hostname: string): boolean {
 		octets[0] === "127" &&
 		octets.every((octet) => Number(octet) <= 255)
 	);
+}
+
+/** Build the same-port Wi-Fi origin exposed by the desktop's LAN helper. */
+function lanOriginFromNodeUrl(
+	nodeUrl: string,
+	lanAddress: string
+): string | null {
+	try {
+		const active = new URL(nodeUrl.trim());
+		if (
+			(active.protocol !== "http:" && active.protocol !== "https:") ||
+			active.username ||
+			active.password ||
+			active.search ||
+			active.hash ||
+			(active.pathname !== "" && active.pathname !== "/")
+		) {
+			return null;
+		}
+		const host = lanAddress.trim().replace(/^\[|\]$/g, "");
+		if (!host || /[/?#@\s]/.test(host) || isLocalHost(host)) {
+			return null;
+		}
+		const formattedHost = host.includes(":") ? `[${host}]` : host;
+		const port = active.port ? `:${active.port}` : "";
+		return originFromUrl(`${active.protocol}//${formattedHost}${port}`);
+	} catch {
+		return null;
+	}
 }
 
 function meshOrigin(hostname: string, nodeUrl: string): string | null {
@@ -103,5 +133,19 @@ export async function resolveNodeShareOrigins(
 		// An older/unreachable Core simply contributes no mesh origin; a public
 		// active-node origin remains valid when the node record already has one.
 	}
-	return shareOriginsForNode(node, mesh);
+	const origins = shareOriginsForNode(node, mesh);
+	if (origins.some((origin) => origin.source === "active")) {
+		return origins;
+	}
+	try {
+		const lanAddress = await invokeWhenReady<string>("get_lan_ip");
+		const lanOrigin = lanOriginFromNodeUrl(node.url, lanAddress);
+		if (lanOrigin && !origins.some((origin) => origin.origin === lanOrigin)) {
+			origins.unshift({ origin: lanOrigin, source: "lan", reachable: true });
+		}
+	} catch {
+		// A browser/web build or an offline desktop may not expose a LAN address;
+		// mesh/public origins already discovered above remain useful.
+	}
+	return origins;
 }

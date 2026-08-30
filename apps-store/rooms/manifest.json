@@ -55,6 +55,11 @@
         "routes": [
           { "path": "/", "method": "GET", "permission": "rooms.view" },
           { "path": "/", "method": "POST", "permission": "rooms.create" },
+          { "path": "/guest", "method": "GET", "auth": "public" },
+          { "path": "/guest/exchange", "method": "POST", "auth": "public" },
+          { "path": "/guest/snapshot", "method": "GET", "auth": "public" },
+          { "path": "/guest/events", "method": "GET", "auth": "public" },
+          { "path": "/guest/turns", "method": "POST", "auth": "public" },
           {
             "path": "/:room_id",
             "method": "GET",
@@ -90,12 +95,7 @@
             "method": "POST",
             "permission": "rooms.manage",
             "resource_param": "room_id"
-          },
-          { "path": "/guest", "method": "GET", "auth": "public" },
-          { "path": "/guest/exchange", "method": "POST", "auth": "public" },
-          { "path": "/guest/snapshot", "method": "GET", "auth": "public" },
-          { "path": "/guest/events", "method": "GET", "auth": "public" },
-          { "path": "/guest/turns", "method": "POST", "auth": "public" }
+          }
         ]
       },
       "host_api": {
@@ -108,8 +108,7 @@
     "app:realtime",
     "hook:side-model",
     "core:list_agents",
-    "shell:integrate",
-    "ui:toast"
+    "shell:integrate"
   ],
   "permission_levels": [
     {

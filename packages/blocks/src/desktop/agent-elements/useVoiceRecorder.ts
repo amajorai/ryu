@@ -55,7 +55,7 @@ function computeAmplitude(data: Uint8Array): number {
 	let sumSquares = 0;
 	for (let i = 0; i < data.length; i++) {
 		// getByteTimeDomainData is centered at 128; map to -1..1.
-		const v = (data[i] - 128) / 128;
+		const v = ((data[i] ?? 128) - 128) / 128;
 		sumSquares += v * v;
 	}
 	const rms = Math.sqrt(sumSquares / (data.length || 1));
@@ -112,7 +112,7 @@ function encodeWav(samples: Float32Array, sampleRate: number): Blob {
 
 	let offset = 44;
 	for (let i = 0; i < samples.length; i++) {
-		const s = Math.max(-1, Math.min(1, samples[i]));
+		const s = Math.max(-1, Math.min(1, samples[i] ?? 0));
 		view.setInt16(offset, s < 0 ? s * 0x80_00 : s * 0x7f_ff, true);
 		offset += 2;
 	}
