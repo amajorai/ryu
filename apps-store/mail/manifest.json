@@ -51,7 +51,7 @@
       },
       "host_api": { "grants": ["mail:crud"] },
       "port": 7996,
-      "health_path": "/api/mail/status",
+      "health_path": "/health",
       "http": {
         "mount": "/api/mail",
         "public_mount": "/api/mail",

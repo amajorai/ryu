@@ -72,6 +72,7 @@
     "./components/profile-charts": "./src/components/profile-charts.tsx",
     "./components/progress": "./src/components/progress.tsx",
     "./components/radio-group": "./src/components/radio-group.tsx",
+    "./components/run-status-timeline": "./src/components/run-status-timeline.tsx",
     "./components/select": "./src/components/select.tsx",
     "./components/separator": "./src/components/separator.tsx",
     "./components/sidebar": "./src/components/sidebar.tsx",

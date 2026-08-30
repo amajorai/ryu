@@ -18,6 +18,7 @@
 // are collapsed into one aggregate marker per day carrying a run count instead
 // of one event per fire.
 
+import type { RunStatusTimelineEntry } from "@ryu/ui/components/run-status-timeline";
 import { CronExpressionParser } from "cron-parser";
 import type {
 	ExecOutcome,
@@ -35,6 +36,8 @@ export interface CalendarEvent {
 	 * single day (used for high-frequency schedules to keep the grid readable).
 	 */
 	aggregateCount?: number;
+	/** Finished instant for a past run, when Core returned a valid timestamp. */
+	end?: Date;
 	/** Error message for a failed past run, if any. */
 	error?: string | null;
 	/** Stable id, unique within a render. */
@@ -351,6 +354,8 @@ function pastOccurrences(
 		if (!Number.isFinite(ms) || ms < startMs || ms >= endMs) {
 			continue;
 		}
+		const finished = new Date(record.finishedAt);
+		const finishedMs = finished.getTime();
 		events.push({
 			id: `${job.id}-run-${record.startedAt}`,
 			jobId: job.id,
@@ -359,6 +364,8 @@ function pastOccurrences(
 			kind: "past",
 			outcome: record.outcome,
 			error: record.error,
+			end:
+				Number.isFinite(finishedMs) && finishedMs >= ms ? finished : undefined,
 			...target,
 			scheduleLabel: label,
 		});
@@ -434,6 +441,52 @@ export function groupEventsByDay(
 		}
 	}
 	return map;
+}
+
+/** Convert one calendar day into the status entries used by the Agenda strip. */
+export function buildRunStatusTimelineEntries(
+	dayStart: Date,
+	dayEnd: Date,
+	events: CalendarEvent[]
+): RunStatusTimelineEntry[] {
+	const dayStartAt = dayStart.getTime();
+	const dayEndAt = dayEnd.getTime();
+	if (!(Number.isFinite(dayStartAt) && Number.isFinite(dayEndAt))) {
+		return [];
+	}
+
+	return events.flatMap((event): RunStatusTimelineEntry[] => {
+		const eventStartAt = event.start.getTime();
+		if (!Number.isFinite(eventStartAt)) {
+			return [];
+		}
+		const aggregate = event.aggregateCount != null;
+		const startAt = aggregate ? dayStartAt : eventStartAt;
+		const endAt = aggregate ? dayEndAt : event.end?.getTime();
+		const status =
+			event.kind === "past"
+				? event.outcome === "failure"
+					? "failure"
+					: "success"
+				: "scheduled";
+		const runLabel = aggregate
+			? `${event.aggregateCount} projected runs; times collapsed`
+			: event.scheduleLabel;
+
+		return [
+			{
+				...(endAt != null && Number.isFinite(endAt) && endAt > startAt
+					? { endAt }
+					: {}),
+				id: event.id,
+				label: `${event.jobName} · ${
+					event.kind === "past" ? "Completed" : "Scheduled"
+				} · ${runLabel}`,
+				startAt,
+				status,
+			},
+		];
+	});
 }
 
 /** Day key for a Date — exported so the grid keys cells the same way. */

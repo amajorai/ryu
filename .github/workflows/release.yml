@@ -397,6 +397,8 @@ jobs:
         working-directory: apps/island
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The full renderer bundle peaks above Node's default heap on macOS.
+          NODE_OPTIONS: --max-old-space-size=8192
           # Matches the windows-2022 image pinned above. On the default
           # windows-latest (VS2026) node-gyp finds no 2022 toolchain and fails.
           GYP_MSVS_VERSION: "2022"

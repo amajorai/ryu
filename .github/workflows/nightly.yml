@@ -327,6 +327,8 @@ jobs:
         working-directory: apps/island
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The full renderer bundle peaks above Node's default heap on macOS.
+          NODE_OPTIONS: --max-old-space-size=8192
           # node-gyp cannot locate Visual Studio on windows-latest without this.
           GYP_MSVS_VERSION: "2022"
           npm_config_msvs_version: "2022"

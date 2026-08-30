@@ -51,6 +51,11 @@ import {
 import { Input } from "@ryu/ui/components/input";
 import { Label } from "@ryu/ui/components/label";
 import {
+	RunStatusTimeline,
+	type RunStatusTimelineEntry,
+	RunStatusTimelineLegend,
+} from "@ryu/ui/components/run-status-timeline";
+import {
 	Select,
 	SelectContent,
 	SelectItem,
@@ -62,6 +67,9 @@ import { Textarea } from "@ryu/ui/components/textarea";
 import { useState } from "react";
 
 export type ScheduleOutcome = "success" | "failure";
+
+/** A recorded or projected run shown in a schedule's 24-hour status strip. */
+export type ScheduleRun = RunStatusTimelineEntry;
 
 /** A scheduled job, pre-formatted by the container for display. */
 export interface ScheduleRow {
@@ -75,6 +83,8 @@ export interface ScheduleRow {
 	/** Human last-run string, e.g. "2 hours ago" or "Never". */
 	lastRunLabel: string;
 	name: string;
+	/** Runs positioned in the rolling 24-hour status strip, oldest first. */
+	recentRuns?: ScheduleRun[];
 	/** Human schedule phrase, e.g. "Daily at 8 AM" or "Every hour". */
 	scheduleLabel: string;
 	/** When the job runs a workflow, its resolved name; else null. */
@@ -116,6 +126,8 @@ export interface SchedulesViewProps {
 	onCreate?: (payload: CreateSchedulePayload) => Promise<unknown>;
 	onDelete?: (id: string) => void;
 	onRetry?: () => void;
+	/** Stable clock for previews/tests; live callers can omit it to use now. */
+	timelineEndAt?: number;
 	workflows: WorkflowOption[];
 	workflowsLoading?: boolean;
 }
@@ -535,10 +547,18 @@ function OutcomeBadge({ outcome }: { outcome: ScheduleOutcome }) {
 function JobCard({
 	job,
 	onDelete,
+	timelineEndAt,
 }: {
 	job: ScheduleRow;
 	onDelete?: (id: string) => void;
+	timelineEndAt?: number;
 }) {
+	const endAt = timelineEndAt ?? Date.now();
+	const startAt = endAt - 24 * 60 * 60 * 1000;
+	const runs = job.recentRuns ?? [];
+	const runCount = runs.length;
+	const runWord = runCount === 1 ? "run" : "runs";
+
 	return (
 		<Card>
 			<CardHeader>
@@ -568,6 +588,23 @@ function JobCard({
 					<span className="text-muted-foreground">
 						Last run: {job.lastRunLabel}
 					</span>
+				</div>
+				<div className="border-t pt-3">
+					<div className="mb-1.5 flex items-center justify-between gap-2">
+						<span className="font-medium text-muted-foreground text-xs">
+							Last 24 hours
+						</span>
+						<span className="text-muted-foreground text-xs tabular-nums">
+							{runCount} {runWord}
+						</span>
+					</div>
+					<RunStatusTimeline
+						ariaLabel={`${job.name} run status in the last 24 hours`}
+						endAt={endAt}
+						entries={runs}
+						showScale
+						startAt={startAt}
+					/>
 				</div>
 				{job.lastOutcome === "failure" && job.lastError ? (
 					<p className="line-clamp-2 text-destructive text-xs">
@@ -599,6 +636,7 @@ export function SchedulesView({
 	onCreate,
 	onDelete,
 	onRetry,
+	timelineEndAt,
 }: SchedulesViewProps) {
 	if (loading) {
 		return (
@@ -661,11 +699,31 @@ export function SchedulesView({
 						<EmptyContent>{createDialog}</EmptyContent>
 					</Empty>
 				) : (
-					<div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-						{jobs.map((job) => (
-							<JobCard job={job} key={job.id} onDelete={onDelete} />
-						))}
-					</div>
+					<>
+						<div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
+							<div>
+								<p className="font-medium text-sm">
+									Run status · last 24 hours
+								</p>
+								<p className="text-muted-foreground text-xs">
+									Green completed, red failed, amber scheduled or waiting.
+								</p>
+							</div>
+							<RunStatusTimelineLegend
+								statuses={["success", "failure", "scheduled", "waiting"]}
+							/>
+						</div>
+						<div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+							{jobs.map((job) => (
+								<JobCard
+									job={job}
+									key={job.id}
+									onDelete={onDelete}
+									timelineEndAt={timelineEndAt}
+								/>
+							))}
+						</div>
+					</>
 				)}
 			</div>
 		</div>
