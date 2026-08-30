@@ -36,17 +36,18 @@ use std::sync::OnceLock;
 
 /// The single error type surfaced to foreign code. Carries the human-readable
 /// message from the underlying `ryu_sdk` error, so a Python/Swift caller gets a
-/// `RyuError` with `.message` (or the language's idiomatic equivalent).
+/// `RyuError` with `.details` (or the language's idiomatic equivalent). The
+/// field deliberately avoids Kotlin's inherited `Exception.message` property.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum RyuError {
-    #[error("{message}")]
-    Ryu { message: String },
+    #[error("{details}")]
+    Ryu { details: String },
 }
 
 impl RyuError {
     fn msg(message: impl Into<String>) -> Self {
         RyuError::Ryu {
-            message: message.into(),
+            details: message.into(),
         }
     }
 }
@@ -349,10 +350,10 @@ mod tests {
     fn manifest_semver_error() {
         let bad = r#"{"id":"com.example.x","name":"X","version":"nope","runnables":[]}"#;
         let err = parse_and_validate_manifest(bad.into()).unwrap_err();
-        let RyuError::Ryu { message } = err;
+        let RyuError::Ryu { details } = err;
         assert!(
-            message.contains("semver"),
-            "expected semver error, got: {message}"
+            details.contains("semver"),
+            "expected semver error, got: {details}"
         );
     }
 
@@ -367,8 +368,8 @@ mod tests {
     fn egress_blocklist() {
         assert!(assert_allowed_egress("http://127.0.0.1:7981".into()).is_ok());
         let err = assert_allowed_egress("https://api.openai.com".into()).unwrap_err();
-        let RyuError::Ryu { message } = err;
-        assert!(message.to_lowercase().contains("egress"));
+        let RyuError::Ryu { details } = err;
+        assert!(details.to_lowercase().contains("egress"));
     }
 
     #[test]
