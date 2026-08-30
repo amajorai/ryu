@@ -782,6 +782,10 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // lives in the standalone `ryu-token-table` sidecar; Core only loads the
     // manifest and generic transport contracts.
     include_str!("../../../../apps-store/token-table/manifest.json"),
+    // Rooms is Core-tier so its active-node sidecar may run through Core's
+    // generic lifecycle; keep the manifest in the hermetic test catalog too so
+    // the Core-tier ↔ built-in-manifest invariant covers the shipped app.
+    include_str!("../../../../apps-store/rooms/manifest.json"),
     // Harbor — an object-first CRM over the `ryu-crm` sidecar (a `local` sibling binary
     // on 8009; 8007 was contested by three concurrently built apps and 8008 taken by
     // `@ryu/news`). Same zero-coupling posture as Outpost above — Core links no CRM code
