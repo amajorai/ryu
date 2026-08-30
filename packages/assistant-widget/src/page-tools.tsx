@@ -396,6 +396,7 @@ export function PageToolsPopover({
 			<PopoverContent
 				align="end"
 				className={cn("max-h-[calc(100svh-6rem)] overflow-y-auto p-3", "w-80")}
+				onMouseDown={(event) => event.stopPropagation()}
 			>
 				{selected ? (
 					<PageToolForm

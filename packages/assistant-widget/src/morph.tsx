@@ -3,7 +3,7 @@
 import { SPRING_MORPH } from "@ryu/ui/lib/ease";
 import { cn } from "@ryu/ui/lib/utils";
 import { motion, type Transition, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const MORPH_SPRING: Transition = SPRING_MORPH;
@@ -29,6 +29,7 @@ export interface RyuAssistantMorphProps {
 	dismissable?: boolean;
 	isOpen?: boolean;
 	onOpenChange?: (open: boolean) => void;
+	style?: CSSProperties;
 	trigger?: ReactNode;
 	triggerClassName?: string;
 	triggerLabel?: string;
@@ -56,6 +57,7 @@ export function RyuAssistantMorph({
 	triggerClassName,
 	triggerLabel,
 	triggerSize = DEFAULT_TRIGGER_SIZE,
+	style,
 }: RyuAssistantMorphProps) {
 	const prefersReducedMotion = useReducedMotion();
 	const transition = prefersReducedMotion ? REDUCED_TRANSITION : MORPH_SPRING;
@@ -106,7 +108,7 @@ export function RyuAssistantMorph({
 
 	const triggerRadius = triggerSize / 2;
 	return (
-		<div className={className} ref={containerRef}>
+		<div className={className} ref={containerRef} style={style}>
 			<motion.div
 				animate={{
 					borderRadius: isOpen ? PANEL_BORDER_RADIUS : triggerRadius,
