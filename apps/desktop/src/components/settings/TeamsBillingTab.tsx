@@ -528,7 +528,7 @@ function TeamsBillingTabForOrg({
 						}}
 						next={{
 							amount: formatMonthlyUsd(previewMonthlyPrice),
-							detail: `${previewSeatCount} member seats · shared workspace · pooled wallet`,
+							detail: `${previewSeatCount} member seats · shared workspace · seat changes prorate and charge now`,
 							eyebrow: "New",
 							label: planLabel(organizationPlanId ?? "teams"),
 						}}

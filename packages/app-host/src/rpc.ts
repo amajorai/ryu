@@ -1723,6 +1723,8 @@ export interface HostServices {
 	skillsListVersions?(input: { id: string }): Promise<SkillVersionRecord[]>;
 	/** Restore a version as the current SKILL.md (`POST …/versions/:vid/restore`). */
 	skillsRestore?(input: { id: string; versionId: string }): Promise<void>;
+	/** Open the shared agent-target distribution flow for an installed skill. */
+	skillsDistribute?(input: { id: string }): Promise<void>;
 	/** Rename the owning tab (the desktop page's `updateTabTitle`) — shell-navigation. */
 	skillsSetTitle?(input: { title: string }): void;
 	/** Snapshot the current SKILL.md as a new version (`POST /api/skills/:id/versions`). */
@@ -4924,6 +4926,23 @@ export async function dispatchRpc(
 			await services.skillsRestore(input);
 			return null;
 		}
+		case "skills.distribute": {
+			const input = asSkillIdArg(args[0]);
+			if (!input) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"skills.distribute requires a { id: string }"
+				);
+			}
+			if (!services.skillsDistribute) {
+				throw new CodedRpcError(
+					"server_error",
+					"skills.distribute is not available"
+				);
+			}
+			await services.skillsDistribute(input);
+			return null;
+		}
 		case "skills.setTitle": {
 			const input = asSkillTitleArg(args[0]);
 			if (!input) {
@@ -7113,7 +7132,7 @@ export function asMeetingOpenNotesArg(
 	};
 }
 
-/** Narrow an RPC argument to a `{ id: string }` for `skills.getSource`/`listVersions`.
+/** Narrow an RPC argument to a `{ id: string }` for skill reads/distribution.
  *  Returns null for any other shape so a malformed read never reaches Core. */
 export function asSkillIdArg(data: unknown): { id: string } | null {
 	if (typeof data !== "object" || data === null) {

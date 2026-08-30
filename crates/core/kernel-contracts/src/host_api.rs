@@ -1493,6 +1493,13 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
         true,
     ),
     m(
+        "skills.distribute",
+        "skills.crud",
+        Some("skills:crud"),
+        false,
+        true,
+    ),
+    m(
         "skills.setTitle",
         "skills.crud",
         Some("skills:crud"),

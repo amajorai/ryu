@@ -1,6 +1,6 @@
 {
   "name": "@ryuhq/github-action",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "GitHub Action for running Ryu Core agents, teams, workflows, and tools",
   "type": "module",
   "main": "./dist/index.cjs",

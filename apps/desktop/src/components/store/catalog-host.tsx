@@ -35,6 +35,7 @@ import {
 	useState,
 } from "react";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import { ActiveModelControl } from "@/src/components/store/ActiveModelControl.tsx";
 import { useDesktopDependencyLookup } from "@/src/components/store/dependency-lookup.ts";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
@@ -169,6 +170,7 @@ function useMarketplaceAccess(): boolean {
 export function DesktopCatalogHost({ children }: { children: ReactNode }) {
 	const activeNode = useCatalogNode();
 	const { openTab } = useTabsContext();
+	const { distributeInstalledSkill } = useSkillDistributionFlow();
 	const navigate = useCallback(
 		(path: string) => {
 			openTab(path);
@@ -197,6 +199,9 @@ export function DesktopCatalogHost({ children }: { children: ReactNode }) {
 	const host = useMemo<CatalogHost>(
 		() => ({
 			canAuthorSkills: skillEditorOwner !== null,
+			distributeSkill: async (skillId) => {
+				await distributeInstalledSkill(skillId);
+			},
 			install: desktopInstall,
 			Markdown,
 			// Reads the listing's repo at a version tag. Bound to the active node
@@ -273,6 +278,7 @@ export function DesktopCatalogHost({ children }: { children: ReactNode }) {
 		[
 			navigate,
 			skillEditorOwner,
+			distributeInstalledSkill,
 			activeNode.url,
 			activeNode.token,
 			activeNode.userJwt,

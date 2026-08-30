@@ -11,6 +11,7 @@ import { TextSwap } from "@ryu/ui/components/text-swap";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { sileo } from "sileo";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
@@ -27,11 +28,7 @@ import {
 	installApp,
 	type PluginCatalogDetail,
 } from "@/src/lib/api/plugins.ts";
-import {
-	fetchSkillDetail,
-	installSkill,
-	type SkillDetail,
-} from "@/src/lib/api/skills.ts";
+import { fetchSkillDetail, type SkillDetail } from "@/src/lib/api/skills.ts";
 import { pickRecommendedQuant } from "@/src/lib/deep-link.ts";
 import { useDeepLinkStore } from "@/src/store/useDeepLinkStore.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
@@ -206,6 +203,7 @@ function nodeBody(
 // nothing happens until the user confirms here. Installs go through Core's
 // verified, source-pinned download path — the link never picks the registry.
 export function DeepLinkConfirmDialog() {
+	const { installCatalogSkill } = useSkillDistributionFlow();
 	const pending = useDeepLinkStore((s) => s.pending);
 	const clear = useDeepLinkStore((s) => s.clear);
 	const qc = useQueryClient();
@@ -325,7 +323,10 @@ export function DeepLinkConfirmDialog() {
 		const { card } = skillDetail.data;
 		setBusy(true);
 		try {
-			await installSkill(target, intent.id);
+			const installed = await installCatalogSkill({ id: intent.id, target });
+			if (installed === null) {
+				return;
+			}
 			sileo.success({ title: `Installed ${card.name}` });
 			Promise.resolve(qc.invalidateQueries({ queryKey: ["skills"] })).catch(
 				() => undefined

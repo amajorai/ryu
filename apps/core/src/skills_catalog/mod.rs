@@ -24,6 +24,7 @@ use serde::Serialize;
 const GITHUB_CACHE_TTL_SECONDS: u64 = 60 * 60 * 24;
 
 pub mod default_skills;
+pub mod distribution;
 pub mod from_source;
 pub mod packs;
 pub mod plugin_skills;

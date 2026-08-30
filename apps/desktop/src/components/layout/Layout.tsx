@@ -31,6 +31,7 @@ import { SupportAccessBanner } from "@/src/components/settings/support-access-ba
 import { NodeUnreachableBanner } from "@/src/components/shell/NodeUnreachableBanner.tsx";
 import { ReconnectRetryBanner } from "@/src/components/shell/ReconnectRetryBanner.tsx";
 import { SafeModeBanner } from "@/src/components/shell/SafeModeBanner.tsx";
+import { SkillDistributionProvider } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import { AutoUpdater } from "@/src/components/updater/AutoUpdater.tsx";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import {
@@ -1126,36 +1127,38 @@ export default function Layout() {
 		<TooltipProvider delay={0}>
 			<ChatDisplayPrefs>
 				<TabsProvider initialTab={initialTabRef.current}>
-					<TitleBarProvider>
-						<SidebarProvider
-							style={
-								{
-									"--sidebar-width": `${sidebarWidth}px`,
-								} as React.CSSProperties
-							}
-						>
-							<ChatHistoryProvider>
-								<SpacesProvider>
-									<SystemStatusProvider>
-										<HotkeysProvider
-											registry={DESKTOP_HOTKEYS}
-											storage={coreKvHotkeyStorage}
-										>
-											<DesktopReportHost>
-												<ProjectDockHost>
-													<LayoutContent
-														nativeWindowChrome={nativeWindowChrome}
-														onSidebarWidthChange={handleSidebarWidthChange}
-														sidebarWidth={sidebarWidth}
-													/>
-												</ProjectDockHost>
-											</DesktopReportHost>
-										</HotkeysProvider>
-									</SystemStatusProvider>
-								</SpacesProvider>
-							</ChatHistoryProvider>
-						</SidebarProvider>
-					</TitleBarProvider>
+					<SkillDistributionProvider>
+						<TitleBarProvider>
+							<SidebarProvider
+								style={
+									{
+										"--sidebar-width": `${sidebarWidth}px`,
+									} as React.CSSProperties
+								}
+							>
+								<ChatHistoryProvider>
+									<SpacesProvider>
+										<SystemStatusProvider>
+											<HotkeysProvider
+												registry={DESKTOP_HOTKEYS}
+												storage={coreKvHotkeyStorage}
+											>
+												<DesktopReportHost>
+													<ProjectDockHost>
+														<LayoutContent
+															nativeWindowChrome={nativeWindowChrome}
+															onSidebarWidthChange={handleSidebarWidthChange}
+															sidebarWidth={sidebarWidth}
+														/>
+													</ProjectDockHost>
+												</DesktopReportHost>
+											</HotkeysProvider>
+										</SystemStatusProvider>
+									</SpacesProvider>
+								</ChatHistoryProvider>
+							</SidebarProvider>
+						</TitleBarProvider>
+					</SkillDistributionProvider>
 				</TabsProvider>
 			</ChatDisplayPrefs>
 		</TooltipProvider>

@@ -13,12 +13,17 @@ import type { ApiTarget } from "./client.ts";
 import { setBuyerTokenProvider } from "./client.ts";
 import {
 	addMarketplaceSource,
+	distributeSkill,
 	fetchSkillDetail,
 	fetchSkillSources,
+	fetchSkillTargets,
 	installSkill,
 	listSkills,
 	removeMarketplaceSource,
 	reorderMarketplaceSource,
+	resetSkillTargetPreferences,
+	SkillTargetsRequiredError,
+	saveSkillTargetPreferences,
 	searchSkills,
 	selectSkillSource,
 	setSkillActive,
@@ -150,10 +155,66 @@ describe("installSkill — buyer token + error envelope", () => {
 			JSON.stringify({ success: true, result: { slug: "s", path: "/p" } })
 		);
 		const out = await installSkill(target, "id1");
-		expect(out).toEqual({ slug: "s", path: "/p" });
+		expect(out).toEqual({ slug: "s", path: "/p", distribution: null });
 		const h = cap.init?.headers as Record<string, string>;
 		expect(h["X-Ryu-Buyer-Token"]).toBe("sess-42");
 		expect(JSON.parse(cap.init?.body as string)).toEqual({ id: "id1" });
+	});
+
+	test("sends an explicit remembered target selection", async () => {
+		const cap = stub(
+			JSON.stringify({
+				success: true,
+				result: { slug: "s", path: "/p" },
+				distribution: { skillId: "s", targets: [] },
+			})
+		);
+
+		const out = await installSkill(target, "demo", undefined, {
+			promptForTargets: true,
+			targetIds: ["codex", "cursor"],
+			rememberTargetIds: true,
+		});
+
+		expect(JSON.parse(cap.init?.body as string)).toEqual({
+			id: "demo",
+			promptForTargets: true,
+			targetIds: ["codex", "cursor"],
+			rememberTargetIds: true,
+		});
+		expect(out.distribution).toEqual({ skillId: "s", targets: [] });
+	});
+
+	test("preserves the catalog source alongside prompt-aware options", async () => {
+		const cap = stub(
+			JSON.stringify({ success: true, result: { slug: "s", path: "/p" } })
+		);
+
+		await installSkill(target, "owner/repo/demo", "private-registry", {
+			promptForTargets: true,
+		});
+
+		expect(JSON.parse(cap.init?.body as string)).toEqual({
+			id: "owner/repo/demo",
+			source: "private-registry",
+			promptForTargets: true,
+		});
+	});
+
+	test("turns the prompt precondition into SkillTargetsRequiredError", async () => {
+		stub(
+			JSON.stringify({
+				error: "skill_targets_required",
+				code: "skill_targets_required",
+			}),
+			409
+		);
+
+		await expect(
+			installSkill(target, "owner/repo/demo", undefined, {
+				promptForTargets: true,
+			})
+		).rejects.toBeInstanceOf(SkillTargetsRequiredError);
 	});
 
 	test("omits the buyer header when not signed in", async () => {
@@ -175,6 +236,70 @@ describe("installSkill — buyer token + error envelope", () => {
 		await expect(installSkill(target, "paid")).rejects.toThrow(
 			"Failed to install paid"
 		);
+	});
+});
+
+describe("skill targets", () => {
+	const snapshot = {
+		targets: [
+			{
+				id: "codex",
+				name: "Codex",
+				projectSkillsDir: ".agents/skills",
+				globalSkillsDir: "~/.agents/skills",
+				featured: true,
+				detected: true,
+				resolvedGlobalPath: "/home/me/.agents/skills",
+				selectable: true,
+				unavailableReason: null,
+			},
+		],
+		preferences: { version: 1, configured: true, targetIds: [] },
+		droppedTargetIds: [],
+		warning: null,
+	};
+
+	test("maps targets and preserves configured-empty preferences", async () => {
+		const cap = stub(JSON.stringify(snapshot));
+		expect(await fetchSkillTargets(target)).toEqual(snapshot);
+		expect(cap.url).toBe("http://127.0.0.1:7980/api/skills/targets");
+	});
+
+	test("PUT saves target ids and returns the refreshed snapshot", async () => {
+		const cap = stub(JSON.stringify(snapshot));
+		expect(
+			await saveSkillTargetPreferences(target, ["codex", "cursor"])
+		).toEqual(snapshot);
+		expect(cap.init?.method).toBe("PUT");
+		expect(JSON.parse(cap.init?.body as string)).toEqual({
+			targetIds: ["codex", "cursor"],
+		});
+	});
+
+	test("DELETE resets preferences and returns the refreshed snapshot", async () => {
+		const cap = stub(JSON.stringify(snapshot));
+		expect(await resetSkillTargetPreferences(target)).toEqual(snapshot);
+		expect(cap.init?.method).toBe("DELETE");
+		expect(cap.init?.body).toBeUndefined();
+	});
+
+	test("POST manually distributes with an explicit one-time empty selection", async () => {
+		const distribution = { skillId: "demo", targets: [] };
+		const cap = stub(JSON.stringify({ success: true, distribution }));
+		expect(
+			await distributeSkill(target, "owner/demo", {
+				targetIds: [],
+				remember: false,
+			})
+		).toEqual(distribution);
+		expect(cap.url).toBe(
+			"http://127.0.0.1:7980/api/skills/owner%2Fdemo/distribute"
+		);
+		expect(cap.init?.method).toBe("POST");
+		expect(JSON.parse(cap.init?.body as string)).toEqual({
+			targetIds: [],
+			rememberTargetIds: false,
+		});
 	});
 });
 

@@ -332,6 +332,7 @@ export default function SkillsCatalogSection({
 							<SkillDetailPanel
 								canAuthor={canAuthor}
 								detail={detail}
+								distributeSkill={host.distributeSkill}
 								enabledByKey={enabledByKey}
 								error={detailError}
 								friendly={friendly}
@@ -989,6 +990,7 @@ function SkillCardAction({
 function SkillDetailPanel({
 	selectedId,
 	detail,
+	distributeSkill,
 	loading,
 	error,
 	install,
@@ -1008,6 +1010,7 @@ function SkillDetailPanel({
 }: {
 	selectedId: string | null;
 	detail: SkillDetail | null;
+	distributeSkill: CatalogHost["distributeSkill"];
 	loading: boolean;
 	error: string | null;
 	install: () => Promise<void>;
@@ -1115,6 +1118,7 @@ function SkillDetailPanel({
 					<SkillDetailAction
 						canAuthor={canAuthor}
 						card={card}
+						distributeSkill={distributeSkill}
 						install={install}
 						installing={installing}
 						installLayer={installLayer}
@@ -1316,6 +1320,7 @@ function SkillLink({ href, label }: { href: string; label: string }) {
  *  affordance where `installLayer` is null (web). */
 function SkillDetailAction({
 	card,
+	distributeSkill,
 	install,
 	installing,
 	installLayer,
@@ -1328,6 +1333,7 @@ function SkillDetailAction({
 	canAuthor,
 }: {
 	card: SkillCard;
+	distributeSkill: CatalogHost["distributeSkill"];
 	install: () => Promise<void>;
 	installing: string | null;
 	installLayer: CatalogInstall | null;
@@ -1369,6 +1375,18 @@ function SkillDetailAction({
 
 	return (
 		<div className="flex shrink-0 items-center gap-3">
+			{distributeSkill ? (
+				<Button
+					onClick={() => {
+						distributeSkill(card.id).catch(() => undefined);
+					}}
+					size="sm"
+					variant="ghost"
+				>
+					<HugeiconsIcon className="size-4" icon={Download01Icon} />
+					Use with agents
+				</Button>
+			) : null}
 			{canAuthor && skillKey !== null ? (
 				<Button onClick={() => onEdit(skillKey)} size="sm" variant="ghost">
 					<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />

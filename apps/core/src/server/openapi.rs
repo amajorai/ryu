@@ -107,6 +107,10 @@ use utoipa::OpenApi;
         super::skills_catalog_list,
         super::skills_catalog_detail,
         super::skills_catalog_install,
+        super::skills_targets,
+        super::skills_target_preferences_put,
+        super::skills_target_preferences_delete,
+        super::skills_distribute,
         super::skills_install_from_source,
         // (`skills_activate` + `list_skills` moved to `ryu_skills::api`, merged below)
         super::list_engines,

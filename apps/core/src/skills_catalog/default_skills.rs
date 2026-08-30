@@ -28,9 +28,11 @@
 //!
 //! ## Three things the CLI invocation must keep
 //!
-//! - **`-a claude-code`** — without an agent filter the CLI fans out to *every*
-//!   agent directory it knows (54 of them on a bare machine: `~/.iflow`,
-//!   `~/.trae`, `~/.openclaw`, …). Ryu must only ever write its own skills dir.
+//! - **explicit `-a` targets** — without an agent filter the CLI fans out to
+//!   *every* agent directory it knows (54 of them on a bare machine:
+//!   `~/.iflow`, `~/.trae`, `~/.openclaw`, …). Ryu always scopes the install to
+//!   its canonical `claude-code` root plus only the user's remembered global
+//!   targets.
 //! - **`DO_NOT_TRACK` / `DISABLE_TELEMETRY`** — the CLI posts an install event to
 //!   `https://add-skill.vercel.sh/t`. Running it automatically on every Ryu boot
 //!   would report our whole install base to a third party without the user ever
@@ -46,10 +48,16 @@
 //! button appear broken. Turning the whole behavior off ahead of first boot is
 //! `skills.install-defaults = false`.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Stdio;
 
 use anyhow::{Context, Result};
+
+use super::distribution::{
+    distribute_skill, list_agent_targets, parse_preferences, DistributionContext,
+    DistributionStatus, INSTALL_TARGETS_PREF,
+};
 
 /// The repo the default skills come from.
 pub const DEFAULT_SKILL_REPO: &str = "anthropics/skills";
@@ -79,6 +87,27 @@ pub fn missing_defaults() -> Vec<&'static str> {
     DEFAULT_SKILLS
         .iter()
         .filter(|slug| !installed.contains(**slug))
+        .copied()
+        .collect()
+}
+
+/// The canonical source file for a default skill. The CLI's `claude-code`
+/// target and Core's primary registry write to this exact location.
+fn canonical_skill_md(skill: &str) -> PathBuf {
+    ryu_skills::SkillRegistry::skills_dir()
+        .join(skill)
+        .join("SKILL.md")
+}
+
+/// Defaults absent from the canonical Ryu/Claude skills root.
+///
+/// The default installer needs a canonical source package to verify and fan out
+/// to remembered targets. A matching skill in a secondary scan root is useful
+/// to the registry, but cannot substitute for that source package.
+fn missing_canonical_defaults() -> Vec<&'static str> {
+    DEFAULT_SKILLS
+        .iter()
+        .filter(|slug| !canonical_skill_md(slug).is_file())
         .copied()
         .collect()
 }
@@ -124,7 +153,7 @@ fn resolve_npx() -> Option<PathBuf> {
 ///
 /// Split out so the invariants (agent scoping, one `-s` per skill, `--copy`) are
 /// unit-testable without running Node.
-fn cli_args(skills: &[&str]) -> Vec<String> {
+fn cli_args(skills: &[&str], target_ids: &[String]) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "-y".to_string(),
         "skills@latest".to_string(),
@@ -137,10 +166,16 @@ fn cli_args(skills: &[&str]) -> Vec<String> {
         args.push("-s".to_string());
         args.push((*skill).to_string());
     }
-    args.push("-a".to_string());
     // Never unscoped: an unfiltered install writes into every agent dir on the
-    // machine, not just Ryu's.
-    args.push(CLI_AGENT.to_string());
+    // machine, not just Ryu's. The canonical target always comes first, then
+    // each remembered global target once.
+    let mut agents = HashSet::new();
+    for target_id in std::iter::once(CLI_AGENT).chain(target_ids.iter().map(String::as_str)) {
+        if agents.insert(target_id) {
+            args.push("-a".to_string());
+            args.push(target_id.to_string());
+        }
+    }
     args.push("-g".to_string());
     args.push("-y".to_string());
     // Copy rather than symlink, so removing the CLI's cache cannot empty the
@@ -150,14 +185,14 @@ fn cli_args(skills: &[&str]) -> Vec<String> {
 }
 
 /// Install via Vercel's `skills` CLI. Returns `Ok(false)` when `npx` is absent.
-async fn install_via_cli(skills: &[&str]) -> Result<bool> {
+async fn install_via_cli(skills: &[&str], target_ids: &[String]) -> Result<bool> {
     let Some(npx) = resolve_npx() else {
         tracing::info!("npx not found; using Core's own skill fetcher for defaults");
         return Ok(false);
     };
 
-    let args = cli_args(skills);
-    tracing::info!(npx = %npx.display(), ?skills, "installing default skills via the skills CLI");
+    let args = cli_args(skills, target_ids);
+    tracing::info!(npx = %npx.display(), ?skills, ?target_ids, "installing default skills via the skills CLI");
 
     let mut command = tokio::process::Command::new(&npx);
     command
@@ -203,6 +238,78 @@ async fn install_via_core(client: &reqwest::Client, skills: &[&str]) -> Vec<Stri
     installed
 }
 
+/// Copy or verify every canonical default in each remembered target. The CLI is
+/// allowed to do the initial fan-out, but Core verifies its output and fills in
+/// any target that the CLI did not create.
+fn distribute_defaults(target_ids: &[String]) {
+    if target_ids.is_empty() {
+        return;
+    }
+
+    let context = match DistributionContext::current() {
+        Ok(context) => context,
+        Err(error) => {
+            for target_id in target_ids {
+                tracing::warn!(
+                    skill = "default",
+                    %target_id,
+                    status = "failed",
+                    error = %error,
+                    "default skill target distribution failed"
+                );
+            }
+            return;
+        }
+    };
+
+    for skill in DEFAULT_SKILLS {
+        let source_skill_md = canonical_skill_md(skill);
+        if !source_skill_md.is_file() {
+            for target_id in target_ids {
+                tracing::warn!(
+                    %skill,
+                    %target_id,
+                    status = "failed",
+                    source = %source_skill_md.display(),
+                    "canonical default skill is absent before target distribution"
+                );
+            }
+            continue;
+        }
+
+        match distribute_skill(&context, skill, source_skill_md.as_path(), target_ids) {
+            Ok(result) => {
+                for target in result.targets {
+                    if matches!(
+                        target.status,
+                        DistributionStatus::Conflict | DistributionStatus::Failed
+                    ) {
+                        tracing::warn!(
+                            %skill,
+                            target_id = %target.target_id,
+                            status = ?target.status,
+                            path = ?target.path,
+                            message = ?target.message,
+                            "default skill target distribution did not succeed"
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                for target_id in target_ids {
+                    tracing::warn!(
+                        %skill,
+                        %target_id,
+                        status = "failed",
+                        error = %error,
+                        "default skill target distribution failed"
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Install any missing default skills. Best-effort: never returns an error to the
 /// caller's boot path, and reports which slugs ended up on disk.
 ///
@@ -213,6 +320,7 @@ pub async fn install_defaults_if_needed(
     client: &reqwest::Client,
     enabled: bool,
     already_done: bool,
+    target_ids: &[String],
 ) -> Vec<String> {
     if !enabled {
         tracing::debug!("default skills disabled via `{INSTALL_DEFAULTS_PREF}`");
@@ -223,31 +331,39 @@ pub async fn install_defaults_if_needed(
         // must not have it reappear on the next boot.
         return Vec::new();
     }
-    let missing = missing_defaults();
+    let missing = missing_canonical_defaults();
     if missing.is_empty() {
+        distribute_defaults(target_ids);
         return Vec::new();
     }
 
-    match install_via_cli(&missing).await {
+    let installed = match install_via_cli(&missing, target_ids).await {
         Ok(true) => {
             // Trust nothing: confirm against the disk rather than the exit code,
             // and fall back for whatever the CLI silently skipped.
-            let still_missing = missing_defaults();
+            let still_missing = missing_canonical_defaults();
             if still_missing.is_empty() {
-                return missing.iter().map(|s| (*s).to_string()).collect();
+                missing.iter().map(|s| (*s).to_string()).collect()
+            } else {
+                tracing::warn!(
+                    ?still_missing,
+                    "skills CLI reported success but canonical defaults are absent; falling back"
+                );
+                install_via_core(client, &still_missing).await
             }
-            tracing::warn!(
-                ?still_missing,
-                "skills CLI reported success but some defaults are absent; falling back"
-            );
-            install_via_core(client, &still_missing).await
         }
         Ok(false) => install_via_core(client, &missing).await,
         Err(e) => {
             tracing::warn!(error = %e, "skills CLI failed; falling back to Core's fetcher");
             install_via_core(client, &missing).await
         }
-    }
+    };
+
+    // `distribute_skill` records a target that the CLI already populated as
+    // `current`; any omitted target is copied by Core. Either way, failures
+    // remain warnings so this background boot work cannot fail Core startup.
+    distribute_defaults(target_ids);
+    installed
 }
 
 /// Attempt counter, so a machine that can never install (no Node *and* no
@@ -295,6 +411,8 @@ pub async fn run_on_boot(
         return;
     }
 
+    let target_ids = remembered_global_target_ids(preferences).await;
+
     let attempts = preferences
         .get(ATTEMPTS_PREF)
         .await
@@ -310,7 +428,7 @@ pub async fn run_on_boot(
         .set(ATTEMPTS_PREF, &(attempts + 1).to_string())
         .await;
 
-    let installed = install_defaults_if_needed(client, enabled, already_done).await;
+    let installed = install_defaults_if_needed(client, enabled, already_done, &target_ids).await;
     if !installed.is_empty() {
         tracing::info!(?installed, "installed default skills");
         // Hot-reload so a freshly installed skill is selectable immediately,
@@ -321,9 +439,58 @@ pub async fn run_on_boot(
     // Only latch the run-once marker when the set is actually complete. A first
     // boot that was offline should retry (up to MAX_ATTEMPTS) rather than
     // permanently record "defaults installed" for a machine that has none.
-    if missing_defaults().is_empty() {
+    if missing_canonical_defaults().is_empty() {
         let _ = preferences.set(DEFAULTS_MARKER_PREF, "1").await;
     }
+}
+
+/// Load remembered targets without ever prompting at boot. Invalid,
+/// project-only, and duplicate-path targets are discarded before they reach the
+/// CLI or Core distribution; the canonical `claude-code` target is supplied by
+/// [`cli_args`] independently.
+async fn remembered_global_target_ids(
+    preferences: &crate::server::preferences::PreferencesStore,
+) -> Vec<String> {
+    let raw = preferences.get(INSTALL_TARGETS_PREF).await.ok().flatten();
+    let context = match DistributionContext::current() {
+        Ok(context) => context,
+        Err(error) => {
+            tracing::warn!(error = %error, "reading saved skill install targets failed");
+            return Vec::new();
+        }
+    };
+    let targets = match list_agent_targets(&context.home_dir, &context.environment) {
+        Ok(targets) => targets,
+        Err(error) => {
+            tracing::warn!(error = %error, "resolving saved skill install targets failed");
+            return Vec::new();
+        }
+    };
+    let parsed = parse_preferences(raw.as_deref(), &targets);
+    if let Some(warning) = parsed.warning {
+        tracing::warn!(%warning, "saved skill install targets were ignored");
+    }
+    if !parsed.preferences.configured {
+        return Vec::new();
+    }
+
+    let targets_by_id = targets
+        .iter()
+        .map(|target| (target.id.as_str(), target))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut seen_paths = HashSet::new();
+    parsed
+        .preferences
+        .target_ids
+        .into_iter()
+        .filter(|target_id| {
+            targets_by_id
+                .get(target_id.as_str())
+                .filter(|target| target.selectable)
+                .and_then(|target| target.resolved_global_path.as_deref())
+                .is_some_and(|path| seen_paths.insert(path.to_owned()))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -338,16 +505,24 @@ mod tests {
         );
     }
 
-    /// The CLI fans out to every agent directory on the machine unless an agent
-    /// is named, and its id is `claude-code` (it rejects `claude`). If this test
-    /// fails, a Ryu boot is writing skills into other tools' config dirs.
     #[test]
-    fn cli_args_scope_the_install_to_one_agent() {
-        let args = cli_args(&["pdf"]);
-        let agent_at = args.iter().position(|a| a == "-a").expect("no -a flag");
+    fn cli_args_keep_canonical_and_repeat_every_configured_agent() {
+        let args = cli_args(&["pdf", "docx"], &["codex".into(), "cursor".into()]);
+        assert!(args.windows(2).any(|pair| pair == ["-a", "claude-code"]));
+        assert!(args.windows(2).any(|pair| pair == ["-a", "codex"]));
+        assert!(args.windows(2).any(|pair| pair == ["-a", "cursor"]));
+        assert_eq!(args.iter().filter(|arg| arg.as_str() == "-s").count(), 2);
+        assert!(args.contains(&"--copy".to_owned()));
+    }
+
+    #[test]
+    fn cli_args_dedupe_the_canonical_target() {
+        let args = cli_args(&["pdf"], &["claude-code".into(), "claude-code".into()]);
         assert_eq!(
-            args.get(agent_at + 1).map(String::as_str),
-            Some("claude-code")
+            args.windows(2)
+                .filter(|pair| pair == &["-a", "claude-code"])
+                .count(),
+            1
         );
     }
 
@@ -355,7 +530,7 @@ mod tests {
     /// skill must get its own flag.
     #[test]
     fn cli_args_repeat_the_skill_flag_never_comma_join() {
-        let args = cli_args(&["pdf", "xlsx", "docx"]);
+        let args = cli_args(&["pdf", "xlsx", "docx"], &[]);
         let flags = args.iter().filter(|a| *a == "-s").count();
         assert_eq!(flags, 3, "expected one -s per skill: {args:?}");
         assert!(
@@ -369,7 +544,7 @@ mod tests {
 
     #[test]
     fn cli_args_target_the_anthropic_repo_and_copy_files() {
-        let args = cli_args(&["pdf"]);
+        let args = cli_args(&["pdf"], &[]);
         assert!(args.iter().any(|a| a == DEFAULT_SKILL_REPO));
         assert!(args.iter().any(|a| a == "add"));
         // --copy, so clearing the npx cache cannot empty the user's skills dir.
@@ -380,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn disabled_preference_installs_nothing() {
         let client = reqwest::Client::new();
-        assert!(install_defaults_if_needed(&client, false, false)
+        assert!(install_defaults_if_needed(&client, false, false, &[])
             .await
             .is_empty());
     }
@@ -388,7 +563,7 @@ mod tests {
     #[tokio::test]
     async fn completed_marker_installs_nothing() {
         let client = reqwest::Client::new();
-        assert!(install_defaults_if_needed(&client, true, true)
+        assert!(install_defaults_if_needed(&client, true, true, &[])
             .await
             .is_empty());
     }

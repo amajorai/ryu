@@ -6,7 +6,12 @@
 // lives in Core — this module only shapes requests and parses responses, so
 // desktop/mobile/extension reuse it.
 
-import { type ApiTarget, buyerTokenHeader, request } from "./client.ts";
+import {
+	ApiError,
+	type ApiTarget,
+	buyerTokenHeader,
+	request,
+} from "./client.ts";
 
 /** A Skill row in the left-hand selector. */
 export interface SkillCard {
@@ -197,9 +202,117 @@ export async function fetchSkillDetail(
 	};
 }
 
+export interface SkillAgentTarget {
+	detected: boolean;
+	featured: boolean;
+	globalSkillsDir: string | null;
+	id: string;
+	name: string;
+	projectSkillsDir: string;
+	resolvedGlobalPath: string | null;
+	selectable: boolean;
+	unavailableReason: string | null;
+}
+
+export interface SkillInstallPreferences {
+	configured: boolean;
+	targetIds: string[];
+	version: 1;
+}
+
+export interface SkillTargetsSnapshot {
+	droppedTargetIds: string[];
+	preferences: SkillInstallPreferences;
+	targets: SkillAgentTarget[];
+	warning: string | null;
+}
+
+export type SkillDistributionStatus =
+	| "copied"
+	| "current"
+	| "conflict"
+	| "failed";
+
+export interface SkillDistributionTargetResult {
+	message: string | null;
+	path: string | null;
+	status: SkillDistributionStatus;
+	targetId: string;
+}
+
+export interface SkillDistributionResult {
+	skillId: string;
+	targets: SkillDistributionTargetResult[];
+}
+
+export interface SkillInstallOptions {
+	promptForTargets?: boolean;
+	rememberTargetIds?: boolean;
+	targetIds?: string[];
+}
+
+export interface SkillTargetChoice {
+	remember: boolean;
+	targetIds: string[];
+}
+
 export interface SkillInstallResult {
+	distribution: SkillDistributionResult | null;
 	path: string;
 	slug: string;
+}
+
+export class SkillTargetsRequiredError extends Error {
+	constructor() {
+		super("Choose default agents on this computer.");
+		this.name = "SkillTargetsRequiredError";
+	}
+}
+
+export async function fetchSkillTargets(
+	target: ApiTarget
+): Promise<SkillTargetsSnapshot> {
+	return request(target, "/api/skills/targets");
+}
+
+export async function saveSkillTargetPreferences(
+	target: ApiTarget,
+	targetIds: string[]
+): Promise<SkillTargetsSnapshot> {
+	return request(target, "/api/skills/targets/preferences", {
+		method: "PUT",
+		body: { targetIds },
+	});
+}
+
+export async function resetSkillTargetPreferences(
+	target: ApiTarget
+): Promise<SkillTargetsSnapshot> {
+	return request(target, "/api/skills/targets/preferences", {
+		method: "DELETE",
+	});
+}
+
+export async function distributeSkill(
+	target: ApiTarget,
+	skillId: string,
+	choice: SkillTargetChoice
+): Promise<SkillDistributionResult> {
+	const json = await request<{
+		distribution?: SkillDistributionResult;
+		error?: string;
+		success?: boolean;
+	}>(target, `/api/skills/${encodeURIComponent(skillId)}/distribute`, {
+		method: "POST",
+		body: {
+			targetIds: choice.targetIds,
+			rememberTargetIds: choice.remember,
+		},
+	});
+	if (json.success === false || !json.distribution) {
+		throw new Error(json.error ?? `Failed to distribute ${skillId}`);
+	}
+	return json.distribution;
 }
 
 /** One installed skill whose local SKILL.md differs from the current upstream
@@ -233,23 +346,41 @@ export async function listSkillUpdates(
 export async function installSkill(
 	target: ApiTarget,
 	id: string,
-	source?: string
+	source?: string,
+	options: SkillInstallOptions = {}
 ): Promise<SkillInstallResult> {
-	const json = await request<{
-		success?: boolean;
+	let json: {
+		distribution?: SkillDistributionResult;
 		error?: string;
-		result?: { slug: string; path: string };
-	}>(target, "/api/skills/catalog/install", {
-		method: "POST",
-		body: { id, ...(source ? { source } : {}) },
-		// Forward the buyer's control-plane session for optional Marketplace
-		// account-aware operations. It is not required for installation.
-		headers: buyerTokenHeader(target),
-	});
+		result?: { path: string; slug: string };
+		success?: boolean;
+	};
+	try {
+		json = await request(target, "/api/skills/catalog/install", {
+			method: "POST",
+			body: { id, ...(source ? { source } : {}), ...options },
+			// Forward the buyer's control-plane session so a PAID marketplace item's
+			// entitlement check (#491) can resolve the org + license. Free items ignore it.
+			headers: buyerTokenHeader(target),
+		});
+	} catch (error) {
+		if (
+			error instanceof ApiError &&
+			error.status === 409 &&
+			error.serverMessage === "skill_targets_required"
+		) {
+			throw new SkillTargetsRequiredError();
+		}
+		throw error;
+	}
 	if (json.success === false || !json.result) {
 		throw new Error(json.error ?? `Failed to install ${id}`);
 	}
-	return { slug: json.result.slug, path: json.result.path };
+	return {
+		slug: json.result.slug,
+		path: json.result.path,
+		distribution: json.distribution ?? null,
+	};
 }
 
 // ── Installed skills + enable/disable (activation) ────────────────────────────

@@ -47,6 +47,8 @@
     "rnp:check": "bun run tools/verify-rnp-contract.ts",
     "test:tools": "bun tools/check-api-target-propagation.mjs && node --test tools/ai-release-notes.test.mjs tools/public-release-notes.test.mjs tools/core-openapi-sync.test.mjs tools/pi-extension-syntax.test.mjs tools/generate-registry.test.mjs tools/generate-marketplace.test.mjs tools/generate-icons.test.mjs tools/mirror-plugins.test.mjs tools/mirror-satellites.test.mjs tools/plugin-icon-coverage.test.mjs tools/plugin-runtime-pinning.test.mjs tools/route-permission-methods.test.mjs tools/profile-contract.test.mjs tools/standalone-apps.test.mjs tools/publish-release-notes.test.mjs tools/publish-workflows.test.mjs tools/toolsmith/harness.test.mjs tools/toolsmith/purity.test.mjs tools/toolsmith/manifest.test.mjs scripts/release/next-version.test.mjs scripts/release/channel-brand.test.mjs scripts/release/artifact-name.test.mjs scripts/wipe.test.mjs && bun test tools/generate-agent-plugins.test.mjs && bun tools/generate-agent-plugins.mjs --check",
     "test:plugins": "bun tools/run-plugin-tests.mjs",
+    "skills:targets:sync": "node tools/sync-skill-agent-targets.mjs",
+    "skills:targets:check": "node tools/sync-skill-agent-targets.mjs --check",
     "mirror:satellites": "bash tools/mirror-satellites.sh",
     "mirror:plugins": "bash tools/mirror-plugins.sh",
     "mirror:public": "bash tools/mirror-push.sh && bash tools/mirror-satellites.sh && bash tools/mirror-plugins.sh",

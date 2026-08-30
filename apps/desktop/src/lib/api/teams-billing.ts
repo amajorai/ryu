@@ -246,6 +246,8 @@ export function checkoutTeamsOnboarding(
 export function updateTeamsSeats(seats: number): Promise<{
 	memberCount: number;
 	pendingSeatCount: number;
+	prorationBehavior: "invoice";
+	prorationLabel: string;
 	seats: number;
 }> {
 	return post("/billing/seats", { seats });

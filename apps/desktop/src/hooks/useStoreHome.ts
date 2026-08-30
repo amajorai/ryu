@@ -32,6 +32,7 @@ import {
 } from "@ryu/marketplace/catalog/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import { fetchAgentCatalog, installAgent } from "@/src/lib/api/agents.ts";
 import { type ApiTarget, request } from "@/src/lib/api/client.ts";
 import {
@@ -50,7 +51,7 @@ import {
 	installApp,
 	installPluginFromCatalog,
 } from "@/src/lib/api/plugins.ts";
-import { installSkill, searchSkills } from "@/src/lib/api/skills.ts";
+import { searchSkills } from "@/src/lib/api/skills.ts";
 import { beginInstall, endInstall } from "@/src/store/useInstallStore.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 import type { StoreSearchRealm } from "./useStoreSearch.ts";
@@ -125,6 +126,7 @@ export interface StoreForYou {
 }
 
 export function useStoreHome(): UseStoreHomeResult {
+	const { installCatalogSkill } = useSkillDistributionFlow();
 	const activeNode = useActiveNode();
 	const target: ApiTarget = {
 		url: activeNode.url,
@@ -291,11 +293,10 @@ export function useStoreHome(): UseStoreHomeResult {
 				runAdd(
 					card.id,
 					() =>
-						installSkill(
-							{ url, token, userJwt },
-							card.id,
-							card.registryId ?? undefined
-						),
+						installCatalogSkill({
+							id: card.id,
+							source: card.registryId ?? undefined,
+						}),
 					[["store-home", "skills", url], ["skills"]]
 				),
 			mcp: (card) =>
@@ -320,7 +321,7 @@ export function useStoreHome(): UseStoreHomeResult {
 					[["store-home", "models", url], ["models"]]
 				),
 		};
-	}, [runAdd, url, token]);
+	}, [installCatalogSkill, runAdd, url, token]);
 
 	const rows = useMemo<HomeRow[]>(() => {
 		const result: HomeRow[] = [];

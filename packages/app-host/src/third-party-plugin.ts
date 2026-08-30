@@ -575,6 +575,20 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
         blueprint: {
           request: function (a) { return call("blueprint.request", [a || {}]); }
         },
+        // Skill authoring + shared agent distribution (needs grant skills:crud).
+        // The host keeps its node token and owns the target picker; the frame sends
+        // only the installed skill id. Kept in manual lockstep with Path B below.
+        skills: {
+          getSource: function (a) { return call("skills.getSource", [a || {}]); },
+          create: function (a) { return call("skills.create", [a || {}]); },
+          update: function (a) { return call("skills.update", [a || {}]); },
+          listVersions: function (a) { return call("skills.listVersions", [a || {}]); },
+          versionSource: function (a) { return call("skills.versionSource", [a || {}]); },
+          snapshot: function (a) { return call("skills.snapshot", [a || {}]); },
+          restore: function (a) { return call("skills.restore", [a || {}]); },
+          distribute: function (a) { return call("skills.distribute", [a || {}]); },
+          setTitle: function (a) { return call("skills.setTitle", [a || {}]); }
+        },
         // Shell primitives (needs grant shell:integrate). The generic shell-integration
         // lane a DECOUPLED companion uses: open an allowlisted shell tab, and subscribe
         // to the live theme / palette commands / node event stream. openTab is unary; the
@@ -1324,6 +1338,7 @@ function htmlCompanionHeadFragment(
         versionSource: function (a) { return call("skills.versionSource", [a || {}]); },
         snapshot: function (a) { return call("skills.snapshot", [a || {}]); },
         restore: function (a) { return call("skills.restore", [a || {}]); },
+        distribute: function (a) { return call("skills.distribute", [a || {}]); },
         setTitle: function (a) { return call("skills.setTitle", [a || {}]); }
       },
       // Shell primitives (needs grant shell:integrate). The generic shell-integration

@@ -13,6 +13,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	type AddMarketplaceParams,
@@ -20,7 +21,6 @@ import {
 	fetchSkillDetail,
 	fetchSkillSources,
 	type InstalledSkill,
-	installSkill,
 	listSkills,
 	removeMarketplaceSource,
 	reorderMarketplaceSource,
@@ -150,6 +150,7 @@ export function installedSkillsQuery(target: ApiTarget) {
 }
 
 export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
+	const { installCatalogSkill } = useSkillDistributionFlow();
 	const activeNode = useActiveNode();
 	const target: ApiTarget = {
 		url: activeNode.url,
@@ -269,7 +270,7 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 
 	const installMutation = useMutation({
 		mutationFn: (vars: { id: string; source?: string }) =>
-			installSkill({ url, token, userJwt }, vars.id, vars.source),
+			installCatalogSkill(vars),
 		onMutate: async (vars) => {
 			const key = ["skills", "detail", url, vars.id, detailSource];
 			await qc.cancelQueries({ queryKey: key });
@@ -284,6 +285,11 @@ export function useSkillsCatalog(initialQuery = ""): UseSkillsCatalogResult {
 		},
 		onError: (_err, _vars, ctx) => {
 			if (ctx?.previous) {
+				qc.setQueryData(ctx.key, ctx.previous);
+			}
+		},
+		onSuccess: (result, _vars, ctx) => {
+			if (result === null && ctx?.previous) {
 				qc.setQueryData(ctx.key, ctx.previous);
 			}
 		},

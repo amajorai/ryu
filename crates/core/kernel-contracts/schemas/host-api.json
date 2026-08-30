@@ -1389,6 +1389,13 @@
     {
       "capability": "skills.crud",
       "grant": "skills:crud",
+      "method": "skills.distribute",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "skills.crud",
+      "grant": "skills:crud",
       "method": "skills.setTitle",
       "streaming": false,
       "tsHost": true

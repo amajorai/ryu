@@ -10404,7 +10404,39 @@
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Canonical install and optional target distribution completed",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid source or target",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Install permission required",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "409": {
+            "description": "Prompt-aware install requires a target selection",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Install, preferences, or distribution failed",
             "content": {
               "application/json": {
                 "schema": {}
@@ -10432,6 +10464,117 @@
         "responses": {
           "200": {
             "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/targets": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "List agent skill targets and install defaults",
+        "operationId": "skills_targets",
+        "responses": {
+          "200": {
+            "description": "Targets and preferences",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Target registry or preferences unavailable",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/targets/preferences": {
+      "put": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Set default agent skill targets",
+        "operationId": "skills_target_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Preferences saved",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid target id",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Install permission required",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Target registry or preferences unavailable",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Clear default agent skill targets",
+        "operationId": "skills_target_preferences_delete",
+        "responses": {
+          "200": {
+            "description": "Preferences cleared",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Install permission required",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Target registry or preferences unavailable",
             "content": {
               "application/json": {
                 "schema": {}
@@ -10488,6 +10631,76 @@
         "responses": {
           "200": {
             "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/distribute": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Distribute an installed skill to agent targets",
+        "operationId": "skills_distribute",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Canonical skill id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Per-target distribution result",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid target or canonical package",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "Install permission required",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Canonical skill not found",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "500": {
+            "description": "Distribution task or preferences failed",
             "content": {
               "application/json": {
                 "schema": {}

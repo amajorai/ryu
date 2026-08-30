@@ -82,6 +82,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.10.6",
     "@ryu/config": "workspace:*",
     "@types/react": "^19.2.10",
     "@types/react-dom": "catalog:",

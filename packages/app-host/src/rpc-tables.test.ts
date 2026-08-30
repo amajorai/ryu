@@ -12,8 +12,11 @@
 import { describe, expect, test } from "bun:test";
 import {
 	type Capability,
+	CodedRpcError,
+	dispatchRpc,
 	GRANT_CAPABILITY,
 	HOST_API_VERSION,
+	type HostServices,
 	METHOD_CAPABILITY,
 	STREAMING_METHODS,
 } from "./rpc.ts";
@@ -236,6 +239,7 @@ const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"skills.versionSource": "skills.crud",
 	"skills.snapshot": "skills.crud",
 	"skills.restore": "skills.crud",
+	"skills.distribute": "skills.crud",
 	"skills.setTitle": "skills.crud",
 	"shell.openTab": "shell.integrate",
 	"shell.themeSubscribe": "shell.integrate",
@@ -375,4 +379,50 @@ describe("rpc tables derive from the blessed host-API contract (lockstep)", () =
 		expect(typeof HOST_API_VERSION).toBe("string");
 		expect(HOST_API_VERSION).toMatch(/^\d+\.\d+\.\d+/);
 	});
+});
+
+describe("skills.distribute RPC", () => {
+	const granted = new Set<Capability>(["skills.crud"]);
+
+	test("forwards an existing skill id to the host service", async () => {
+		const received: string[] = [];
+		const services: HostServices = {
+			listAgents: () => Promise.resolve([]),
+			registerRoute: () => Promise.resolve(null),
+			skillsDistribute: ({ id }) => {
+				received.push(id);
+				return Promise.resolve();
+			},
+		};
+
+		await expect(
+			dispatchRpc("skills.distribute", [{ id: "skill-42" }], granted, services)
+		).resolves.toBeNull();
+		expect(received).toEqual(["skill-42"]);
+	});
+
+	for (const input of [{}, { id: 42 }]) {
+		test(`rejects ${JSON.stringify(input)} before it reaches the host service`, async () => {
+			let called = false;
+			const services: HostServices = {
+				listAgents: () => Promise.resolve([]),
+				registerRoute: () => Promise.resolve(null),
+				skillsDistribute: () => {
+					called = true;
+					return Promise.resolve();
+				},
+			};
+
+			const error = await dispatchRpc(
+				"skills.distribute",
+				[input],
+				granted,
+				services
+			).catch((reason: unknown) => reason);
+
+			expect(error).toBeInstanceOf(CodedRpcError);
+			expect((error as CodedRpcError).code).toBe("invalid_args");
+			expect(called).toBe(false);
+		});
+	}
 });

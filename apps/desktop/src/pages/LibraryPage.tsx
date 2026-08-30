@@ -97,6 +97,7 @@ import SidebarLibrarySection, {
 import SkillRelationsGraph from "@/src/components/library/SkillRelationsGraph.tsx";
 import { SpaceProjectFolder } from "@/src/components/library/SpaceProjectFolder.tsx";
 import { MemoryLibrary } from "@/src/components/memory/MemoryLibrary.tsx";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import { CreateSpaceDialog } from "@/src/components/spaces/CreateSpaceDialog.tsx";
 import {
 	TeamDialog,
@@ -407,6 +408,7 @@ function LibraryCollections({
 	}, [section]);
 
 	const { activateTab, openTab, tabs } = useTabsContext();
+	const { distributeInstalledSkill } = useSkillDistributionFlow();
 	const { openCreateAgent } = useCreateAgentDialog();
 	const { favorites, toggle: toggleFavorite } = useFavorites();
 	const recents = useRecents();
@@ -965,6 +967,10 @@ function LibraryCollections({
 				id: skill.id,
 				name: skill.name,
 				onOpen: () => openTab("/store/skills", { title: "Skills" }),
+				secondaryAction: {
+					label: `Use ${skill.name} with agents`,
+					onSelect: () => void distributeInstalledSkill(skill.id),
+				},
 				subtitle: skill.description,
 			})),
 			tabs: tabs.map((tab) => ({
@@ -990,6 +996,7 @@ function LibraryCollections({
 		companions,
 		composioConnections.data,
 		chatItems,
+		distributeInstalledSkill,
 		installedSkills,
 		localEngines,
 		mcpServers,

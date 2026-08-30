@@ -5050,6 +5050,12 @@ fn skills_routes(state: &ServerState) -> Router<ServerState> {
         .route("/api/skills/catalog", get(skills_catalog_list))
         .route("/api/skills/catalog/detail", get(skills_catalog_detail))
         .route("/api/skills/catalog/install", post(skills_catalog_install))
+        .route("/api/skills/targets", get(skills_targets))
+        .route(
+            "/api/skills/targets/preferences",
+            put(skills_target_preferences_put).delete(skills_target_preferences_delete),
+        )
+        .route("/api/skills/:id/distribute", post(skills_distribute))
         .route("/api/skills/updates", get(skills_updates))
         .route(
             "/api/skills/install-from-source",
@@ -38749,10 +38755,491 @@ async fn skills_catalog_detail(
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SkillInstallBody {
     id: String,
     #[serde(default)]
     source: Option<String>,
+    #[serde(default)]
+    prompt_for_targets: bool,
+    target_ids: Option<Vec<String>>,
+    #[serde(default)]
+    remember_target_ids: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillTargetPreferencesBody {
+    target_ids: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillDistributeBody {
+    target_ids: Vec<String>,
+    #[serde(default)]
+    remember_target_ids: bool,
+}
+
+async fn skill_target_context_and_targets() -> anyhow::Result<(
+    crate::skills_catalog::distribution::DistributionContext,
+    Vec<crate::skills_catalog::distribution::SkillAgentTargetView>,
+)> {
+    tokio::task::spawn_blocking(|| {
+        let context = crate::skills_catalog::distribution::DistributionContext::current()?;
+        let targets = crate::skills_catalog::distribution::list_agent_targets(
+            &context.home_dir,
+            &context.environment,
+        )?;
+        Ok((context, targets))
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("agent target discovery task failed: {error}"))?
+}
+
+async fn skill_target_preferences(
+    state: &ServerState,
+    targets: &[crate::skills_catalog::distribution::SkillAgentTargetView],
+) -> anyhow::Result<crate::skills_catalog::distribution::ParsedPreferences> {
+    let raw = state
+        .preferences
+        .get(crate::skills_catalog::distribution::INSTALL_TARGETS_PREF)
+        .await?;
+    Ok(crate::skills_catalog::distribution::parse_preferences(
+        raw.as_deref(),
+        targets,
+    ))
+}
+
+fn skill_target_envelope(
+    targets: Vec<crate::skills_catalog::distribution::SkillAgentTargetView>,
+    parsed: crate::skills_catalog::distribution::ParsedPreferences,
+) -> serde_json::Value {
+    json!({
+        "targets": targets,
+        "preferences": parsed.preferences,
+        "droppedTargetIds": parsed.dropped_target_ids,
+        "warning": parsed.warning,
+    })
+}
+
+fn deduplicate_target_ids(target_ids: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    target_ids
+        .into_iter()
+        .filter(|target_id| seen.insert(target_id.clone()))
+        .collect()
+}
+
+fn should_distribute_after_install(
+    preferences: &crate::skills_catalog::distribution::SkillInstallPreferencesV1,
+    input: &crate::skills_catalog::distribution::SkillTargetSelectionInput,
+) -> bool {
+    input.target_ids.is_some() || preferences.configured
+}
+
+async fn reload_before_optional_preference_write<Reload, PreferenceWrite>(
+    reload: Reload,
+    remember_target_ids: bool,
+    preference_write: PreferenceWrite,
+) -> anyhow::Result<()>
+where
+    Reload: FnOnce(),
+    PreferenceWrite: std::future::Future<Output = anyhow::Result<()>>,
+{
+    reload();
+    if remember_target_ids {
+        preference_write.await?;
+    }
+    Ok(())
+}
+
+async fn save_skill_target_preferences(
+    state: &ServerState,
+    target_ids: Vec<String>,
+) -> anyhow::Result<crate::skills_catalog::distribution::SkillInstallPreferencesV1> {
+    let preferences = crate::skills_catalog::distribution::SkillInstallPreferencesV1 {
+        version: 1,
+        configured: true,
+        target_ids,
+    };
+    let encoded = serde_json::to_string(&preferences)?;
+    state
+        .preferences
+        .set(
+            crate::skills_catalog::distribution::INSTALL_TARGETS_PREF,
+            &encoded,
+        )
+        .await?;
+    Ok(preferences)
+}
+
+/// `GET /api/skills/targets` — list known global agent targets and the resolved
+/// install defaults. Reading the target registry is available to every caller
+/// that can reach the Skills App; it does not require install permission.
+#[utoipa::path(
+    get,
+    path = "/api/skills/targets",
+    tag = "Skills",
+    summary = "List agent skill targets and install defaults",
+    responses(
+        (status = 200, description = "Targets and preferences", body = serde_json::Value),
+        (status = 500, description = "Target registry or preferences unavailable", body = serde_json::Value)
+    )
+)]
+async fn skills_targets(State(state): State<ServerState>) -> (StatusCode, Json<serde_json::Value>) {
+    let (_, targets) = match skill_target_context_and_targets().await {
+        Ok(result) => result,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error.to_string() })),
+            );
+        }
+    };
+    match skill_target_preferences(&state, &targets).await {
+        Ok(parsed) => (StatusCode::OK, Json(skill_target_envelope(targets, parsed))),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": error.to_string() })),
+        ),
+    }
+}
+
+/// `PUT /api/skills/targets/preferences` — validate and remember the default
+/// agent targets used by future catalog installs.
+#[utoipa::path(
+    put,
+    path = "/api/skills/targets/preferences",
+    tag = "Skills",
+    summary = "Set default agent skill targets",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Preferences saved", body = serde_json::Value),
+        (status = 400, description = "Invalid target id", body = serde_json::Value),
+        (status = 403, description = "Install permission required", body = serde_json::Value),
+        (status = 500, description = "Target registry or preferences unavailable", body = serde_json::Value)
+    )
+)]
+async fn skills_target_preferences_put(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(body): Json<SkillTargetPreferencesBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Err(response) = enforce_app_lifecycle_permission_json(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::APP_INSTALL,
+    )
+    .await
+    {
+        return response;
+    }
+    let (_, targets) = match skill_target_context_and_targets().await {
+        Ok(result) => result,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error.to_string() })),
+            );
+        }
+    };
+    let target_ids = deduplicate_target_ids(body.target_ids);
+    if let Err(error) =
+        crate::skills_catalog::distribution::validate_target_ids(&target_ids, &targets)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": error.to_string() })),
+        );
+    }
+    let preferences = match save_skill_target_preferences(&state, target_ids).await {
+        Ok(preferences) => preferences,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": error.to_string() })),
+            );
+        }
+    };
+    let parsed = crate::skills_catalog::distribution::ParsedPreferences {
+        preferences,
+        dropped_target_ids: Vec::new(),
+        warning: None,
+    };
+    (StatusCode::OK, Json(skill_target_envelope(targets, parsed)))
+}
+
+/// `DELETE /api/skills/targets/preferences` — clear the default so the next
+/// prompt-aware install asks again. Existing distributed files are untouched.
+#[utoipa::path(
+    delete,
+    path = "/api/skills/targets/preferences",
+    tag = "Skills",
+    summary = "Clear default agent skill targets",
+    responses(
+        (status = 200, description = "Preferences cleared", body = serde_json::Value),
+        (status = 403, description = "Install permission required", body = serde_json::Value),
+        (status = 500, description = "Target registry or preferences unavailable", body = serde_json::Value)
+    )
+)]
+async fn skills_target_preferences_delete(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Err(response) = enforce_app_lifecycle_permission_json(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::APP_INSTALL,
+    )
+    .await
+    {
+        return response;
+    }
+    let (_, targets) = match skill_target_context_and_targets().await {
+        Ok(result) => result,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error.to_string() })),
+            );
+        }
+    };
+    if let Err(error) = state
+        .preferences
+        .delete(crate::skills_catalog::distribution::INSTALL_TARGETS_PREF)
+        .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "success": false, "error": error.to_string() })),
+        );
+    }
+    let parsed = crate::skills_catalog::distribution::ParsedPreferences {
+        preferences: Default::default(),
+        dropped_target_ids: Vec::new(),
+        warning: None,
+    };
+    (StatusCode::OK, Json(skill_target_envelope(targets, parsed)))
+}
+
+/// `POST /api/skills/:id/distribute` — project an already-installed canonical
+/// skill package into the selected agent-native global directories.
+#[utoipa::path(
+    post,
+    path = "/api/skills/{id}/distribute",
+    tag = "Skills",
+    summary = "Distribute an installed skill to agent targets",
+    params(("id" = String, Path, description = "Canonical skill id")),
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Per-target distribution result", body = serde_json::Value),
+        (status = 400, description = "Invalid target or canonical package", body = serde_json::Value),
+        (status = 403, description = "Install permission required", body = serde_json::Value),
+        (status = 404, description = "Canonical skill not found", body = serde_json::Value),
+        (status = 500, description = "Distribution task or preferences failed", body = serde_json::Value)
+    )
+)]
+async fn skills_distribute(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Path(id): Path<String>,
+    Json(body): Json<SkillDistributeBody>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if let Err(response) = enforce_app_lifecycle_permission_json(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::APP_INSTALL,
+    )
+    .await
+    {
+        return response;
+    }
+    let target_ids = body.target_ids;
+    let id_for_validation = id.clone();
+    let target_ids_for_validation = target_ids.clone();
+    let validated = tokio::task::spawn_blocking(move || {
+        let context = crate::skills_catalog::distribution::DistributionContext::current()?;
+        let targets = crate::skills_catalog::distribution::list_agent_targets(
+            &context.home_dir,
+            &context.environment,
+        )?;
+        crate::skills_catalog::distribution::validate_target_ids(
+            &target_ids_for_validation,
+            &targets,
+        )?;
+        Ok::<_, anyhow::Error>((context, ryu_skills::resolve_skill_md(&id_for_validation)))
+    })
+    .await;
+    let (context, source_skill_md) = match validated {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "success": false, "error": error.to_string() })),
+            );
+        }
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({ "success": false, "error": format!("target validation task failed: {error}") }),
+                ),
+            );
+        }
+    };
+    let Some(source_skill_md) = source_skill_md else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "success": false, "error": "canonical skill not found" })),
+        );
+    };
+    if body.remember_target_ids {
+        if let Err(error) = save_skill_target_preferences(&state, target_ids.clone()).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": error.to_string() })),
+            );
+        }
+    }
+    let id_for_distribution = id.clone();
+    let distributed = tokio::task::spawn_blocking(move || {
+        crate::skills_catalog::distribution::distribute_skill(
+            &context,
+            &id_for_distribution,
+            &source_skill_md,
+            &target_ids,
+        )
+    })
+    .await;
+    match distributed {
+        Ok(Ok(distribution)) => (
+            StatusCode::OK,
+            Json(json!({ "success": true, "distribution": distribution })),
+        ),
+        Ok(Err(error)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": error.to_string() })),
+        ),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                json!({ "success": false, "error": format!("distribution task failed: {error}") }),
+            ),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod skill_target_api_contract_tests {
+    use super::{
+        reload_before_optional_preference_write, should_distribute_after_install,
+        SkillDistributeBody, SkillInstallBody, SkillTargetPreferencesBody,
+    };
+    use crate::skills_catalog::distribution::{
+        SkillInstallPreferencesV1, SkillTargetSelectionInput,
+    };
+
+    #[test]
+    fn legacy_skill_install_body_keeps_target_prompting_disabled() {
+        let body: SkillInstallBody =
+            serde_json::from_str(r#"{"id":"owner/repo/demo"}"#).expect("body parses");
+
+        assert_eq!(body.id, "owner/repo/demo");
+        assert!(!body.prompt_for_targets);
+        assert!(body.target_ids.is_none());
+        assert!(!body.remember_target_ids);
+    }
+
+    #[test]
+    fn skill_install_body_accepts_camel_case_target_selection_fields() {
+        let body: SkillInstallBody = serde_json::from_str(
+            r#"{"id":"owner/repo/demo","promptForTargets":true,"targetIds":["codex"],"rememberTargetIds":true}"#,
+        )
+        .expect("body parses");
+
+        assert!(body.prompt_for_targets);
+        assert_eq!(
+            body.target_ids.as_deref(),
+            Some(["codex".to_owned()].as_slice())
+        );
+        assert!(body.remember_target_ids);
+    }
+
+    #[test]
+    fn target_preference_body_accepts_target_ids_only() {
+        let body: SkillTargetPreferencesBody =
+            serde_json::from_str(r#"{"targetIds":["codex","claude-code"]}"#).expect("body parses");
+
+        assert_eq!(body.target_ids, ["codex", "claude-code"]);
+    }
+
+    #[test]
+    fn manual_distribution_body_defaults_remember_to_false() {
+        let body: SkillDistributeBody =
+            serde_json::from_str(r#"{"targetIds":[]}"#).expect("body parses");
+
+        assert!(body.target_ids.is_empty());
+        assert!(!body.remember_target_ids);
+    }
+
+    #[test]
+    fn legacy_unconfigured_install_skips_distribution() {
+        assert!(!should_distribute_after_install(
+            &SkillInstallPreferencesV1::default(),
+            &SkillTargetSelectionInput::default(),
+        ));
+    }
+
+    #[test]
+    fn configured_empty_default_still_requests_a_distribution_result() {
+        let preferences = SkillInstallPreferencesV1 {
+            version: 1,
+            configured: true,
+            target_ids: Vec::new(),
+        };
+
+        assert!(should_distribute_after_install(
+            &preferences,
+            &SkillTargetSelectionInput::default(),
+        ));
+    }
+
+    #[test]
+    fn explicit_empty_selection_still_requests_a_distribution_result() {
+        let input = SkillTargetSelectionInput {
+            target_ids: Some(Vec::new()),
+            ..Default::default()
+        };
+
+        assert!(should_distribute_after_install(
+            &SkillInstallPreferencesV1::default(),
+            &input,
+        ));
+    }
+
+    #[tokio::test]
+    async fn canonical_reload_precedes_a_failing_remember_write() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let reload_calls = calls.clone();
+        let write_calls = calls.clone();
+
+        let result = reload_before_optional_preference_write(
+            move || reload_calls.lock().expect("calls lock").push("reload"),
+            true,
+            async move {
+                write_calls.lock().expect("calls lock").push("remember");
+                Err::<(), _>(anyhow::anyhow!("preference write failed"))
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            ["reload", "remember"]
+        );
+    }
 }
 
 /// `GET /api/skills/updates` — installed (through-Ryu) skills whose local
@@ -38770,9 +39257,11 @@ async fn skills_updates(State(state): State<ServerState>) -> Json<serde_json::Va
     Json(json!({ "updates": updates }))
 }
 
-/// `POST /api/skills/catalog/install { id, source? }` — installs into the universal
-/// `~/.claude/skills/<slug>/SKILL.md` and reloads the live skill registry so the
-/// Skill is usable immediately (and visible to Claude Code / the skills CLI).
+/// `POST /api/skills/catalog/install { id, source?, promptForTargets?, targetIds?,
+/// rememberTargetIds? }` — installs into the canonical skills directory and
+/// reloads the live registry so the Skill is usable immediately. Prompt-aware
+/// callers can distribute the installed package to agent-native global skill
+/// directories; older callers keep canonical-only behavior until defaults exist.
 ///
 /// Source-aware (#463): skills.sh installs via the `owner/repo/slug` download
 /// path; a custom Claude marketplace source resolves the chosen item to its
@@ -38784,7 +39273,13 @@ async fn skills_updates(State(state): State<ServerState>) -> Json<serde_json::Va
     tag = "Skills",
     summary = "Install a skill from the catalog",
     request_body = serde_json::Value,
-    responses((status = 200, description = "OK", body = serde_json::Value))
+    responses(
+        (status = 200, description = "Canonical install and optional target distribution completed", body = serde_json::Value),
+        (status = 400, description = "Invalid source or target", body = serde_json::Value),
+        (status = 403, description = "Install permission required", body = serde_json::Value),
+        (status = 409, description = "Prompt-aware install requires a target selection", body = serde_json::Value),
+        (status = 500, description = "Install, preferences, or distribution failed", body = serde_json::Value)
+    )
 )]
 async fn skills_catalog_install(
     State(state): State<ServerState>,
@@ -38820,6 +39315,55 @@ async fn skills_catalog_install(
             })),
         );
     }
+    let (distribution_context, targets) = match skill_target_context_and_targets().await {
+        Ok(result) => result,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": error.to_string() })),
+            );
+        }
+    };
+    let parsed_preferences = match skill_target_preferences(&state, &targets).await {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "success": false, "error": error.to_string() })),
+            );
+        }
+    };
+    let selection_input = crate::skills_catalog::distribution::SkillTargetSelectionInput {
+        prompt_for_targets: body.prompt_for_targets,
+        target_ids: body.target_ids.clone(),
+        remember_target_ids: body.remember_target_ids,
+    };
+    let selected_target_ids = match crate::skills_catalog::distribution::resolve_target_selection(
+        &parsed_preferences.preferences,
+        &selection_input,
+    ) {
+        Ok(target_ids) => target_ids,
+        Err(_) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "success": false,
+                    "error": "skill_targets_required",
+                    "code": "skill_targets_required",
+                })),
+            );
+        }
+    };
+    if let Err(error) =
+        crate::skills_catalog::distribution::validate_target_ids(&selected_target_ids, &targets)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "success": false, "error": error.to_string() })),
+        );
+    }
+    let distribute_after_install =
+        should_distribute_after_install(&parsed_preferences.preferences, &selection_input);
     // Forward the caller's bearer to the marketplace install handoff (#491) so a
     // PAID Ryu-Marketplace skill is denied unless the buyer org holds a license.
     let buyer_token = buyer_bearer_from_headers(&headers);
@@ -38858,14 +39402,75 @@ async fn skills_catalog_install(
         .await;
     match installed {
         Ok(result) => {
-            // Hot-reload the registry so the new Skill is selectable without a restart.
-            state.skills.reload();
-            (
-                StatusCode::OK,
-                Json(
-                    json!({ "success": true, "result": serde_json::to_value(result).unwrap_or_default() }),
-                ),
+            let result_value = serde_json::to_value(&result).unwrap_or_default();
+            let remember_target_ids =
+                selection_input.remember_target_ids && selection_input.target_ids.is_some();
+            let remembered_target_ids = selected_target_ids.clone();
+            if let Err(error) = reload_before_optional_preference_write(
+                || state.skills.reload(),
+                remember_target_ids,
+                async {
+                    save_skill_target_preferences(&state, remembered_target_ids).await?;
+                    Ok(())
+                },
             )
+            .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "success": false,
+                        "canonicalInstalled": true,
+                        "result": result_value,
+                        "error": error.to_string(),
+                    })),
+                );
+            }
+            if !distribute_after_install {
+                return (
+                    StatusCode::OK,
+                    Json(json!({ "success": true, "result": result_value })),
+                );
+            }
+            let skill_id = result.slug.clone();
+            let source_skill_md = std::path::PathBuf::from(&result.path);
+            let distributed = tokio::task::spawn_blocking(move || {
+                crate::skills_catalog::distribution::distribute_skill(
+                    &distribution_context,
+                    &skill_id,
+                    &source_skill_md,
+                    &selected_target_ids,
+                )
+            })
+            .await;
+            match distributed {
+                Ok(Ok(distribution)) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "success": true,
+                        "result": result_value,
+                        "distribution": distribution,
+                    })),
+                ),
+                Ok(Err(error)) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "success": false,
+                        "canonicalInstalled": true,
+                        "result": result_value,
+                        "error": error.to_string(),
+                    })),
+                ),
+                Err(error) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "success": false,
+                        "canonicalInstalled": true,
+                        "result": result_value,
+                        "error": format!("distribution task failed: {error}"),
+                    })),
+                ),
+            }
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -39255,7 +39860,7 @@ async fn skills_system_status(State(state): State<ServerState>) -> Json<serde_js
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn skills_system_sync(State(state): State<ServerState>) -> Json<serde_json::Value> {
-    use crate::skills_catalog::system_skills::{sync_bundled, SYNC_ENABLED_PREF};
+    use crate::skills_catalog::system_skills::{sync_bundled_with_preferences, SYNC_ENABLED_PREF};
     let enabled = state
         .preferences
         .get(SYNC_ENABLED_PREF)
@@ -39269,7 +39874,8 @@ async fn skills_system_sync(State(state): State<ServerState>) -> Json<serde_json
             )
         })
         .unwrap_or(true);
-    let report = sync_bundled(&state.client, enabled, "").await;
+    let report =
+        sync_bundled_with_preferences(&state.client, &state.preferences, enabled, "").await;
     state.skills.reload();
     Json(json!({
         "success": report.complete,

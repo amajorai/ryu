@@ -2,11 +2,12 @@
 //
 // Tests for the shared HTTP plumbing: apiUrl slash-joining, makeHeaders (bearer +
 // injected surface token), buyerTokenHeader, and request (JSON parse, empty-body →
-// undefined, non-2xx → Error carrying only the status). The provider setters are
+// undefined, non-2xx → structured ApiError). The provider setters are
 // module-global, so each test resets them to avoid leaking a surface into others.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+	ApiError,
 	type ApiTarget,
 	apiUrl,
 	buyerTokenHeader,
@@ -183,5 +184,44 @@ describe("request", () => {
 		await expect(request(target(), "/api/x")).rejects.toThrow(
 			"/api/x failed: 404"
 		);
+	});
+
+	test("exposes status and a structured server error without changing message", async () => {
+		globalThis.fetch = (() =>
+			Promise.resolve(
+				new Response('{"error":"skill_targets_required"}', { status: 409 })
+			)) as unknown as typeof fetch;
+
+		try {
+			await request(target(), "/api/skills/catalog/install");
+			expect.unreachable("request should reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			if (!(error instanceof ApiError)) {
+				return;
+			}
+			expect(error.message).toBe("/api/skills/catalog/install failed: 409");
+			expect(error.status).toBe(409);
+			expect(error.serverMessage).toBe("skill_targets_required");
+		}
+	});
+
+	test("keeps non-JSON error bodies status-only", async () => {
+		globalThis.fetch = (() =>
+			Promise.resolve(
+				new Response("not json", { status: 502 })
+			)) as unknown as typeof fetch;
+
+		try {
+			await request(target(), "/api/x");
+			expect.unreachable("request should reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(ApiError);
+			if (!(error instanceof ApiError)) {
+				return;
+			}
+			expect(error.status).toBe(502);
+			expect(error.serverMessage).toBeUndefined();
+		}
 	});
 });

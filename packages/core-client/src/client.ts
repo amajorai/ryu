@@ -99,6 +99,32 @@ export interface RequestOptions {
 	signal?: AbortSignal;
 }
 
+/** A structured non-2xx response from Core. The message intentionally keeps the
+ * historical status-only shape while typed callers inspect the status/body. */
+export class ApiError extends Error {
+	readonly status: number;
+	readonly serverMessage?: string;
+
+	constructor(path: string, status: number, serverMessage?: string) {
+		super(`${path} failed: ${status}`);
+		this.name = "ApiError";
+		this.status = status;
+		this.serverMessage = serverMessage;
+	}
+}
+
+function serverErrorFromBody(text: string): string | undefined {
+	if (!text) {
+		return undefined;
+	}
+	try {
+		const parsed = JSON.parse(text) as { error?: unknown };
+		return typeof parsed.error === "string" ? parsed.error : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * The dedicated header carrying the user's CONTROL-PLANE (Better-Auth) session
  * bearer to Core on a marketplace install, so a PAID item's entitlement check
@@ -166,8 +192,8 @@ export function buyerTokenHeader(
 /**
  * Perform a JSON request against a node and parse the response.
  *
- * Throws an {@link Error} with the status code on a non-2xx response so callers
- * can degrade gracefully (the status spine relies on this to flag Core as down).
+ * Throws an {@link ApiError} with the status code and Core's structured error
+ * message, when present, while preserving the historical message string.
  */
 export async function request<T>(
 	target: ApiTarget,
@@ -183,10 +209,10 @@ export async function request<T>(
 		body: options.body === undefined ? undefined : JSON.stringify(options.body),
 		signal: options.signal,
 	});
+	const text = await resp.text();
 	if (!resp.ok) {
-		throw new Error(`${path} failed: ${resp.status}`);
+		throw new ApiError(path, resp.status, serverErrorFromBody(text));
 	}
 	// Some endpoints (DELETE, no-content) return an empty body.
-	const text = await resp.text();
 	return (text ? JSON.parse(text) : undefined) as T;
 }

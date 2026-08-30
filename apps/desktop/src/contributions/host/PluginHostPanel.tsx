@@ -73,6 +73,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveUserId, useSession } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { useSkillDistributionFlow } from "@/src/components/skills/SkillDistributionProvider.tsx";
 import {
 	useCurrentTabId,
 	useTabsContext,
@@ -625,6 +626,7 @@ export function PluginHostPanel({
 }) {
 	const node = useActiveNode();
 	const getActiveNode = useActiveNodeGetter();
+	const { distributeInstalledSkill } = useSkillDistributionFlow();
 	const [connected, setConnected] = useState(false);
 	const realtimeSessionsRef = useRef(
 		new Map<string, ApplicationRealtimeSession>()
@@ -1745,6 +1747,7 @@ export function PluginHostPanel({
 								reason: event.reason,
 								type: "close",
 							});
+							queue.end();
 							rejectJoin(
 								new Error(`realtime closed: ${event.reason || event.code}`)
 							);
@@ -1871,6 +1874,9 @@ export function PluginHostPanel({
 			},
 			skillsRestore: async ({ id, versionId }) => {
 				await restoreSkillVersion(toTarget(node), id, versionId);
+			},
+			skillsDistribute: async ({ id }) => {
+				await distributeInstalledSkill(id);
 			},
 			skillsSetTitle: ({ title }) => {
 				if (currentTabId) {
@@ -2086,6 +2092,7 @@ export function PluginHostPanel({
 		}),
 		[
 			node,
+			distributeInstalledSkill,
 			companion.id,
 			companion.name,
 			companion.pluginId,

@@ -90,7 +90,7 @@ describe("create-ryu-app scaffold (agent, default)", () => {
 		};
 		expect(pkg.name).toBe("my-test-app");
 		expect(pkg.scripts.dev).toBe("bun run src/agent.ts");
-		expect(pkg.dependencies["@ryuhq/sdk"]).toBe("^0.2.3");
+		expect(pkg.dependencies["@ryuhq/sdk"]).toBe("^0.2.4");
 	});
 
 	it("manifest.json has at least one agent runnable", () => {

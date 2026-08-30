@@ -230,6 +230,10 @@ export interface CatalogHost {
 	 *  Omitted ⇒ treated as `true`, so a host with no notion of app enablement keeps
 	 *  its old behaviour and only `navigate` gates authoring. */
 	canAuthorSkills?: boolean;
+	/** Offer an already-installed skill to locally detected agent clients. Omitted
+	 *  on read-only hosts, which hides the action rather than suggesting a local
+	 *  distribution flow a browser cannot complete. */
+	distributeSkill?: (skillId: string) => Promise<void>;
 	/** On-demand llmfit hardware fit + tok/s estimate for one repo. */
 	estimateLlmfit: (
 		node: CatalogNode,

@@ -33,6 +33,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use super::distribution::{
+    distribute_skill, list_agent_targets, parse_preferences, DistributionContext,
+    DistributionStatus, SkillAgentTargetView, SkillInstallPreferencesV1, INSTALL_TARGETS_PREF,
+};
 use super::packs::{self, PackSource};
 
 /// The origin registry file (`~/.ryu/skills-origin.json`).
@@ -164,6 +168,10 @@ pub struct SyncReport {
     pub complete: bool,
     /// Per-repository/per-skill failures retained for the API and boot logs.
     pub errors: Vec<String>,
+    /// Target-distribution warnings. These never make the canonical catalog
+    /// sync incomplete: an unavailable third-party agent directory must not
+    /// suppress future bundled-catalog reconciliation.
+    pub distribution_errors: Vec<String>,
 }
 
 /// The on-disk registry is keyed by slug, so two catalog ids with the same leaf
@@ -176,6 +184,145 @@ fn dedupe_skill_ids(ids: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// Keep remembered install targets only when the preference is explicitly
+/// configured and the target remains globally selectable. Multiple agent ids
+/// can resolve to one directory, so keep the first path deterministically.
+fn configured_global_target_ids(
+    preferences: &SkillInstallPreferencesV1,
+    targets: &[SkillAgentTargetView],
+) -> Vec<String> {
+    if !preferences.configured {
+        return Vec::new();
+    }
+
+    let targets_by_id = targets
+        .iter()
+        .map(|target| (target.id.as_str(), target))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut seen_paths = HashSet::new();
+    preferences
+        .target_ids
+        .iter()
+        .filter(|target_id| {
+            targets_by_id
+                .get(target_id.as_str())
+                .filter(|target| target.selectable)
+                .and_then(|target| target.resolved_global_path.as_deref())
+                .is_some_and(|path| seen_paths.insert(path.to_owned()))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Read saved target preferences without prompting. Malformed or unavailable
+/// selections are ignored here because boot reconciliation must stay best-effort.
+async fn remembered_global_target_ids(
+    preferences: &crate::server::preferences::PreferencesStore,
+) -> Vec<String> {
+    let raw = preferences.get(INSTALL_TARGETS_PREF).await.ok().flatten();
+    let context = match DistributionContext::current() {
+        Ok(context) => context,
+        Err(error) => {
+            tracing::warn!(error = %error, "reading saved system-skill targets failed");
+            return Vec::new();
+        }
+    };
+    let targets = match list_agent_targets(&context.home_dir, &context.environment) {
+        Ok(targets) => targets,
+        Err(error) => {
+            tracing::warn!(error = %error, "resolving saved system-skill targets failed");
+            return Vec::new();
+        }
+    };
+    let parsed = parse_preferences(raw.as_deref(), &targets);
+    if let Some(warning) = parsed.warning {
+        tracing::warn!(%warning, "saved system-skill targets were ignored");
+    }
+    configured_global_target_ids(&parsed.preferences, &targets)
+}
+
+/// Run target fan-out after canonical catalog reconciliation, without allowing
+/// a third-party target error to alter catalog completeness.
+fn fan_out_after_catalog_sync(
+    mut report: SyncReport,
+    target_ids: &[String],
+    fan_out: impl FnOnce(&[String], &mut SyncReport),
+) -> SyncReport {
+    if !target_ids.is_empty() {
+        fan_out(target_ids, &mut report);
+    }
+    report
+}
+
+fn report_distribution_warning(
+    report: &mut SyncReport,
+    skill: &str,
+    target_id: &str,
+    message: String,
+) {
+    tracing::warn!(%skill, %target_id, %message, "system skill target distribution did not succeed");
+    report
+        .distribution_errors
+        .push(format!("{skill} -> {target_id}: {message}"));
+}
+
+/// Verify/copy the installed canonical defaults into remembered agent targets.
+/// The source path is intentionally exact: distribution receives each default's
+/// canonical `SKILL.md`, never a scanned alias root.
+fn distribute_default_skills(target_ids: &[String], report: &mut SyncReport) {
+    let context = match DistributionContext::current() {
+        Ok(context) => context,
+        Err(error) => {
+            for target_id in target_ids {
+                report_distribution_warning(report, "default", target_id, error.to_string());
+            }
+            return;
+        }
+    };
+
+    for skill in DEFAULT_SKILLS {
+        let source_skill_md = ryu_skills::SkillRegistry::skills_dir()
+            .join(skill)
+            .join("SKILL.md");
+        if !source_skill_md.is_file() {
+            for target_id in target_ids {
+                report_distribution_warning(
+                    report,
+                    skill,
+                    target_id,
+                    format!("canonical source {} is absent", source_skill_md.display()),
+                );
+            }
+            continue;
+        }
+
+        match distribute_skill(&context, skill, source_skill_md.as_path(), target_ids) {
+            Ok(result) => {
+                for target in result.targets {
+                    if matches!(
+                        target.status,
+                        DistributionStatus::Conflict | DistributionStatus::Failed
+                    ) {
+                        report_distribution_warning(
+                            report,
+                            skill,
+                            &target.target_id,
+                            target
+                                .message
+                                .unwrap_or_else(|| format!("{:?}", target.status)),
+                        );
+                    }
+                }
+            }
+            Err(error) => {
+                for target_id in target_ids {
+                    report_distribution_warning(report, skill, target_id, error.to_string());
+                }
+            }
+        }
+    }
+}
+
 /// Run the bundled-catalog sync: install missing bundled skills (origin
 /// `System`), remove `System`-owned skills that a catalog change dropped, and
 /// leave every `User`-owned skill alone. Idempotent; safe to run on boot and on
@@ -184,11 +331,13 @@ fn dedupe_skill_ids(ids: Vec<String>) -> Vec<String> {
 /// `enabled` is the preference gate and `synced_version` the catalog version the
 /// last run applied; the caller reads both so this stays independent of the
 /// preference store and unit-testable. When `synced_version` already equals
-/// [`bundle_version`] nothing runs.
+/// [`bundle_version`] the canonical catalog reconcile is skipped, but remembered
+/// default-skill targets are still verified and fanned out.
 pub async fn sync_bundled(
     client: &reqwest::Client,
     enabled: bool,
     synced_version: &str,
+    target_ids: &[String],
 ) -> SyncReport {
     let mut report = SyncReport::default();
     if !enabled {
@@ -198,7 +347,7 @@ pub async fn sync_bundled(
     let version = bundle_version();
     if synced_version == version {
         report.complete = true;
-        return report;
+        return fan_out_after_catalog_sync(report, target_ids, distribute_default_skills);
     }
 
     let installed = crate::skills_catalog::installed_slugs();
@@ -285,7 +434,19 @@ pub async fn sync_bundled(
     registry_for_removal.save();
 
     report.complete = report.errors.is_empty();
-    report
+    fan_out_after_catalog_sync(report, target_ids, distribute_default_skills)
+}
+
+/// Shared active reconcile entry point for boot and manual system sync. Both
+/// paths resolve saved targets the same way before calling the catalog sync.
+pub async fn sync_bundled_with_preferences(
+    client: &reqwest::Client,
+    preferences: &crate::server::preferences::PreferencesStore,
+    enabled: bool,
+    synced_version: &str,
+) -> SyncReport {
+    let target_ids = remembered_global_target_ids(preferences).await;
+    sync_bundled(client, enabled, synced_version, &target_ids).await
 }
 
 /// Remove a `System`-owned skill directory and deactivate it. Only ever called
@@ -327,7 +488,7 @@ pub async fn run_on_boot(
         .flatten()
         .unwrap_or_default();
 
-    let report = sync_bundled(client, enabled, &synced_version).await;
+    let report = sync_bundled_with_preferences(client, preferences, enabled, &synced_version).await;
     let version = bundle_version();
     // A partial network/filesystem run must retry next boot. Checkpoint only a
     // completely applied catalog; otherwise a transient outage can permanently
@@ -438,7 +599,7 @@ mod tests {
     #[tokio::test]
     async fn sync_respects_enabled_gate() {
         let client = reqwest::Client::new();
-        let report = sync_bundled(&client, false, "").await;
+        let report = sync_bundled(&client, false, "", &[]).await;
         assert!(report.installed.is_empty());
         assert!(report.removed.is_empty());
         assert!(!report.complete);
@@ -448,9 +609,78 @@ mod tests {
     async fn sync_skips_when_version_matches() {
         let client = reqwest::Client::new();
         let version = bundle_version();
-        let report = sync_bundled(&client, true, &version).await;
+        let report = sync_bundled(&client, true, &version, &[]).await;
         assert!(report.installed.is_empty());
         assert!(report.removed.is_empty());
         assert!(report.complete);
+    }
+
+    fn target(id: &str, path: &str) -> crate::skills_catalog::distribution::SkillAgentTargetView {
+        crate::skills_catalog::distribution::SkillAgentTargetView {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            project_skills_dir: ".agents/skills".to_owned(),
+            global_skills_dir: Some(path.to_owned()),
+            resolved_global_path: Some(path.to_owned()),
+            featured: false,
+            detected: false,
+            selectable: true,
+            unavailable_reason: None,
+        }
+    }
+
+    #[test]
+    fn unconfigured_preferences_keep_active_system_sync_canonical_only() {
+        let preferences = crate::skills_catalog::distribution::SkillInstallPreferencesV1 {
+            version: 1,
+            configured: false,
+            target_ids: vec!["codex".to_owned()],
+        };
+
+        assert!(
+            configured_global_target_ids(&preferences, &[target("codex", "/tmp/codex")]).is_empty()
+        );
+    }
+
+    #[test]
+    fn configured_preferences_dedupe_aliases_before_active_system_sync() {
+        let preferences = crate::skills_catalog::distribution::SkillInstallPreferencesV1 {
+            version: 1,
+            configured: true,
+            target_ids: vec!["codex".to_owned(), "cursor".to_owned(), "other".to_owned()],
+        };
+        let targets = [
+            target("codex", "/tmp/shared"),
+            target("cursor", "/tmp/shared"),
+            target("other", "/tmp/other"),
+        ];
+
+        assert_eq!(
+            configured_global_target_ids(&preferences, &targets),
+            ["codex", "other"]
+        );
+    }
+
+    #[test]
+    fn active_reconcile_fans_defaults_after_a_current_catalog_sync() {
+        let mut received = Vec::new();
+        let report = fan_out_after_catalog_sync(
+            SyncReport {
+                complete: true,
+                ..Default::default()
+            },
+            &["codex".to_owned()],
+            |target_ids, report| {
+                received.extend_from_slice(target_ids);
+                report.distribution_errors.push("target warning".to_owned());
+            },
+        );
+
+        assert_eq!(received, ["codex"]);
+        assert!(
+            report.complete,
+            "target failures do not un-complete the catalog"
+        );
+        assert_eq!(report.distribution_errors, ["target warning"]);
     }
 }
