@@ -80,6 +80,12 @@
             "resource_param": "room_id"
           },
           {
+            "path": "/:room_id/invite",
+            "method": "POST",
+            "permission": "rooms.manage",
+            "resource_param": "room_id"
+          },
+          {
             "path": "/:room_id/invite/revoke",
             "method": "POST",
             "permission": "rooms.manage",

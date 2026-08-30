@@ -33,7 +33,7 @@ pub mod template;
 pub mod templates;
 pub mod triggers;
 
-pub use executor::{fail_run, rerun_run, resume_run};
+pub use executor::{dry_run_workflow, fail_run, rerun_run, resume_run};
 
 use std::collections::{HashMap, HashSet};
 

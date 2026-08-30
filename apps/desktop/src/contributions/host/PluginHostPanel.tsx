@@ -83,7 +83,10 @@ import {
 	contributionRegistry,
 } from "@/src/contributions/registry.ts";
 import { registerTabIcon } from "@/src/contributions/tab-icon-registry.ts";
-import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import {
+	useActiveNode,
+	useActiveNodeGetter,
+} from "@/src/hooks/useActiveNode.ts";
 import { subscribeFriendlyMode } from "@/src/hooks/useFriendlyMode.ts";
 import { listActivity } from "@/src/lib/api/activity.ts";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
@@ -144,6 +147,7 @@ import {
 	updateMonitor,
 } from "@/src/lib/api/monitors.ts";
 import { newsRequest } from "@/src/lib/api/news.ts";
+import { resolveNodeShareOrigins } from "@/src/lib/api/node-share.ts";
 import {
 	ackNotification,
 	archiveNotification,
@@ -620,6 +624,7 @@ export function PluginHostPanel({
 	mountContext?: unknown;
 }) {
 	const node = useActiveNode();
+	const getActiveNode = useActiveNodeGetter();
 	const [connected, setConnected] = useState(false);
 	const realtimeSessionsRef = useRef(
 		new Map<string, ApplicationRealtimeSession>()
@@ -857,6 +862,7 @@ export function PluginHostPanel({
 				const agents = await fetchAgents(toTarget(node));
 				return agents.map((a) => ({ id: a.id, name: a.name }));
 			},
+			nodeShareOrigins: () => resolveNodeShareOrigins(getActiveNode()),
 			// Richer projection for a per-agent model picker (still no secrets — just
 			// the public engine/model binding + flagship flag).
 			listAgentsFull: async () => {
@@ -1270,8 +1276,8 @@ export function PluginHostPanel({
 				return { url: endpoint?.publicUrl ?? "" };
 			},
 			// run + run-state (workflows:runstate)
-			workflowsRun: ({ id, input }) =>
-				runWorkflow(toTarget(node), id, input ?? {}),
+			workflowsRun: ({ id, input, dryRun }) =>
+				runWorkflow(toTarget(node), id, input ?? {}, { dryRun }),
 			workflowsRunGet: ({ runId }) => getWorkflowRun(toTarget(node), runId),
 			workflowsResume: ({ runId, payload }) =>
 				resumeWorkflow(toTarget(node), runId, payload),
@@ -2090,6 +2096,7 @@ export function PluginHostPanel({
 			updateTabsIconWhere,
 			currentTabId,
 			meId,
+			getActiveNode,
 			toastHost,
 		]
 	);

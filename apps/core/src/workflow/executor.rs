@@ -38,6 +38,31 @@ const MAX_SUBWORKFLOW_DEPTH: usize = 8;
 /// re-enter the gate) cannot run away. See the [`NodeKind::While`] doc.
 pub const MAX_WHILE_ITERATIONS: u64 = 100;
 
+/// Whether a workflow execution may create durable state or invoke effectful
+/// nodes. Dry runs are deliberately a separate execution mode so a caller
+/// cannot accidentally turn a read-only preview into a normal durable run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionMode {
+    Live,
+    DryRun,
+}
+
+impl ExecutionMode {
+    const fn is_dry_run(self) -> bool {
+        matches!(self, Self::DryRun)
+    }
+}
+
+/// Save a checkpoint only for a live execution. Keeping this guard at the
+/// executor boundary makes every existing checkpoint call dry-run safe,
+/// including nested workflows, loop iterations, retries, and durable timers.
+fn checkpoint_run(run: &WorkflowRun, mode: ExecutionMode) -> Result<(), String> {
+    if mode.is_dry_run() {
+        return Ok(());
+    }
+    store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))
+}
+
 /// Decide a `While` gate against an explicit iteration cap. Pure so it is unit
 /// testable without an executor or gateway.
 ///
@@ -97,17 +122,48 @@ pub async fn run_workflow(
     input: HashMap<String, String>,
     run_id: String,
 ) -> Result<WorkflowRun, String> {
-    crate::workflow::ensure_agents_active(workflow).await?;
-    crate::plugin_host::fire_workflow_run_event(
-        crate::plugin_host::ON_WORKFLOW_RUN_STARTED,
-        serde_json::json!({
-            "run_id": run_id,
-            "workflow_id": workflow.id,
-            "workflow_name": workflow.name,
-        }),
-    );
+    run_workflow_with_mode(workflow, input, run_id, ExecutionMode::Live).await
+}
 
-    let outcome = run_workflow_inner(workflow, input, run_id.clone(), 0).await;
+/// Evaluate a workflow without creating run history or invoking effectful
+/// nodes. Pure nodes and MCP tools classified as read-only are evaluated in
+/// memory; writes, prompts, notifications, webhooks, desktop actions, and
+/// other effectful nodes are marked `Skipped` with a reason.
+///
+/// The returned [`WorkflowRun`] is a transient projection. Its `run_id` is
+/// useful for correlating the response, but it must not be passed to resume or
+/// expected to be readable from [`store::load_run`].
+pub async fn dry_run_workflow(
+    workflow: &Workflow,
+    input: HashMap<String, String>,
+    run_id: String,
+) -> Result<WorkflowRun, String> {
+    run_workflow_with_mode(workflow, input, run_id, ExecutionMode::DryRun).await
+}
+
+async fn run_workflow_with_mode(
+    workflow: &Workflow,
+    input: HashMap<String, String>,
+    run_id: String,
+    mode: ExecutionMode,
+) -> Result<WorkflowRun, String> {
+    crate::workflow::ensure_agents_active(workflow).await?;
+    if !mode.is_dry_run() {
+        crate::plugin_host::fire_workflow_run_event(
+            crate::plugin_host::ON_WORKFLOW_RUN_STARTED,
+            serde_json::json!({
+                "run_id": run_id,
+                "workflow_id": workflow.id,
+                "workflow_name": workflow.name,
+            }),
+        );
+    }
+
+    let outcome = run_workflow_inner(workflow, input, run_id.clone(), 0, mode).await;
+
+    if mode.is_dry_run() {
+        return outcome;
+    }
 
     match &outcome {
         // A run that suspended at an approval gate has NOT finished — it is waiting
@@ -304,6 +360,7 @@ fn run_workflow_inner(
     input: HashMap<String, String>,
     run_id: String,
     depth: usize,
+    mode: ExecutionMode,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<WorkflowRun, String>> + Send + '_>> {
     Box::pin(async move {
         if depth > MAX_SUBWORKFLOW_DEPTH {
@@ -321,10 +378,17 @@ fn run_workflow_inner(
         let graph = WorkflowGraph::build(workflow).map_err(|e| e.to_string())?;
 
         // Resume from disk when a run with this id already exists, else fresh.
-        let mut run = match store::load_run(&run_id) {
-            Ok(existing) if existing.workflow_id == workflow.id => existing,
-            _ => WorkflowRun::new(run_id.clone(), workflow.id.clone(), input.clone()),
+        let mut run = if mode.is_dry_run() {
+            // A dry run is always a fresh in-memory projection. It must not
+            // accidentally resume a durable run when a caller reuses an id.
+            WorkflowRun::new(run_id.clone(), workflow.id.clone(), input.clone())
+        } else {
+            match store::load_run(&run_id) {
+                Ok(existing) if existing.workflow_id == workflow.id => existing,
+                _ => WorkflowRun::new(run_id.clone(), workflow.id.clone(), input.clone()),
+            }
         };
+        run.dry_run = mode.is_dry_run();
         // Resuming a suspended run: clear awaiting state and re-run from the
         // last checkpoint. Any Awakeable node already flipped to Completed (by
         // the resume endpoint) will be skipped like any other finished node.
@@ -375,6 +439,7 @@ fn run_workflow_inner(
                     &mut pruned_nodes,
                     &mut queue,
                     &mut run,
+                    mode,
                 )?;
                 continue;
             }
@@ -401,8 +466,30 @@ fn run_workflow_inner(
                     .and_then(|s| s.output.clone())
                     .unwrap_or_default()
             } else {
+                // Dry runs execute only pure nodes and tools that Core can
+                // classify as read-only. Effectful nodes are recorded as
+                // skipped and their outgoing paths are treated like a normal
+                // skipped branch, so no external call can happen accidentally.
+                if mode.is_dry_run() {
+                    if let Some(reason) = dry_run_skip_reason(node).await {
+                        mark(&mut run, &node.id, NodeStatus::Skipped, None, Some(reason));
+                        checkpoint_run(&run, mode)?;
+                        resolve_successors(
+                            idx,
+                            true,
+                            &graph,
+                            &mut active_edges,
+                            &mut indegree,
+                            &mut pruned_nodes,
+                            &mut queue,
+                            &mut run,
+                            mode,
+                        )?;
+                        continue;
+                    }
+                }
                 mark(&mut run, &node.id, NodeStatus::Running, None, None);
-                store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+                checkpoint_run(&run, mode)?;
 
                 // Temporal-style retry loop with an optional per-node wall-clock
                 // timeout per attempt. A node with no `retry` policy runs once
@@ -427,10 +514,10 @@ fn run_workflow_inner(
                         st.status = NodeStatus::Running;
                         st.attempts
                     };
-                    store::save_run(&run)
-                        .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+                    checkpoint_run(&run, mode)?;
 
-                    let attempt_result = run_node_attempt(node, &node_input, &mut run, depth).await;
+                    let attempt_result =
+                        run_node_attempt(node, &node_input, &mut run, depth, mode).await;
 
                     match attempt_result {
                         Ok(out) => {
@@ -450,8 +537,7 @@ fn run_workflow_inner(
                             run.status = RunStatus::AwaitingInput;
                             run.awaiting_node = Some(node.id.clone());
                             run.updated_at = chrono::Utc::now().to_rfc3339();
-                            store::save_run(&run)
-                                .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+                            checkpoint_run(&run, mode)?;
                             // Surface an `Awakeable` HITL gate in the approval
                             // inbox so the user can approve (resume) or reject
                             // (fail) it from one place. Best-effort + deduped on
@@ -474,8 +560,7 @@ fn run_workflow_inner(
                         Err(e) => match decide_retry(&policy, attempt, max_attempts, &e) {
                             RetryDecision::Fail => break Err(e),
                             RetryDecision::Retry(sleep_ms) => {
-                                store::save_run(&run)
-                                    .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+                                checkpoint_run(&run, mode)?;
                                 tokio::time::sleep(std::time::Duration::from_millis(sleep_ms))
                                     .await;
                             }
@@ -495,8 +580,7 @@ fn run_workflow_inner(
                         );
                         run.status = RunStatus::Failed;
                         run.error = Some(e.clone());
-                        store::save_run(&run)
-                            .map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+                        checkpoint_run(&run, mode)?;
                         return Err(e);
                     }
                 }
@@ -533,7 +617,7 @@ fn run_workflow_inner(
                 }
             }
 
-            store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+            checkpoint_run(&run, mode)?;
 
             // Resolve successors: decrement each successor's indegree and, once
             // it reaches zero, either enqueue it (a live incoming edge remains)
@@ -547,6 +631,7 @@ fn run_workflow_inner(
                 &mut pruned_nodes,
                 &mut queue,
                 &mut run,
+                mode,
             )?;
         }
 
@@ -566,7 +651,7 @@ fn run_workflow_inner(
             run.status = RunStatus::Completed;
         }
         run.updated_at = chrono::Utc::now().to_rfc3339();
-        store::save_run(&run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+        checkpoint_run(&run, mode)?;
         Ok(run)
     })
 }
@@ -592,6 +677,7 @@ fn resolve_successors(
     pruned_nodes: &mut HashSet<NodeIndex>,
     queue: &mut VecDeque<NodeIndex>,
     run: &mut WorkflowRun,
+    mode: ExecutionMode,
 ) -> Result<(), String> {
     let out_edges: Vec<(petgraph::graph::EdgeIndex, NodeIndex)> = graph
         .graph
@@ -627,7 +713,7 @@ fn resolve_successors(
                 None,
                 None,
             );
-            store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+            checkpoint_run(run, mode)?;
         }
         queue.push_back(target);
     }
@@ -691,6 +777,96 @@ fn build_template_ctx(input: &str, run: &WorkflowRun) -> super::template::Templa
     }
 }
 
+/// Return a skip reason for a node that is not safe to execute during a dry
+/// run. `None` means the node is pure, transient-only, nested execution, or a
+/// registered MCP tool that Core can classify as read-only.
+async fn dry_run_skip_reason(node: &super::WorkflowNode) -> Option<String> {
+    match &node.kind {
+        NodeKind::Input { .. }
+        | NodeKind::Output { .. }
+        | NodeKind::Transform { .. }
+        | NodeKind::Condition { .. }
+        | NodeKind::SetState { .. }
+        | NodeKind::Delay { .. }
+        | NodeKind::Note { .. }
+        | NodeKind::While { .. }
+        | NodeKind::SubWorkflow { .. } => None,
+        NodeKind::Tool { name, .. } => dry_run_tool_skip_reason(name).await,
+        NodeKind::Mcp { server, tool, .. } => {
+            dry_run_tool_skip_reason(&format!("{server}.{tool}")).await
+        }
+        NodeKind::Prompt { .. } => {
+            Some("dry run skipped: prompt nodes call a model and are not read-only".to_string())
+        }
+        NodeKind::Agent { .. } => {
+            Some("dry run skipped: agent nodes may invoke tools or mutate state".to_string())
+        }
+        NodeKind::Skill { .. } => {
+            Some("dry run skipped: skill nodes call an agent and are not read-only".to_string())
+        }
+        NodeKind::AgentDelegate { .. } => Some(
+            "dry run skipped: agent delegation may invoke models or tools and is not read-only"
+                .to_string(),
+        ),
+        NodeKind::Plugin { .. } => Some(
+            "dry run skipped: plugin runnables do not expose a read-only execution contract"
+                .to_string(),
+        ),
+        NodeKind::Guardrails { .. } => Some(
+            "dry run skipped: guardrails use an external Gateway check and are not read-only"
+                .to_string(),
+        ),
+        NodeKind::Webhook { .. } => {
+            Some("dry run skipped: webhook delivery would write to an external service".to_string())
+        }
+        NodeKind::Recipe { .. } => Some(
+            "dry run skipped: recipe replay can change the desktop or external applications"
+                .to_string(),
+        ),
+        NodeKind::GhostAction { .. } => Some(
+            "dry run skipped: ghost actions can change the desktop or external applications"
+                .to_string(),
+        ),
+        NodeKind::NotifyUser { .. } => Some(
+            "dry run skipped: notifications would deliver messages to organization members"
+                .to_string(),
+        ),
+        NodeKind::ChannelSend { .. } => {
+            Some("dry run skipped: channel sends would deliver a message externally".to_string())
+        }
+        NodeKind::Awakeable { .. } => Some(
+            "dry run skipped: human-in-the-loop gates cannot be resumed from a transient run"
+                .to_string(),
+        ),
+    }
+}
+
+/// Classify an MCP tool before a dry run dispatches it. Missing registry
+/// metadata is fail-closed: a dry run never guesses that an unavailable or
+/// unknown tool is safe to invoke.
+async fn dry_run_tool_skip_reason(name: &str) -> Option<String> {
+    let Some(registry) = crate::sidecar::mcp::global_registry() else {
+        return Some(format!(
+            "dry run skipped: cannot verify that tool '{name}' is read-only because the MCP registry is unavailable"
+        ));
+    };
+
+    let (annotations, http_method) = registry.tool_effect_metadata(name).await;
+    let effect = crate::agent_execution::classify_tool_with_metadata(
+        name,
+        annotations.as_ref(),
+        http_method.as_deref(),
+    );
+    if effect.is_read_only() {
+        None
+    } else {
+        Some(format!(
+            "dry run skipped: tool '{name}' is not read-only (effect: {})",
+            effect.label()
+        ))
+    }
+}
+
 // ── Retry / timeout (Temporal-style) ─────────────────────────────────────────
 
 /// The retry loop's decision after an attempt fails: stop, or wait then re-run.
@@ -711,12 +887,13 @@ async fn run_node_attempt(
     input: &str,
     run: &mut WorkflowRun,
     depth: usize,
+    mode: ExecutionMode,
 ) -> Result<String, String> {
     match node.timeout_ms {
         Some(ms) if ms > 0 => {
             match tokio::time::timeout(
                 std::time::Duration::from_millis(ms),
-                execute_node(node, input, run, depth),
+                execute_node(node, input, run, depth, mode),
             )
             .await
             {
@@ -724,7 +901,7 @@ async fn run_node_attempt(
                 Err(_) => Err(format!("node '{}' timed out after {ms}ms", node.id)),
             }
         }
-        _ => execute_node(node, input, run, depth).await,
+        _ => execute_node(node, input, run, depth, mode).await,
     }
 }
 
@@ -856,6 +1033,7 @@ async fn execute_node(
     input: &str,
     run: &mut WorkflowRun,
     depth: usize,
+    mode: ExecutionMode,
 ) -> Result<String, String> {
     use super::template::resolve;
 
@@ -887,6 +1065,11 @@ async fn execute_node(
             let resolved = resolve(value, &ctx);
             run.state.insert(key.clone(), resolved);
             // Pass the incoming value through unchanged to outgoing edges.
+            Ok(input.to_string())
+        }
+        NodeKind::Delay { .. } if mode.is_dry_run() => {
+            // A dry run reports the path without waiting or stamping a durable
+            // timer. Both are execution effects, not read-only evaluation.
             Ok(input.to_string())
         }
         NodeKind::Delay { ms } => {
@@ -921,7 +1104,7 @@ async fn execute_node(
                 }
             };
             if stamped {
-                store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+                checkpoint_run(run, mode)?;
             }
             // Clamp to 0 so a backward clock jump (now > wake_at by skew) can
             // never produce a negative duration / cast surprise — a past wake_at
@@ -951,7 +1134,7 @@ async fn execute_node(
                 // Real bounded loop: re-run the body sub-workflow while the
                 // condition holds. See [`run_while_loop`].
                 Some(body_id) if !body_id.is_empty() => {
-                    run_while_loop(expr, body_id, cap, &node.id, input, run, depth).await
+                    run_while_loop(expr, body_id, cap, &node.id, input, run, depth, mode).await
                 }
                 // One-shot guarded gate (back-compat, NOT a loop): resolve tokens,
                 // evaluate the condition, then consult the per-node iteration
@@ -1020,7 +1203,7 @@ async fn execute_node(
             // side-effecting inner node keeps a STABLE idempotency key across the
             // crash (a fresh UUID here would defeat both).
             let sub_run_id = format!("{}-sub-{}", run.run_id, node.id);
-            let result = run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1).await?;
+            let result = run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1, mode).await?;
             // Forward the first output value (or empty).
             Ok(result.output.values().next().cloned().unwrap_or_default())
         }
@@ -1061,6 +1244,7 @@ async fn execute_node(
                 &run.run_id,
                 &node.id,
                 depth,
+                mode,
             )
             .await
         }
@@ -1154,6 +1338,7 @@ async fn run_while_loop(
     input: &str,
     run: &mut WorkflowRun,
     depth: usize,
+    mode: ExecutionMode,
 ) -> Result<String, String> {
     use super::store::RunStatus;
     use super::template::{resolve, TemplateCtx};
@@ -1207,7 +1392,7 @@ async fn run_while_loop(
         let mut sub_input = HashMap::new();
         sub_input.insert("input".to_string(), carry.clone());
         let sub_run_id = format!("{}-{}-iter-{}", run.run_id, node_id, counter);
-        let result = run_workflow_inner(&body_wf, sub_input, sub_run_id, depth + 1).await?;
+        let result = run_workflow_inner(&body_wf, sub_input, sub_run_id, depth + 1, mode).await?;
 
         // v1: an Awakeable gate inside the body is not supported — fail clearly.
         if result.status == RunStatus::AwaitingInput {
@@ -1225,7 +1410,7 @@ async fn run_while_loop(
         // nodes).
         run.state.insert(counter_key.clone(), counter.to_string());
         run.state.insert(carry_key.clone(), carry.clone());
-        store::save_run(run).map_err(|e| format!("failed to persist checkpoint: {e}"))?;
+        checkpoint_run(run, mode)?;
     }
 
     // Loop finished: the node produces the final carry as a plain data value.
@@ -1560,6 +1745,7 @@ async fn run_plugin(
     run_id: &str,
     node_id: &str,
     depth: usize,
+    mode: ExecutionMode,
 ) -> Result<String, String> {
     use crate::plugin_manifest::PluginManifestLoader;
     use crate::runnable::RunnableKind;
@@ -1618,7 +1804,8 @@ async fn run_plugin(
             // Deterministic child run id (same scheme as a SubWorkflow node) so a
             // resumed parent re-enters the SAME inner run after a restart.
             let sub_run_id = format!("{run_id}-plugin-{node_id}");
-            let result = run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1).await?;
+            let result =
+                run_workflow_inner(&sub, sub_input, sub_run_id, depth + 1, mode).await?;
             Ok(result.output.values().next().cloned().unwrap_or_default())
         }
         RunnableKind::Companion
@@ -2204,6 +2391,23 @@ mod tests {
         let s: store::NodeRunState = serde_json::from_str(r#"{"status":"completed"}"#).unwrap();
         assert_eq!(s.attempts, 0);
         assert!(s.wake_at.is_none());
+
+        let old_run: WorkflowRun = serde_json::from_value(serde_json::json!({
+            "run_id": "r1",
+            "workflow_id": "w1",
+            "status": "completed",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z"
+        }))
+        .expect("old run JSON remains readable");
+        assert!(!old_run.dry_run);
+
+        let mut preview = WorkflowRun::new("preview".into(), "w1".into(), HashMap::new());
+        preview.dry_run = true;
+        let preview_json = serde_json::to_value(&preview).expect("preview run serializes");
+        assert_eq!(preview_json["dryRun"], serde_json::json!(true));
+        assert!(preview_json.get("dry_run").is_none());
+        assert!(store::save_run(&preview).is_err());
     }
 
     #[tokio::test]
@@ -2989,6 +3193,162 @@ mod tests {
         let run = run_workflow(&wf, input, run_id).await.expect("run ok");
         assert_eq!(run.status, RunStatus::Completed);
         assert_eq!(run.output.get("result").map(String::as_str), Some("HELLO"));
+    }
+
+    #[tokio::test]
+    async fn dry_run_evaluates_pure_nodes_and_never_writes_run_state() {
+        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
+
+        let workflow_id = format!("dry-pure-{}", uuid::Uuid::new_v4().simple());
+        let workflow = Workflow {
+            id: workflow_id.clone(),
+            name: "dry run pure".into(),
+            description: None,
+            nodes: vec![
+                WorkflowNode {
+                    id: "in".into(),
+                    retry: None,
+                    timeout_ms: None,
+                    kind: NodeKind::Input {
+                        key: Some("text".into()),
+                    },
+                },
+                WorkflowNode {
+                    id: "up".into(),
+                    retry: None,
+                    timeout_ms: None,
+                    kind: NodeKind::Transform {
+                        op: "uppercase".into(),
+                        template: None,
+                    },
+                },
+                WorkflowNode {
+                    id: "out".into(),
+                    retry: None,
+                    timeout_ms: None,
+                    kind: NodeKind::Output {
+                        key: Some("result".into()),
+                    },
+                },
+            ],
+            edges: vec![
+                WorkflowEdge {
+                    from: "in".into(),
+                    to: "up".into(),
+                    branch: None,
+                },
+                WorkflowEdge {
+                    from: "up".into(),
+                    to: "out".into(),
+                    branch: None,
+                },
+            ],
+            triggers: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let run_id = format!("dry-run-{}", uuid::Uuid::new_v4().simple());
+        let mut input = HashMap::new();
+        input.insert("text".into(), "hello".into());
+
+        // A pre-existing durable record must not be resumed or overwritten by
+        // the transient dry-run projection.
+        let mut persisted = WorkflowRun::new(run_id.clone(), workflow_id, input.clone());
+        persisted.output.insert("old".into(), "sentinel".into());
+        store::save_run(&persisted).expect("seed durable run");
+
+        let run = dry_run_workflow(&workflow, input, run_id.clone())
+            .await
+            .expect("dry run succeeds");
+        assert!(run.dry_run);
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(run.output.get("result").map(String::as_str), Some("HELLO"));
+        assert_eq!(
+            run.nodes.get("up").map(|state| state.status),
+            Some(NodeStatus::Completed)
+        );
+
+        let from_disk = store::load_run(&run_id).expect("seeded run remains on disk");
+        assert!(!from_disk.dry_run);
+        assert_eq!(
+            from_disk.output.get("old").map(String::as_str),
+            Some("sentinel")
+        );
+    }
+
+    #[tokio::test]
+    async fn dry_run_skips_effectful_nodes_without_calling_them() {
+        use crate::workflow::{NodeKind, Workflow, WorkflowEdge, WorkflowNode};
+
+        let workflow_id = format!("dry-skip-{}", uuid::Uuid::new_v4().simple());
+        let workflow = Workflow {
+            id: workflow_id,
+            name: "dry run skip".into(),
+            description: None,
+            nodes: vec![
+                WorkflowNode {
+                    id: "in".into(),
+                    retry: None,
+                    timeout_ms: None,
+                    kind: NodeKind::Input { key: None },
+                },
+                WorkflowNode {
+                    id: "send".into(),
+                    retry: None,
+                    timeout_ms: None,
+                    // This URL is intentionally invalid. A live run would
+                    // attempt validation and fail; a dry run must skip it.
+                    kind: NodeKind::Webhook {
+                        url: "not-a-url".into(),
+                        method: "POST".into(),
+                    },
+                },
+                WorkflowNode {
+                    id: "out".into(),
+                    retry: None,
+                    timeout_ms: None,
+                    kind: NodeKind::Output { key: None },
+                },
+            ],
+            edges: vec![
+                WorkflowEdge {
+                    from: "in".into(),
+                    to: "send".into(),
+                    branch: None,
+                },
+                WorkflowEdge {
+                    from: "send".into(),
+                    to: "out".into(),
+                    branch: None,
+                },
+            ],
+            triggers: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let run_id = format!("dry-skip-run-{}", uuid::Uuid::new_v4().simple());
+        let run = dry_run_workflow(&workflow, empty_input(), run_id.clone())
+            .await
+            .expect("dry run succeeds without calling webhook");
+
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(
+            run.nodes.get("send").map(|state| state.status),
+            Some(NodeStatus::Skipped)
+        );
+        assert!(run
+            .nodes
+            .get("send")
+            .and_then(|state| state.error.as_deref())
+            .is_some_and(|error| error.contains("webhook delivery")));
+        assert_eq!(
+            run.nodes.get("out").map(|state| state.status),
+            Some(NodeStatus::Skipped)
+        );
+        assert!(
+            store::load_run(&run_id).is_err(),
+            "dry run must not create history"
+        );
     }
 
     /// AC1 + AC3 + AC4: Awakeable suspend → disk-persist → resume → completion.
@@ -3816,6 +4176,7 @@ mod tests {
             "run",
             "node",
             0,
+            ExecutionMode::Live,
         )
         .await
         .expect_err("unknown plugin must error");

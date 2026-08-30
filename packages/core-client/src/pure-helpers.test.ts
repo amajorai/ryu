@@ -119,7 +119,24 @@ describe("normalizeMeshStatus", () => {
 			controlServer: null,
 			magicDnsName: null,
 			tailscaleIps: [],
+			tailcatAddress: null,
 			peers: [],
+		});
+	});
+
+	test("normalizes a Tailcat address without treating it as a control server", () => {
+		expect(
+			normalizeMeshStatus({
+				enabled: true,
+				backend: "tailcat",
+				reachable: true,
+				tailcat_address: "tcExampleToken",
+			})
+		).toMatchObject({
+			backend: "tailcat",
+			reachable: true,
+			controlServer: null,
+			tailcatAddress: "tcExampleToken",
 		});
 	});
 

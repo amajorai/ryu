@@ -3,16 +3,16 @@
 //! Extracted from `apps/core/src/mesh` into its own primitive crate (in-process
 //! default preserved — every entry point is a plain function call, never IPC).
 //!
-//! Core owns **what runs** — the optional Tailscale/Headscale daemon (a `Sidecar`
-//! managed by the `SidecarManager`, `apps/core/src/sidecar/tailscale.rs`). This
-//! crate is the **read/shape side**: it shapes `tailscale status --json` into the
+//! Core owns **what runs** — the optional Tailscale/Headscale daemon or Tailcat
+//! listener (a `Sidecar` managed by the `SidecarManager`). This crate is the
+//! **read/shape side**: it shapes provider status into the
 //! canonical `GET /api/mesh/status` contract (Appendix A Contract 6 of
 //! `docs/unified-tool-gateway-spec.md`), resolves the fail-closed shared-mesh-token
 //! bearer for `GET /api/mesh/peers`, and exposes the `ensure_funnel`/`funnel_url`
 //! primitives P6 consumes for public webhook ingress.
 //!
-//! The one kernel coupling — the `tailscale`/`tailscaled` process shell-outs —
-//! inverts through the narrow [`MeshHost`] trait (host shim implemented Core-side
+//! The provider process couplings — the `tailscale`/`tailscaled` and Tailcat
+//! adapters — invert through the narrow [`MeshHost`] trait (host shim implemented Core-side
 //! in `apps/core/src/mesh_host.rs`, installed once at boot via [`set_global_host`],
 //! mirroring the `CryptoHost`/`RecipesHost` precedent). So this crate has ZERO
 //! dependency on apps/core.
@@ -31,12 +31,13 @@ use std::sync::{Arc, OnceLock};
 
 use serde::Serialize;
 
-// ── Host seam (the "what runs" half — tailscale daemon shell-outs) ────────────
+// ── Host seam (the "what runs" half — provider process shell-outs) ───────────
 
-/// The kernel-side couplings this crate needs but cannot own: the three
-/// `tailscale`/`tailscaled` process shell-outs (the "what runs" half of the mesh,
-/// a `Sidecar` in Core). Core implements this in `apps/core/src/mesh_host.rs` and
-/// installs it once at boot via [`set_global_host`].
+/// The provider couplings this crate needs but cannot own: the
+/// `tailscale`/`tailscaled` and Tailcat process shell-outs (the "what runs" half
+/// of the network, a `Sidecar` in Core). Core implements this in
+/// `apps/core/src/mesh_host.rs` and installs it once at boot via
+/// [`set_global_host`].
 ///
 /// Every method is only ever called when the mesh is **enabled**
 /// (`RYU_MESH_ENABLED`); the disabled paths short-circuit before the host is
@@ -44,12 +45,13 @@ use serde::Serialize;
 /// (mesh-off) install correctly.
 #[async_trait::async_trait]
 pub trait MeshHost: Send + Sync {
-    /// Run `tailscale status --json` and return the parsed JSON. Errors when the
-    /// daemon is absent or returns non-JSON (the caller maps that to an
+    /// Run the selected provider status read and return JSON. Errors when the
+    /// provider is absent or returns non-JSON (the caller maps that to an
     /// enabled-but-unreachable status).
     async fn status_json(&self) -> anyhow::Result<serde_json::Value>;
 
     /// Ensure a Tailscale Funnel is serving `port`, returning the public URL.
+    /// Tailcat implementations must return an unsupported-capability error.
     async fn ensure_funnel(&self, port: u16) -> anyhow::Result<String>;
 
     /// The active public Funnel URL for `port`, or `None` when unreachable.
@@ -188,16 +190,20 @@ pub struct MeshStatus {
     pub reachable: bool,
     /// `up == reachable` — both present in the wire shape per Contract 6.
     pub up: bool,
-    /// `"tailscale"` | `"headscale"` | `null`.
+    /// `"tailscale"` | `"headscale"` | `"tailcat"` | `null`.
     pub backend: Option<String>,
-    /// Raw `BackendState` string from `tailscale status --json` (e.g.
-    /// `"Running"`, `"NeedsLogin"`, `"Stopped"`).
+    /// Provider state (Tailscale's raw `BackendState`, or `Running`/`Stopped`
+    /// for Tailcat).
     pub backend_state: String,
     /// Control-plane server URL (Headscale → its login server; Tailscale SaaS →
-    /// the coordination server). `null` when unknown.
+    /// the coordination server). `null` for Tailcat or when unknown.
     pub control_server: Option<String>,
     pub magic_dns_name: Option<String>,
     pub tailscale_ips: Vec<String>,
+    /// The active Tailcat connection address, or `null` for Tailscale/Headscale.
+    /// This is a bearer for the point-to-point connection and is returned only
+    /// through the authenticated status route.
+    pub tailcat_address: Option<String>,
     pub peers: Vec<MeshPeer>,
     /// Independent of mesh — P7 reads the ingress mode from
     /// `/api/webhook-ingress/status`, not here. Always `null` in this object.
@@ -215,6 +221,7 @@ impl Default for MeshStatus {
             control_server: None,
             magic_dns_name: None,
             tailscale_ips: Vec::new(),
+            tailcat_address: None,
             peers: Vec::new(),
             webhook_ingress_mode: None,
         }
@@ -226,18 +233,32 @@ impl Default for MeshStatus {
 /// `tailscale`; anything else (a self-hosted `--login-server`) is `headscale`.
 const TAILSCALE_SAAS_CONTROL: &str = "controlplane.tailscale.com";
 
-/// Classify the mesh backend from the control server URL. A Headscale install is
-/// reached via `--login-server <url>`; Tailscale's SaaS uses its own coordination
-/// server. When no control URL is reported (the caller passes `None` — the URL is
-/// absent or was filtered out as empty), the backend stays `null`: a valid
-/// Contract 6 value, since we cannot distinguish Tailscale from Headscale without
-/// it.
+/// Classify the mesh backend from a provider marker or control server URL. Tailcat
+/// has no control server, so its synthetic provider snapshot carries an explicit
+/// `Backend` marker. A Headscale install is reached via `--login-server <url>`;
+/// Tailscale's SaaS uses its own coordination server. When no marker or control
+/// URL is reported, the backend stays `null`: a valid Contract 6 value.
 fn classify_backend(control_url: Option<&str>) -> Option<String> {
     match control_url {
         None => None,
         Some(url) if url.contains(TAILSCALE_SAAS_CONTROL) => Some("tailscale".to_owned()),
         Some(_) => Some("headscale".to_owned()),
     }
+}
+
+fn classify_provider_backend(
+    explicit_backend: Option<&str>,
+    control_url: Option<&str>,
+    tailcat_address: Option<&str>,
+) -> Option<String> {
+    if explicit_backend
+        .map(|value| value.eq_ignore_ascii_case("tailcat"))
+        .unwrap_or(false)
+        || tailcat_address.is_some()
+    {
+        return Some("tailcat".to_owned());
+    }
+    classify_backend(control_url)
 }
 
 /// Parse the JSON emitted by `tailscale status --json` into a [`MeshStatus`].
@@ -275,10 +296,22 @@ pub fn parse_status_json(enabled: bool, raw: &serde_json::Value) -> MeshStatus {
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
 
+    let tailcat_address = raw
+        .get("Self")
+        .and_then(|s| s.get("TailcatAddress"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty());
+    let explicit_backend = raw.get("Backend").and_then(|v| v.as_str());
+
     let backend = if backend_state == "Stopped" || backend_state == "NoState" {
         None
     } else {
-        classify_backend(control_server.as_deref())
+        classify_provider_backend(
+            explicit_backend,
+            control_server.as_deref(),
+            tailcat_address.as_deref(),
+        )
     };
 
     let self_node = raw.get("Self");
@@ -312,6 +345,7 @@ pub fn parse_status_json(enabled: bool, raw: &serde_json::Value) -> MeshStatus {
         control_server,
         magic_dns_name,
         tailscale_ips,
+        tailcat_address,
         peers,
         webhook_ingress_mode: None,
     }
@@ -681,6 +715,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_status_json_tailcat_backend() {
+        let raw = serde_json::json!({
+            "BackendState": "Running",
+            "Backend": "tailcat",
+            "Self": {
+                "TailcatAddress": "tcExampleToken"
+            }
+        });
+        let status = parse_status_json(true, &raw);
+        assert!(status.enabled);
+        assert!(status.reachable);
+        assert_eq!(status.backend.as_deref(), Some("tailcat"));
+        assert!(status.control_server.is_none());
+        assert_eq!(status.tailcat_address.as_deref(), Some("tcExampleToken"));
+        assert!(status.peers.is_empty());
+    }
+
+    #[test]
     fn disabled_shape_is_all_default() {
         let status = MeshStatus::default();
         assert!(!status.enabled);
@@ -691,6 +743,7 @@ mod tests {
         assert!(status.control_server.is_none());
         assert!(status.magic_dns_name.is_none());
         assert!(status.tailscale_ips.is_empty());
+        assert!(status.tailcat_address.is_none());
         assert!(status.peers.is_empty());
         assert!(status.webhook_ingress_mode.is_none());
     }
@@ -706,6 +759,7 @@ mod tests {
         assert_eq!(json["control_server"], serde_json::Value::Null);
         assert_eq!(json["magic_dns_name"], serde_json::Value::Null);
         assert_eq!(json["tailscale_ips"], serde_json::json!([]));
+        assert_eq!(json["tailcat_address"], serde_json::Value::Null);
         assert_eq!(json["peers"], serde_json::json!([]));
         assert_eq!(json["webhook_ingress_mode"], serde_json::Value::Null);
     }

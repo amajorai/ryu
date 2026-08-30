@@ -169,7 +169,10 @@ describe("dispatchRpc capability gate", () => {
 
 	it("keeps unary dispatch denials identical to the shared streaming gate", async () => {
 		for (const [method, capability] of Object.entries(METHOD_CAPABILITY)) {
-			if (capability === "host.capabilities") {
+			if (
+				capability === "host.capabilities" ||
+				method === "node.shareOrigins"
+			) {
 				continue;
 			}
 			let assertedError: unknown;
@@ -286,6 +289,7 @@ describe("grant-mapping completeness invariant", () => {
 	// set is empty, and every call is denied (the `timeline.read` regression).
 	const LOCAL_HOST_CAPS = new Set<Capability>([
 		"host.capabilities",
+		"node.shareOrigins",
 		"widget.state",
 		"ui.displayMode",
 	]);
@@ -305,6 +309,26 @@ describe("grant-mapping completeness invariant", () => {
 			});
 		}
 		expect(unmapped).toEqual([]);
+	});
+});
+
+describe("node share-origin host method", () => {
+	it("is local, argument-free, and secret-free", async () => {
+		const origins = [
+			{ origin: "http://192.168.1.20:7980", source: "active", reachable: true },
+		] as const;
+		await expect(
+			dispatchRpc("node.shareOrigins", [], new Set(), {
+				...services(),
+				nodeShareOrigins: () => Promise.resolve([...origins]),
+			})
+		).resolves.toEqual(origins);
+		await expect(
+			dispatchRpc("node.shareOrigins", [{}], new Set(), {
+				...services(),
+				nodeShareOrigins: () => Promise.resolve([]),
+			})
+		).rejects.toThrow("takes no arguments");
 	});
 });
 

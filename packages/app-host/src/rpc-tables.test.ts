@@ -31,10 +31,16 @@ test("registers targeted Inbox notifications as a separate capability", () => {
 
 const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"host.capabilities": "host.capabilities",
+	"node.shareOrigins": "node.shareOrigins",
 	"native.haptics": "native.haptics",
 	"native.notifications.create": "native.notifications",
 	"native.liveActivities.update": "native.liveActivities",
 	"app.request": "app.http",
+	"realtime.connect": "app.realtime",
+	"realtime.publish": "app.realtime",
+	"realtime.presence": "app.realtime",
+	"realtime.subscribe": "app.realtime",
+	"realtime.close": "app.realtime",
 	"core.listAgents": "core.listAgents",
 	"catalog.snapshot": "core.listAgents",
 	"catalog.models": "core.listAgents",
@@ -255,6 +261,7 @@ const OLD_GRANT_CAPABILITY: Record<string, Capability> = {
 	"native:notifications": "native.notifications",
 	"native:live_activities": "native.liveActivities",
 	"app:http": "app.http",
+	"app:realtime": "app.realtime",
 	"core:list_agents": "core.listAgents",
 	"chat.sendFollowUp": "chat.broadcast",
 	"ui:render": "ui.render",
@@ -308,6 +315,7 @@ const OLD_STREAMING_METHODS: readonly string[] = [
 	"shell.registerCommand",
 	"shell.registerTabIcon",
 	"shell.eventsSubscribe",
+	"realtime.subscribe",
 ];
 
 /** Pure comparison (no assertions): the sorted key lists plus the list of keys

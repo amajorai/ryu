@@ -236,16 +236,21 @@ export const registerRyuTools = (
 		{
 			title: "Ryu Run Workflow",
 			description:
-				"Run a workflow by id with an optional string input map. Returns the run state (may be awaiting_input on a human-in-the-loop gate).",
+				"Run a workflow by id with an optional string input map. Set dryRun to true for a transient read-only preview that skips effectful nodes and creates no run history.",
 			inputSchema: {
 				id: z.string().describe("Workflow id to run."),
 				input: z
 					.record(z.string(), z.string())
 					.optional()
 					.describe("String key/value inputs for the workflow run."),
+				dryRun: z
+					.boolean()
+					.optional()
+					.describe("Read-only preview; no run history or effectful nodes."),
 			},
 		},
-		({ id, input }) => run(() => runWorkflow(target, id, input ?? {}))
+		({ id, input, dryRun }) =>
+			run(() => runWorkflow(target, id, input ?? {}, { dryRun }))
 	);
 
 	// ── MCP bridge ──────────────────────────────────────────────────────────────

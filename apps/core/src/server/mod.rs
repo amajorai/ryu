@@ -41,6 +41,7 @@ pub mod hardware_ws;
 // turn on the user's behalf. Names no app — it is a host primitive, reached through
 // the generic capability broker.
 pub mod host_chat;
+pub mod model_stream;
 // Healing is now OUT-OF-PROCESS: the `ryu-healing` sidecar (`crates/ryu-healing`
 // `[[bin]]`) owns the diagnose→propose engine, the per-source attempt cap, the
 // `healing.*` prefs, the Gateway diagnosis, and the `/api/healing/*` surface (served
@@ -269,9 +270,9 @@ pub struct ServerState {
     /// by background ingest loops (`crate::activity::ingest`) that subscribe to
     /// each producing engine. Records *what happened* ⇒ Core.
     pub activity: ryu_activity::ActivityStore,
-    /// Optional mesh plane (#478): a thin handle over the Tailscale/Headscale
-    /// status read path. The daemon itself is an opt-in Sidecar (never in
-    /// `startup_order`); this handle backs `GET /api/mesh/status`.
+    /// Optional private-network plane (#478): a thin handle over the
+    /// Tailscale/Headscale or Tailcat status read path. The provider itself is
+    /// an opt-in Sidecar; this handle backs `GET /api/mesh/status`.
     pub mesh: ryu_mesh::MeshHandle,
     /// In-memory connected-client presence registry (the "who's on this node"
     /// surface). Populated by the `track_connection` middleware on every
@@ -4061,7 +4062,7 @@ pub fn create_router(
             "/api/identities/connections/:id",
             get(identity_api::poll_connection).delete(identity_api::delete_connection),
         )
-        // ── Mesh status (#478): opt-in Tailscale/Headscale reachability ───────
+        // ── Private network status (#478): opt-in Tailscale/Headscale/Tailcat ──
         .route("/api/mesh/status", get(mesh_status))
         .route("/api/mesh/peers", get(mesh_peers))
         .route("/api/mesh/config", post(mesh_config))
@@ -21464,7 +21465,49 @@ async fn list_engines(State(state): State<ServerState>) -> Json<serde_json::Valu
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn engine_models() -> Json<serde_json::Value> {
-    Json(json!({ "models": crate::sidecar::adapters::engine_model_catalog() }))
+    let mut models = crate::sidecar::adapters::engine_model_catalog();
+    // Mesh LLM owns its model catalog because model weights/config live in its
+    // runtime, not in Ryu. When it is the selected resident engine, project its
+    // OpenAI-compatible `/v1/models` ids into the same secret-free catalog that
+    // every other engine picker consumes. A down/unselected Mesh LLM contributes
+    // no stale placeholder model, so Rooms cannot offer a prompt that would be
+    // routed to a different local engine.
+    if crate::sidecar::active_engine::ActiveEngineStore::load()
+        .active
+        .as_deref()
+        == Some("mesh-llm")
+    {
+        let endpoint = crate::sidecar::active_engine::local_engine_base_url("mesh-llm")
+            .map(|base| format!("{}/v1/models", base.trim_end_matches('/')));
+        if let Some(endpoint) = endpoint {
+            let client = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_millis(250))
+                .timeout(std::time::Duration::from_secs(1))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            if let Ok(response) = client.get(endpoint).send().await {
+                if let Ok(value) = response.json::<serde_json::Value>().await {
+                    let discovered = value
+                        .get("data")
+                        .and_then(serde_json::Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|entry| {
+                            let id = entry.get("id")?.as_str()?.trim();
+                            (!id.is_empty()).then(|| crate::sidecar::adapters::EngineModel {
+                                id: id.to_owned(),
+                                name: id.to_owned(),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    if !discovered.is_empty() {
+                        models.insert("mesh-llm".to_owned(), discovered);
+                    }
+                }
+            }
+        }
+    }
+    Json(json!({ "models": models }))
 }
 
 /// Convert the persona's first active source into the shared desktop glyph shape.
@@ -24113,6 +24156,9 @@ fn binary_installed_on_disk(name: &str) -> bool {
     // is the one `start()` will actually act on.
     if name == "tailscale" {
         return crate::sidecar::tailscale::resolve_mesh_pair().is_ok();
+    }
+    if name == "tailcat" {
+        return crate::sidecar::tailcat::resolve_binary().is_ok();
     }
     if name == "mesh-llm" {
         return crate::sidecar::providers::mesh_llm::installer::binary_is_available();
@@ -31414,9 +31460,12 @@ async fn tools_exec_resume(
 
 // ── Mesh status (#478) ───────────────────────────────────────────────────────
 
-/// `GET /api/mesh/status` — opt-in Tailscale/Headscale mesh reachability.
+/// `GET /api/mesh/status` — opt-in Tailscale/Headscale mesh or Tailcat reachability.
 ///
-/// Returns the canonical Contract 6 superset. When the mesh is disabled
+/// Returns the canonical Contract 6 superset. The backend is `tailscale`,
+/// `headscale`, or `tailcat`; Tailcat reports its short-lived connection
+/// bearer as `tailcat_address` and has no peer list or control server. When the
+/// mesh is disabled
 /// (`ryu_mesh::is_enabled()` false — `RYU_MESH_ENABLED` unset AND the
 /// `mesh-enabled` pref off) this is the all-default object with HTTP 200 (never
 /// 500), so a vanilla install reports `enabled:false` without amber.
@@ -31424,7 +31473,7 @@ async fn tools_exec_resume(
     get,
     path = "/api/mesh/status",
     tag = "Nodes",
-    summary = "Mesh (Tailscale/Headscale) reachability + peers",
+    summary = "Mesh (Tailscale/Headscale) or Tailcat reachability + peers",
     responses((status = 200, description = "Mesh status", body = serde_json::Value))
 )]
 async fn mesh_status(State(state): State<ServerState>) -> Json<serde_json::Value> {
@@ -31464,15 +31513,19 @@ async fn mesh_peers(State(state): State<ServerState>) -> Json<serde_json::Value>
     Json(serde_json::to_value(resp).unwrap_or_default())
 }
 
-/// `POST /api/mesh/config` — enable or disable the mesh plane from the desktop.
+/// `POST /api/mesh/config` — enable or disable the network plane from the desktop.
 ///
 /// Persists the `mesh-enabled` pref (so the choice survives a Core restart),
 /// updates the in-process signal [`ryu_mesh::set_pref_enabled`] immediately, and
-/// starts (enable) or stops (disable) the Tailscale daemon sidecar. Always
+/// starts (enable) or stops (disable) the selected network sidecar. Always
 /// answers 200 with the live status so the desktop toggle reflects the PERSISTED
 /// state even when the daemon fails to start; a daemon-start failure rides in a
 /// non-contract `start_error` field (the desktop surfaces it as a warning, not a
 /// rolled-back toggle).
+///
+/// The optional `backend` request field accepts `headscale`, `tailscale`, or
+/// `tailcat`. Supplying it persists the selection and, when the network is
+/// enabled, stops the previous backend before starting the selected one.
 ///
 /// A missing client is the common `start_error`, and it is no longer a dead end.
 /// PATH adoption still wins, but when there is no complete `tailscale`/`tailscaled`
@@ -31484,9 +31537,12 @@ async fn mesh_peers(State(state): State<ServerState>) -> Json<serde_json::Value>
 ///   archive, macOS Homebrew, or `RYU_TAILSCALE_RELEASE_URL`). True ⇒ the client
 ///   should offer the install; false ⇒ tell the user how to install it themselves.
 ///
-/// **Enabling the mesh INSTALLS the client** when one is missing and this node has
-/// an install route — the same way picking an engine installs it. The user asked
-/// for a tailnet, not for a shopping list; making them find
+/// **Enabling the Tailscale/Headscale mesh INSTALLS the client** when one is
+/// missing and this node has an install route — the same way picking an engine
+/// installs it. Tailcat is adopted from PATH or an explicit binary override
+/// because its upstream distribution differs by platform and its CLI/wire format
+/// carries no stability promise. The user asked for a connection, not for a
+/// shopping list; making them find
 /// `POST /api/setup/tailscale/install` themselves was the whole reason enabling
 /// the mesh felt broken. So a third non-contract field rides along:
 ///
@@ -31500,30 +31556,69 @@ async fn mesh_peers(State(state): State<ServerState>) -> Json<serde_json::Value>
 /// any client timeout. The daemon is started by that task once the binaries land,
 /// so the client does not need to re-POST this route.
 ///
-/// Security: enabling mesh makes this Core reachable over the tailnet, so the
-/// fail-closed token gate (`enforce_remote_auth`) requires a strong
+/// Security: enabling a network backend makes this Core reachable through a
+/// tailnet or a Tailcat listener, so the fail-closed token gate (`enforce_remote_auth`) requires a strong
 /// non-placeholder `RYU_TOKEN` before this handler persists or starts the mesh, and
 /// the same check runs again at startup. A node with no usable token cannot be
 /// enabled or restarted with the mesh on. Loopback-admin trust
 /// neutralization follows automatically: the gateway is (re)spawned with
 /// `RYU_MESH_ENABLED=1` once `is_enabled()` reads true.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[schema(rename_all = "camelCase")]
 struct MeshConfigBody {
     enabled: bool,
+    /// Optional explicit network backend. Existing callers may omit it and keep
+    /// the stored selection. Accepted values are `headscale`, `tailscale`, and
+    /// `tailcat`.
+    #[serde(default)]
+    backend: Option<String>,
 }
 
 #[utoipa::path(
     post,
     path = "/api/mesh/config",
     tag = "Nodes",
-    summary = "Enable or disable the mesh plane",
-    request_body = serde_json::Value,
+    summary = "Enable or disable the network plane",
+    request_body = MeshConfigBody,
     responses((status = 200, description = "Mesh status after applying the change", body = serde_json::Value))
 )]
 async fn mesh_config(
     State(state): State<ServerState>,
     Json(body): Json<MeshConfigBody>,
 ) -> axum::response::Response {
+    let was_enabled = ryu_mesh::is_enabled();
+    let current_backend = crate::sidecar::tailscale::mesh_backend().await.0;
+    let requested_backend = match body.backend.as_deref() {
+        Some(raw) => {
+            let Some(backend) = crate::sidecar::tailscale::parse_backend_choice(raw) else {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "backend must be one of: headscale, tailscale, tailcat".to_owned(),
+                );
+            };
+            backend
+        }
+        None => current_backend,
+    };
+
+    // An operator environment override is authoritative. Do not report a
+    // successful UI switch that the next status read will silently override.
+    if let Some(raw) = std::env::var("RYU_MESH_BACKEND")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let env_backend = crate::sidecar::tailscale::parse_backend(Some(&raw));
+        if body.backend.is_some() && requested_backend != env_backend {
+            return json_error(
+                    StatusCode::CONFLICT,
+                    format!(
+                        "RYU_MESH_BACKEND pins this node to {}; remove or change that environment override before selecting another backend",
+                        env_backend.as_str()
+                    ),
+                );
+        }
+    }
+
     if body.enabled {
         let resolved = crate::node_token::resolve_and_export();
         let token = resolved.as_ref().map(|value| value.token.clone());
@@ -31532,6 +31627,44 @@ async fn mesh_config(
             return json_error(StatusCode::FORBIDDEN, error);
         }
     }
+
+    // A backend swap while enabled must stop the old process before the new
+    // adapter starts. This is kept server-side so clients cannot leave both
+    // network listeners active by racing preference writes.
+    if was_enabled && current_backend != requested_backend {
+        if let Err(error) = state
+            .manager
+            .stop_sidecar(current_backend.sidecar_name())
+            .await
+        {
+            tracing::warn!(
+                backend = current_backend.as_str(),
+                "network: failed to stop previous backend during switch: {error}"
+            );
+        }
+        state
+            .manager
+            .unmark_installed(current_backend.sidecar_name())
+            .await;
+    }
+
+    if body.backend.is_some() {
+        if let Err(error) = state
+            .preferences
+            .set(
+                crate::mesh_host::MESH_BACKEND_PREF_KEY,
+                requested_backend.as_str(),
+            )
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("failed to persist mesh-backend pref: {error}") })),
+            )
+                .into_response();
+        }
+    }
+
     let value = if body.enabled { "true" } else { "false" };
     if let Err(e) = state
         .preferences
@@ -31553,46 +31686,73 @@ async fn mesh_config(
         can_install: false,
     };
     if body.enabled {
-        // The PURE pre-check first, so a missing client is diagnosed structurally
-        // rather than scraped back out of the start error's prose.
-        if let Err(m) = crate::sidecar::tailscale::ensure_mesh_binaries() {
-            tracing::warn!("mesh: {m}");
-            // Install it FOR them when this node has a route, instead of handing
-            // back a sentence about `brew`. The task starts the daemon itself once
-            // the binaries land (mesh stays enabled throughout), so the client's
-            // only job is to show progress and re-read the status.
-            if m.can_install {
-                tracing::info!(
-                    "mesh: no Tailscale client on this node — installing one in the background"
-                );
-                spawn_mesh_client_install(
-                    state.downloads.clone(),
-                    Arc::clone(&state.manager),
-                    Arc::clone(&state.install_status),
-                );
-                // True even when an install was ALREADY running (the helper's
-                // `false`): the user's enable is being served by that run, and
-                // reporting "not installing" would send the client back to the
-                // dead-end error text.
-                installing = true;
+        match requested_backend {
+            crate::sidecar::tailscale::MeshBackend::Tailcat => {
+                state.manager.unmark_installed("tailscale").await;
+                if let Err(error) = crate::sidecar::tailcat::resolve_binary() {
+                    tracing::warn!("network: {error}");
+                    start_error = Some(error.to_string());
+                    missing.missing = vec!["tailcat".to_owned()];
+                } else {
+                    state.manager.mark_installed("tailcat").await;
+                    if let Err(error) = state.manager.start_sidecar("tailcat").await {
+                        tracing::warn!("network: Tailcat failed to start: {error}");
+                        start_error = Some(error.to_string());
+                    }
+                }
             }
-            start_error = Some(m.to_string());
-            missing = m;
-        } else {
-            // Make the daemon eligible to run, then start it.
-            state.manager.mark_installed("tailscale").await;
-            if let Err(e) = state.manager.start_sidecar("tailscale").await {
-                tracing::warn!("mesh: daemon failed to start after enable: {e}");
-                start_error = Some(e.to_string());
+            crate::sidecar::tailscale::MeshBackend::Headscale
+            | crate::sidecar::tailscale::MeshBackend::Tailscale => {
+                // The PURE pre-check first, so a missing client is diagnosed
+                // structurally rather than scraped back out of the start error's
+                // prose.
+                if let Err(m) = crate::sidecar::tailscale::ensure_mesh_binaries() {
+                    tracing::warn!("mesh: {m}");
+                    // Install it FOR them when this node has a route, instead of
+                    // handing back a sentence about `brew`. The task starts the
+                    // daemon itself once the binaries land.
+                    if m.can_install {
+                        tracing::info!(
+                            "mesh: no Tailscale client on this node — installing one in the background"
+                        );
+                        spawn_mesh_client_install(
+                            state.downloads.clone(),
+                            Arc::clone(&state.manager),
+                            Arc::clone(&state.install_status),
+                        );
+                        installing = true;
+                    }
+                    start_error = Some(m.to_string());
+                    missing = m;
+                    state.manager.unmark_installed("tailscale").await;
+                } else {
+                    state.manager.unmark_installed("tailcat").await;
+                    // Make the daemon eligible to run, then start it.
+                    state.manager.mark_installed("tailscale").await;
+                    if let Err(error) = state.manager.start_sidecar("tailscale").await {
+                        tracing::warn!("mesh: daemon failed to start after enable: {error}");
+                        start_error = Some(error.to_string());
+                    }
+                }
             }
         }
     } else {
         // Best-effort stop — a daemon that never started is not an error for a
-        // disable request, and neither is `tailscale down` on an absent socket.
-        state.manager.unmark_installed("tailscale").await;
-        if let Err(e) = state.manager.stop_sidecar("tailscale").await {
-            tracing::warn!("mesh: stop after disable failed: {e}");
+        // disable request. Stop BOTH adapters so disabling after a backend
+        // preference change cannot leave the old listener alive.
+        for backend in [
+            crate::sidecar::tailscale::MeshBackend::Headscale,
+            crate::sidecar::tailscale::MeshBackend::Tailcat,
+        ] {
+            if let Err(error) = state.manager.stop_sidecar(backend.sidecar_name()).await {
+                tracing::warn!(
+                    backend = backend.as_str(),
+                    "network: stop after disable failed: {error}"
+                );
+            }
         }
+        state.manager.unmark_installed("tailscale").await;
+        state.manager.unmark_installed("tailcat").await;
     }
 
     let status = state.mesh.status().await;
@@ -31654,13 +31814,21 @@ pub(crate) fn spawn_mesh_client_install(
         match result {
             Ok(version) => {
                 install_status.set_installed("tailscale", version).await;
-                if ryu_mesh::is_enabled() {
+                let selected_backend = crate::sidecar::tailscale::mesh_backend().await.0;
+                if ryu_mesh::is_enabled()
+                    && selected_backend != crate::sidecar::tailscale::MeshBackend::Tailcat
+                {
                     manager.mark_installed("tailscale").await;
                     if let Err(e) = manager.start_sidecar("tailscale").await {
                         tracing::warn!("mesh: daemon failed to start after auto-install: {e}");
                     } else {
                         tracing::info!("mesh: client installed and daemon started");
                     }
+                } else if ryu_mesh::is_enabled() {
+                    tracing::info!(
+                        backend = selected_backend.as_str(),
+                        "mesh: client installed, but Tailcat is the selected backend; leaving Tailscale daemon stopped"
+                    );
                 } else {
                     tracing::info!("mesh: client installed, but the mesh was turned off meanwhile");
                 }
@@ -39491,6 +39659,9 @@ async fn install_sidecar(
             "tailscale" => {
                 crate::sidecar::tailscale::downloader::install_mesh_client(&downloads).await
             }
+            "tailcat" => crate::sidecar::tailcat::resolve_binary()
+                .map(|_| "adopted".to_owned())
+                .map_err(|error| anyhow::anyhow!(error.to_string())),
             "island" => {
                 let version = query
                     .version
@@ -43099,17 +43270,48 @@ async fn restore_workflow_version(
     }
 }
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
 struct RunWorkflowBody {
     /// Initial input map (key → value) for `Input` nodes.
     #[serde(default)]
     input: std::collections::HashMap<String, String>,
     /// Optional run id to create or resume. Generated when absent.
-    #[serde(default)]
+    #[serde(default, alias = "run_id")]
     run_id: Option<String>,
+    /// Evaluate in memory without creating run history or invoking effectful
+    /// nodes. The supplied `runId` is ignored in this mode.
+    #[serde(default, alias = "dry_run")]
+    dry_run: bool,
 }
 
-/// `POST /workflows/:id/run` — execute a persisted workflow end-to-end.
+#[cfg(test)]
+mod workflow_run_body_tests {
+    use super::RunWorkflowBody;
+
+    #[test]
+    fn accepts_camel_case_dry_run_and_legacy_snake_case_alias() {
+        let camel: RunWorkflowBody = serde_json::from_value(serde_json::json!({
+            "input": { "text": "hello" },
+            "runId": "ignored",
+            "dryRun": true
+        }))
+        .expect("camel-case request body should parse");
+        assert!(camel.dry_run);
+        assert_eq!(camel.run_id.as_deref(), Some("ignored"));
+
+        let legacy: RunWorkflowBody = serde_json::from_value(serde_json::json!({
+            "dry_run": true,
+            "run_id": "legacy"
+        }))
+        .expect("legacy snake-case aliases should remain readable");
+        assert!(legacy.dry_run);
+        assert_eq!(legacy.run_id.as_deref(), Some("legacy"));
+    }
+}
+
+/// `POST /workflows/:id/run` — execute a persisted workflow end-to-end, or
+/// evaluate it as a read-only dry run when `dryRun` is true.
 ///
 /// Routes through the durable engine selected by `durable::select_engine()` —
 /// the in-process petgraph topological executor with file-backed resumable
@@ -43117,14 +43319,20 @@ struct RunWorkflowBody {
 /// `run_id` to resume a run after a Core restart (already-Completed nodes are
 /// skipped and their output reused).
 ///
+/// Set `dryRun: true` to evaluate the graph as a transient read-only projection:
+/// no run file, lifecycle hook, approval, timer checkpoint, or effectful node
+/// execution is created. Pure nodes and classified read-only MCP tools may run;
+/// other effectful nodes are returned as skipped with reasons.
+///
 /// Returns 503 when the gateway is unreachable and fail-closed is in effect.
 #[utoipa::path(
     post,
     path = "/workflows/{id}/run",
     tag = "Workflows",
     summary = "Run a workflow",
+    description = "Execute a workflow durably, or set dryRun to true for a transient read-only projection. Normal runs use file-backed resumable checkpoints; dry runs create no run history, lifecycle hook, approval, timer checkpoint, or effectful node execution. Pure nodes and classified read-only MCP tools may run, while other effectful nodes are returned as skipped with reasons. A caller-provided runId is ignored in dry-run mode.",
     params(("id" = String, Path)),
-    request_body = serde_json::Value,
+    request_body = RunWorkflowBody,
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 async fn run_workflow(
@@ -43160,19 +43368,31 @@ async fn run_workflow(
         }
     };
 
-    let run_id = body
-        .run_id
-        .unwrap_or_else(|| format!("run_{}", uuid::Uuid::new_v4().simple()));
-
-    let engine = crate::workflow::durable::select_engine();
+    let run_id = if body.dry_run {
+        // Dry runs are transient projections. Never accept a caller-provided
+        // id here: a fresh id avoids accidental durable-run lookup and makes
+        // the no-history contract explicit.
+        format!("dryrun_{}", uuid::Uuid::new_v4().simple())
+    } else {
+        body.run_id
+            .unwrap_or_else(|| format!("run_{}", uuid::Uuid::new_v4().simple()))
+    };
 
     tracing::debug!(
         workflow_id = %id,
         run_id = %run_id,
-        "workflow: starting durable run"
+        dry_run = body.dry_run,
+        "workflow: starting run"
     );
 
-    match engine.execute(&workflow, body.input, run_id).await {
+    let outcome = if body.dry_run {
+        crate::workflow::executor::dry_run_workflow(&workflow, body.input, run_id).await
+    } else {
+        let engine = crate::workflow::durable::select_engine();
+        engine.execute(&workflow, body.input, run_id).await
+    };
+
+    match outcome {
         Ok(run) => (StatusCode::OK, Json(json!({ "success": true, "run": run }))),
         Err(e) => {
             // Fail-closed: a gateway-unreachable error (from run_prompt) maps to 503.

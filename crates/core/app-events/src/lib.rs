@@ -49,6 +49,12 @@
 //! [`EventEmitter::emit`] therefore logs and swallows, and [`EventEmitter::try_emit`]
 //! is available when a caller genuinely wants the outcome.
 
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -67,8 +73,523 @@ const ENV_EXT_TOKEN: &str = "RYU_EXT_TOKEN";
 const HDR_PLUGIN_ID: &str = "x-ryu-plugin-id";
 /// The kernel capability this crate invokes.
 const CAP_EVENTS_EMIT: &str = "events.emit";
+/// The kernel capability that broadcasts a bounded named event into an app room.
+const CAP_REALTIME_PUBLISH: &str = "realtime.publish";
 /// The kernel capability that records a provider-neutral external-tool charge.
 const CAP_TOOL_USAGE_RECORD: &str = "billing.recordToolCharge";
+
+const MAX_MODEL_ID_BYTES: usize = 256;
+const MAX_MODEL_PROVIDER_BYTES: usize = 64;
+const MAX_MODEL_REQUEST_ID_BYTES: usize = 128;
+const MAX_MODEL_MESSAGES: usize = 40;
+const MAX_MODEL_MESSAGE_BYTES: usize = 32 * 1024;
+const MAX_MODEL_CONTEXT_BYTES: usize = 128 * 1024;
+const MAX_MODEL_OUTPUT_TOKENS: u32 = 4096;
+const MAX_REALTIME_ROOM_ID_BYTES: usize = 512;
+const MAX_REALTIME_EVENT_NAME_BYTES: usize = 128;
+const MAX_REALTIME_EVENT_BYTES: usize = 256 * 1024;
+
+/// One text message sent through the generic sidecar-to-Core model stream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStreamMessage {
+    pub content: String,
+    pub role: String,
+}
+
+/// Provider-neutral request for a bounded streaming model call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStreamRequest {
+    pub messages: Vec<ModelStreamMessage>,
+    pub model: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    pub request_id: String,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+}
+
+impl ModelStreamRequest {
+    pub fn validate(&self) -> Result<(), ModelStreamError> {
+        validate_text(&self.model, MAX_MODEL_ID_BYTES, "model")?;
+        validate_text(&self.request_id, MAX_MODEL_REQUEST_ID_BYTES, "requestId")?;
+        if self.messages.is_empty() || self.messages.len() > MAX_MODEL_MESSAGES {
+            return Err(ModelStreamError::Invalid(
+                "messages must contain 1..40 items".to_owned(),
+            ));
+        }
+        let mut total = 0usize;
+        for message in &self.messages {
+            if !matches!(message.role.as_str(), "system" | "user" | "assistant") {
+                return Err(ModelStreamError::Invalid(
+                    "message role is not supported".to_owned(),
+                ));
+            }
+            if message.content.is_empty() || message.content.len() > MAX_MODEL_MESSAGE_BYTES {
+                return Err(ModelStreamError::Invalid(
+                    "message content is empty or too long".to_owned(),
+                ));
+            }
+            if message
+                .content
+                .chars()
+                .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+            {
+                return Err(ModelStreamError::Invalid(
+                    "message content contains unsupported control characters".to_owned(),
+                ));
+            }
+            total = total.saturating_add(message.content.len());
+        }
+        if total > MAX_MODEL_CONTEXT_BYTES {
+            return Err(ModelStreamError::Invalid(
+                "message context is too large".to_owned(),
+            ));
+        }
+        if let Some(provider) = &self.provider {
+            validate_text(provider, MAX_MODEL_PROVIDER_BYTES, "provider")?;
+            if provider.contains("://") || provider.contains('/') {
+                return Err(ModelStreamError::Invalid(
+                    "provider must be a provider slot, not a URL".to_owned(),
+                ));
+            }
+        }
+        if self
+            .max_tokens
+            .is_some_and(|value| value == 0 || value > MAX_MODEL_OUTPUT_TOKENS)
+        {
+            return Err(ModelStreamError::Invalid(
+                "maxTokens must be between 1 and 4096".to_owned(),
+            ));
+        }
+        if self
+            .temperature
+            .is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
+        {
+            return Err(ModelStreamError::Invalid(
+                "temperature must be between 0 and 2".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn validate_text(value: &str, max_bytes: usize, field: &str) -> Result<(), ModelStreamError> {
+    if value.trim().is_empty() || value.len() > max_bytes || value.chars().any(char::is_control) {
+        return Err(ModelStreamError::Invalid(format!(
+            "{field} is empty, too long, or invalid"
+        )));
+    }
+    Ok(())
+}
+
+/// The only events a sidecar can receive from Core's model stream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ModelStreamEvent {
+    #[serde(rename = "textDelta")]
+    TextDelta {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        delta: String,
+    },
+    #[serde(rename = "completed")]
+    Completed {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    #[serde(rename = "failed")]
+    Failed {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelStreamError {
+    NotHosted,
+    Invalid(String),
+    Transport(String),
+    Rejected { status: u16, code: String },
+    Protocol(String),
+}
+
+impl std::fmt::Display for ModelStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotHosted => write!(f, "not running as a Core-hosted sidecar"),
+            Self::Invalid(message) => write!(f, "invalid model stream request: {message}"),
+            Self::Transport(message) => write!(f, "model stream transport failed: {message}"),
+            Self::Rejected { status, code } => {
+                write!(f, "model stream rejected ({status}): {code}")
+            }
+            Self::Protocol(message) => write!(f, "model stream protocol failed: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for ModelStreamError {}
+
+/// A streaming response from Core. It filters the wire to [`ModelStreamEvent`]
+/// values before an app sees it.
+pub struct ModelStream {
+    inner: Pin<Box<dyn Stream<Item = Result<ModelStreamEvent, ModelStreamError>> + Send>>,
+}
+
+impl Stream for ModelStream {
+    type Item = Result<ModelStreamEvent, ModelStreamError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+/// Reusable client for `POST /api/host/model/stream`.
+#[derive(Clone)]
+pub struct ModelStreamClient {
+    plugin_id: String,
+    http: reqwest::Client,
+    endpoint: Option<String>,
+    token: Option<String>,
+}
+
+impl ModelStreamClient {
+    #[must_use]
+    pub fn from_env(plugin_id: impl Into<String>) -> Self {
+        Self::with_client(plugin_id, reqwest::Client::new())
+    }
+
+    #[must_use]
+    pub fn with_client(plugin_id: impl Into<String>, http: reqwest::Client) -> Self {
+        let endpoint = core_model_stream_endpoint();
+        let token = std::env::var(ENV_EXT_TOKEN)
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        Self {
+            plugin_id: plugin_id.into(),
+            http,
+            endpoint,
+            token,
+        }
+    }
+
+    /// Build a client for a caller-supplied Core-compatible endpoint. This is
+    /// useful for an app's integration harness and for nodes that front Core
+    /// through a local test listener; normal sidecars should use [`Self::from_env`].
+    #[must_use]
+    pub fn with_endpoint(
+        plugin_id: impl Into<String>,
+        http: reqwest::Client,
+        endpoint: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Self {
+        Self {
+            plugin_id: plugin_id.into(),
+            http,
+            endpoint: Some(endpoint.into()),
+            token: Some(token.into()),
+        }
+    }
+
+    /// Build a deliberately disabled client for standalone app operation and
+    /// tests; no network request can be attempted.
+    #[must_use]
+    pub fn disabled(plugin_id: impl Into<String>) -> Self {
+        Self {
+            plugin_id: plugin_id.into(),
+            http: reqwest::Client::new(),
+            endpoint: None,
+            token: None,
+        }
+    }
+
+    pub async fn stream(
+        &self,
+        request: ModelStreamRequest,
+    ) -> Result<ModelStream, ModelStreamError> {
+        request.validate()?;
+        let (Some(endpoint), Some(token)) = (self.endpoint.as_deref(), self.token.as_deref())
+        else {
+            return Err(ModelStreamError::NotHosted);
+        };
+        let response = self
+            .http
+            .post(endpoint)
+            .header(HDR_PLUGIN_ID, &self.plugin_id)
+            .bearer_auth(token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| ModelStreamError::Transport(error.to_string()))?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            let body = response.text().await.unwrap_or_default();
+            let code = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| value.get("code").and_then(Value::as_str).map(str::to_owned))
+                .unwrap_or_else(|| "modelStreamRejected".to_owned());
+            return Err(ModelStreamError::Rejected { status, code });
+        }
+
+        let request_id = request.request_id;
+        let mut upstream = response.bytes_stream();
+        let inner = async_stream::stream! {
+            let mut buffer = Vec::new();
+            let mut terminal = false;
+            while let Some(chunk) = upstream.next().await {
+                let bytes = match chunk {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        yield Err(ModelStreamError::Transport(error.to_string()));
+                        terminal = true;
+                        break;
+                    }
+                };
+                buffer.extend_from_slice(&bytes);
+                while let Some(position) = find_sse_frame_boundary(&buffer) {
+                    let frame = buffer.drain(..position).collect::<Vec<_>>();
+                    buffer.drain(..2);
+                    match parse_model_stream_frame(&frame, &request_id) {
+                        Ok(Some(event)) => {
+                            terminal = matches!(event, ModelStreamEvent::Completed { .. } | ModelStreamEvent::Failed { .. });
+                            yield Ok(event);
+                            if terminal { break; }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            yield Err(error);
+                            terminal = true;
+                            break;
+                        }
+                    }
+                }
+                if terminal { break; }
+            }
+            if !terminal {
+                yield Err(ModelStreamError::Protocol("stream ended without a terminal event".to_owned()));
+            }
+        };
+        Ok(ModelStream {
+            inner: Box::pin(inner),
+        })
+    }
+}
+
+/// A bounded named event published into the caller's application-owned room.
+#[derive(Debug, Clone, Serialize)]
+struct RealtimePublishRequest {
+    room_id: String,
+    event: String,
+    data: Value,
+}
+
+impl RealtimePublishRequest {
+    fn validate(&self) -> Result<(), RealtimePublishError> {
+        if self.room_id.trim().is_empty()
+            || self.room_id.len() > MAX_REALTIME_ROOM_ID_BYTES
+            || self.room_id.chars().any(char::is_control)
+        {
+            return Err(RealtimePublishError::Invalid(
+                "room_id is empty, too long, or invalid".to_owned(),
+            ));
+        }
+        if self.event.trim().is_empty()
+            || self.event.len() > MAX_REALTIME_EVENT_NAME_BYTES
+            || self.event.chars().any(char::is_control)
+        {
+            return Err(RealtimePublishError::Invalid(
+                "event is empty, too long, or invalid".to_owned(),
+            ));
+        }
+        let bytes = serde_json::to_vec(self).map_err(|_| {
+            RealtimePublishError::Invalid("event data could not be serialized".to_owned())
+        })?;
+        if bytes.len() > MAX_REALTIME_EVENT_BYTES {
+            return Err(RealtimePublishError::Invalid(
+                "event data is too large".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum RealtimePublishError {
+    NotHosted,
+    Invalid(String),
+    Transport(reqwest::Error),
+    Rejected { status: u16, body: String },
+}
+
+impl std::fmt::Display for RealtimePublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotHosted => write!(f, "not running as a Core-hosted sidecar"),
+            Self::Invalid(message) => write!(f, "invalid realtime publish: {message}"),
+            Self::Transport(error) => write!(f, "realtime publish transport failed: {error}"),
+            Self::Rejected { status, body } => {
+                write!(f, "Core rejected realtime publish ({status}): {body}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RealtimePublishError {}
+
+/// Publishes named events through Core's generic application-room capability.
+/// Core supplies the app namespace from the authenticated sidecar identity; the
+/// caller can only choose the opaque room id and event payload.
+#[derive(Clone)]
+pub struct ApplicationRoomPublisher {
+    plugin_id: String,
+    http: reqwest::Client,
+    endpoint: Option<String>,
+    token: Option<String>,
+}
+
+impl ApplicationRoomPublisher {
+    #[must_use]
+    pub fn from_env(plugin_id: impl Into<String>) -> Self {
+        Self::with_client(plugin_id, reqwest::Client::new())
+    }
+
+    #[must_use]
+    pub fn with_client(plugin_id: impl Into<String>, http: reqwest::Client) -> Self {
+        Self {
+            plugin_id: plugin_id.into(),
+            http,
+            endpoint: core_endpoint_for(CAP_REALTIME_PUBLISH),
+            token: std::env::var(ENV_EXT_TOKEN)
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+        }
+    }
+
+    /// Build a deliberately disabled publisher for standalone app operation and
+    /// tests; no network request can be attempted.
+    #[must_use]
+    pub fn disabled(plugin_id: impl Into<String>) -> Self {
+        Self {
+            plugin_id: plugin_id.into(),
+            http: reqwest::Client::new(),
+            endpoint: None,
+            token: None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_hosted(&self) -> bool {
+        self.endpoint.is_some() && self.token.is_some()
+    }
+
+    /// Broadcast one named event through Core's authenticated application-room
+    /// capability. This does not wait for Desktop subscribers.
+    pub async fn publish(
+        &self,
+        room_id: impl Into<String>,
+        event: impl Into<String>,
+        data: Value,
+    ) -> Result<(), RealtimePublishError> {
+        let request = RealtimePublishRequest {
+            room_id: room_id.into(),
+            event: event.into(),
+            data,
+        };
+        request.validate()?;
+        let (Some(endpoint), Some(token)) = (self.endpoint.as_deref(), self.token.as_deref())
+        else {
+            return Err(RealtimePublishError::NotHosted);
+        };
+        let response = self
+            .http
+            .post(endpoint)
+            .header(HDR_PLUGIN_ID, &self.plugin_id)
+            .bearer_auth(token)
+            .json(&request)
+            .send()
+            .await
+            .map_err(RealtimePublishError::Transport)?;
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(RealtimePublishError::Rejected {
+                status,
+                body: response.text().await.unwrap_or_default(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Best-effort publishing for terminal persistence and other paths where a
+    /// missing live subscriber must not fail the durable operation.
+    pub async fn publish_best_effort(
+        &self,
+        room_id: impl Into<String>,
+        event: impl Into<String>,
+        data: Value,
+    ) {
+        if let Err(error) = self.publish(room_id, event, data).await {
+            if !matches!(error, RealtimePublishError::NotHosted) {
+                tracing::warn!("app-room publish failed: {error}");
+            }
+        }
+    }
+}
+
+fn core_model_stream_endpoint() -> Option<String> {
+    let port = std::env::var(ENV_CORE_PORT)
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .or_else(|| {
+            std::env::var(ENV_CORE_BIND).ok().and_then(|bind| {
+                bind.rsplit_once(':')
+                    .and_then(|(_, port)| port.trim().parse::<u16>().ok())
+            })
+        })?;
+    Some(format!("http://127.0.0.1:{port}/api/host/model/stream"))
+}
+
+fn find_sse_frame_boundary(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(2).position(|window| window == b"\n\n")
+}
+
+fn parse_model_stream_frame(
+    frame: &[u8],
+    request_id: &str,
+) -> Result<Option<ModelStreamEvent>, ModelStreamError> {
+    let text = std::str::from_utf8(frame)
+        .map_err(|_| ModelStreamError::Protocol("stream frame is not UTF-8".to_owned()))?;
+    let data = text
+        .lines()
+        .find_map(|line| line.strip_prefix("data:").map(str::trim))
+        .unwrap_or_default();
+    if data.is_empty() {
+        return Ok(None);
+    }
+    if data == "[DONE]" {
+        return Ok(Some(ModelStreamEvent::Completed {
+            request_id: request_id.to_owned(),
+        }));
+    }
+    let value = serde_json::from_str::<Value>(data)
+        .map_err(|_| ModelStreamError::Protocol("stream frame is not valid JSON".to_owned()))?;
+    let event = serde_json::from_value::<ModelStreamEvent>(value.clone()).ok();
+    if event.is_some() {
+        return Ok(event);
+    }
+    if value.get("type").and_then(Value::as_str) == Some("error") || value.get("error").is_some() {
+        return Ok(Some(ModelStreamEvent::Failed {
+            request_id: request_id.to_owned(),
+            code: "providerError".to_owned(),
+            message: "model stream failed".to_owned(),
+        }));
+    }
+    Ok(None)
+}
 
 /// What Core reports back about a fan-out: how many subscribers it reached.
 ///
@@ -293,9 +814,11 @@ fn core_endpoint_for(capability: &str) -> Option<String> {
                     .and_then(|(_, p)| p.trim().parse::<u16>().ok())
             })
         })?;
-    Some(format!(
-        "http://127.0.0.1:{port}/api/host/capability/{capability}"
-    ))
+    Some(endpoint_for_port(port, capability))
+}
+
+fn endpoint_for_port(port: u16, capability: &str) -> String {
+    format!("http://127.0.0.1:{port}/api/host/capability/{capability}")
 }
 
 /// Emits app events on behalf of ONE plugin.
@@ -944,5 +1467,153 @@ mod tests {
                 workflows: 1
             }
         );
+    }
+
+    #[test]
+    fn model_stream_request_accepts_bounded_text_messages() {
+        let request = ModelStreamRequest {
+            messages: vec![ModelStreamMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
+            model: "mesh-model".to_owned(),
+            provider: Some("local".to_owned()),
+            request_id: "req_1".to_owned(),
+            max_tokens: Some(128),
+            temperature: Some(0.2),
+        };
+        assert!(request.validate().is_ok());
+
+        let wire = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(wire["requestId"], "req_1");
+        assert_eq!(wire["messages"][0]["role"], "user");
+        assert_eq!(wire["maxTokens"], 128);
+    }
+
+    #[test]
+    fn model_stream_request_rejects_urls_and_oversized_context() {
+        let mut request = ModelStreamRequest {
+            messages: vec![ModelStreamMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
+            model: "mesh-model".to_owned(),
+            provider: Some("http://127.0.0.1:9337".to_owned()),
+            request_id: "req_1".to_owned(),
+            max_tokens: Some(128),
+            temperature: None,
+        };
+        assert!(matches!(
+            request.validate(),
+            Err(ModelStreamError::Invalid(_))
+        ));
+
+        request.provider = Some("local".to_owned());
+        request.messages[0].content = "x".repeat(MAX_MODEL_CONTEXT_BYTES);
+        assert!(matches!(
+            request.validate(),
+            Err(ModelStreamError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn realtime_publish_request_has_exact_bounded_wire_shape() {
+        let request = RealtimePublishRequest {
+            room_id: "room_opaque_id".to_owned(),
+            event: "turn.delta".to_owned(),
+            data: serde_json::json!({ "runId": "run_opaque_id", "delta": "text" }),
+        };
+        assert!(request.validate().is_ok());
+        assert_eq!(
+            serde_json::to_value(request).expect("request serializes"),
+            serde_json::json!({
+                "room_id": "room_opaque_id",
+                "event": "turn.delta",
+                "data": { "runId": "run_opaque_id", "delta": "text" }
+            })
+        );
+        assert_eq!(
+            endpoint_for_port(7980, CAP_REALTIME_PUBLISH),
+            "http://127.0.0.1:7980/api/host/capability/realtime.publish"
+        );
+    }
+
+    #[test]
+    fn realtime_publish_rejects_invalid_room_event_and_payload() {
+        let mut request = RealtimePublishRequest {
+            room_id: String::new(),
+            event: "turn.delta".to_owned(),
+            data: Value::Null,
+        };
+        assert!(matches!(
+            request.validate(),
+            Err(RealtimePublishError::Invalid(message)) if message.contains("room_id")
+        ));
+
+        request.room_id = "room_1".to_owned();
+        request.event = "".to_owned();
+        assert!(matches!(
+            request.validate(),
+            Err(RealtimePublishError::Invalid(message)) if message.contains("event")
+        ));
+
+        request.event = "turn.delta".to_owned();
+        request.data = Value::String("x".repeat(MAX_REALTIME_EVENT_BYTES));
+        assert!(matches!(
+            request.validate(),
+            Err(RealtimePublishError::Invalid(message)) if message.contains("too large")
+        ));
+    }
+
+    #[tokio::test]
+    async fn realtime_publish_is_not_hosted_without_callback_coordinates() {
+        let publisher = ApplicationRoomPublisher {
+            plugin_id: "@ryu/rooms".to_owned(),
+            http: reqwest::Client::new(),
+            endpoint: None,
+            token: None,
+        };
+        assert!(matches!(
+            publisher.publish("room_1", "turn.delta", Value::Null).await,
+            Err(RealtimePublishError::NotHosted)
+        ));
+    }
+
+    #[test]
+    fn model_stream_event_uses_camel_case_wire_fields() {
+        let event = ModelStreamEvent::TextDelta {
+            request_id: "req_1".to_owned(),
+            delta: "hello".to_owned(),
+        };
+        let wire = serde_json::to_value(event).expect("event serializes");
+        assert_eq!(wire["type"], "textDelta");
+        assert_eq!(wire["requestId"], "req_1");
+    }
+
+    #[test]
+    fn model_stream_parser_accepts_delta_and_done_frames() {
+        assert_eq!(
+            parse_model_stream_frame(
+                br#"data: {"type":"textDelta","requestId":"req_1","delta":"hello"}"#,
+                "req_1",
+            )
+            .expect("delta frame"),
+            Some(ModelStreamEvent::TextDelta {
+                request_id: "req_1".to_owned(),
+                delta: "hello".to_owned(),
+            })
+        );
+        assert!(matches!(
+            parse_model_stream_frame(b"data: [DONE]", "req_1").expect("done frame"),
+            Some(ModelStreamEvent::Completed { request_id }) if request_id == "req_1"
+        ));
+    }
+
+    #[test]
+    fn model_stream_parser_rejects_malformed_json() {
+        assert!(matches!(
+            parse_model_stream_frame(b"data: not-json", "req_1"),
+            Err(ModelStreamError::Protocol(_))
+        ));
     }
 }

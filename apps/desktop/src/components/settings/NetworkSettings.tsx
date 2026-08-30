@@ -1,16 +1,17 @@
 // apps/desktop/src/components/settings/NetworkSettings.tsx
 //
 // The node's network surface (Gateway settings → Network): the opt-in
-// Tailscale/Headscale mesh plane. Owns the enable toggle, a live status line,
-// and the self-hosted Headscale control-server URL (`mesh-login-server`).
+// Tailscale/Headscale mesh or short-lived Tailcat connection. Owns the enable
+// toggle, a live status line, the Tailcat address, and the Headscale URL.
 //
-// The mesh is PATH-adopted — it runs the official `tailscale` + `tailscaled`
-// client (userspace networking, no admin rights), which must be installed on
-// this machine. Enabling writes the `mesh-enabled` pref through
-// `POST /api/mesh/config`; Core then starts the daemon, so this is the writer
-// the rest of the mesh surface (the node dropdown's `MeshSection`, status tones)
-// keys off.
+// Tailscale/Headscale use the official `tailscale` + `tailscaled` client; Tailcat
+// uses the separately installed `tailcat` CLI. Enabling writes the
+// `mesh-enabled` pref through `POST /api/mesh/config`; Core then starts the
+// selected backend, so this is the writer the rest of the network surface keys
+// off.
 
+import { Copy01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
@@ -21,7 +22,14 @@ import { useFeatureFlag } from "@/src/hooks/useFeatureFlag.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchMeshStatus,
+	MESH_BACKEND_HEADSCALE,
+	MESH_BACKEND_PREF,
+	MESH_BACKEND_TAILCAT,
+	MESH_BACKEND_TAILSCALE,
+	MESH_LOGIN_SERVER_PREF,
+	type MeshBackend,
 	type MeshStatus,
+	parseMeshBackend,
 	setMeshEnabled,
 } from "@/src/lib/api/mesh.ts";
 import { getPreference, setPreference } from "@/src/lib/api/preferences.ts";
@@ -51,13 +59,21 @@ export function NetworkSettings() {
 	const [headscaleUrl, setHeadscaleUrlValue] = useState("");
 	const [headscaleLoaded, setHeadscaleLoaded] = useState(false);
 	const [savingHeadscale, setSavingHeadscale] = useState(false);
+	const [meshBackend, setMeshBackend] = useState<MeshBackend>(
+		MESH_BACKEND_HEADSCALE
+	);
+	const [tailcatCopied, setTailcatCopied] = useState(false);
 
 	useEffect(() => {
 		let cancelled = false;
 		const target = toTarget(useNodeStore.getState().getActiveNode());
-		getPreference(target, "mesh-login-server").then((val) => {
+		Promise.all([
+			getPreference(target, MESH_LOGIN_SERVER_PREF),
+			getPreference(target, MESH_BACKEND_PREF),
+		]).then(([loginServer, backend]) => {
 			if (!cancelled) {
-				setHeadscaleUrlValue(val ?? "");
+				setHeadscaleUrlValue(loginServer ?? "");
+				setMeshBackend(parseMeshBackend(backend));
 				setHeadscaleLoaded(true);
 			}
 		});
@@ -103,7 +119,9 @@ export function NetworkSettings() {
 				sileo.warning({
 					title: canInstall
 						? "Mesh enabled, but the daemon didn't start"
-						: "Mesh enabled — install the Tailscale client",
+						: meshBackend === MESH_BACKEND_TAILCAT
+							? "Network enabled — install the Tailcat CLI"
+							: "Mesh enabled — install the Tailscale client",
 					description: startError,
 				});
 				return;
@@ -112,8 +130,12 @@ export function NetworkSettings() {
 				title: enabled ? "Mesh enabled" : "Mesh disabled",
 				description: enabled
 					? status.reachable
-						? "This node is now on the tailnet."
-						: "The mesh daemon is starting; it may need to finish connecting."
+						? meshBackend === MESH_BACKEND_TAILCAT
+							? "Tailcat is listening and its short-lived address is ready to share."
+							: "This node is now on the tailnet."
+						: meshBackend === MESH_BACKEND_TAILCAT
+							? "The Tailcat listener is starting; it will publish an address when ready."
+							: "The mesh daemon is starting; it may need to finish connecting."
 					: "This node has left the tailnet.",
 			});
 		} catch (e) {
@@ -136,7 +158,11 @@ export function NetworkSettings() {
 	const handleSaveHeadscale = async () => {
 		setSavingHeadscale(true);
 		const target = toTarget(useNodeStore.getState().getActiveNode());
-		const ok = await setPreference(target, "mesh-login-server", headscaleUrl);
+		const ok = await setPreference(
+			target,
+			MESH_LOGIN_SERVER_PREF,
+			headscaleUrl
+		);
 		setSavingHeadscale(false);
 		if (ok) {
 			sileo.success({
@@ -149,6 +175,21 @@ export function NetworkSettings() {
 		}
 	};
 
+	const handleCopyTailcatAddress = async () => {
+		const address = meshStatus?.tailcatAddress;
+		if (!address) {
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(address);
+			setTailcatCopied(true);
+			sileo.success({ title: "Tailcat address copied" });
+			window.setTimeout(() => setTailcatCopied(false), 2000);
+		} catch {
+			sileo.error({ title: "Could not copy the Tailcat address" });
+		}
+	};
+
 	// The section is hidden only when the running Core has no mesh plane at all
 	// (`meshAvailable` false — an older binary). A mesh-off install still gets the
 	// enable toggle; turning it on is the whole point of this tab.
@@ -158,8 +199,8 @@ export function NetworkSettings() {
 
 	return (
 		<SettingsSection
-			caption="Join this node to a tailnet so it can reach other Ryu nodes and be reached by them. Uses the official tailscale + tailscaled client in userspace networking mode (no admin rights); Ryu installs it for you if this machine doesn't have it. Pick the control plane (Headscale or Tailscale) from Tunnel in the node menu."
-			title="Mesh (Tailscale / Headscale)"
+			caption="Connect this node privately with Tailscale, Headscale, or a short-lived Tailcat address. Tailscale and Headscale use the official tailscale + tailscaled client in userspace networking mode; Tailcat uses the separately installed tailcat CLI. Pick the backend from Tunnel in the node menu."
+			title="Network (Tailscale / Headscale / Tailcat)"
 		>
 			<SettingsGroup>
 				<SettingsItem
@@ -171,48 +212,94 @@ export function NetworkSettings() {
 							onCheckedChange={handleToggleMesh}
 						/>
 					}
-					description="When on, this node joins the tailnet and other Ryu nodes can reach it. Turning it off leaves the tailnet."
-					title="Enable mesh"
+					description={
+						meshBackend === MESH_BACKEND_TAILCAT
+							? "When on, this node exposes its Core through a short-lived Tailcat address. Turning it off revokes that address."
+							: "When on, this node joins the tailnet and other Ryu nodes can reach it. Turning it off leaves the tailnet."
+					}
+					title="Enable private network"
 				/>
 				{meshStatus?.enabled ? (
 					<SettingsItem
 						description={
 							meshStatus.reachable
-								? meshStatus.magicDnsName
-									? `Reachable on the tailnet as ${meshStatus.magicDnsName}.`
-									: "Reachable on the tailnet."
-								: "Enabled but not connected yet. The daemon may still be starting, or the official Tailscale client is missing or not logged in."
+								? meshBackend === MESH_BACKEND_TAILCAT
+									? "Tailcat is listening. Share the address below with a client."
+									: meshStatus.magicDnsName
+										? `Reachable on the tailnet as ${meshStatus.magicDnsName}.`
+										: "Reachable on the tailnet."
+								: meshBackend === MESH_BACKEND_TAILCAT
+									? "Enabled but no Tailcat address is ready yet. The listener may still be starting."
+									: "Enabled but not connected yet. The daemon may still be starting, or the official Tailscale client is missing or not logged in."
 						}
 						title="Status"
 					/>
 				) : null}
-				<SettingsItem title="Control server URL">
-					<div className="flex items-center gap-2">
-						<Input
-							autoComplete="off"
-							className="h-8 flex-1 text-xs"
-							disabled={!headscaleLoaded}
-							id="headscale-url"
-							onChange={(e) => setHeadscaleUrlValue(e.target.value)}
-							placeholder="https://headscale.example.com"
-							type="url"
-							value={headscaleUrl}
-						/>
-						<Button
-							disabled={!headscaleLoaded || savingHeadscale}
-							onClick={handleSaveHeadscale}
-							size="sm"
-						>
-							{savingHeadscale ? "Saving…" : "Save"}
-						</Button>
-					</div>
-					<p className="text-muted-foreground text-xs">
-						Point the mesh at a self-hosted Headscale server instead of
-						Tailscale SaaS. Leave empty to use Tailscale SaaS. Passed as{" "}
-						<code>--login-server</code> to <code>tailscale up</code>. It applies
-						the next time this node enrolls.
-					</p>
-				</SettingsItem>
+				{meshStatus?.backend === MESH_BACKEND_TAILCAT &&
+				meshStatus.tailcatAddress ? (
+					<SettingsItem title="Tailcat address">
+						<div className="flex items-center gap-2">
+							<Input
+								aria-label="Tailcat address"
+								className="min-w-0 flex-1 font-mono text-xs"
+								readOnly
+								value={meshStatus.tailcatAddress}
+							/>
+							<Button
+								onClick={handleCopyTailcatAddress}
+								size="sm"
+								variant="secondary"
+							>
+								<HugeiconsIcon icon={Copy01Icon} size={14} />
+								{tailcatCopied ? "Copied" : "Copy"}
+							</Button>
+						</div>
+						<p className="text-muted-foreground text-xs">
+							Pass this address to a Tailcat client, for example{" "}
+							<code>tailcat &lt;address&gt; &lt;port&gt;</code>. Treat it like a
+							password. It is replaced when this listener stops or restarts.
+						</p>
+					</SettingsItem>
+				) : null}
+				{meshBackend === MESH_BACKEND_HEADSCALE ? (
+					<SettingsItem title="Control server URL">
+						<div className="flex items-center gap-2">
+							<Input
+								autoComplete="off"
+								className="h-8 flex-1 text-xs"
+								disabled={!headscaleLoaded}
+								id="headscale-url"
+								onChange={(e) => setHeadscaleUrlValue(e.target.value)}
+								placeholder="https://headscale.example.com"
+								type="url"
+								value={headscaleUrl}
+							/>
+							<Button
+								disabled={!headscaleLoaded || savingHeadscale}
+								onClick={handleSaveHeadscale}
+								size="sm"
+							>
+								{savingHeadscale ? "Saving…" : "Save"}
+							</Button>
+						</div>
+						<p className="text-muted-foreground text-xs">
+							Point the mesh at a self-hosted Headscale server instead of
+							Tailscale SaaS. Leave empty to use Tailscale SaaS. Passed as{" "}
+							<code>--login-server</code> to <code>tailscale up</code>. It
+							applies the next time this node enrolls.
+						</p>
+					</SettingsItem>
+				) : meshBackend === MESH_BACKEND_TAILSCALE ? (
+					<SettingsItem
+						description="Tailscale uses its hosted coordination server. No control server URL is needed."
+						title="Control server"
+					/>
+				) : (
+					<SettingsItem
+						description="Tailcat has no account, control server, or tailnet. It creates a short-lived address for this node."
+						title="Control server"
+					/>
+				)}
 			</SettingsGroup>
 		</SettingsSection>
 	);

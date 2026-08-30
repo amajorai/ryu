@@ -115,10 +115,12 @@ import {
 	ingressLabel,
 	MESH_BACKEND_HEADSCALE,
 	MESH_BACKEND_PREF,
+	MESH_BACKEND_TAILCAT,
 	MESH_BACKEND_TAILSCALE,
 	MESH_LOGIN_SERVER_PREF,
 	type MeshBackend,
 	parseMeshBackend,
+	setMeshBackend,
 	setMeshEnabled,
 	type WebhookIngressStatus,
 } from "@/src/lib/api/mesh.ts";
@@ -145,7 +147,6 @@ import {
 	type SpeechProcessingStructure,
 	type SpeechProcessingStyling,
 	setDesktopTtsPref,
-	setPreference,
 	setSpeechProcessingPrefs,
 	setVoiceInputPrefs,
 	subscribeDesktopTtsPrefs,
@@ -2695,27 +2696,31 @@ function layerCaption(entry: CapabilityLayerEntry): string {
 const TUNNEL_LABEL: Record<MeshBackend, string> = {
 	[MESH_BACKEND_HEADSCALE]: "Headscale",
 	[MESH_BACKEND_TAILSCALE]: "Tailscale",
+	[MESH_BACKEND_TAILCAT]: "Tailcat",
 };
 
 /**
- * The **Tunnel** toolkit: which control plane this node's mesh enrols against,
- * and the enable/disable for the mesh itself.
+ * The **Tunnel** toolkit: which network backend this node uses, and the
+ * enable/disable for the network itself.
  *
  * It sits in the Toolkits block because that is what the user is picking — the
  * thing behind "can my nodes reach each other" — but it is NOT a capability
  * contribution: no plugin provides a tunnel, so it reads the node's own
  * `mesh-backend` pref instead of the capability ladder. Headscale is the default,
- * because self-hosting the control plane is the point.
+ * because self-hosting the control plane is the point. Tailcat is point-to-point:
+ * it exposes this Core through a short-lived address and does not provide peer
+ * discovery or a persistent tailnet.
  *
- * Turning it on INSTALLS the client. The mesh needs the official
+ * Turning it on starts the selected backend. Tailscale/Headscale need the official
  * `tailscale`/`tailscaled` pair, and Core downloads (or brews) one when this node
- * has none — the same deal the engines get. `installing` on the enable response is
- * that signal; {@link watchMeshInstall} waits it out.
+ * has none. Tailcat is adopted from a user-installed `tailcat` binary.
+ * `installing` on the enable response is the Tailscale/Headscale signal;
+ * {@link watchMeshInstall} waits it out.
  *
- * A backend swap is a SETTING, not a migration: a node already enrolled with one
- * control plane stays enrolled until it re-runs `tailscale up` with an auth key
- * for the new one. The daemon is restarted so a key that IS present applies, and
- * the toast says as much rather than implying the node has moved.
+ * A backend swap is a SETTING, not a migration: a node already enrolled with
+ * Tailscale/Headscale stays enrolled until it re-runs `tailscale up` with an auth
+ * key for the new one. Tailcat is restarted with a fresh address, and the toast
+ * says as much rather than implying a persistent tailnet move.
  */
 function useTunnel(target: ApiTarget) {
 	return useQuery({
@@ -2770,7 +2775,9 @@ function TunnelLayer({
 				sileo.warning({
 					title: result.canInstall
 						? "Mesh on, but the tunnel didn't connect"
-						: "Mesh on — install the Tailscale client",
+						: backend === MESH_BACKEND_TAILCAT
+							? "Tailcat selected — install the Tailcat CLI"
+							: "Mesh on — install the Tailscale client",
 					description: result.startError,
 				});
 				return;
@@ -2778,8 +2785,10 @@ function TunnelLayer({
 			sileo.success({
 				title: next ? "Tunnel on" : "Tunnel off",
 				description: next
-					? `This node joins the tailnet via ${TUNNEL_LABEL[backend]}.`
-					: "This node has left the tailnet.",
+					? backend === MESH_BACKEND_TAILCAT
+						? "This node now has a short-lived Tailcat address to share."
+						: "This node joins the selected private network."
+					: "This node has left the private network.",
 			});
 		} catch (e) {
 			sileo.error({
@@ -2793,14 +2802,42 @@ function TunnelLayer({
 		if (next === backend) {
 			return;
 		}
-		const ok = await setPreference(target, MESH_BACKEND_PREF, next);
-		if (!ok) {
+		let result: Awaited<ReturnType<typeof setMeshBackend>>;
+		try {
+			result = await setMeshBackend(target, next, enabled);
+		} catch (error) {
 			sileo.error({
-				title: `Couldn't switch the tunnel to ${TUNNEL_LABEL[next]}`,
+				title:
+					error instanceof Error
+						? error.message
+						: "Couldn't switch the network backend",
 			});
 			return;
 		}
 		await query.refetch();
+		if (enabled && result.installing) {
+			await watchMeshInstall(target);
+			await query.refetch();
+			return;
+		}
+		if (enabled && result.startError) {
+			if (next === MESH_BACKEND_HEADSCALE && loginServer === "") {
+				sileo.warning({
+					title: "Tunnel set to Headscale",
+					description: "Add your control server URL to finish setting it up.",
+					button: {
+						title: "Add URL",
+						onClick: () => openGateway("network"),
+					},
+				});
+			} else {
+				sileo.warning({
+					title: `${TUNNEL_LABEL[next]} selected, but it did not start`,
+					description: result.startError,
+				});
+			}
+			return;
+		}
 		if (next === MESH_BACKEND_HEADSCALE && loginServer === "") {
 			// Core REFUSES to enrol against Headscale with no control server rather
 			// than silently falling back to Tailscale's SaaS, so say so here instead
@@ -2815,22 +2852,12 @@ function TunnelLayer({
 			});
 			return;
 		}
-		if (enabled) {
-			// Restart so a present auth key re-runs `tailscale up` against the new
-			// control plane. Without one the daemon simply keeps its existing
-			// enrolment — which the description says plainly.
-			try {
-				await stopSidecar(target, "tailscale");
-				await startSidecar(target, "tailscale");
-			} catch {
-				// Not fatal: the pref is saved, and a node restart applies it anyway.
-			}
-			await query.refetch();
-		}
 		sileo.success({
-			title: `Tunnel → ${TUNNEL_LABEL[next]}`,
+			title: `Network → ${TUNNEL_LABEL[next]}`,
 			description: enabled
-				? "An already-enrolled node keeps its current tailnet until it re-enrols with an auth key for the new control plane."
+				? next === MESH_BACKEND_TAILCAT
+					? "The listener was restarted with a new short-lived address."
+					: "The selected network backend was restarted. An already-enrolled Tailscale or Headscale node keeps its current tailnet until it re-enrols with a new auth key."
 				: undefined,
 		});
 	};
@@ -2866,11 +2893,19 @@ function TunnelLayer({
 			return "Needs a control server URL";
 		}
 		if (!enabled) {
-			return backend === MESH_BACKEND_HEADSCALE
-				? `Off · ${loginServer}`
+			if (backend === MESH_BACKEND_HEADSCALE) {
+				return `Off · ${loginServer}`;
+			}
+			return backend === MESH_BACKEND_TAILCAT
+				? "Off · Tailcat"
 				: "Off · Tailscale SaaS";
 		}
 		if (status.reachable) {
+			if (backend === MESH_BACKEND_TAILCAT) {
+				return status.tailcatAddress
+					? "Tailcat address ready"
+					: "Tailcat connected";
+			}
 			return status.magicDnsName
 				? `Connected as ${status.magicDnsName}`
 				: "Connected";
@@ -2900,6 +2935,13 @@ function TunnelLayer({
 					active: backend === MESH_BACKEND_TAILSCALE,
 					detail: "hosted",
 					select: () => pickBackend(MESH_BACKEND_TAILSCALE),
+				},
+				{
+					name: MESH_BACKEND_TAILCAT,
+					label: TUNNEL_LABEL[MESH_BACKEND_TAILCAT],
+					active: backend === MESH_BACKEND_TAILCAT,
+					detail: "point-to-point",
+					select: () => pickBackend(MESH_BACKEND_TAILCAT),
 				},
 			]}
 			label="Tunnel"
@@ -3165,10 +3207,18 @@ function MeshSection({
 		peers !== null &&
 		peerList.length > 0 &&
 		peers.bearerSource === BEARER_SOURCE_NONE;
+	const networkLabel =
+		status.backend === MESH_BACKEND_TAILCAT
+			? status.tailcatAddress
+				? "Tailcat address ready"
+				: reachable
+					? "Tailcat connected"
+					: "Tailcat starting…"
+			: (status.magicDnsName ?? (reachable ? "Connected" : "Connecting…"));
 	return (
 		<div className="px-1 py-0.5">
 			<p className="px-2 pt-0.5 pb-1 font-medium text-[10px] text-muted-foreground/50 uppercase tracking-wider">
-				Mesh
+				Network
 			</p>
 			<div className="flex items-center gap-2 px-2 py-1 text-xs">
 				<span
@@ -3176,7 +3226,7 @@ function MeshSection({
 					className={cn("size-1.5 shrink-0 rounded-full", dotColor)}
 				/>
 				<span className="flex-1 truncate text-muted-foreground">
-					{status.magicDnsName ?? (reachable ? "Connected" : "Connecting…")}
+					{networkLabel}
 				</span>
 				{status.backend && (
 					<span className="shrink-0 text-[10px] text-muted-foreground/60">

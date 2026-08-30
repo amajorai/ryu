@@ -33,7 +33,11 @@ import type {
 import hostApiContract from "../../../crates/core/kernel-contracts/schemas/host-api.json" with {
 	type: "json",
 };
-import type { RyuCatalogModels, RyuCatalogSnapshot } from "./app-bridge.ts";
+import type {
+	RyuCatalogModels,
+	RyuCatalogSnapshot,
+	RyuNodeShareOrigin,
+} from "./app-bridge.ts";
 
 /** A request envelope a plugin sends over the bridge. `id` correlates the reply. */
 export interface RpcRequest {
@@ -136,6 +140,7 @@ export interface WidgetGlobalsPatch {
  *  `secret_reach_blocked` adversarial tests). */
 export type Capability =
 	| "host.capabilities"
+	| "node.shareOrigins"
 	| "native.haptics"
 	| "native.notifications"
 	| "native.liveActivities"
@@ -1120,6 +1125,8 @@ async function browserNativeNotification(
 // docs; it is intentionally not alphabetized across those semantic sections.
 // biome-ignore assist/source/useSortedInterfaceMembers: preserve host-surface grouping
 export interface HostServices {
+	/** Return secret-free active-node and mesh origins for share links. */
+	nodeShareOrigins?(): Promise<RyuNodeShareOrigin[]>;
 	/** Mobile-only native actions. Desktop, web, and extension hosts deliberately
 	 * leave these callbacks undefined, so a granted call fails closed as
 	 * unavailable instead of falling back to browser or raw native APIs. */
@@ -2009,8 +2016,10 @@ export interface HostServices {
 	workflowsMcp?(): Promise<unknown>;
 	/** Resume a run suspended at an Awakeable gate (`POST /workflows/runs/:runId/resume`). */
 	workflowsResume?(input: { runId: string; payload: string }): Promise<unknown>;
-	/** Run a workflow (`POST /workflows/:id/run`). Returns the run record. */
+	/** Run or dry-run a workflow (`POST /workflows/:id/run`). Returns the run
+	 * record; dry runs are transient and read-only. */
 	workflowsRun?(input: {
+		dryRun?: boolean;
 		id: string;
 		input?: Record<string, string>;
 	}): Promise<unknown>;
@@ -2159,6 +2168,7 @@ export const GRANT_CAPABILITY: Record<string, Capability> = grantCapability;
  * explicit contract rows; they are never inferred from plugin grants. */
 const LOCAL_HOST_CAPABILITIES: ReadonlySet<Capability> = new Set([
 	"host.capabilities",
+	"node.shareOrigins",
 ]);
 
 /** Capabilities whose ungranted call throws a STRUCTURED {@link CodedRpcError}
@@ -2393,6 +2403,14 @@ export async function dispatchRpc(
 			}
 			return await (services.hostCapabilities?.() ??
 				detectBrowserHostCapabilities());
+		case "node.shareOrigins":
+			if (args.length !== 0) {
+				throw new CapabilityError("node.shareOrigins takes no arguments");
+			}
+			if (!services.nodeShareOrigins) {
+				throw new CapabilityError("node.shareOrigins is not available");
+			}
+			return await services.nodeShareOrigins();
 		case "native.haptics": {
 			const input = asNativeHapticsInput(args[0]);
 			if (!input || args.length !== 1) {
@@ -3490,7 +3508,7 @@ export async function dispatchRpc(
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"workflows.run requires a { id: string, input?: Record<string,string> }"
+					"workflows.run requires a { id: string, input?: Record<string,string>, dryRun?: boolean }"
 				);
 			}
 			if (!services.workflowsRun) {
@@ -7469,12 +7487,13 @@ export function asTemplateInstallArg(
 	return { templateId: o.templateId };
 }
 
-/** Narrow an arg to `{ id: string, input?: Record<string,string> }` (workflows.run).
+/** Narrow an arg to `{ id: string, input?: Record<string,string>, dryRun?: boolean }` (workflows.run).
  *  `input` is an optional string→string map (the initial run inputs); a present-but-
- *  malformed value rejects the whole arg. */
+ *  malformed value rejects the whole arg. `dryRun` is an optional boolean that
+ *  requests Core's transient read-only execution mode. */
 export function asWorkflowRunArg(
 	data: unknown
-): { id: string; input?: Record<string, string> } | null {
+): { dryRun?: boolean; id: string; input?: Record<string, string> } | null {
 	if (typeof data !== "object" || data === null) {
 		return null;
 	}
@@ -7482,8 +7501,12 @@ export function asWorkflowRunArg(
 	if (typeof o.id !== "string" || o.id.length === 0) {
 		return null;
 	}
+	if (o.dryRun !== undefined && typeof o.dryRun !== "boolean") {
+		return null;
+	}
+	const dryRun = o.dryRun as boolean | undefined;
 	if (o.input === undefined) {
-		return { id: o.id };
+		return dryRun === undefined ? { id: o.id } : { id: o.id, dryRun };
 	}
 	if (
 		typeof o.input !== "object" ||
@@ -7499,7 +7522,9 @@ export function asWorkflowRunArg(
 		}
 		input[k] = v;
 	}
-	return { id: o.id, input };
+	return dryRun === undefined
+		? { id: o.id, input }
+		: { id: o.id, input, dryRun };
 }
 
 /** Narrow an arg to `{ runId: string }` (workflows.runGet). */

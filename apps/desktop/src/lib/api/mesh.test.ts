@@ -16,7 +16,9 @@ import {
 	INGRESS_URL_PREF,
 	ingressLabel,
 	isOwnRelayKind,
+	MESH_BACKEND_TAILCAT,
 	normalizeMeshStatus,
+	parseMeshBackend,
 } from "./mesh.ts";
 
 describe("ingressLabel", () => {
@@ -90,5 +92,22 @@ describe("normalizeMeshStatus enabled gate", () => {
 		expect(
 			normalizeMeshStatus({ enabled: true, reachable: true }).enabled
 		).toBe(true);
+	});
+});
+
+describe("Tailcat backend", () => {
+	test("normalizes and labels the point-to-point backend", () => {
+		expect(parseMeshBackend(" tailcat ")).toBe(MESH_BACKEND_TAILCAT);
+		expect(
+			normalizeMeshStatus({
+				backend: MESH_BACKEND_TAILCAT,
+				enabled: true,
+				reachable: true,
+				tailcat_address: "tcExampleToken",
+			})
+		).toMatchObject({
+			backend: MESH_BACKEND_TAILCAT,
+			tailcatAddress: "tcExampleToken",
+		});
 	});
 });

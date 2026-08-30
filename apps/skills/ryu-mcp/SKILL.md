@@ -71,7 +71,9 @@ Skills directory:
 Workflows:
 
 - `ryu_list_workflows` - list workflows defined on the node. No args.
-- `ryu_run_workflow` - run a workflow. Args - `id`, optional `input` (string map).
+- `ryu_run_workflow` - run a workflow. Args - `id`, optional `input` (string map), and optional
+  `dryRun`. `dryRun: true` performs a transient read-only preview with no run history or effectful
+  node execution.
 
 MCP bridge:
 

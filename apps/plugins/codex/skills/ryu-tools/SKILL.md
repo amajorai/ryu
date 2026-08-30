@@ -5,7 +5,7 @@ description: Reference for the ryu_* MCP tools this plugin exposes and how to co
 
 # Driving Ryu through the ryu_* tools
 
-This plugin bundles an MCP bridge to one Ryu Core node. Every tool below is namespaced `ryu_` and maps to a typed Core API call. `tools/list` reflects the live set - trust it for exact names and argument shapes over this summary. All tools are read-only except `ryu_set_active_model`, `ryu_install_skill`, and `ryu_run_workflow`.
+This plugin bundles an MCP bridge to one Ryu Core node. Every tool below is namespaced `ryu_` and maps to a typed Core API call. `tools/list` reflects the live set - trust it for exact names and argument shapes over this summary. All tools are read-only except `ryu_set_active_model`, `ryu_install_skill`, and a normal `ryu_run_workflow` call. Pass `dryRun: true` to `ryu_run_workflow` for a transient read-only preview that creates no run history and skips effectful nodes.
 
 ## Health and system
 
@@ -36,7 +36,7 @@ This plugin bundles an MCP bridge to one Ryu Core node. Every tool below is name
 ## Workflows
 
 - `ryu_list_workflows` - defined workflows.
-- `ryu_run_workflow` `{ id, input? }` - run one by id. It can return `awaiting_input`; surface exactly what it is waiting on.
+- `ryu_run_workflow` `{ id, input?, dryRun? }` - run one by id. `dryRun: true` is read-only and transient; a normal run can return `awaiting_input`, which should be surfaced exactly.
 
 ## MCP bridge (reach any registered server)
 

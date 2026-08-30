@@ -117,6 +117,13 @@ export interface RyuCatalogModels {
 	source: string;
 }
 
+/** A reachable URL projection for the active node. No credential crosses this seam. */
+export interface RyuNodeShareOrigin {
+	origin: string;
+	reachable: true;
+	source: "active" | "mesh";
+}
+
 /** The host-installed bridge surface consumed by full-page Companion apps. */
 export interface RyuAppBridge {
 	agent?: {
@@ -142,5 +149,8 @@ export interface RyuAppBridge {
 			prompt: string;
 			system?: string;
 		}): Promise<string>;
+	};
+	node?: {
+		shareOrigins(): Promise<RyuNodeShareOrigin[]>;
 	};
 }

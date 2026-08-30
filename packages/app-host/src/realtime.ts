@@ -7,6 +7,8 @@
  * those values and exposes only this opaque room connection.
  */
 
+import type { RyuNodeShareOrigin } from "./app-bridge.ts";
+
 export interface TokenTableEvent {
 	data: unknown;
 	name: string;
@@ -114,6 +116,9 @@ export async function openRealtimeResource(
 }
 
 export interface RyuCompanionWindowApi {
+	node?: {
+		shareOrigins(): Promise<RyuNodeShareOrigin[]>;
+	};
 	realtime: RealtimeAppApi;
 	/** @deprecated Use `realtime`; retained for Token Table compatibility. */
 	tokenTable: TokenTableApi;

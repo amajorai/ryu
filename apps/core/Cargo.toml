@@ -399,16 +399,18 @@ ryu-knowledge = { path = "../../crates/core/knowledge" }
 # `DocAccessMeta`→`ResourceTenancy` mapping, and preferences all stay Core-side
 # (`crate::server::spaces` re-export shim).
 ryu-spaces = { path = "../../crates/core/spaces" }
-# Mesh read/shape primitive (#478 P5–P7) — extracted Core capability crate: the
-# `RYU_MESH_ENABLED` gate, the `GET /api/mesh/status` (Contract 6) shaping from
-# `tailscale status --json`, the fail-closed shared-mesh-token bearer resolution
+# Private-network read/shape primitive (#478 P5–P7) — extracted Core capability
+# crate: the `RYU_MESH_ENABLED` gate, the `GET /api/mesh/status` (Contract 6)
+# shaping from Tailscale/Headscale status or a Tailcat address, the fail-closed
+# shared-mesh-token bearer resolution
 # for `GET /api/mesh/peers`, and the Funnel helpers P6 consumes. NON-optional: the
 # fail-closed startup gate in `server::create_router` reads `is_enabled()` and
 # `enforce_remote_auth` consults `is_insecure_auth_token_placeholder` (the
 # node-admittance security model this crate anchors) unconditionally in every
 # build. In-process, function-call hot path (no IPC). Core injects a `MeshHost`
-# impl (`mesh_host.rs`) — the `tailscale`/`tailscaled` process shell-outs, the
-# "what runs" half of the mesh — so the crate has ZERO dependency on apps/core.
+# impl (`mesh_host.rs`) — the Tailscale/Headscale and Tailcat process adapters,
+# the "what runs" half of the network — so the crate has ZERO dependency on
+# apps/core.
 ryu-mesh = { path = "../../crates/core/mesh" }
 # Crypto (encryption-at-rest primitive) — extracted Core capability crate: the
 # `FieldCipher` AEAD + `enc:v1:` envelope + the master-key custody ladder (env →

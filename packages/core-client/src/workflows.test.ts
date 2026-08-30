@@ -12,7 +12,12 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ApiTarget } from "./client.ts";
-import { createWorkflow, fetchWorkflows, getWorkflowRun } from "./workflows.ts";
+import {
+	createWorkflow,
+	fetchWorkflows,
+	getWorkflowRun,
+	runWorkflow,
+} from "./workflows.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -133,6 +138,7 @@ describe("wire → camel mapping", () => {
 			workflowId: "w1",
 			status: "awaiting_input",
 			awaitingNode: "gate1",
+			dryRun: false,
 			input: {},
 			output: {},
 			nodes: {},
@@ -140,5 +146,41 @@ describe("wire → camel mapping", () => {
 			createdAt: "2026-01-01",
 			updatedAt: "2026-01-02",
 		});
+	});
+});
+
+describe("workflow dry runs", () => {
+	test("sends dryRun and maps the transient result flag", async () => {
+		let requestBody: unknown;
+		globalThis.fetch = ((_input, init) => {
+			requestBody = JSON.parse(String(init?.body));
+			return Promise.resolve(
+				new Response(
+					JSON.stringify({
+						run: {
+							run_id: "dryrun-1",
+							workflow_id: "w1",
+							status: "completed",
+							dryRun: true,
+							created_at: "2026-01-01",
+							updated_at: "2026-01-01",
+						},
+					}),
+					{ status: 200 }
+				)
+			);
+		}) as unknown as typeof fetch;
+
+		const run = await runWorkflow(
+			target,
+			"w1",
+			{ input: "hello" },
+			{ dryRun: true }
+		);
+		expect(requestBody).toEqual({
+			input: { input: "hello" },
+			dryRun: true,
+		});
+		expect(run.dryRun).toBe(true);
 	});
 });

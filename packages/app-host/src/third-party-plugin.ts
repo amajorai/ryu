@@ -183,6 +183,9 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
       var plugin = {
         host: {
           capabilities: function () { return call("host.capabilities", []); },
+          node: {
+            shareOrigins: function () { return call("node.shareOrigins", []); }
+          },
           native: {
             haptics: function (a) { return call("native.haptics", [a || {}]); },
             notifications: {
@@ -909,6 +912,9 @@ function htmlCompanionHeadFragment(
     // during first render queues into the outbox instead of throwing. Identical
     // surface to the Path A installWindowRyu().
     var ryu = {
+      node: {
+        shareOrigins: function () { return call("node.shareOrigins", []); }
+      },
       listAgents: function () { return call("core.listAgents", []); },
       // Secret-free provider/model/agent/app/hook metadata for shared Ryu pickers.
       catalog: {

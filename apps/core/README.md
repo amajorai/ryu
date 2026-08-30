@@ -47,7 +47,7 @@ OpenAPI: `ryu-core --dump-openapi` writes the spec, also served at `GET /api/ope
 - **Model catalog:** browse and install HF GGUF models; active-engine swap; a Pi config layer
 - **Skills catalog:** browse and install Agent Skills from skills.sh into the universal skills dir
 - **Website monitors:** price/content/stock/keyword/uptime checks with change alerting
-- **Mesh:** opt-in Tailscale userspace networking
+- **Private networking:** opt-in Tailscale/Headscale userspace networking or a short-lived Tailcat listener
 - **Git-native workspace:** per-run worktrees, diff capture, merge/PR apply
 - **Wasmtime sandbox:** ephemeral WASI module execution (opt-in `sandbox-wasmtime` feature)
 

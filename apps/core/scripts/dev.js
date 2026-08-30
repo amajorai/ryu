@@ -83,6 +83,7 @@ const sidecarBins = [
 	"tuition",
 	"news",
 	"blueprint",
+	"rooms",
 	"mission-control",
 	"crm",
 	"drafts",

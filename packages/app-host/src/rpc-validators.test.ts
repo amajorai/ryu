@@ -165,10 +165,18 @@ describe("asWorkflowRunArg — input must be Record<string, string>", () => {
 		).toEqual({ id: "wf-1", input: { a: "1", b: "two" } });
 	});
 
+	test("accepts the read-only dry-run flag", () => {
+		expect(asWorkflowRunArg({ id: "wf-1", dryRun: true })).toEqual({
+			id: "wf-1",
+			dryRun: true,
+		});
+	});
+
 	test("rejects an array input or a non-string input value", () => {
 		expect(asWorkflowRunArg({ id: "wf-1", input: ["a"] })).toBeNull();
 		expect(asWorkflowRunArg({ id: "wf-1", input: { a: 1 } })).toBeNull();
 		expect(asWorkflowRunArg({ id: "wf-1", input: null })).toBeNull();
+		expect(asWorkflowRunArg({ id: "wf-1", dryRun: "yes" })).toBeNull();
 	});
 
 	test("rejects a missing / empty id", () => {

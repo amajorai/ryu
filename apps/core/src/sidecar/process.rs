@@ -121,6 +121,42 @@ impl ProcessHandle {
         Ok(())
     }
 
+    /// Like [`ProcessHandle::start_path_with_scrubbed_env`], but detaches all
+    /// standard streams from the child.
+    ///
+    /// Some adopted tools print bearer-like connection material to stderr as
+    /// part of normal startup. A caller that already has a structured status
+    /// channel must not inherit that output into Core's logs, so it can choose
+    /// this variant while retaining the same secret-scrubbed environment.
+    pub async fn start_path_with_scrubbed_env_quiet(
+        &self,
+        program: &str,
+        args: &[String],
+        env: &[(String, String)],
+    ) -> Result<()> {
+        let mut command = tokio::process::Command::new(program);
+        command
+            .args(args)
+            .kill_on_drop(true)
+            .no_window()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        command.env_clear();
+        for (key, value) in crate::sidecar::env_scrub::scrub_child_env(std::env::vars(), &[]) {
+            command.env(key, value);
+        }
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let child = command
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn {program}: {e}"))?;
+        *self.child.lock().unwrap() = Some(child);
+        self.running.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Spawn a PATH-resolved command with a MINIMAL env: the child does NOT inherit
     /// Core's environment at all. It starts from an `env_clear()`ed command seeded
     /// with ONLY the small benign allow-list

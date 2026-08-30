@@ -29,6 +29,7 @@ pub mod resources;
 /// crate's host seam (Gateway metering url/bearer, ryu-dir, org, default
 /// budget) once at startup via [`crate::sandbox_host`].
 pub use ryu_sandbox as sandbox;
+pub mod tailcat;
 pub mod tailscale;
 pub mod tools;
 pub mod untrusted;

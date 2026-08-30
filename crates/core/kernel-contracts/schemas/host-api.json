@@ -8,6 +8,13 @@
       "tsHost": true
     },
     {
+      "capability": "node.shareOrigins",
+      "grant": null,
+      "method": "node.shareOrigins",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
       "capability": "native.haptics",
       "grant": "native:haptics",
       "method": "native.haptics",
@@ -123,6 +130,41 @@
       "capability": "app.http",
       "grant": "app:http",
       "method": "app.request",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "app.realtime",
+      "grant": "app:realtime",
+      "method": "realtime.connect",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "app.realtime",
+      "grant": "app:realtime",
+      "method": "realtime.publish",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "app.realtime",
+      "grant": "app:realtime",
+      "method": "realtime.presence",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "app.realtime",
+      "grant": "app:realtime",
+      "method": "realtime.subscribe",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
+      "capability": "app.realtime",
+      "grant": "app:realtime",
+      "method": "realtime.close",
       "streaming": false,
       "tsHost": true
     },
@@ -1401,5 +1443,5 @@
       "tsHost": false
     }
   ],
-  "version": "1.9.0"
+  "version": "1.10.0"
 }

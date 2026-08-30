@@ -1,12 +1,12 @@
 //! Core's implementation of the extracted [`ryu_mesh::MeshHost`] seam.
 //!
-//! The `ryu-mesh` crate owns the mesh read/shape side — the `RYU_MESH_ENABLED`
-//! gate, the `GET /api/mesh/status` (Contract 6) shaping, the fail-closed
-//! shared-mesh-token bearer resolution, and the Funnel helpers. What it cannot
-//! own — because it is kernel machinery, the "what runs" half of the mesh — are
-//! the `tailscale`/`tailscaled` process shell-outs ([`crate::sidecar::tailscale`],
-//! a `Sidecar` managed by the `SidecarManager`). This shim implements those three
-//! shell-outs, and Core installs it once at boot via [`install`], mirroring the
+//! The `ryu-mesh` crate owns the network read/shape side — the
+//! `RYU_MESH_ENABLED` gate, the `GET /api/mesh/status` (Contract 6) shaping, the
+//! fail-closed shared-mesh-token bearer resolution, and the Funnel helpers. What
+//! it cannot own — because it is process machinery, the "what runs" half — are
+//! the `tailscale`/`tailscaled` and Tailcat process adapters (the `Sidecar`s
+//! managed by `SidecarManager`). This shim implements the provider dispatch, and
+//! Core installs it once at boot via [`install`], mirroring the
 //! `CryptoHost`/`RecipesHost` precedent.
 //!
 //! The install is unconditional (the mesh dep is non-optional): the crate's
@@ -26,8 +26,9 @@ use ryu_mesh::MeshHost;
 pub const MESH_ENABLED_PREF_KEY: &str = "mesh-enabled";
 
 /// The Core preference holding which control plane the tunnel enrolls against —
-/// `"headscale"` (self-hosted, the default) or `"tailscale"` (SaaS). Written by
-/// the node selector's **Tunnel** layer; read by
+/// `"headscale"` (self-hosted, the default), `"tailscale"` (SaaS), or `"tailcat"`
+/// (short-lived point-to-point). Written by the node selector's **Tunnel** layer;
+/// read by
 /// [`crate::sidecar::tailscale::mesh_backend`].
 ///
 /// This is a SETTING and must not be confused with `MeshStatus::backend`, which is
@@ -45,8 +46,9 @@ pub const MESH_BACKEND_PREF_KEY: &str = "mesh-backend";
 /// may write `mesh-enabled` on behalf of the user; this key exists so the install
 /// half can be defaulted ON without dragging the enablement half with it.
 ///
-/// The same client serves both control planes ([`MESH_BACKEND_PREF_KEY`]:
-/// Headscale or Tailscale SaaS), so there is nothing backend-specific to stage.
+/// The Tailscale client serves both control planes ([`MESH_BACKEND_PREF_KEY`]:
+/// Headscale or Tailscale SaaS). Tailcat is a separate adopted CLI and is not
+/// part of the Tailscale pre-install path.
 pub const MESH_PREINSTALL_PREF_KEY: &str = "mesh-preinstall-client";
 
 /// Default for [`MESH_PREINSTALL_PREF_KEY`] when the pref was never written —
@@ -92,22 +94,47 @@ pub fn install() {
     ryu_mesh::set_global_host(std::sync::Arc::new(CoreMeshHost));
 }
 
-/// Core's `MeshHost` — the kernel side of the mesh seam. Each method forwards to
-/// the `tailscale` CLI shell-outs in [`crate::sidecar::tailscale`].
+/// Core's `MeshHost` — the process side of the network seam. Status dispatches to
+/// the selected Tailscale/Headscale or Tailcat adapter; Funnel remains a
+/// Tailscale-only capability.
 pub struct CoreMeshHost;
 
 #[async_trait]
 impl MeshHost for CoreMeshHost {
     async fn status_json(&self) -> Result<serde_json::Value> {
-        crate::sidecar::tailscale::status_json().await
+        match crate::sidecar::tailscale::mesh_backend().await.0 {
+            crate::sidecar::tailscale::MeshBackend::Tailcat => {
+                crate::sidecar::tailcat::status_json()
+            }
+            crate::sidecar::tailscale::MeshBackend::Headscale
+            | crate::sidecar::tailscale::MeshBackend::Tailscale => {
+                crate::sidecar::tailscale::status_json().await
+            }
+        }
     }
 
     async fn ensure_funnel(&self, port: u16) -> Result<String> {
-        crate::sidecar::tailscale::ensure_funnel(port).await
+        match crate::sidecar::tailscale::mesh_backend().await.0 {
+            crate::sidecar::tailscale::MeshBackend::Tailcat => {
+                anyhow::bail!(
+                    "Tailcat does not provide Funnel ingress; select Tailscale for Funnel"
+                )
+            }
+            crate::sidecar::tailscale::MeshBackend::Headscale
+            | crate::sidecar::tailscale::MeshBackend::Tailscale => {
+                crate::sidecar::tailscale::ensure_funnel(port).await
+            }
+        }
     }
 
     async fn funnel_url(&self, port: u16) -> Option<String> {
-        crate::sidecar::tailscale::funnel_url(port).await
+        match crate::sidecar::tailscale::mesh_backend().await.0 {
+            crate::sidecar::tailscale::MeshBackend::Tailcat => None,
+            crate::sidecar::tailscale::MeshBackend::Headscale
+            | crate::sidecar::tailscale::MeshBackend::Tailscale => {
+                crate::sidecar::tailscale::funnel_url(port).await
+            }
+        }
     }
 }
 

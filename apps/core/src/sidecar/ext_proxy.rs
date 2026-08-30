@@ -1334,6 +1334,10 @@ fn tungstenite_to_axum(msg: TsMessage) -> WsMessage {
 pub fn host_routes() -> Router<ServerState> {
     Router::new()
         .route("/api/host/model/complete", post(host_model_complete))
+        .route(
+            "/api/host/model/stream",
+            post(crate::server::model_stream::host_model_stream),
+        )
         .route("/api/host/rpc", post(host_rpc))
         .route("/api/host/capability/:cap", post(host_capability))
 }
@@ -1394,7 +1398,7 @@ pub(crate) async fn authenticate_sidecar(
     Ok((plugin_id, approved))
 }
 
-async fn authorize_host_call(
+pub(crate) async fn authorize_host_call(
     state: &ServerState,
     headers: &HeaderMap,
     required_grant: &str,
@@ -3212,8 +3216,9 @@ mod tests {
             other => panic!("mail process must be Local, got {other:?}"),
         }
         assert_eq!(sc.port, 7996);
-        // Health probes the bearer-gated status route (ryu-mail has no /health).
-        assert_eq!(sc.health_path, "/api/mail/status");
+        // Health probes the public process liveness route; the bearer-gated
+        // `/api/mail/status` remains the service-level status endpoint.
+        assert_eq!(sc.health_path, "/health");
         let http = sc.http.as_ref().expect("mail declares http");
         assert_eq!(http.public_mount.as_deref(), Some("/api/mail"));
         assert_eq!(http.mount.as_deref(), Some("/api/mail"));

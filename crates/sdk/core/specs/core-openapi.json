@@ -6465,12 +6465,14 @@
         "tags": [
           "Nodes"
         ],
-        "summary": "Enable or disable the mesh plane",
+        "summary": "Enable or disable the network plane",
         "operationId": "mesh_config",
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": {}
+              "schema": {
+                "$ref": "#/components/schemas/MeshConfigBody"
+              }
             }
           },
           "required": true
@@ -6512,8 +6514,8 @@
         "tags": [
           "Nodes"
         ],
-        "summary": "Mesh (Tailscale/Headscale) reachability + peers",
-        "description": "Returns the canonical Contract 6 superset. When the mesh is disabled\n(`ryu_mesh::is_enabled()` false \u2014 `RYU_MESH_ENABLED` unset AND the\n`mesh-enabled` pref off) this is the all-default object with HTTP 200 (never\n500), so a vanilla install reports `enabled:false` without amber.",
+        "summary": "Mesh (Tailscale/Headscale) or Tailcat reachability + peers",
+        "description": "Returns the canonical Contract 6 superset. The backend is `tailscale`,\n`headscale`, or `tailcat`; Tailcat reports its short-lived connection\nbearer as `tailcat_address` and has no peer list or control server. When the\nmesh is disabled\n(`ryu_mesh::is_enabled()` false \u2014 `RYU_MESH_ENABLED` unset AND the\n`mesh-enabled` pref off) this is the all-default object with HTTP 200 (never\n500), so a vanilla install reports `enabled:false` without amber.",
         "operationId": "mesh_status",
         "responses": {
           "200": {
@@ -13229,7 +13231,7 @@
           "Workflows"
         ],
         "summary": "Run a workflow",
-        "description": "Routes through the durable engine selected by `durable::select_engine()` \u2014\nthe in-process petgraph topological executor with file-backed resumable\nstate, crash-recoverable at the node checkpoint level. Re-POST with the same\n`run_id` to resume a run after a Core restart (already-Completed nodes are\nskipped and their output reused).\n\nReturns 503 when the gateway is unreachable and fail-closed is in effect.",
+        "description": "Execute a workflow durably, or set dryRun to true for a transient read-only projection. Normal runs use file-backed resumable checkpoints; dry runs create no run history, lifecycle hook, approval, timer checkpoint, or effectful node execution. Pure nodes and classified read-only MCP tools may run, while other effectful nodes are returned as skipped with reasons. A caller-provided runId is ignored in dry-run mode.",
         "operationId": "run_workflow",
         "parameters": [
           {
@@ -13244,7 +13246,9 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": {}
+              "schema": {
+                "$ref": "#/components/schemas/RunWorkflowBody"
+              }
             }
           },
           "required": true
@@ -13824,6 +13828,25 @@
         },
         "additionalProperties": false
       },
+      "MeshConfigBody": {
+        "type": "object",
+        "description": "`POST /api/mesh/config` \u2014 enable or disable the network plane from the desktop.\n\nPersists the `mesh-enabled` pref (so the choice survives a Core restart),\nupdates the in-process signal [`ryu_mesh::set_pref_enabled`] immediately, and\nstarts (enable) or stops (disable) the selected network sidecar. Always\nanswers 200 with the live status so the desktop toggle reflects the PERSISTED\nstate even when the daemon fails to start; a daemon-start failure rides in a\nnon-contract `start_error` field (the desktop surfaces it as a warning, not a\nrolled-back toggle).\n\nThe optional `backend` request field accepts `headscale`, `tailscale`, or\n`tailcat`. Supplying it persists the selection and, when the network is\nenabled, stops the previous backend before starting the selected one.\n\nA missing client is the common `start_error`, and it is no longer a dead end.\nPATH adoption still wins, but when there is no complete `tailscale`/`tailscaled`\npair Ryu can install a managed one, so this handler answers with two more\nnon-contract fields beside `start_error`:\n\n- `missing_binaries: string[]` \u2014 what could not be resolved anywhere.\n- `can_install: bool` \u2014 whether THIS node has an install route at all (Linux\n  archive, macOS Homebrew, or `RYU_TAILSCALE_RELEASE_URL`). True \u21d2 the client\n  should offer the install; false \u21d2 tell the user how to install it themselves.\n\n**Enabling the Tailscale/Headscale mesh INSTALLS the client** when one is\nmissing and this node has an install route \u2014 the same way picking an engine\ninstalls it. Tailcat is adopted from PATH or an explicit binary override\nbecause its upstream distribution differs by platform and its CLI/wire format\ncarries no stability promise. The user asked for a connection, not for a\nshopping list; making them find\n`POST /api/setup/tailscale/install` themselves was the whole reason enabling\nthe mesh felt broken. So a third non-contract field rides along:\n\n- `installing: bool` \u2014 an install was started for this enable; the client\n  should show progress (it also lands in the download overlay) and re-read\n  `/api/mesh/status` rather than treat `start_error` as final.\n\nThe install is still NOT inline. It is `tokio::spawn`ed via\n[`spawn_mesh_client_install`] precisely because these are minute-long\ntransfers; awaiting one inside the toggle handler would hang the request past\nany client timeout. The daemon is started by that task once the binaries land,\nso the client does not need to re-POST this route.\n\nSecurity: enabling a network backend makes this Core reachable through a\ntailnet or a Tailcat listener, so the fail-closed token gate (`enforce_remote_auth`) requires a strong\nnon-placeholder `RYU_TOKEN` before this handler persists or starts the mesh, and\nthe same check runs again at startup. A node with no usable token cannot be\nenabled or restarted with the mesh on. Loopback-admin trust\nneutralization follows automatically: the gateway is (re)spawned with\n`RYU_MESH_ENABLED=1` once `is_enabled()` reads true.",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "backend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional explicit network backend. Existing callers may omit it and keep\nthe stored selection. Accepted values are `headscale`, `tailscale`, and\n`tailcat`."
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
       "RestoreDocumentVersionBody": {
         "type": "object",
         "required": [
@@ -14203,6 +14226,32 @@
             }
           }
         ]
+      },
+      "RunWorkflowBody": {
+        "type": "object",
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "Evaluate in memory without creating run history or invoking effectful\nnodes. The supplied `runId` is ignored in this mode."
+          },
+          "input": {
+            "type": "object",
+            "description": "Initial input map (key \u2192 value) for `Input` nodes.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional run id to create or resume. Generated when absent."
+          }
+        }
       }
     }
   },

@@ -1,6 +1,6 @@
 // apps/desktop/src/lib/api/mesh.ts
 //
-// Typed client for Core's mesh-status surface (`GET /api/mesh/status`,
+// Typed client for Core's private-network status surface (`GET /api/mesh/status`,
 // Contract 6 of the unified-tool-gateway spec). The endpoint is the canonical
 // superset Core emits in snake_case; this module normalizes raw → camelCase.
 //
@@ -33,9 +33,9 @@ export interface MeshPeer {
 	tailscaleIps: string[];
 }
 
-/** Normalized mesh status (Contract 6). */
+/** Normalized private-network status (Contract 6). */
 export interface MeshStatus {
-	/** `"tailscale"` | `"headscale"` | null. */
+	/** `"tailscale"` | `"headscale"` | `"tailcat"` | null. */
 	backend: string | null;
 	/** Raw `BackendState` passthrough (e.g. "Running", "NeedsLogin"). */
 	backendState: string;
@@ -53,8 +53,10 @@ export interface MeshStatus {
 	magicDnsName: string | null;
 	/** Peer nodes on the tailnet. */
 	peers: MeshPeer[];
-	/** tailscaled client up + authed. Equal to `up`. */
+	/** Selected network provider is live. Equal to `up`. */
 	reachable: boolean;
+	/** The short-lived Tailcat connection address, or null for mesh backends. */
+	tailcatAddress: string | null;
 	/** This node's Tailscale IPs. */
 	tailscaleIps: string[];
 }
@@ -78,6 +80,7 @@ export interface RawMeshStatus {
 	magic_dns_name?: string | null;
 	peers?: RawPeer[];
 	reachable?: boolean;
+	tailcat_address?: string | null;
 	tailscale_ips?: string[];
 	up?: boolean;
 	webhook_ingress_mode?: string | null;
@@ -104,6 +107,7 @@ export function normalizeMeshStatus(raw: RawMeshStatus): MeshStatus {
 		controlServer: raw.control_server ?? null,
 		magicDnsName: raw.magic_dns_name ?? null,
 		tailscaleIps: raw.tailscale_ips ?? [],
+		tailcatAddress: raw.tailcat_address ?? null,
 		peers: (raw.peers ?? []).map(normalizePeer),
 	};
 }
@@ -127,10 +131,10 @@ export async function fetchMeshStatus(
 
 /**
  * The result of {@link setMeshEnabled}: the live {@link MeshStatus} after the
- * change, plus an optional `startError` when enabling persisted but the Tailscale
- * daemon could not start (e.g. the official `tailscale`/`tailscaled` client is
- * not installed on this machine). The mesh is still ON in that case — the caller
- * should reflect the toggle as enabled and surface `startError` as a warning.
+ * change, plus an optional `startError` when the selected provider could not
+ * start (for example, the official Tailscale pair or the Tailcat CLI is absent).
+ * The private network is still ON in that case — the caller should reflect the
+ * toggle as enabled and surface `startError` as a warning.
  */
 export interface SetMeshEnabledResult {
 	/**
@@ -158,7 +162,7 @@ export interface SetMeshEnabledResult {
  *
  * Writes the `mesh-enabled` pref (survives a Core restart), flips Core's
  * in-process signal immediately, and starts (enable) or stops (disable) the
- * Tailscale daemon sidecar. Resolves with the updated status; when enabling, a
+ * selected network sidecar. Resolves with the updated status; when enabling, a
  * daemon-start failure is NOT a rejection — it rides in `startError` while the
  * mesh stays enabled. Throws (via `ApiError`) only on a genuinely unusable
  * response (pref write failure, network).
@@ -187,21 +191,55 @@ export async function setMeshEnabled(
 	};
 }
 
-// ── Tunnel backend (`mesh-backend` pref) ──────────────────────────────────────
+/**
+ * Select the network backend and apply the current enabled state in one
+ * Core-owned operation. The backend is persisted before Core starts the
+ * selected sidecar, so switching between Tailscale/Headscale and Tailcat
+ * cannot leave the old listener running.
+ */
+export async function setMeshBackend(
+	target: ApiTarget,
+	backend: MeshBackend,
+	enabled: boolean
+): Promise<SetMeshEnabledResult> {
+	const raw = await request<
+		RawMeshStatus & {
+			can_install?: boolean;
+			installing?: boolean;
+			missing_binaries?: string[];
+			start_error?: string | null;
+		}
+	>(target, "/api/mesh/config", {
+		method: "POST",
+		body: { backend, enabled },
+	});
+	return {
+		startError: raw.start_error ?? null,
+		installing: raw.installing ?? false,
+		canInstall: raw.can_install ?? false,
+		missingBinaries: raw.missing_binaries ?? [],
+		status: normalizeMeshStatus(raw),
+	};
+}
+
+// ── Network backend (`mesh-backend` pref) ─────────────────────────────────────
 //
-// Which control plane this node enrolls against. A SETTING, distinct from
-// `MeshStatus.backend`, which is derived from the control server the daemon
-// reports once connected — before a node has ever enrolled there is nothing to
-// derive, so the picker reads this instead.
+// Which private-network backend this node uses. A SETTING, distinct from
+// `MeshStatus.backend`, which is derived from provider status once connected —
+// before a node has ever started there is nothing to derive, so the picker reads
+// this instead.
 
 /** Self-hosted Headscale — the default. Needs a control server URL. */
 export const MESH_BACKEND_HEADSCALE = "headscale";
 /** Tailscale's SaaS coordination server. */
 export const MESH_BACKEND_TAILSCALE = "tailscale";
+/** Tailcat's short-lived point-to-point connection. */
+export const MESH_BACKEND_TAILCAT = "tailcat";
 
 export type MeshBackend =
 	| typeof MESH_BACKEND_HEADSCALE
-	| typeof MESH_BACKEND_TAILSCALE;
+	| typeof MESH_BACKEND_TAILSCALE
+	| typeof MESH_BACKEND_TAILCAT;
 
 /** The `mesh-backend` pref key, mirroring `MESH_BACKEND_PREF_KEY` in Core. */
 export const MESH_BACKEND_PREF = "mesh-backend";
@@ -214,9 +252,14 @@ export const MESH_LOGIN_SERVER_PREF = "mesh-login-server";
  * the daemon never disagree about what an unconfigured node will do.
  */
 export function parseMeshBackend(raw: string | null | undefined): MeshBackend {
-	return raw?.trim().toLowerCase() === MESH_BACKEND_TAILSCALE
-		? MESH_BACKEND_TAILSCALE
-		: MESH_BACKEND_HEADSCALE;
+	switch (raw?.trim().toLowerCase()) {
+		case MESH_BACKEND_TAILSCALE:
+			return MESH_BACKEND_TAILSCALE;
+		case MESH_BACKEND_TAILCAT:
+			return MESH_BACKEND_TAILCAT;
+		default:
+			return MESH_BACKEND_HEADSCALE;
+	}
 }
 
 // ── Mesh peers + candidate bearer (`GET /api/mesh/peers`, P7) ──────────────────

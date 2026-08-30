@@ -185,6 +185,7 @@ use sidecar::{
         ryutts::RyuTtsManager, sdcpp::StableDiffusionManager, sglang::SglangManager,
         vllm::VllmManager, whispercpp::WhisperCppManager, DockerModelRunnerManager,
     },
+    tailcat::TailcatManager,
     tailscale::TailscaleManager,
     tools::{
         ghost::GhostManager, llmfit::LlmFit, research::ResearchManager, shadow::ShadowManager,
@@ -673,10 +674,11 @@ async fn main() {
         Arc::new(ZeroClawManager::new().with_downloads(download_center.clone())),
         Arc::new(OpenClawManager::new()),
         Arc::new(HermesManager::new()),
-        // Mesh daemon (Tailscale/Headscale, #478). Opt-in via RYU_MESH_ENABLED;
-        // registered here so the catalog/install routes can reach it, but
-        // deliberately NOT in `startup_order` — it never auto-starts.
+        // Network backends (Tailscale/Headscale + Tailcat, #478). Opt-in via
+        // RYU_MESH_ENABLED; registered here so the config/start routes can reach
+        // them. Only the selected backend is marked installed at boot.
         Arc::new(TailscaleManager::new().with_downloads(download_center.clone())),
+        Arc::new(TailcatManager::new()),
     ];
 
     let startup_order = vec![
@@ -739,8 +741,9 @@ async fn main() {
         "nemoclaw".into(),
         "ironclaw".into(),
         "hermes".into(),
-        // Mesh daemon (Tailscale/Headscale, #478). Listed in startup_order so a
-        // mesh-enabled node auto-starts the daemon on boot. `start_all` skips it
+        // Network backends (Tailscale/Headscale + Tailcat, #478). Listed in
+        // startup_order so an enabled node auto-starts its selected backend on boot.
+        // `start_all` skips them
         // unless it was explicitly marked installed, which `main()` does just
         // below only when `ryu_mesh::is_enabled()`. A mesh-off install is never
         // marked and so never runs (nor logs) anything.
@@ -757,6 +760,7 @@ async fn main() {
         // `versions.json` tailscale row from boot 2 onward. Seeding from it would
         // start a tailnet daemon nobody asked for.
         "tailscale".into(),
+        "tailcat".into(),
     ];
 
     // Keep the names so we can seed the installed set from disk before
@@ -2410,9 +2414,16 @@ async fn main() {
     // install stays unmarked → `start_all` skips it
     // entirely (no daemon, no warning). The desktop's runtime toggle marks it
     // too via `POST /api/mesh/config`.
+    let selected_network_backend = crate::sidecar::tailscale::mesh_backend().await.0;
     if ryu_mesh::is_enabled() {
-        setup.mark_installed("tailscale").await;
-        tracing::info!("mesh: enabled, Tailscale daemon will start with the other sidecars");
+        setup
+            .mark_installed(selected_network_backend.sidecar_name())
+            .await;
+        tracing::info!(
+            backend = selected_network_backend.as_str(),
+            sidecar = selected_network_backend.sidecar_name(),
+            "network: selected backend will start with the other sidecars"
+        );
     }
 
     // Mesh CLIENT install — a separate decision from the enable above, and the
@@ -2438,7 +2449,9 @@ async fn main() {
     // on a Mac without Homebrew, so those nodes stay silent instead of failing.
     // Re-entry is guarded by `MESH_INSTALL_IN_FLIGHT`, so this racing a user's
     // toggle cannot double-download.
-    if (ryu_mesh::is_enabled() || mesh_preinstall_client)
+    if (ryu_mesh::is_enabled()
+        || (mesh_preinstall_client
+            && selected_network_backend != crate::sidecar::tailscale::MeshBackend::Tailcat))
         && crate::sidecar::tailscale::ensure_mesh_binaries().is_err()
         && crate::sidecar::tailscale::downloader::can_install()
     {

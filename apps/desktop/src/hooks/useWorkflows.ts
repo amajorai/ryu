@@ -6,6 +6,7 @@ import {
 	resumeWorkflow as apiResumeWorkflow,
 	runWorkflow as apiRunWorkflow,
 	fetchWorkflows,
+	type RunWorkflowOptions,
 	type Workflow,
 	type WorkflowRun,
 } from "@/src/lib/api/workflows.ts";
@@ -28,7 +29,11 @@ export interface UseWorkflowsResult {
 	reload: () => Promise<void>;
 	remove: (id: string) => Promise<void>;
 	resume: (runId: string, payload: string) => Promise<WorkflowRun>;
-	run: (id: string, input: Record<string, string>) => Promise<WorkflowRun>;
+	run: (
+		id: string,
+		input: Record<string, string>,
+		options?: RunWorkflowOptions
+	) => Promise<WorkflowRun>;
 	workflows: Workflow[];
 }
 
@@ -101,8 +106,11 @@ export function useWorkflows(): UseWorkflowsResult {
 	);
 
 	const run = useCallback(
-		async (id: string, input: Record<string, string>) =>
-			await apiRunWorkflow({ url, token, userJwt }, id, input),
+		async (
+			id: string,
+			input: Record<string, string>,
+			options?: RunWorkflowOptions
+		) => await apiRunWorkflow({ url, token, userJwt }, id, input, options),
 		[url, token, userJwt]
 	);
 

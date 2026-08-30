@@ -52,7 +52,7 @@ use serde::Serialize;
 /// `1.y` (y ≥ x) kernel unchanged. The `ryu-plugin-ready` handshake carries this
 /// value as `hostApiVersion`; the host accepts a missing value (legacy) this
 /// major and only annotates it (no rejection).
-pub const HOST_API_VERSION: &str = "1.9.0";
+pub const HOST_API_VERSION: &str = "1.10.0";
 
 /// One method in the host↔plugin RPC surface — the row type of the single-sourced
 /// `method → capability → grant` table.
@@ -102,6 +102,10 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     // grant-free; the host decides whether the concrete surface can provide
     // them, while the contract still keeps the method vocabulary closed.
     m("host.capabilities", "host.capabilities", None, false, true),
+    // Secret-free active-node origins for apps that need to create a link to
+    // the node. The host filters loopback/wildcard addresses and never returns
+    // node credentials, user JWTs, or cookies.
+    m("node.shareOrigins", "node.shareOrigins", None, false, true),
     m(
         "native.haptics",
         "native.haptics",
@@ -204,6 +208,43 @@ pub const HOST_API_METHODS: &[HostApiMethod] = &[
     // from the owning plugin id and Core's ext-proxy still enforces the manifest
     // route allowlist, so the frame supplies only a relative path/method/body.
     m("app.request", "app.http", Some("app:http"), false, true),
+    // Generic application-room realtime. The trusted host owns the node token
+    // and WebSocket URL; the companion receives only an opaque room connection.
+    m(
+        "realtime.connect",
+        "app.realtime",
+        Some("app:realtime"),
+        false,
+        true,
+    ),
+    m(
+        "realtime.publish",
+        "app.realtime",
+        Some("app:realtime"),
+        false,
+        true,
+    ),
+    m(
+        "realtime.presence",
+        "app.realtime",
+        Some("app:realtime"),
+        false,
+        true,
+    ),
+    m(
+        "realtime.subscribe",
+        "app.realtime",
+        Some("app:realtime"),
+        true,
+        true,
+    ),
+    m(
+        "realtime.close",
+        "app.realtime",
+        Some("app:realtime"),
+        false,
+        true,
+    ),
     m("ui.requestDisplayMode", "ui.displayMode", None, false, true),
     m("ui.requestModal", "ui.displayMode", None, false, true),
     m("ui.notifyHeight", "ui.displayMode", None, false, true),

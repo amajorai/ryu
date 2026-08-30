@@ -2043,6 +2043,7 @@ mod tests {
         struct GatewayEnv {
             fallback: Option<std::ffi::OsString>,
             approval_mode: Option<std::ffi::OsString>,
+            gateway_url: Option<std::ffi::OsString>,
         }
         impl Drop for GatewayEnv {
             fn drop(&mut self) {
@@ -2055,6 +2056,10 @@ mod tests {
                         Some(value) => std::env::set_var("RYU_EXEC_APPROVAL_MODE", value),
                         None => std::env::remove_var("RYU_EXEC_APPROVAL_MODE"),
                     }
+                    match self.gateway_url.take() {
+                        Some(value) => std::env::set_var("RYU_GATEWAY_URL", value),
+                        None => std::env::remove_var("RYU_GATEWAY_URL"),
+                    }
                 }
             }
         }
@@ -2063,10 +2068,15 @@ mod tests {
         let _gateway_env = GatewayEnv {
             fallback: std::env::var_os("RYU_ALLOW_GATEWAY_FALLBACK"),
             approval_mode: std::env::var_os("RYU_EXEC_APPROVAL_MODE"),
+            gateway_url: std::env::var_os("RYU_GATEWAY_URL"),
         };
         unsafe {
             std::env::set_var("RYU_ALLOW_GATEWAY_FALLBACK", "1");
             std::env::set_var("RYU_EXEC_APPROVAL_MODE", "off");
+            // Keep the live-boundary test hermetic. A developer machine may have
+            // a real Gateway at the profile default, but this fixture is testing
+            // the explicit local fallback path, not Gateway authentication.
+            std::env::set_var("RYU_GATEWAY_URL", "http://127.0.0.1:1");
         }
 
         let calls = Arc::new(AtomicUsize::new(0));

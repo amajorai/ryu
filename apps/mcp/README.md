@@ -128,7 +128,7 @@ does not launch from the repo root.
 | `ryu_search_skills` | Search the skills directory (`{ query, limit? }`). |
 | `ryu_install_skill` | Install a skill by catalog id (`{ id }`). |
 | `ryu_list_workflows` | List defined workflows. |
-| `ryu_run_workflow` | Run a workflow (`{ id, input? }`). |
+| `ryu_run_workflow` | Run a workflow (`{ id, input?, dryRun? }`); `dryRun: true` is a transient read-only preview that creates no run history and skips effectful nodes. |
 | `ryu_list_mcp_servers` | List MCP servers Ryu has registered. |
 | `ryu_call_mcp_tool` | Bridge: invoke a tool on any registered MCP server (`{ tool, server?, agentId, args? }`). `agentId` is required - Core ties the tool allowlist to a registered agent. |
 | `ryu_list_spaces` | List knowledge Spaces. |

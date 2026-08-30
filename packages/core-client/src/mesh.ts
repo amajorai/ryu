@@ -1,6 +1,6 @@
 // apps/desktop/src/lib/api/mesh.ts
 //
-// Typed client for Core's mesh-status surface (`GET /api/mesh/status`,
+// Typed client for Core's private-network status surface (`GET /api/mesh/status`,
 // Contract 6 of the unified-tool-gateway spec). The endpoint is the canonical
 // superset Core emits in snake_case; this module normalizes raw → camelCase.
 //
@@ -33,22 +33,24 @@ export interface MeshPeer {
 	tailscaleIps: string[];
 }
 
-/** Normalized mesh status (Contract 6). */
+/** Normalized private-network status (Contract 6). */
 export interface MeshStatus {
-	/** `"tailscale"` | `"headscale"` | null. */
+	/** `"tailscale"` | `"headscale"` | `"tailcat"` | null. */
 	backend: string | null;
 	/** Raw `BackendState` passthrough (e.g. "Running", "NeedsLogin"). */
 	backendState: string;
 	/** Control-plane server URL, when known. */
 	controlServer: string | null;
-	/** Mesh opted-in at all (`RYU_MESH_ENABLED` truthy). */
+	/** Private networking opted-in at all (`RYU_MESH_ENABLED` truthy). */
 	enabled: boolean;
 	/** This node's MagicDNS name (trailing dot stripped), or null. */
 	magicDnsName: string | null;
 	/** Peer nodes on the tailnet. */
 	peers: MeshPeer[];
-	/** tailscaled client up + authed. Equal to `up`. */
+	/** Selected network provider is live. Equal to `up`. */
 	reachable: boolean;
+	/** The short-lived Tailcat connection address, or null for mesh backends. */
+	tailcatAddress: string | null;
 	/** This node's Tailscale IPs. */
 	tailscaleIps: string[];
 }
@@ -72,6 +74,7 @@ export interface RawMeshStatus {
 	magic_dns_name?: string | null;
 	peers?: RawPeer[];
 	reachable?: boolean;
+	tailcat_address?: string | null;
 	tailscale_ips?: string[];
 	up?: boolean;
 	webhook_ingress_mode?: string | null;
@@ -98,6 +101,7 @@ export function normalizeMeshStatus(raw: RawMeshStatus): MeshStatus {
 		controlServer: raw.control_server ?? null,
 		magicDnsName: raw.magic_dns_name ?? null,
 		tailscaleIps: raw.tailscale_ips ?? [],
+		tailcatAddress: raw.tailcat_address ?? null,
 		peers: (raw.peers ?? []).map(normalizePeer),
 	};
 }

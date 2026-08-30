@@ -79,18 +79,20 @@ const ENV_HOSTNAME: &str = "RYU_MESH_HOSTNAME";
 const ENV_TAILSCALED_BIN: &str = "RYU_TAILSCALED_BIN";
 /// Env overriding the `tailscale` CLI binary (otherwise resolved on PATH).
 const ENV_TAILSCALE_BIN: &str = "RYU_TAILSCALE_BIN";
-/// Env overriding the tunnel backend (`headscale` | `tailscale`), outranking the
+/// Env overriding the tunnel backend (`headscale` | `tailscale` | `tailcat`), outranking the
 /// `mesh-backend` pref exactly as the other mesh envs outrank their prefs.
 const ENV_BACKEND: &str = "RYU_MESH_BACKEND";
 
-/// Which control plane this node enrolls against. Self-hosted by default: Ryu's
-/// whole point is that the hard, private thing is the normal thing.
+/// Which private-network backend this node uses. Headscale is self-hosted by
+/// default: Ryu's whole point is that the hard, private thing is the normal thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshBackend {
     /// Self-hosted Headscale — `tailscale up --login-server=<url>`.
     Headscale,
     /// Tailscale's SaaS coordination server — no `--login-server` at all.
     Tailscale,
+    /// Tailcat's short-lived point-to-point server — no control plane or login.
+    Tailcat,
 }
 
 impl MeshBackend {
@@ -98,6 +100,15 @@ impl MeshBackend {
         match self {
             Self::Headscale => "headscale",
             Self::Tailscale => "tailscale",
+            Self::Tailcat => "tailcat",
+        }
+    }
+
+    /// The sidecar that owns this backend's process lifecycle.
+    pub fn sidecar_name(self) -> &'static str {
+        match self {
+            Self::Headscale | Self::Tailscale => "tailscale",
+            Self::Tailcat => crate::sidecar::tailcat::SIDECAR_NAME,
         }
     }
 }
@@ -114,7 +125,20 @@ pub fn parse_backend(raw: Option<&str>) -> MeshBackend {
     match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
         Some("tailscale") => MeshBackend::Tailscale,
         Some("headscale") => MeshBackend::Headscale,
+        Some("tailcat") => MeshBackend::Tailcat,
         _ => DEFAULT_MESH_BACKEND,
+    }
+}
+
+/// Parse only an explicitly supplied backend choice. Unlike [`parse_backend`],
+/// this returns `None` for an unknown value so an HTTP config request cannot
+/// silently turn a typo into a different network backend.
+pub fn parse_backend_choice(raw: &str) -> Option<MeshBackend> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "tailscale" => Some(MeshBackend::Tailscale),
+        "headscale" => Some(MeshBackend::Headscale),
+        "tailcat" => Some(MeshBackend::Tailcat),
+        _ => None,
     }
 }
 
@@ -669,6 +693,12 @@ impl Sidecar for TailscaleManager {
                 );
             }
 
+            if crate::sidecar::tailscale::mesh_backend().await.0 == MeshBackend::Tailcat {
+                anyhow::bail!(
+                    "Tailcat is the selected network backend; use the Tailcat sidecar instead"
+                );
+            }
+
             // Resolved BEFORE anything else so a machine without a complete client
             // pair gets one clear sentence instead of an OS errno from deep in the
             // spawn path. Pure — `start()` runs at boot from `start_all()`, so it
@@ -810,6 +840,11 @@ impl Sidecar for TailscaleManager {
                     // stale Headscale URL here would send the node to the wrong
                     // control plane, so the URL is ignored on purpose.
                     (MeshBackend::Tailscale, _) => {}
+                    (MeshBackend::Tailcat, _) => {
+                        anyhow::bail!(
+                            "Tailcat is the selected network backend; use the Tailcat sidecar"
+                        );
+                    }
                 }
                 // Register under a sanitized whole-hostname label rather than
                 // letting Tailscale take the first one (see `mesh_hostname`).
@@ -1211,9 +1246,10 @@ mod tests {
         // A typo must not strand a node off its tailnet — it falls back, it does
         // not error.
         assert_eq!(parse_backend(Some("headscaleee")), MeshBackend::Headscale);
-        // Both real values round-trip, case- and whitespace-insensitively.
+        // All real values round-trip, case- and whitespace-insensitively.
         assert_eq!(parse_backend(Some(" Headscale ")), MeshBackend::Headscale);
         assert_eq!(parse_backend(Some("TAILSCALE")), MeshBackend::Tailscale);
+        assert_eq!(parse_backend(Some("TAILCAT")), MeshBackend::Tailcat);
         assert_eq!(
             parse_backend(Some(MeshBackend::Tailscale.as_str())),
             MeshBackend::Tailscale
@@ -1223,5 +1259,26 @@ mod tests {
             MeshBackend::Headscale
         );
         assert_eq!(DEFAULT_MESH_BACKEND, MeshBackend::Headscale);
+    }
+
+    #[test]
+    fn explicit_backend_choices_reject_unknown_values() {
+        assert_eq!(
+            parse_backend_choice("headscale"),
+            Some(MeshBackend::Headscale)
+        );
+        assert_eq!(
+            parse_backend_choice(" TAILSCALE "),
+            Some(MeshBackend::Tailscale)
+        );
+        assert_eq!(parse_backend_choice("tailcat"), Some(MeshBackend::Tailcat));
+        assert_eq!(parse_backend_choice("tailscalee"), None);
+    }
+
+    #[test]
+    fn backend_sidecar_names_keep_tailscale_and_tailcat_separate() {
+        assert_eq!(MeshBackend::Headscale.sidecar_name(), "tailscale");
+        assert_eq!(MeshBackend::Tailscale.sidecar_name(), "tailscale");
+        assert_eq!(MeshBackend::Tailcat.sidecar_name(), "tailcat");
     }
 }

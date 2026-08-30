@@ -23,7 +23,7 @@ export type GatewaySection =
 	| "hooks"
 	| "keys"
 	| "integrations"
-	// The node's network surface (mesh / Tailscale / Headscale), extracted from
+	// The node's network surface (Tailscale / Headscale / Tailcat), extracted from
 	// Integrations into its own tab.
 	| "network"
 	| "usage"

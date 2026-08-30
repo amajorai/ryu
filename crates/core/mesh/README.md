@@ -1,9 +1,10 @@
 # ryu-mesh
 
-The **read/shape side** of Ryu's optional Tailscale/Headscale mesh plane (unified-tool-
-gateway epic #478, P5–P7). Core owns *what runs* — the optional `tailscaled` daemon,
-a `Sidecar` managed Core-side. This crate shapes its status, resolves the peer-listing
-bearer, and exposes the Funnel helpers public webhook ingress consumes.
+The **read/shape side** of Ryu's optional Tailscale/Headscale mesh plane and Tailcat
+point-to-point network (unified-tool-gateway epic #478, P5–P7). Core owns *what runs* —
+the selected `tailscaled` or `tailcat` process, a `Sidecar` managed Core-side.
+This crate shapes its status, resolves the peer-listing bearer, and exposes the Funnel
+helpers public webhook ingress consumes.
 
 ## Role in the decomposition
 
@@ -12,16 +13,16 @@ default (every entry point is a plain function call, never IPC) and consumed as 
 **non-optional** path dependency — the fail-closed startup gate reads `is_enabled()` /
 `is_insecure_auth_token_placeholder()` unconditionally.
 
-Zero dependency on `apps/core`. The one kernel coupling — the `tailscale` /
-`tailscaled` process shell-outs — inverts through the narrow **`MeshHost`** trait
+Zero dependency on `apps/core`. The provider process adapters invert through the
+narrow **`MeshHost`** trait
 (`status_json`, `ensure_funnel`, `funnel_url`), implemented in
 `apps/core/src/mesh_host.rs` and installed once at boot via `set_global_host`.
 **That trait is the swap seam.**
 
 ## Key surface
 
-- `MeshHost` + `set_global_host` — the inverted daemon shell-out seam.
-- `query_status` — shapes `tailscale status --json` into the canonical
+- `MeshHost` + `set_global_host` — the inverted provider process seam.
+- `query_status` — shapes Tailscale/Headscale status or a Tailcat address into the canonical
   `GET /api/mesh/status` contract (Contract 6).
 - Fail-closed shared-mesh-token bearer resolution for `GET /api/mesh/peers`; the
   node-admittance security model this crate anchors — `enforce_remote_auth` stays in
@@ -29,7 +30,7 @@ Zero dependency on `apps/core`. The one kernel coupling — the `tailscale` /
 - `ensure_funnel` / `funnel_url` — the Funnel primitives P6 (webhook ingress)
   consumes for a public URL.
 
-The mesh is **opt-in** — `RYU_MESH_ENABLED` (env, wins when set) OR the
+The network is **opt-in** — `RYU_MESH_ENABLED` (env, wins when set) OR the
 `mesh-enabled` pref that Core seeds into `set_pref_enabled` (the desktop's Gateway →
 Integrations toggle writes it through `POST /api/mesh/config`). When off,
 `query_status` returns the all-default object (HTTP 200) **without** touching the

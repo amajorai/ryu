@@ -6569,9 +6569,10 @@ const GATEWAY_SECTIONS: {
 	{
 		value: "network",
 		label: "Network",
-		hint: "The mesh: join this node to a tailnet and reach other Ryu nodes.",
+		hint: "Connect this node with Tailscale, Headscale, or a short-lived Tailcat address.",
 		icon: Share08Icon,
-		keywords: "network mesh tailscale headscale tailnet vpn remote peers",
+		keywords:
+			"network mesh tailscale headscale tailcat tailnet vpn remote peers",
 	},
 	// Moved from the App Settings dialog (node-level Core infra, not apps).
 	{
