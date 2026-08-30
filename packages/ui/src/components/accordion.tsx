@@ -62,14 +62,23 @@ function AccordionTrigger({
 	);
 }
 
+type AccordionContentProps = AccordionPrimitive.Panel.Props & {
+	/** Override the panel wrapper layout without changing the inner content styles. */
+	panelClassName?: string;
+};
+
 function AccordionContent({
 	className,
+	panelClassName,
 	children,
 	...props
-}: AccordionPrimitive.Panel.Props) {
+}: AccordionContentProps) {
 	return (
 		<AccordionPrimitive.Panel
-			className="overflow-hidden px-4 text-sm data-closed:animate-accordion-up data-open:animate-accordion-down"
+			className={cn(
+				"overflow-hidden px-4 text-sm data-closed:animate-accordion-up data-open:animate-accordion-down",
+				panelClassName
+			)}
 			data-slot="accordion-content"
 			{...props}
 		>

@@ -1330,6 +1330,7 @@ const CORE_RUNTIME_BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../apps-store/pull-requests/manifest.json"),
     include_str!("../../../../apps-store/quests/manifest.json"),
     include_str!("../../../../apps-store/reasoning/manifest.json"),
+    include_str!("../../../../apps-store/rooms/manifest.json"),
     include_str!("../../../../apps-store/reelfarm/manifest.json"),
     include_str!("../../../../apps-store/research/manifest.json"),
     include_str!("../../../../apps-store/rlm/manifest.json"),

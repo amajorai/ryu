@@ -346,7 +346,7 @@ export default function SignInForm({
 							<AccordionTrigger className="border-0 bg-transparent shadow-none hover:bg-transparent hover:shadow-none">
 								More options
 							</AccordionTrigger>
-							<AccordionContent>
+							<AccordionContent className="p-0" panelClassName="p-0">
 								<div className="flex flex-col gap-4">
 									{onPasskey ? (
 										<div className="relative">
@@ -388,6 +388,7 @@ export default function SignInForm({
 									) : null}
 
 									<Button
+										className="w-full"
 										onClick={onToggleMagicLink}
 										size="lg"
 										variant="secondary"
