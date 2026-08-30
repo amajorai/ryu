@@ -212,7 +212,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          NODE_OPTIONS: --max-old-space-size=8192
+          # Windows needs the larger heap for the full desktop renderer bundle.
+          NODE_OPTIONS: ${{ matrix.platform == 'windows-latest' && '--max-old-space-size=16384' || '--max-old-space-size=8192' }}
           # Vite INLINES these; apps/desktop/.env is gitignored, so without them a
           # released build bakes the localhost fallbacks and cannot sign in.
           VITE_APP_BACKEND_URL: ${{ vars.VITE_APP_BACKEND_URL || 'https://api.ryuhq.com' }}

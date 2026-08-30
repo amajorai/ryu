@@ -12,9 +12,10 @@ test("footer uses the cursor-aware outline Ryu mark", () => {
 	expect(html).not.toContain(">ryu</div>");
 });
 
-test("footer carries the landing deployment positioning", () => {
+test("footer carries the universal integration positioning", () => {
 	const html = renderToStaticMarkup(<Footer />);
 
-	expect(html).toContain("We deploy and run AI agents safely in the cloud");
+	expect(html).toContain("The universal AI integration layer");
+	expect(html).not.toContain("We deploy and run AI agents safely in the cloud");
 	expect(html).not.toContain("Autonomous AI in the cloud");
 });

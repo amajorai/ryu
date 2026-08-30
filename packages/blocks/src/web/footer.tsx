@@ -25,7 +25,7 @@ export default function Footer({
 				<div className="mb-12 grid grid-cols-1 gap-12 md:grid-cols-2">
 					<div className="space-y-4">
 						<h3 className="font-medium text-2xl">
-							We deploy and run AI agents safely in the cloud
+							The universal AI integration layer
 						</h3>
 						<p className="max-w-md text-muted-foreground">
 							Ryu is the integration layer for AI. We deploy it, keep it
