@@ -20,6 +20,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "pretest": "bun run --cwd ../sdk build",
     "test": "bun test",
     "clean": "rm -rf dist"
   },
