@@ -392,6 +392,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_member_acks_do_not_drop_a_vote() {
+        use super::super::{NodeKind, NotifyTargetSpec, Workflow, WorkflowNode};
+
+        let workflow = Workflow {
+            id: format!("notify-concurrent-{}", uuid::Uuid::new_v4().simple()),
+            name: "concurrent notify ack".into(),
+            description: None,
+            nodes: vec![WorkflowNode {
+                id: "approval".into(),
+                kind: NodeKind::NotifyUser {
+                    target: NotifyTargetSpec::Members {
+                        user_ids: vec!["u1".into(), "u2".into()],
+                    },
+                    title: "Review".into(),
+                    body: "Approve".into(),
+                    ack_mode: AckMode::Quorum { n: 2 },
+                    ack_timeout_ms: None,
+                },
+                retry: None,
+                timeout_ms: None,
+            }],
+            edges: Vec::new(),
+            triggers: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        super::super::store::save_workflow(&workflow).expect("workflow should persist");
+
+        let run_id = format!("notify-concurrent-run-{}", uuid::Uuid::new_v4().simple());
+        let mut run = WorkflowRun::new(run_id.clone(), workflow.id, HashMap::new());
+        run.status = RunStatus::AwaitingInput;
+        run.awaiting_node = Some("approval".into());
+        let state = AckState {
+            mode: "quorum".into(),
+            threshold: 2,
+            required: vec!["u1".into(), "u2".into()],
+            acked: Vec::new(),
+            notifications: HashMap::from([("u1".into(), "n1".into()), ("u2".into(), "n2".into())]),
+        };
+        run.state.insert(
+            ack_state_key("approval"),
+            serde_json::to_string(&state).expect("ack state should encode"),
+        );
+        super::super::store::save_run(&run).expect("run should persist");
+
+        let (first, second) = tokio::join!(ack_gate(&run_id, "u1"), ack_gate(&run_id, "u2"));
+        let outcomes = [
+            first.expect("first ack should succeed"),
+            second.expect("second ack should succeed"),
+        ];
+        assert_eq!(
+            outcomes.iter().filter(|outcome| outcome.satisfied).count(),
+            1
+        );
+        assert_eq!(
+            super::super::store::load_run(&run_id)
+                .expect("run should be completed after the second ack")
+                .status,
+            RunStatus::Completed
+        );
+    }
+
+    #[tokio::test]
     async fn non_target_cannot_ack() {
         let mut run = gate_run("n1", &["u1"], &AckMode::First);
         assert!(record_ack(&mut run, "intruder").await.is_err());
