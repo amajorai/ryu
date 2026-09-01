@@ -55,6 +55,14 @@ import {
 	Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import {
+	ACCOUNT_LINKING_PROVIDERS,
+	type LinkedAccountProvider,
+} from "./linked-account-providers.ts";
+import { DISCORD_SVGL, SvglIcon } from "./svgl-icon.tsx";
+
+export type { LinkedAccountProvider } from "./linked-account-providers.ts";
+export { ACCOUNT_LINKING_PROVIDERS } from "./linked-account-providers.ts";
 
 const noop = () => {
 	// presentational default; the live app injects real handlers
@@ -97,14 +105,18 @@ export interface LinkedAccount {
 	providerId: string;
 }
 
-function linkedAccountLabel(providerId: string): string {
+function LinkedAccountIcon({
+	providerId,
+}: {
+	providerId: LinkedAccountProvider;
+}) {
 	if (providerId === "google") {
-		return "Google";
+		return GOOGLE_LOGO;
 	}
-	return providerId
-		.split(/[-_]/)
-		.map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
-		.join(" ");
+	if (providerId === "github") {
+		return <Github aria-hidden="true" className="size-5" />;
+	}
+	return <SvglIcon size={20} spec={DISCORD_SVGL} />;
 }
 
 const SECONDS_PER_HOUR = 3600;
@@ -633,6 +645,7 @@ export interface ProfileSettingsProps {
 	/** App-local change-email / change-password dialogs (injected by the live page). */
 	changeEmailSlot?: ReactNode;
 	changePasswordSlot?: ReactNode;
+	connectingProvider?: LinkedAccountProvider | null;
 	email?: string;
 	emailChangeStatusSlot?: ReactNode;
 	/** Connections tab. */
@@ -656,6 +669,7 @@ export interface ProfileSettingsProps {
 	mergeStatusSlot?: ReactNode;
 	/** Profile tab. */
 	name?: string;
+	onConnectAccount?: (providerId: LinkedAccountProvider) => void;
 	onConnectGoogle?: () => void;
 	onDeleteAccount?: () => void;
 	onNameChange?: (name: string) => void;
@@ -721,7 +735,9 @@ export default function ProfileSettings({
 	isLoadingSubscription = false,
 	onSubscriptionToggle = noop,
 	googleConnected = false,
+	connectingProvider = null,
 	onConnectGoogle = noop,
+	onConnectAccount,
 	linkedAccounts,
 	onUnlinkAccount,
 	onUnlinkGoogle = noop,
@@ -740,6 +756,15 @@ export default function ProfileSettings({
 			return;
 		}
 		onUnlinkGoogle();
+	};
+	const connectAccount = (providerId: LinkedAccountProvider) => {
+		if (onConnectAccount) {
+			onConnectAccount(providerId);
+			return;
+		}
+		if (providerId === "google") {
+			onConnectGoogle();
+		}
 	};
 
 	return (
@@ -1055,45 +1080,64 @@ export default function ProfileSettings({
 							<div>
 								<p className="font-medium">Connected accounts</p>
 								<p className="text-muted-foreground text-sm">
-									Accounts linked for sign-in and provider access.
+									Link individual social identities to this Ryu account. These
+									are separate from organization and agent connections.
 								</p>
 							</div>
-							{connections.length > 0 ? (
-								<div className="space-y-3">
-									{connections.map((account) => (
+							<div className="divide-y overflow-hidden rounded-lg border">
+								{ACCOUNT_LINKING_PROVIDERS.map((provider) => {
+									const account = connections.find(
+										(candidate) => candidate.providerId === provider.id
+									);
+									const isConnecting = connectingProvider === provider.id;
+									return (
 										<div
-											className="flex items-center justify-between gap-3"
-											key={account.accountId}
+											className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+											data-testid={`linked-account-${provider.id}`}
+											key={provider.id}
 										>
 											<div className="flex min-w-0 items-center gap-3">
-												<div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
-													{account.providerId === "google" ? (
-														GOOGLE_LOGO
-													) : (
-														<Plug className="size-5 text-muted-foreground" />
-													)}
+												<div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+													<LinkedAccountIcon providerId={provider.id} />
 												</div>
-												<p className="truncate font-medium">
-													{linkedAccountLabel(account.providerId)}
-												</p>
+												<div className="min-w-0">
+													<p className="truncate font-medium text-sm">
+														{provider.label}
+													</p>
+													<p className="truncate text-muted-foreground text-xs">
+														{account ? "Connected" : provider.description}
+													</p>
+												</div>
 											</div>
-											<Button
-												onClick={() => unlinkAccount(account)}
-												variant="destructive"
-											>
-												Unlink
-											</Button>
+											{account ? (
+												<Button
+													disabled={connectingProvider !== null}
+													onClick={() => unlinkAccount(account)}
+													size="sm"
+													variant="outline"
+												>
+													Unlink
+												</Button>
+											) : (
+												<Button
+													disabled={connectingProvider !== null}
+													loading={isConnecting}
+													onClick={() => connectAccount(provider.id)}
+													size="sm"
+													variant="outline"
+												>
+													{isConnecting ? "Opening…" : "Connect"}
+												</Button>
+											)}
 										</div>
-									))}
-								</div>
-							) : (
-								<p className="text-muted-foreground text-sm">
-									No connected accounts yet.
-								</p>
-							)}
-							<Button onClick={onConnectGoogle} variant="outline">
-								Connect Google
-							</Button>
+									);
+								})}
+							</div>
+							<p className="rounded-md bg-muted/50 px-3 py-2 text-muted-foreground text-xs">
+								The login page keeps Google as its only social option. Telegram
+								Login is organization/channel-level, so it does not belong in
+								this user-account list.
+							</p>
 						</CardContent>
 					</Card>
 				</TabsContent>

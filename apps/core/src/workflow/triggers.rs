@@ -212,6 +212,8 @@ pub fn apply_schedule_reconcile(
                 require_approval: upsert.require_approval,
                 // Core owns workflow-trigger jobs, not an App.
                 owner_app: None,
+                owner_user_id: None,
+                org_id: None,
                 created_at: now.clone(),
                 updated_at: now.clone(),
                 last_run_at: None,

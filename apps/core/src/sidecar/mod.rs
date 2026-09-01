@@ -30,6 +30,7 @@ pub mod resources;
 /// budget) once at startup via [`crate::sandbox_host`].
 pub use ryu_sandbox as sandbox;
 pub mod tailcat;
+pub mod tailcat_downloader;
 pub mod tailscale;
 pub mod tools;
 pub mod untrusted;

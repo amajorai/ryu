@@ -348,6 +348,8 @@ export interface MessageListProps {
 	onUndoFileEdits?: (plan: FileEditUndoPlan) => Promise<void>;
 	onWorkflowResume?: (runId: string, payload: string) => Promise<unknown>;
 	previewResolvers?: LinkPreviewResolvers;
+	/** Message id currently selected by the host's chat-local search. */
+	searchActiveMessageId?: string;
 	/** Contributed text-selection toolbar actions (see
 	 * {@link ContributedSelectionAction}), resolved and ordered by the shell. */
 	selectionActions?: ContributedSelectionAction[];
@@ -1677,6 +1679,7 @@ export const MessageList = memo(function MessageList({
 	answerNow,
 	className,
 	showCopyToolbar = true,
+	searchActiveMessageId,
 	onBranch,
 	onAgentUiSubmit,
 	onEditMessage,
@@ -2338,6 +2341,9 @@ export const MessageList = memo(function MessageList({
 					const hasUnreadMessage = turn.assistantMsgs.some(
 						(msg) => msg.id === firstUnreadMessageId
 					);
+					const isSearchActive =
+						searchActiveMessageId === turn.userMsg?.id ||
+						turn.assistantMsgs.some((msg) => msg.id === searchActiveMessageId);
 
 					return (
 						// A Fragment, NOT a wrapper element: the separator and the
@@ -2352,8 +2358,11 @@ export const MessageList = memo(function MessageList({
 							<div
 								className={cn(
 									"relative space-y-2",
-									continuesRun ? "mt-0.5" : "mt-2"
+									continuesRun ? "mt-0.5" : "mt-2",
+									isSearchActive &&
+										"rounded-xl bg-primary/5 ring-2 ring-primary/35 ring-offset-2 ring-offset-background"
 								)}
+								data-chat-search-active={isSearchActive ? "true" : undefined}
 								data-group-position={groupPosition}
 								data-message-id={turn.userMsg ? turnKey : undefined}
 								data-slot="message-scroller-item"

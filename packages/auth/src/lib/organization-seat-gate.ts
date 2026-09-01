@@ -5,10 +5,48 @@ export interface SeatAdmissionDecision {
 	readonly reason?: string;
 }
 
+export interface OrganizationSeatUsage {
+	readonly allocatedSeats: number;
+	readonly atCapacity: boolean;
+	readonly availableSeats: number | null;
+	readonly memberCount: number;
+	readonly overAllocated: boolean;
+	readonly reservedSeatCount: number;
+}
+
 /**
- * A pending invitation does not spend a seat until it is claimed, but an
- * in-flight claim does. This function is intentionally pure so the database
- * and Polar lookups remain outside the policy itself.
+ * Build the shared roster/billing view from authoritative counts. A pending
+ * invitation is an allocation, while an organization without an active plan
+ * has no usable invitation capacity.
+ */
+export const organizationSeatUsage = (input: {
+	includedSeats: number | null;
+	memberCount: number;
+	reservedSeatCount: number;
+}): OrganizationSeatUsage => {
+	const memberCount = Math.max(0, Math.floor(input.memberCount));
+	const reservedSeatCount = Math.max(0, Math.floor(input.reservedSeatCount));
+	const allocatedSeats = memberCount + reservedSeatCount;
+	const availableSeats =
+		input.includedSeats === null
+			? null
+			: Math.max(input.includedSeats - allocatedSeats, 0);
+	return {
+		allocatedSeats,
+		atCapacity:
+			input.includedSeats !== null && allocatedSeats >= input.includedSeats,
+		availableSeats,
+		memberCount,
+		overAllocated:
+			input.includedSeats !== null && memberCount > input.includedSeats,
+		reservedSeatCount,
+	};
+};
+
+/**
+ * A pending invitation and an in-flight membership claim both occupy a seat.
+ * This function is intentionally pure so the database and Polar lookups remain
+ * outside the policy itself.
  */
 export const decideSeatAdmission = (input: {
 	billedSeats: number;
@@ -22,7 +60,7 @@ export const decideSeatAdmission = (input: {
 		return {
 			allowed: false,
 			reason:
-				"No unassigned Teams seat is available. Ask an organization owner or admin to add a seat first.",
+				"No unassigned organization seat is available. Buy another seat or remove a member first.",
 		};
 	}
 	return { allowed: true };

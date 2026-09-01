@@ -14,9 +14,9 @@
 //
 // Data sourcing - mirror the Rust exactly. Core's GET /api/gateway/status returns
 // `{ reachable, url, health, metrics, effective_config }` where `effective_config`
-// is the parsed gateway.toml read from disk (apps/core/src/server/mod.rs
-// gateway_status ~11065) and is therefore present even when the gateway PROCESS is
-// down. apps/cli reads every policy indicator from that `effective_config` with
+// is the credential-redacted parsed gateway.toml read from disk (apps/core/src/server/mod.rs
+// gateway_status) and is therefore present even when the gateway PROCESS is down.
+// apps/cli reads every policy indicator from that `effective_config` with
 // `unwrap_or(false)` defaults, so we read the same JSON paths with the same
 // fall-to-false behaviour and match by construction. We deliberately do NOT use
 // the typed core-client fetchGatewayStatus (it normalizes effective_config away)
@@ -43,8 +43,9 @@ const REFRESH_INTERVAL_MS = 5000;
 const KEY_WIDTH = 10;
 
 // Raw wire shape of GET /api/gateway/status. `metrics` and `effective_config` are
-// passed through verbatim by Core (raw gateway /metrics, parsed gateway.toml), so
-// they stay `unknown`-typed and are read via the narrowing getters below.
+// passed through by Core (raw gateway /metrics, credential-redacted parsed
+// gateway.toml), so they stay `unknown`-typed and are read via the narrowing
+// getters below.
 interface RawStatus {
 	effective_config?: unknown;
 	metrics?: unknown;

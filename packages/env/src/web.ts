@@ -17,6 +17,11 @@ export const env = createEnv({
 		// Browser build of the desktop app (apps/webapp). The download menu links
 		// here for "Web app". Local dev server runs on :5175.
 		NEXT_PUBLIC_WEBAPP_URL: z.url().default("http://localhost:5175"),
+		// Public dashboard target used by standalone product home redirects. Keep
+		// this on the signed-in portal, not on the marketing site.
+		NEXT_PUBLIC_PRODUCT_DASHBOARD_URL: z
+			.url()
+			.default("https://app.ryuhq.com/dashboard"),
 		// Public Google OAuth client id used by the Google One Tap browser prompt.
 		// The client id is not a secret; the matching authorized JavaScript origins
 		// still have to be configured in Google Cloud Console.
@@ -42,6 +47,8 @@ export const env = createEnv({
 		NEXT_PUBLIC_CORE_URL: process.env.NEXT_PUBLIC_CORE_URL,
 		NEXT_PUBLIC_DOCS_URL: process.env.NEXT_PUBLIC_DOCS_URL,
 		NEXT_PUBLIC_WEBAPP_URL: process.env.NEXT_PUBLIC_WEBAPP_URL,
+		NEXT_PUBLIC_PRODUCT_DASHBOARD_URL:
+			process.env.NEXT_PUBLIC_PRODUCT_DASHBOARD_URL,
 		NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
 		NEXT_PUBLIC_TURNSTILE_SITE_KEY: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY,
 		NEXT_PUBLIC_STORAGE_ENDPOINT: process.env.NEXT_PUBLIC_STORAGE_ENDPOINT,

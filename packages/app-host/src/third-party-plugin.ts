@@ -1126,9 +1126,9 @@ function htmlCompanionHeadFragment(
         openSettings: function () { return call("timeline.openSettings", []); }
       },
       // Calendar (needs grant calendar:crud). The @ryu/calendar companion renders
-      // the scheduled-runs calendar and schedules an agent; the host calls Core's
+      // the scheduled-runs calendar and schedules an agent routine; the host calls Core's
       // /heartbeat/jobs + /workflows + /api/agents directly (the monitors pattern),
-      // plus the createScheduledAgentWorkflow composite.
+      // plus the createScheduledAgentWorkflow routine composite.
       calendar: {
         jobs: function () { return call("calendar.jobs", []); },
         workflows: function () { return call("calendar.workflows", []); },

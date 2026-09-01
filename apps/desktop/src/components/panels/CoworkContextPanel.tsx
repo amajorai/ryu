@@ -11,7 +11,8 @@
 //   • Context   — the selected project folder + branch (workspace + git status).
 //   • Changes   — the aggregate worktree diff with Apply / Open PR (DiffReviewPane).
 //   • Sources   — chat attachments and connectors the run actually used
-//                 (web search, GitHub, Gmail, MCP servers, local files).
+//                 (web search, GitHub, Gmail, MCP servers, apps, integrations,
+//                 local files).
 //   • Side chats— persisted `/btw` asides for this conversation (see Phase 2).
 //
 // Everything except Artifacts/Changes is derived from the live stream, so it is
@@ -26,6 +27,7 @@ import {
 	BrowserIcon,
 	CheckmarkCircle02Icon,
 	ComputerTerminal01Icon,
+	ConnectIcon,
 	DatabaseIcon,
 	Delete01Icon,
 	File01Icon,
@@ -37,6 +39,7 @@ import {
 	Link01Icon,
 	Mail01Icon,
 	MessageQuestionIcon,
+	Package01Icon,
 	PlusSignIcon,
 	Robot01Icon,
 	Search01Icon,
@@ -241,7 +244,188 @@ const SHELL_TOOLS = new Set([
 	"shell",
 ]);
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch", "web_search"]);
-const MCP_TOOL_RE = /^mcp\.([^.]+)\.(.+)$/;
+
+type SourceToolKind = "app" | "integration" | "mcp";
+
+interface ParsedSourceTool {
+	kind: SourceToolKind;
+	operation: string;
+	source: Omit<DerivedSource, "items">;
+}
+
+// These qualified names are Ryu's own rendering/orchestration tools, not
+// external sources. Keep them out of Sources while allowing provider facades
+// such as browser.* and memory.* to remain visible when they are actually used.
+const INTERNAL_QUALIFIED_TOOL_NAMESPACES = new Set([
+	"agents",
+	"artifact",
+	"delegate",
+	"describe",
+	"execute",
+	"resume",
+	"skills",
+	"threads",
+	"tool_search",
+	"ui",
+]);
+
+const TOOL_ARGUMENT_KEYS = [
+	"query",
+	"question",
+	"email",
+	"name",
+	"id",
+	"issue",
+	"subject",
+	"title",
+	"summary",
+	"channel",
+	"message",
+	"text",
+	"repository",
+	"repo",
+	"owner",
+	"project",
+	"url",
+	"link",
+	"uri",
+	...PATH_KEYS,
+];
+
+function splitFirstQualifiedPart(
+	value: string,
+	separator: "." | "__"
+): [string, string] | null {
+	const at = value.indexOf(separator);
+	if (at <= 0 || at + separator.length >= value.length) {
+		return null;
+	}
+	return [value.slice(0, at), value.slice(at + separator.length)];
+}
+
+function splitQualifiedTool(value: string): [string, string] | null {
+	const dot = value.indexOf(".");
+	const legacy = value.indexOf("__");
+	if (dot === -1 && legacy === -1) {
+		return null;
+	}
+	if (legacy === -1 || (dot !== -1 && dot < legacy)) {
+		return splitFirstQualifiedPart(value, ".");
+	}
+	return splitFirstQualifiedPart(value, "__");
+}
+
+function prettySourceLabel(value: string): string {
+	const normalized = value
+		.replace(/[._-]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function prettyOperationLabel(value: string): string {
+	const normalized = prettySourceLabel(value);
+	return normalized
+		? normalized.charAt(0) + normalized.slice(1).toLowerCase()
+		: "Tool";
+}
+
+function parseMcpToolName(tool: string): [string, string] | null {
+	const dotted = /^mcp\.(.+)$/i.exec(tool)?.[1];
+	if (dotted) {
+		return splitFirstQualifiedPart(dotted, ".");
+	}
+	const dashed = /^mcp-(.+)$/i.exec(tool)?.[1];
+	if (dashed) {
+		return splitQualifiedTool(dashed);
+	}
+	const legacy = /^mcp__(.+)$/i.exec(tool)?.[1];
+	return legacy ? splitQualifiedTool(legacy) : null;
+}
+
+function parseAppToolName(tool: string): [string, string] | null {
+	const dotted = /^app\.(.+)$/i.exec(tool)?.[1];
+	const legacy = /^app__(.+)$/i.exec(tool)?.[1];
+	const rest = dotted ?? legacy;
+	if (!rest) {
+		return null;
+	}
+	return splitQualifiedTool(rest) ?? ["apps", rest];
+}
+
+function parseSourceTool(tool: string): ParsedSourceTool | null {
+	const mcp = parseMcpToolName(tool);
+	if (mcp) {
+		const [rawServer, operation] = mcp;
+		const server = rawServer.toLowerCase();
+		if (server.includes("gmail") || server.includes("mail")) {
+			return {
+				kind: "mcp",
+				operation,
+				source: { id: "gmail", label: "Gmail", icon: Mail01Icon },
+			};
+		}
+		if (server.includes("github") || server.includes("git")) {
+			return {
+				kind: "mcp",
+				operation,
+				source: { id: "github", label: "GitHub", icon: SourceCodeIcon },
+			};
+		}
+		return {
+			kind: "mcp",
+			operation,
+			source: {
+				id: `mcp-${server}`,
+				label: prettySourceLabel(rawServer),
+				icon: Globe02Icon,
+			},
+		};
+	}
+
+	const composio = /^composio(?:\.|__)(.+)$/i.exec(tool)?.[1];
+	if (composio) {
+		return {
+			kind: "integration",
+			operation: composio,
+			source: { id: "composio", label: "Composio", icon: ConnectIcon },
+		};
+	}
+
+	const app = parseAppToolName(tool);
+	if (app) {
+		const [rawApp, operation] = app;
+		const appName = rawApp.toLowerCase();
+		return {
+			kind: "app",
+			operation,
+			source: {
+				id: `app-${appName}`,
+				label: appName === "apps" ? "Apps" : prettySourceLabel(rawApp),
+				icon: Package01Icon,
+			},
+		};
+	}
+
+	const qualified = splitQualifiedTool(tool);
+	if (!qualified) {
+		return null;
+	}
+	const [namespace, operation] = qualified;
+	if (INTERNAL_QUALIFIED_TOOL_NAMESPACES.has(namespace.toLowerCase())) {
+		return null;
+	}
+	const normalizedNamespace = namespace.toLowerCase();
+	return {
+		kind: "mcp",
+		operation,
+		source: {
+			id: `mcp-${normalizedNamespace}`,
+			label: prettySourceLabel(namespace),
+			icon: Globe02Icon,
+		},
+	};
+}
 
 function baseName(path: string): string {
 	const segments = path.split(/[\\/]/).filter(Boolean);
@@ -303,7 +487,9 @@ function attachmentItem(
 /**
  * Map a tool NAME to the connector/source it represents. Returns null for tools
  * that aren't a recognisable external source (so a run that only thinks/writes
- * shows just "Local files", not noise).
+ * shows just "Local files", not noise). Qualified MCP, app, and integration
+ * names are all normalized here so the pinned and workspace projections cannot
+ * disagree about which tool plane a call belongs to.
  */
 function sourceForTool(tool: string): Omit<DerivedSource, "items"> | null {
 	if (WEB_TOOLS.has(tool)) {
@@ -315,20 +501,25 @@ function sourceForTool(tool: string): Omit<DerivedSource, "items"> | null {
 	if (FILE_TOOLS.has(tool) || SEARCH_TOOLS.has(tool) || SHELL_TOOLS.has(tool)) {
 		return { id: "local", label: "Local files", icon: FolderOpenIcon };
 	}
-	// MCP tools carry the server name: mcp.<server>.<tool>.
-	const mcpMatch = MCP_TOOL_RE.exec(tool);
-	if (mcpMatch) {
-		const server = mcpMatch[1].toLowerCase();
-		if (server.includes("gmail") || server.includes("mail")) {
-			return { id: "gmail", label: "Gmail", icon: Mail01Icon };
-		}
-		if (server.includes("github") || server.includes("git")) {
-			return { id: "github", label: "GitHub", icon: SourceCodeIcon };
-		}
-		const pretty = server.charAt(0).toUpperCase() + server.slice(1);
-		return { id: `mcp-${server}`, label: pretty, icon: Globe02Icon };
+	return parseSourceTool(tool)?.source ?? null;
+}
+
+function firstToolArgument(input: unknown): string | undefined {
+	const direct = firstString(input, TOOL_ARGUMENT_KEYS);
+	if (direct) {
+		return direct;
 	}
-	return null;
+	if (typeof input !== "object" || input === null || Array.isArray(input)) {
+		return undefined;
+	}
+	const record = input as Record<string, unknown>;
+	for (const key of ["arguments", "args", "params", "payload"]) {
+		const nested = firstString(record[key], TOOL_ARGUMENT_KEYS);
+		if (nested) {
+			return nested;
+		}
+	}
+	return undefined;
 }
 
 /**
@@ -373,6 +564,19 @@ function itemForTool(tool: string, part: StreamPart): SourceItem | null {
 				}
 			: null;
 	}
+	const parsed = parseSourceTool(tool);
+	if (parsed) {
+		const argument = firstToolArgument(part.input);
+		return {
+			id: `${parsed.kind}:${parsed.source.id}:${parsed.operation}:${argument ?? ""}`,
+			label:
+				parsed.kind === "mcp"
+					? parsed.operation.replace(/[._-]/g, " ")
+					: prettyOperationLabel(parsed.operation),
+			detail: argument ? clampItem(argument) : undefined,
+			icon: parsed.source.icon,
+		};
+	}
 	const url = firstString(part.input, ["url", "link", "uri"]);
 	if (url) {
 		return { id: `url:${url}`, label: url, url, icon: Link01Icon };
@@ -388,24 +592,7 @@ function itemForTool(tool: string, part: StreamPart): SourceItem | null {
 				}
 			: null;
 	}
-	// An MCP call: name the verb, and show whatever argument identifies it.
-	const verb = MCP_TOOL_RE.exec(tool)?.[2];
-	if (!verb) {
-		return null;
-	}
-	const argument = firstString(part.input, [
-		"query",
-		"name",
-		"id",
-		"subject",
-		...PATH_KEYS,
-	]);
-	return {
-		id: `mcp:${verb}:${argument ?? ""}`,
-		label: verb.replace(/_/g, " "),
-		detail: argument ? clampItem(argument) : undefined,
-		icon: Globe02Icon,
-	};
+	return null;
 }
 
 /**
@@ -1423,11 +1610,12 @@ function SourcesList({
 	onShowAll?: () => void;
 	sources: DerivedSource[];
 }) {
-	const shown = limit === undefined ? sources : sources.slice(0, limit);
-	const overflow = sources.length - shown.length;
+	// Keep every source group in the compact summary. The limit applies to the
+	// concrete items inside each group; truncating groups here could hide the
+	// only visible evidence that a run used an MCP, app, or integration.
 	return (
 		<ul className="flex flex-col gap-0.5">
-			{shown.map((source) => (
+			{sources.map((source) => (
 				<SourceGroup
 					itemLimit={limit}
 					key={source.id}
@@ -1435,9 +1623,6 @@ function SourcesList({
 					source={source}
 				/>
 			))}
-			{overflow > 0 && (
-				<OverflowRow count={overflow} label="sources" onShowAll={onShowAll} />
-			)}
 		</ul>
 	);
 }

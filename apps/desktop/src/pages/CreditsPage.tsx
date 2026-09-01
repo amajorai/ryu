@@ -95,6 +95,7 @@ export default function CreditsPage() {
 		ledger,
 		entitlement,
 		grantPools,
+		loading: grantsLoading,
 		walletEmpty,
 		loading,
 		error,
@@ -196,6 +197,7 @@ export default function CreditsPage() {
 				id: pool.poolId ?? pool.label,
 				label: pool.label,
 				remainingMicroUsd: pool.remainingMicroUsd,
+				isFreeProvider: pool.isFreeProvider,
 				spendableOn: pool.poolId
 					? POOL_SPENDABLE_ON[CREDIT_POOLS[pool.poolId].tier]
 					: undefined,
@@ -233,6 +235,7 @@ export default function CreditsPage() {
 				}
 				errorMessage={error ? error.message : null}
 				grantPools={grantPoolViews}
+				grantPoolsLoading={grantsLoading}
 				ledger={pagedLedger}
 				ledgerPage={safeLedgerPage}
 				loading={loading}
@@ -266,6 +269,8 @@ export default function CreditsPage() {
 						? {
 								balanceMicroUsd: wallet.balanceMicroUsd,
 								currency: wallet.currency,
+								subscriptionBalanceMicroUsd: wallet.subscriptionBalanceMicroUsd,
+								topupBalanceMicroUsd: wallet.topupBalanceMicroUsd,
 							}
 						: null
 				}

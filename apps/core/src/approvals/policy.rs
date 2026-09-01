@@ -140,6 +140,10 @@ const SPACE_MUTATION_ACTIONS: &[&str] = &[
     "rename_space",
 ];
 
+/// Routine CRUD changes what runs in the background, so it is a consequential
+/// mutation even when the action name is not one of the broad outbound verbs.
+const ROUTINE_MUTATION_ACTIONS: &[&str] = &["create", "update", "delete", "run_now"];
+
 /// The action segment of a tool id: the part after the last namespace separator
 /// (`<server>.<tool>` → `<tool>`), lowercased. Legacy ids are normalized at the
 /// Core tool ingress before this policy reads them. Falls back to the whole id.
@@ -254,6 +258,15 @@ pub fn should_require_approval_local(
         tags.push("governance-mutation".to_owned());
         return Some(tags);
     }
+    if !core_api_opted_out
+        && action_suffix(tool_id)
+            .strip_prefix("routines.")
+            .is_some_and(|action| ROUTINE_MUTATION_ACTIONS.contains(&action))
+    {
+        let mut tags = classify_risk(tool_id);
+        tags.push("routine-mutation".to_owned());
+        return Some(tags);
+    }
     if !core_api_opted_out && SPACE_MUTATION_ACTIONS.contains(&action_segment(tool_id).as_str()) {
         let mut tags = classify_risk(tool_id);
         tags.push("spaces-mutation".to_owned());
@@ -306,6 +319,32 @@ mod tests {
             should_require_approval_local(&[], t, ApprovalMode::Manual, Some("manual")).is_some()
         );
         assert!(should_require_approval_local(&[], t, ApprovalMode::Off, Some("off")).is_none());
+    }
+
+    #[test]
+    fn routine_mutations_gate_unless_explicit_off() {
+        for action in ["create", "update", "delete", "run_now"] {
+            let tool = format!("routines.{action}");
+            let tags =
+                should_require_approval_local(&[], &tool, ApprovalMode::Smart, Some("smart"))
+                    .expect("routine mutations must gate under smart mode");
+            assert!(tags.iter().any(|tag| tag == "routine-mutation"), "{tool}");
+            assert!(
+                should_require_approval_local(&[], &tool, ApprovalMode::Off, Some("off")).is_none()
+            );
+        }
+        assert!(should_require_approval_local(
+            &[],
+            "routines.list",
+            ApprovalMode::Smart,
+            Some("smart")
+        )
+        .is_none());
+        // Unset/empty mode is not an explicit opt-out.
+        assert!(
+            should_require_approval_local(&[], "routines.create", ApprovalMode::Off, None)
+                .is_some()
+        );
     }
 
     /// The headline gate: a derived non-GET tool must gate under `smart`.

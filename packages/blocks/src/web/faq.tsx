@@ -64,7 +64,7 @@ export const GENERAL_FAQ_ITEMS: FAQItem[] = [
 		id: "7",
 		title: "What does it cost, and can the bill run away from us?",
 		content: [
-			"Plans start at $39 per person per month, and you set a spending ceiling per person and per team on top of that. Work stops at the ceiling rather than quietly billing past it.",
+			"Managed AI plans start at $49 per person per month. A Major Pass is $20/month for supported paid Marketplace apps.",
 			"Routine work can run on your own machines, so expensive model calls are used only when a job genuinely needs one.",
 		],
 	},

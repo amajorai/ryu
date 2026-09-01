@@ -8,6 +8,11 @@ import { isDownloadCtaLink } from "./download-cta.ts";
 import { DownloadMenu } from "./download-menu.tsx";
 import { landingSurfaceCardFlexXlClass } from "./landing-card-tones.ts";
 import { landingSubheadlineClass } from "./landing-typography.ts";
+import {
+	ProductBentoFrame,
+	ProductHeroFrame,
+	type ProductLandingStyle,
+} from "./product-landing-layouts.tsx";
 import { Reveal } from "./reveal.tsx";
 import { SectionTitle } from "./section-title.tsx";
 import { StaggerLines } from "./stagger-lines.tsx";
@@ -55,6 +60,7 @@ function Cta({
 /* ------------------------------------------------------------------ */
 
 export function ProductHero({
+	landingStyle,
 	title,
 	subtitle,
 	primaryCta,
@@ -62,12 +68,30 @@ export function ProductHero({
 	visual,
 }: {
 	eyebrow: string;
+	landingStyle?: ProductLandingStyle;
 	title: string;
 	subtitle: string;
 	primaryCta: CtaLink;
 	secondaryCta?: CtaLink;
 	visual: ReactNode;
 }) {
+	if (landingStyle) {
+		return (
+			<ProductHeroFrame
+				actions={
+					<>
+						<Cta cta={primaryCta} />
+						{secondaryCta ? <Cta cta={secondaryCta} variant="ghost" /> : null}
+					</>
+				}
+				landingStyle={landingStyle}
+				subtitle={subtitle}
+				title={title}
+				visual={visual}
+			/>
+		);
+	}
+
 	return (
 		<section className="container mx-auto px-4 pt-16 pb-12 md:pt-24">
 			<div className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-2">
@@ -172,7 +196,17 @@ export interface BentoItem {
 	visual?: ReactNode;
 }
 
-export function BentoGrid({ items }: { items: BentoItem[] }) {
+export function BentoGrid({
+	items,
+	landingStyle,
+}: {
+	items: BentoItem[];
+	landingStyle?: ProductLandingStyle;
+}) {
+	if (landingStyle) {
+		return <ProductBentoFrame items={items} landingStyle={landingStyle} />;
+	}
+
 	return (
 		<div className="grid auto-rows-[minmax(0,1fr)] grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
 			{items.map((item, i) => (

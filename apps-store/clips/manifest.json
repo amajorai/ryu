@@ -1,5 +1,13 @@
 {
-  "tags": ["clips", "screen", "capture", "video"],
+  "tags": [
+    "clips",
+    "screen",
+    "capture",
+    "video",
+    "short-form",
+    "captions",
+    "inspiration"
+  ],
   "author": { "name": "Ryu", "url": "https://ryuhq.com" },
   "repository": "https://github.com/amajorai/ryu-clips",
   "homepage": "https://github.com/amajorai/ryu-clips",
@@ -10,9 +18,17 @@
   "version": "0.1.14",
   "stability": "experimental",
   "category": "Media & Voice",
-  "description": "Clips: capture and browse screen/timeline clips. A Core→Shadow proxy that depends on the Shadow capture app for its recordings. Runs the out-of-process ryu-clips sidecar; Core proxies /api/clips/* to it. The Shadow record/browse surface is fully served out-of-process (the sidecar reads RYU_SHADOW_URL itself); URL/yt-dlp ingest and auto-file into the Clips Space require Core's kernel machinery and degrade cleanly in the standalone sidecar.",
-  "tagline": "Capture and browse screen clips",
-  "keywords": ["clips", "screen", "capture", "video"],
+  "description": "A local-first video repurposing workspace for importing or capturing recordings, finding transcript-led moments, reviewing short-form formats, editing vertical previews, and preparing exports. The out-of-process ryu-clips sidecar owns the Core→Shadow capture and ingest surface.",
+  "tagline": "Find the moments worth sharing",
+  "keywords": [
+    "clips",
+    "screen",
+    "capture",
+    "video",
+    "short-form",
+    "captions",
+    "inspiration"
+  ],
   "icon": "film-01",
   "iconDither": { "from": 327, "to": "transparent", "direction": "down" },
   "surfaces": {
@@ -28,7 +44,19 @@
   "engines": {
     "ryu": ">=0.1.0"
   },
-  "runnables": [],
+  "runnables": [
+    {
+      "id": "clips-companion",
+      "name": "Clips",
+      "kind": "companion",
+      "config": {
+        "label": "Clips",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html"
+      }
+    }
+  ],
+  "permission_grants": ["app:http"],
   "requires": {
     "apps": [
       {
@@ -68,7 +96,6 @@
       }
     }
   ],
-  "permission_grants": [],
   "permission_levels": [
     {
       "id": "clips.view",
@@ -82,7 +109,20 @@
       "implies": ["clips.view"]
     }
   ],
+  "companion": {
+    "label": "Clips",
+    "icon": "film-01"
+  },
   "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "clips",
+        "title": "Clips",
+        "icon": "film-01",
+        "target": "/plugin/app__clips-companion",
+        "order": 65
+      }
+    ],
     "chat_widget_templates": [
       {
         "id": "clips.chat",

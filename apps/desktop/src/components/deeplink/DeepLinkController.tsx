@@ -9,6 +9,7 @@ import { sileo } from "sileo";
 import { ContinueOnNodeDialog } from "@/src/components/chat/ContinueOnNodeDialog.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { pageRoute } from "@/src/lib/page-routes.ts";
+import { isMainWindow } from "@/src/lib/window-routing.ts";
 import { useDeepLinkStore } from "@/src/store/useDeepLinkStore.ts";
 import { type Node, useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
@@ -28,24 +29,6 @@ interface PendingHandoff {
 // copy is what keeps "reachable by deep link" and "openable in the side panel"
 // the same set. An unknown key is ignored here exactly as before — a malicious or
 // stale link can't navigate somewhere unexpected.
-
-// Only the main window handles deep links — tear-off ("tab-N") and companion
-// windows also render Layout, and registering the listener in each would
-// double-handle a single link.
-function isMainWindow(): boolean {
-	try {
-		const tauriWindow: Window & {
-			__TAURI_INTERNALS__?: {
-				metadata?: { currentWindow?: { label?: unknown } };
-			};
-		} = window;
-		const label =
-			tauriWindow.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
-		return typeof label !== "string" || label === "main";
-	} catch {
-		return true;
-	}
-}
 
 /**
  * Act on a navigation intent (page or chat) by opening the right tab. Returns

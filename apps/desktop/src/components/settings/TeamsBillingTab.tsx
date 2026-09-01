@@ -1,4 +1,4 @@
-import { Robot01Icon, Wallet01Icon } from "@hugeicons/core-free-icons";
+import { Robot01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	businessMonthlyPriceUsd,
@@ -9,6 +9,7 @@ import {
 } from "@ryu/blocks/web/pricing.tsx";
 import { BeforeAfterSummary } from "@ryu/ui/components/before-after-summary.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
+import { CreditBalanceBreakdown } from "@ryu/ui/components/credit-balance-breakdown.tsx";
 import {
 	Dialog,
 	DialogClose,
@@ -22,12 +23,13 @@ import { Input } from "@ryu/ui/components/input.tsx";
 import { Spinner } from "@ryu/ui/components/spinner.tsx";
 import { formatMicroUsd } from "@ryu/ui/lib/number-format.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { FRONTEND_URL } from "@/lib/auth-client.ts";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { useStepUp } from "@/src/components/StepUpDialog.tsx";
 import { useBillingStatusStream } from "@/src/hooks/useBillingStatusStream.ts";
+import { useCreditGrants } from "@/src/hooks/useCreditGrants.ts";
 import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
 import {
 	checkoutOrganizationPlan,
@@ -42,6 +44,7 @@ import {
 	TeamsBillingError,
 	updateTeamsSeats,
 } from "@/src/lib/api/teams-billing.ts";
+import { formatDate } from "@/src/lib/timezone.ts";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -89,7 +92,7 @@ function legacyPlanAmount(plan: string | null | undefined): string {
 		case "max":
 			return "$99/mo";
 		case "pro":
-			return "$39/mo";
+			return "$49/mo";
 		case "teams":
 			return "$250/mo";
 		case "business":
@@ -97,6 +100,21 @@ function legacyPlanAmount(plan: string | null | undefined): string {
 		default:
 			return "$0/mo";
 	}
+}
+
+function formatCreditExpiry(value: string | null): string | null {
+	if (!value) {
+		return null;
+	}
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) {
+		return null;
+	}
+	return `Expires ${formatDate(date, {
+		day: "numeric",
+		month: "short",
+		year: "numeric",
+	})}`;
 }
 
 /**
@@ -143,6 +161,18 @@ function TeamsBillingTabForOrg({
 	// reflected here without a refresh.
 	const queryClient = useQueryClient();
 	const liveBilling = useBillingStatusStream();
+	const { pools: grantPools } = useCreditGrants();
+	const providerAllocations = useMemo(
+		() =>
+			grantPools.map((pool, index) => ({
+				expiresAtLabel: formatCreditExpiry(pool.expiresAt),
+				id: `${pool.label}-${index}`,
+				isFreeProvider: pool.isFreeProvider,
+				label: pool.label,
+				remainingMicroUsd: pool.remainingMicroUsd,
+			})),
+		[grantPools]
+	);
 	useEffect(() => {
 		if (!liveBilling) {
 			return;
@@ -445,7 +475,7 @@ function TeamsBillingTabForOrg({
 				<SettingsSection title="Seats">
 					<SettingsGroup>
 						<SettingsItem
-							description={`${seatStatus?.memberCount ?? 0} active members and ${seatStatus?.pendingSeatReservations ?? 0} in-flight invitation claims. Capacity is ${seatStatus?.includedSeats ?? "—"} (${currentSeats} billed${seatStatus?.bonusSeats ? ` + ${seatStatus.bonusSeats} negotiated` : ""}); the shared pool adds $${organizationPlanId === "business" ? 100 : 50} per five billed seats.`}
+							description={`${seatStatus?.memberCount ?? 0} active members and ${seatStatus?.pendingInvitations ?? 0} pending invitations reserve seats. ${seatStatus?.allocatedSeats ?? 0} allocated of ${seatStatus?.includedSeats ?? "—"} capacity (${currentSeats} billed${seatStatus?.bonusSeats ? ` + ${seatStatus.bonusSeats} negotiated` : ""}); the shared pool adds $${organizationPlanId === "business" ? 100 : 50} per five billed seats.`}
 							title="Member seats"
 						/>
 					</SettingsGroup>
@@ -458,42 +488,23 @@ function TeamsBillingTabForOrg({
 						<Spinner className="size-4" />
 					</SettingsCard>
 				) : (
-					<SettingsGroup>
-						<SettingsItem
-							actions={
-								<span className="font-mono font-semibold text-sm tabular-nums">
-									{walletQuery.data
-										? formatMicroUsd(walletQuery.data.wallet.balanceMicroUsd)
-										: "—"}
-								</span>
+					<SettingsCard>
+						<CreditBalanceBreakdown
+							compact
+							currency={walletQuery.data?.wallet.currency}
+							onDemandCreditsMicroUsd={
+								walletQuery.data?.wallet.topupBalanceMicroUsd ?? null
 							}
-							description="A shared credit balance for the whole organization."
-							title={
-								<span className="flex items-center gap-2">
-									<HugeiconsIcon
-										className="size-4 text-muted-foreground"
-										icon={Wallet01Icon}
-									/>
-									Current balance
-								</span>
+							planAllowanceMicroUsd={
+								subQuery.data?.entitlement.monthlyCreditPoolMicroUsd ?? null
 							}
+							planCreditsMicroUsd={
+								walletQuery.data?.wallet.subscriptionBalanceMicroUsd ?? null
+							}
+							providerAllocations={providerAllocations}
+							totalMicroUsd={walletQuery.data?.wallet.balanceMicroUsd ?? null}
 						/>
-						<SettingsItem
-							actions={
-								<span className="font-mono font-semibold text-sm tabular-nums">
-									{(subQuery.data?.entitlement.monthlyCreditPoolMicroUsd ?? 0) >
-									0
-										? formatMicroUsd(
-												subQuery.data?.entitlement.monthlyCreditPoolMicroUsd ??
-													0
-											)
-										: "—"}
-								</span>
-							}
-							description="Refreshed each billing period while the plan is active."
-							title="Monthly included pool"
-						/>
-					</SettingsGroup>
+					</SettingsCard>
 				)}
 			</SettingsSection>
 

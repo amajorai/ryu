@@ -57,5 +57,5 @@ emitted module name is `ryu_sdk` because the crate calls
 The exported surface includes `validate_plugin_id`, `parse_and_validate_manifest`,
 `plugin_manifest_json_schema`, `resolve_gateway_url`, `resolve_gateway_token`,
 `assert_allowed_egress`, `ModelClient.chat`, `ModelClient.stream` with
-`ChatSink`, and `EmbeddingClient.embed`. See
-[`docs/multi-language-bindings-spec.md`](../../docs/multi-language-bindings-spec.md).
+`ChatSink`, and `EmbeddingClient.embed`. See the public
+[Fumadocs language-binding guide](https://docs.ryuhq.com/docs/extend/develop/sdk/language-bindings).

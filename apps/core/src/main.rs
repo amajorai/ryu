@@ -5,6 +5,7 @@ mod activity;
 mod agent_control;
 mod agent_execution;
 mod agent_routing;
+mod agent_sandbox;
 mod agent_selection;
 mod agents;
 mod approvals;
@@ -252,6 +253,16 @@ fn seed_ghost_sidecar_env() {
 
 #[tokio::main]
 async fn main() {
+    // The Ryu-managed Codex PreToolUse hook must be able to run without
+    // starting the Core server or opening any durable state. Keep this before
+    // every normal boot path so the hook is a pure JSON-in/JSON-out guard.
+    if crate::codex_config::run_safe_delete_hook_if_requested() {
+        return;
+    }
+    if crate::agent_sandbox::run_if_requested() {
+        return;
+    }
+
     // Emit the OpenAPI spec and exit — keeps stdout clean (before tracing init)
     // so `ryu-core --dump-openapi > core-openapi.json` is well-formed. The spec
     // is static (derived from handler annotations), so no server state is needed.
@@ -748,17 +759,11 @@ async fn main() {
         // below only when `ryu_mesh::is_enabled()`. A mesh-off install is never
         // marked and so never runs (nor logs) anything.
         //
-        // It USED to be PATH-adopted only, and therefore never in `versions.json`.
-        // It can be there now — `sidecar/tailscale/downloader.rs` installs a
-        // managed pair when no client is on PATH — which would otherwise make
-        // `seed_installed_from_disk` mark it installed on every boot and produce a
-        // failed-start log for users who never enabled the mesh. That function
-        // skips this one name for exactly that reason; the mesh pref stays the
-        // single source of installed-ness here. That skip is now load-bearing for
-        // the DEFAULT node, not just an unusual one: first run pre-installs the
-        // client (see `MESH_PREINSTALL_PREF_KEY`), so a mesh-OFF machine has a
-        // `versions.json` tailscale row from boot 2 onward. Seeding from it would
-        // start a tailnet daemon nobody asked for.
+        // These used to be PATH-adopted only, and therefore never in
+        // `versions.json`. They can be there now because Ryu manages both client
+        // binaries; seeding from them would otherwise start a network listener
+        // for users who never enabled the mesh. The mesh pref stays the single
+        // source of installed-ness for these sidecars.
         "tailscale".into(),
         "tailcat".into(),
     ];
@@ -1184,9 +1189,9 @@ async fn main() {
     rtk_config::seed_and_apply(&preferences).await;
     // Command-approval gate: seed `RYU_EXEC_APPROVAL_MODE` from the pref so every
     // ACP agent's native tool calls (Claude/Codex `Bash`/`Write`/`Edit`) are
-    // scanned at the `request_permission` seam. Off by default; seeded once here
-    // (before request threads) so there is no concurrent env race — restart to
-    // apply, like the crash/OTLP prefs.
+    // scanned at the `request_permission` seam. The pattern scanner is armed by
+    // default; the permanent-deletion guard is stronger and remains active even
+    // when this pattern mode is explicitly turned off.
     if let Ok(Some(value)) = preferences
         .get(exec_approval::EXEC_APPROVAL_MODE_PREF_KEY)
         .await
@@ -2406,16 +2411,23 @@ async fn main() {
     // Awaited (not spawned) so the seed is in place before `start_all` reads it.
     setup.seed_installed_from_disk(&seed_names).await;
 
-    // Mesh daemon: make `start_all` actually start it when the mesh is enabled.
-    // `seed_installed_from_disk` deliberately skips tailscale (a `versions.json`
-    // row now exists once the managed client is installed, and seeding from it
-    // would start the daemon for people who never enabled the mesh), so mark it
-    // installed from the SAME signal the rest of the mesh reads. A mesh-off
-    // install stays unmarked → `start_all` skips it
-    // entirely (no daemon, no warning). The desktop's runtime toggle marks it
-    // too via `POST /api/mesh/config`.
+    // Mesh daemon: make `start_all` actually start the selected backend when the
+    // mesh is enabled. `seed_installed_from_disk` deliberately skips both network
+    // sidecars: a managed binary may exist because Ryu preinstalled it while the
+    // mesh was off, and seeding from that binary would start a network listener
+    // nobody asked for. The enabled preference is the authority that marks the
+    // selected sidecar installed.
     let selected_network_backend = crate::sidecar::tailscale::mesh_backend().await.0;
-    if ryu_mesh::is_enabled() {
+    let selected_network_available = match selected_network_backend {
+        crate::sidecar::tailscale::MeshBackend::Tailcat => {
+            crate::sidecar::tailcat::resolve_binary().is_ok()
+        }
+        crate::sidecar::tailscale::MeshBackend::Headscale
+        | crate::sidecar::tailscale::MeshBackend::Tailscale => {
+            crate::sidecar::tailscale::ensure_mesh_binaries().is_ok()
+        }
+    };
+    if ryu_mesh::is_enabled() && selected_network_available {
         setup
             .mark_installed(selected_network_backend.sidecar_name())
             .await;
@@ -2424,51 +2436,53 @@ async fn main() {
             sidecar = selected_network_backend.sidecar_name(),
             "network: selected backend will start with the other sidecars"
         );
+    } else if ryu_mesh::is_enabled() {
+        tracing::info!(
+            backend = selected_network_backend.as_str(),
+            "network: selected backend is not installed yet; background installation will make it startable"
+        );
     }
 
-    // Mesh CLIENT install — a separate decision from the enable above, and the
-    // reason the two are no longer one block. Staging the binaries on a mesh-OFF
-    // node is what makes first run behave like llama.cpp + the default GGUF, which
-    // `install_local_stack` fetches unconditionally ~90 lines up: the client is
-    // there before the user wants it. Without this the ONLY trigger was the
-    // Tunnel toggle itself, so flipping it dropped the user into an up-to-10-minute
-    // `watchMeshInstall` wait; with the binaries staged that toggle takes the
-    // `ensure_mesh_binaries().is_ok()` branch and connects immediately.
+    // Mesh client install — a separate decision from enabling the mesh. Staging
+    // the selected backend on a mesh-OFF node is what makes first use behave like
+    // the default engines: the client is already present before the user turns
+    // the Tunnel on. If the user chose Tailcat, stage Tailcat; Headscale and
+    // Tailscale share the managed Tailscale client pair.
     //
-    // This does NOT turn the mesh on. `spawn_mesh_client_install` re-reads
-    // `ryu_mesh::is_enabled()` only AFTER the download and, when false, logs
-    // "installed, but the mesh was turned off meanwhile" without marking or
-    // starting anything — so no daemon runs, Core stays loopback-only, and the
-    // fail-closed token gate is untouched. `seed_installed_from_disk`'s tailscale
-    // skip is what keeps that true across the NEXT boot (a `versions.json` row now
-    // exists on mesh-off nodes), so it must stay.
-    //
-    // Both conditions after the want-check are the honest ones: nothing downloads
-    // when a complete `tailscale`/`tailscaled` pair already resolves (PATH adoption
-    // included), and `can_install()` is false on Windows (no userspace route) and
-    // on a Mac without Homebrew, so those nodes stay silent instead of failing.
-    // Re-entry is guarded by `MESH_INSTALL_IN_FLIGHT`, so this racing a user's
-    // toggle cannot double-download.
-    if (ryu_mesh::is_enabled()
-        || (mesh_preinstall_client
-            && selected_network_backend != crate::sidecar::tailscale::MeshBackend::Tailcat))
-        && crate::sidecar::tailscale::ensure_mesh_binaries().is_err()
-        && crate::sidecar::tailscale::downloader::can_install()
-    {
+    // This does NOT turn the mesh on. `spawn_mesh_backend_install` re-reads
+    // `ryu_mesh::is_enabled()` only AFTER the download and, when false, leaves
+    // the sidecar unmarked and stopped. The fail-closed token gate therefore
+    // remains untouched while a mesh-OFF node is being prepared.
+    let should_preinstall_network = ryu_mesh::is_enabled() || mesh_preinstall_client;
+    let can_install_selected_backend = match selected_network_backend {
+        crate::sidecar::tailscale::MeshBackend::Tailcat => {
+            crate::sidecar::tailcat_downloader::can_install()
+        }
+        crate::sidecar::tailscale::MeshBackend::Headscale
+        | crate::sidecar::tailscale::MeshBackend::Tailscale => {
+            crate::sidecar::tailscale::downloader::can_install()
+        }
+    };
+    if should_preinstall_network && !selected_network_available && can_install_selected_backend {
         if ryu_mesh::is_enabled() {
-            tracing::info!("mesh: enabled but no Tailscale client — installing one now");
+            tracing::info!(
+                backend = selected_network_backend.as_str(),
+                "mesh: selected network client is missing — installing one now"
+            );
         } else {
             tracing::info!(
-                "mesh: pre-installing the Tailscale client (mesh stays off; set \
+                backend = selected_network_backend.as_str(),
+                "mesh: pre-installing the selected network client (mesh stays off; set \
                  {}=0 or the `{}` pref to skip)",
                 crate::mesh_host::MESH_PREINSTALL_ENV,
                 crate::mesh_host::MESH_PREINSTALL_PREF_KEY,
             );
         }
-        crate::server::spawn_mesh_client_install(
+        crate::server::spawn_mesh_backend_install(
             download_center.clone(),
             Arc::clone(&sidecars),
             Arc::clone(&install_status),
+            selected_network_backend,
         );
     }
 
@@ -2569,6 +2583,8 @@ fn ensure_identity_health_job() -> Result<(), String> {
         require_approval: false,
         // Core-owned (reconciled by Core itself), not an App-created job.
         owner_app: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: existing
             .as_ref()
             .map(|j| j.created_at.clone())
@@ -2604,6 +2620,8 @@ fn ensure_learning_cycle_job() -> Result<(), String> {
         require_approval: false,
         // Core-owned (reconciled by Core itself), not an App-created job.
         owner_app: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: existing
             .as_ref()
             .map(|j| j.created_at.clone())

@@ -1,6 +1,6 @@
 # Ryu SDK examples
 
-Small, runnable examples for building on Ryu with [`@ryu/sdk`](../packages/sdk). Every
+Small, runnable examples for building on Ryu with [`@ryuhq/sdk`](../packages/sdk). Every
 example routes model calls through the **gateway** — no provider keys live in code.
 
 ## Run

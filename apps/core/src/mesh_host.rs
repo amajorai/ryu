@@ -25,9 +25,9 @@ use ryu_mesh::MeshHost;
 /// [`ryu_mesh::is_enabled`].
 pub const MESH_ENABLED_PREF_KEY: &str = "mesh-enabled";
 
-/// The Core preference holding which control plane the tunnel enrolls against —
-/// `"headscale"` (self-hosted, the default), `"tailscale"` (SaaS), or `"tailcat"`
-/// (short-lived point-to-point). Written by the node selector's **Tunnel** layer;
+/// The Core preference holding which network backend the tunnel uses —
+/// `"headscale"` (self-hosted), `"tailscale"` (SaaS), or `"tailcat"` (the
+/// short-lived no-setup default). Written by the node selector's **Tunnel** layer;
 /// read by
 /// [`crate::sidecar::tailscale::mesh_backend`].
 ///
@@ -37,8 +37,9 @@ pub const MESH_ENABLED_PREF_KEY: &str = "mesh-enabled";
 /// nothing to derive from, so the picker would have no selection to render.
 pub const MESH_BACKEND_PREF_KEY: &str = "mesh-backend";
 
-/// The Core preference deciding whether first run PRE-INSTALLS the mesh client
-/// (`tailscale` + `tailscaled`) even though the mesh itself is off.
+/// The Core preference deciding whether first run PRE-INSTALLS the selected
+/// network client (`tailscale` + `tailscaled`, or `tailcat`) even though the
+/// mesh itself is off.
 ///
 /// Deliberately a SEPARATE key from [`MESH_ENABLED_PREF_KEY`]: pre-installing
 /// stages binaries, enabling changes the node's security posture (Core becomes
@@ -46,16 +47,15 @@ pub const MESH_BACKEND_PREF_KEY: &str = "mesh-backend";
 /// may write `mesh-enabled` on behalf of the user; this key exists so the install
 /// half can be defaulted ON without dragging the enablement half with it.
 ///
-/// The Tailscale client serves both control planes ([`MESH_BACKEND_PREF_KEY`]:
-/// Headscale or Tailscale SaaS). Tailcat is a separate adopted CLI and is not
-/// part of the Tailscale pre-install path.
+/// The selected backend's client is staged: Headscale and Tailscale share the
+/// official Tailscale client pair, while Tailcat uses its own managed CLI.
 pub const MESH_PREINSTALL_PREF_KEY: &str = "mesh-preinstall-client";
 
 /// Default for [`MESH_PREINSTALL_PREF_KEY`] when the pref was never written —
 /// i.e. on the fresh install this exists to serve. ON, matching how llama.cpp and
 /// the default Gemma GGUF are fetched unconditionally on first run: a user who
 /// later flips the Tunnel toggle then connects immediately instead of waiting out
-/// a ~38 MB transfer (or a `brew install`) behind the toggle.
+/// a network-client transfer behind the toggle.
 pub const MESH_PREINSTALL_DEFAULT: bool = true;
 
 /// Environment override for [`MESH_PREINSTALL_PREF_KEY`], with the same truthiness

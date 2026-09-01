@@ -1,0 +1,112 @@
+{
+  "tags": ["positioning", "ICP", "outreach", "copy", "agents"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-autopilot",
+  "homepage": "https://github.com/amajorai/ryu-autopilot",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/autopilot",
+  "name": "Autopilot",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "category": "Automation",
+  "description": "A positioning-first launch companion. Choose one job, define the market position and narrow ICP, then derive outreach and copy from the same strategy before running bounded Ryu work.",
+  "tagline": "Find the wedge before the copy",
+  "keywords": ["positioning", "ICP", "outreach", "copy", "launch strategy"],
+  "icon": "workflow-circle-06",
+  "iconDither": { "from": 210, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "none" },
+    "web": { "support": "full" },
+    "cli": { "support": "list" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "autopilot-companion",
+      "name": "Autopilot",
+      "kind": "companion",
+      "config": {
+        "label": "Autopilot",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html"
+      }
+    }
+  ],
+  "permission_grants": [
+    "hook:run-agent",
+    "storage:kv",
+    "core:list_agents",
+    "shell:integrate",
+    "ui:toast"
+  ],
+  "permission_levels": [
+    {
+      "id": "autopilot.view",
+      "label": "Can view",
+      "description": "See the one-job strategy, market position, ICP, activation pack, and guardrails."
+    },
+    {
+      "id": "autopilot.edit",
+      "label": "Can edit",
+      "description": "Edit the one-job strategy, selected agent lane, and Autopilot guardrails.",
+      "implies": ["autopilot.view"]
+    },
+    {
+      "id": "autopilot.run",
+      "label": "Can run",
+      "description": "Run a bounded strategy pass through the selected Ryu agent. The agent still follows each enabled tool's own grants and approval gates.",
+      "implies": ["autopilot.edit"]
+    }
+  ],
+  "companion": { "label": "Autopilot", "icon": "workflow-circle-06" },
+  "contributes": {
+    "sidebar_buttons": [
+      {
+        "id": "autopilot-overview",
+        "title": "Strategy",
+        "icon": "dashboard-square-02",
+        "target": "/plugin/app__autopilot-companion",
+        "context": { "section": "overview" },
+        "order": 70
+      },
+      {
+        "id": "autopilot-positioning",
+        "title": "Positioning",
+        "icon": "file-edit",
+        "target": "/plugin/app__autopilot-companion",
+        "context": { "section": "positioning" },
+        "order": 71
+      },
+      {
+        "id": "autopilot-icp",
+        "title": "First ICP",
+        "icon": "user-multiple-02",
+        "target": "/plugin/app__autopilot-companion",
+        "context": { "section": "icp" },
+        "order": 72
+      },
+      {
+        "id": "autopilot-activation",
+        "title": "Outreach + copy",
+        "icon": "mail-send-01",
+        "target": "/plugin/app__autopilot-companion",
+        "context": { "section": "activation" },
+        "order": 73
+      },
+      {
+        "id": "autopilot-guardrails",
+        "title": "Guardrails",
+        "icon": "shield-01",
+        "target": "/plugin/app__autopilot-companion",
+        "context": { "section": "guardrails" },
+        "order": 74
+      }
+    ]
+  }
+}

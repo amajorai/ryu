@@ -78,3 +78,5 @@ export const GITHUB_SVGL = {
 	light: "github_light",
 	dark: "github_dark",
 } as const satisfies SvglSpec;
+
+export const DISCORD_SVGL = "discord" as const satisfies SvglSpec;

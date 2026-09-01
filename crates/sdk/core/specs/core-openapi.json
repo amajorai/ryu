@@ -1552,6 +1552,7 @@
           "Auth"
         ],
         "summary": "Device authorization status",
+        "description": "Returns device authorization state. The active account bearer is included only for a trusted local client; Tailcat-forwarded requests receive status flags without the bearer.",
         "operationId": "auth_status",
         "responses": {
           "200": {
@@ -4644,7 +4645,7 @@
           "Gateway"
         ],
         "summary": "Gateway status (proxied)",
-        "description": "Always responds `200`. When the gateway is unreachable it returns\n`{ \"reachable\": false, ... }` rather than an error status, so the desktop\nstatus spine can distinguish \"gateway down (Core up)\" from \"Core down\" \u2014 the\ntyped client treats any non-2xx as Core being unreachable.\n\nForwards the gateway bearer token (`RYU_GATEWAY_TOKEN`) when configured, in\ncase the gateway runs with auth enabled.",
+        "description": "Returns Gateway health, metrics, and a persisted effective configuration with credential values redacted before serialization. Always responds 200, including when the Gateway is unreachable.",
         "operationId": "gateway_status",
         "responses": {
           "200": {
@@ -13213,6 +13214,31 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Core"
+        ],
+        "summary": "Create a scheduled job",
+        "operationId": "create_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
       }
     },
     "/heartbeat/jobs/{id}": {
@@ -13222,6 +13248,98 @@
         ],
         "summary": "Get one scheduled job",
         "operationId": "get_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Core"
+        ],
+        "summary": "Update a scheduled job",
+        "operationId": "update_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Core"
+        ],
+        "summary": "Delete a scheduled job",
+        "operationId": "delete_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/heartbeat/jobs/{id}/run": {
+      "post": {
+        "tags": [
+          "Core"
+        ],
+        "summary": "Run a scheduled job now",
+        "description": "The \"does this actually work\" affordance every automation surface wants, and\nthe only honest one: it runs the *saved* job through the same\n[`crate::scheduler::run_target`] the tick loop uses, so what it proves is what\nwill happen when the schedule fires \u2014 not an approximation assembled by the\ncaller. The outcome is recorded in the job's history exactly as a scheduled\nrun is, which is why a manual run shows up alongside the automatic ones.\n\nDeliberately ignores `enabled` and `require_approval`: this IS the human\nacting, so gating it on a schedule flag or on an approval the same human\nwould immediately grant would only be ceremony. It respects nothing about\n*when* the job would have run, only *what* it runs.",
+        "operationId": "run_job_now",
         "parameters": [
           {
             "name": "id",
@@ -14043,7 +14161,7 @@
       },
       "MeshConfigBody": {
         "type": "object",
-        "description": "`POST /api/mesh/config` \u2014 enable or disable the network plane from the desktop.\n\nPersists the `mesh-enabled` pref (so the choice survives a Core restart),\nupdates the in-process signal [`ryu_mesh::set_pref_enabled`] immediately, and\nstarts (enable) or stops (disable) the selected network sidecar. Always\nanswers 200 with the live status so the desktop toggle reflects the PERSISTED\nstate even when the daemon fails to start; a daemon-start failure rides in a\nnon-contract `start_error` field (the desktop surfaces it as a warning, not a\nrolled-back toggle).\n\nThe optional `backend` request field accepts `headscale`, `tailscale`, or\n`tailcat`. Supplying it persists the selection and, when the network is\nenabled, stops the previous backend before starting the selected one.\n\nA missing client is the common `start_error`, and it is no longer a dead end.\nPATH adoption still wins, but when there is no complete `tailscale`/`tailscaled`\npair Ryu can install a managed one, so this handler answers with two more\nnon-contract fields beside `start_error`:\n\n- `missing_binaries: string[]` \u2014 what could not be resolved anywhere.\n- `can_install: bool` \u2014 whether THIS node has an install route at all (Linux\n  archive, macOS Homebrew, or `RYU_TAILSCALE_RELEASE_URL`). True \u21d2 the client\n  should offer the install; false \u21d2 tell the user how to install it themselves.\n\n**Enabling the Tailscale/Headscale mesh INSTALLS the client** when one is\nmissing and this node has an install route \u2014 the same way picking an engine\ninstalls it. Tailcat is adopted from PATH or an explicit binary override\nbecause its upstream distribution differs by platform and its CLI/wire format\ncarries no stability promise. The user asked for a connection, not for a\nshopping list; making them find\n`POST /api/setup/tailscale/install` themselves was the whole reason enabling\nthe mesh felt broken. So a third non-contract field rides along:\n\n- `installing: bool` \u2014 an install was started for this enable; the client\n  should show progress (it also lands in the download overlay) and re-read\n  `/api/mesh/status` rather than treat `start_error` as final.\n\nThe install is still NOT inline. It is `tokio::spawn`ed via\n[`spawn_mesh_client_install`] precisely because these are minute-long\ntransfers; awaiting one inside the toggle handler would hang the request past\nany client timeout. The daemon is started by that task once the binaries land,\nso the client does not need to re-POST this route.\n\nSecurity: enabling a network backend makes this Core reachable through a\ntailnet or a Tailcat listener, so the fail-closed token gate (`enforce_remote_auth`) requires a strong\nnon-placeholder `RYU_TOKEN` before this handler persists or starts the mesh, and\nthe same check runs again at startup. A node with no usable token cannot be\nenabled or restarted with the mesh on. Loopback-admin trust\nneutralization follows automatically: the gateway is (re)spawned with\n`RYU_MESH_ENABLED=1` once `is_enabled()` reads true.",
+        "description": "`POST /api/mesh/config` \u2014 enable or disable the network plane from the desktop.\n\nPersists the `mesh-enabled` pref (so the choice survives a Core restart),\nupdates the in-process signal [`ryu_mesh::set_pref_enabled`] immediately, and\nstarts (enable) or stops (disable) the selected network sidecar. Always\nanswers 200 with the live status so the desktop toggle reflects the PERSISTED\nstate even when the daemon fails to start; a daemon-start failure rides in a\nnon-contract `start_error` field (the desktop surfaces it as a warning, not a\nrolled-back toggle).\n\nThe optional `backend` request field accepts `headscale`, `tailscale`, or\n`tailcat`. Supplying it persists the selection and, when the network is\nenabled, stops the previous backend before starting the selected one.\n\nA missing client is the common `start_error`, and it is no longer a dead end.\nPATH adoption still wins, but when there is no complete `tailscale`/`tailscaled`\npair Ryu can install a managed one, so this handler answers with two more\nnon-contract fields beside `start_error`:\n\n- `missing_binaries: string[]` \u2014 what could not be resolved anywhere.\n- `can_install: bool` \u2014 whether THIS node has a managed install route for the\n  selected network client. True \u21d2 the background install starts; false \u21d2 the\n  response names the operator-managed fallback.\n\n**Enabling any network backend INSTALLS its client** when one is missing and\nthis node has an install route \u2014 the same way picking an engine installs it.\nTailcat uses a pinned, checksum-verified release asset; Tailscale/Headscale\nuse the pinned official userspace pair. The user asked for a connection, not\nfor a shopping list; making them find\n`POST /api/setup/tailscale/install` themselves was the whole reason enabling\nthe mesh felt broken. So a third non-contract field rides along:\n\n- `installing: bool` \u2014 an install was started for this enable; the client\n  should show progress (it also lands in the download overlay) and re-read\n  `/api/mesh/status` rather than treat `start_error` as final.\n\nThe install is still NOT inline. It is `tokio::spawn`ed via\n[`spawn_mesh_backend_install`] precisely because these are minute-long\ntransfers; awaiting one inside the toggle handler would hang the request past\nany client timeout. The daemon is started by that task once the binaries land,\nso the client does not need to re-POST this route.\n\nSecurity: enabling a network backend makes this Core reachable through a\ntailnet or a Tailcat listener, so the fail-closed token gate (`enforce_remote_auth`) requires a strong\nnon-placeholder `RYU_TOKEN` before this handler persists or starts the mesh, and\nthe same check runs again at startup. A node with no usable token cannot be\nenabled or restarted with the mesh on. Loopback-admin trust\nneutralization follows automatically: the gateway is (re)spawned with\n`RYU_MESH_ENABLED=1` once `is_enabled()` reads true.",
         "required": [
           "enabled"
         ],

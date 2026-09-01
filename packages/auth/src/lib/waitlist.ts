@@ -9,6 +9,8 @@
 // having to flip a row first. The same allowlist is what bypasses the waitlist
 // redirect.
 
+import { GUEST_MODE_ENABLED } from "./guest-mode.ts";
+
 /** Parsed, lower-cased set of admin emails from the `ADMIN_EMAILS` env var. */
 export function adminEmails(): Set<string> {
 	const raw = process.env.ADMIN_EMAILS ?? "";
@@ -196,12 +198,18 @@ export function isAdmin(user: {
  * True when this user is still in the queue. Admins (env allowlist) never are,
  * and nobody is when the waitlist is bypassed (no admins configured — see
  * `isWaitlistBypassed`), which also unblocks accounts stamped `WAITLIST_ROLE`
- * before `ADMIN_EMAILS` was emptied.
+ * before `ADMIN_EMAILS` was emptied. Anonymous sessions remain gated while
+ * guest mode is disabled because they have no durable account admission to
+ * check.
  */
 export function isWaitlisted(user: {
+	isAnonymous?: boolean | null;
 	role?: string | null;
 	email?: string | null;
 }): boolean {
+	if (user.isAnonymous && !GUEST_MODE_ENABLED) {
+		return true;
+	}
 	return (
 		user.role === WAITLIST_ROLE &&
 		!isAdminEmail(user.email) &&

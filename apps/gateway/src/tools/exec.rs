@@ -420,7 +420,7 @@ async fn exec_kind_forward(
 }
 
 use crate::firewall::cmdscan::{
-    scan_command_with_rules, ApprovalMode, ManagedCommandRule, ScanVerdict,
+    scan_command_with_rules_policy, ApprovalMode, ManagedCommandRule, ScanVerdict,
 };
 
 /// Request body for `POST /v1/exec/scan` (COMMAND-SCAN CONTRACT, verbatim shape).
@@ -446,14 +446,21 @@ pub struct ExecScanBody {
     pub team_id: Option<String>,
     #[serde(default)]
     pub managed_rules: Vec<ManagedCommandRule>,
+    /// Set only by an authenticated Core forwarder after the operator has
+    /// explicitly changed Ryu's permanent-deletion policy. The field defaults
+    /// to false so a direct or legacy caller cannot widen the safety posture.
+    #[serde(default)]
+    pub allow_permanent_delete: bool,
 }
 
 /// `POST /v1/exec/scan` — pre-exec command governance. Returns the verbatim
 /// `{ decision, reason, findings }` shape. Trusted-forwarder / master-key only
 /// (same governance gate as the exec-budget endpoints; NO mesh check, matching
 /// its sibling `check_exec_budget`). Mode is read from `RYU_EXEC_APPROVAL_MODE`
-/// at this boundary; the scanner itself is pure. The HARDLINE blocklist always
-/// denies regardless of mode.
+/// at this boundary; the scanner itself is pure. Permanent deletion and the
+/// legacy HARDLINE blocklist always deny unless the authenticated caller has
+/// explicitly changed the permanent-deletion policy. Approval mode alone cannot
+/// disable either safety block.
 pub async fn exec_scan(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -471,12 +478,13 @@ pub async fn exec_scan(
     let mode = std::env::var("RYU_EXEC_APPROVAL_MODE")
         .map(|s| ApprovalMode::from_env_str(&s))
         .unwrap_or(ApprovalMode::Manual);
-    let verdict = scan_command_with_rules(
+    let verdict = scan_command_with_rules_policy(
         &body.backend,
         &body.command,
         mode,
         &body.managed_rules,
         body.project_id.as_deref(),
+        body.allow_permanent_delete,
     );
     Ok(Json(verdict))
 }

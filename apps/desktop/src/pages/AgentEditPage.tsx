@@ -33,6 +33,7 @@ import { AgentEvalsView } from "@/src/components/agents/AgentEvalsView.tsx";
 import { AgentExecutionPolicyPanel } from "@/src/components/agents/AgentExecutionPolicyPanel.tsx";
 import { AgentImageField } from "@/src/components/agents/AgentImageField.tsx";
 import { AgentLanyardCard } from "@/src/components/agents/AgentLanyardCard.tsx";
+import { AgentRoutinesPanel } from "@/src/components/agents/AgentRoutinesPanel.tsx";
 import { AgentRunHistoryView } from "@/src/components/agents/AgentRunHistoryView.tsx";
 import { AgentSetupComposer } from "@/src/components/agents/AgentSetupComposer.tsx";
 import { AgentSmartRouteOverride } from "@/src/components/agents/AgentSmartRouteOverride.tsx";
@@ -1728,6 +1729,11 @@ export default function AgentEditPage({
 								value={systemPrompt}
 								version={existing?.version ?? "1.0.0"}
 							/>
+						)
+					}
+					routinesPanel={
+						isNew || !agentId ? null : (
+							<AgentRoutinesPanel agentId={agentId} disabled={isLocked} />
 						)
 					}
 					rules={rules}

@@ -14,7 +14,8 @@
 //   POST /api/credits/topup   -> a Polar checkout URL + fee breakdown for a pack
 //
 // Top-ups go through Polar (epic #496, Unit B2). The buyer is CHARGED
-// `face + deposit fee` (5% + $0.35) and the wallet is CREDITED the FACE value;
+// `face + deposit fee` (the plan's current percentage/floor quote) and the wallet
+// is CREDITED the FACE value;
 // the topup response carries the {@link TopupQuote} so the UI can show the fee
 // before sending the buyer to checkout. Balances and ledger deltas are in
 // micro-USD (millionths of a dollar) integers to avoid float drift;
@@ -101,6 +102,10 @@ export interface CreditWallet {
 	id: string;
 	ownerId: string;
 	ownerType: string;
+	/** Remaining included plan credit for the current billing period. */
+	subscriptionBalanceMicroUsd: number;
+	/** Remaining purchased credit; this balance rolls over. */
+	topupBalanceMicroUsd: number;
 	updatedAt: string;
 }
 

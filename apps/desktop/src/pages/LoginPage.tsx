@@ -1,3 +1,4 @@
+import { GUEST_MODE_ENABLED } from "@ryu/auth/lib/guest-mode";
 import { type LocalCoreSetupState, LoginView } from "@ryu/blocks/desktop/login";
 import { toast } from "@ryu/ui/components/sileo";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -49,6 +50,9 @@ export default function LoginPage() {
 	// tells them they don't need one.
 	const coreReady = IS_WEBAPP ? coreStatus === "running" : true;
 	const browserDevice = detectBrowserDevice();
+	// Guest sessions bypass durable-account waitlist admission. Keep the browser
+	// action behind the same shared policy as the server endpoint.
+	const canUseGuestMode = IS_WEBAPP && GUEST_MODE_ENABLED;
 
 	useEffect(() => {
 		return () => {
@@ -296,17 +300,19 @@ export default function LoginPage() {
 				hasVerificationUri={verificationUri !== null}
 				localCoreSetup={localCoreSetup}
 				onCancel={handleCancel}
-				onContinueAsGuest={IS_WEBAPP ? handleContinueAsGuest : undefined}
-				onDownloadCoreAgain={IS_WEBAPP ? beginCoreDownload : undefined}
+				onContinueAsGuest={canUseGuestMode ? handleContinueAsGuest : undefined}
+				onDownloadCoreAgain={canUseGuestMode ? beginCoreDownload : undefined}
 				onOpenCoreDownloads={
-					IS_WEBAPP ? () => openExternal(`${WEB_URL}/download/core`) : undefined
+					canUseGuestMode
+						? () => openExternal(`${WEB_URL}/download/core`)
+						: undefined
 				}
 				onOpenVerification={() =>
 					verificationUri && openExternal(verificationUri)
 				}
 				onRetry={handleRetry}
 				onSignIn={handleSignIn}
-				onUseCloud={IS_WEBAPP ? handleUseCloud : undefined}
+				onUseCloud={canUseGuestMode ? handleUseCloud : undefined}
 				polling={polling}
 				userCode={userCode}
 				waiting={waiting}

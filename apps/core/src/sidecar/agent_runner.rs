@@ -128,6 +128,32 @@ impl AgentRunner {
         .await
     }
 
+    /// Run a scheduled agent turn in a durable conversation. `conversation_id`
+    /// is either the routine's selected existing chat or a newly-created id for
+    /// this firing. The row is ensured before the model starts so a routine that
+    /// promises a persistent transcript cannot silently lose a tool-only/error
+    /// turn because the chat did not exist yet.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_scheduled(
+        &self,
+        agent_id: String,
+        conversation_id: String,
+        title: String,
+        text: String,
+        model: Option<String>,
+        owner_user_id: Option<String>,
+        org_id: Option<String>,
+    ) -> anyhow::Result<String> {
+        let tenancy = owner_user_id
+            .map(|user_id| crate::server::conversations::Tenancy::Owned { user_id, org_id })
+            .unwrap_or(crate::server::conversations::Tenancy::Unattributed);
+        self.conversations
+            .ensure_conversation(&conversation_id, Some(&agent_id), Some(&title), tenancy)
+            .await?;
+        self.run_worker_with_model(Some(agent_id), conversation_id, text, None, false, model)
+            .await
+    }
+
     /// Run one configured agent with a caller-owned output-token ceiling. The
     /// routing layer takes the stricter of this cap and the agent's stored
     /// inference default, so delegated work cannot inherit a larger budget from
@@ -183,6 +209,21 @@ impl AgentRunner {
         cwd: Option<String>,
         isolate: bool,
     ) -> anyhow::Result<String> {
+        self.run_worker_with_model(agent_id, conversation_id, text, cwd, isolate, None)
+            .await
+    }
+
+    /// [`run_worker`](Self::run_worker) with an optional per-turn model pin.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_worker_with_model(
+        &self,
+        agent_id: Option<String>,
+        conversation_id: String,
+        text: String,
+        cwd: Option<String>,
+        isolate: bool,
+        model: Option<String>,
+    ) -> anyhow::Result<String> {
         crate::agent_execution::ensure_noninteractive_run_allowed(
             &self.agent_store,
             agent_id.as_deref(),
@@ -197,8 +238,7 @@ impl AgentRunner {
             cwd,
             isolate,
             None,
-            // A coordinator worker runs its own agent's configured model.
-            None,
+            model,
             None,
             Arc::clone(&self.registry),
             self.conversations.clone(),

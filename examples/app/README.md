@@ -10,8 +10,8 @@ entry and uses the platform from inside a sandboxed iframe. It exercises the who
 | Tool-less completion | `hook:side-model` | `host.sideModel({ prompt, system? })` |
 | Full tool-using sub-agent | `hook:run-agent` | `host.runAgent({ task, wall_time_secs? })` |
 
-See [`docs/ryu-apps-extensibility.md`](../../docs/ryu-apps-extensibility.md) for the
-full contract (endpoint, security model, `window.ryu` SDK alias, Phase-2 backlog).
+See the public [Companion UI guide](https://docs.ryuhq.com/docs/extend/develop/extensions/companion-ui)
+for the host-bridge contract, sandbox boundary, and `window.ryu` SDK alias.
 
 ## How it works
 

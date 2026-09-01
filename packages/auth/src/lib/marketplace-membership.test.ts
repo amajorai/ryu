@@ -3,8 +3,18 @@ import {
 	allocateMarketplaceMembershipPool,
 	annualizedMarketplacePriceMinor,
 	isMarketplaceMembershipListingEligible,
+	isRecurringMarketplacePlan,
 	marketplaceTierMultiplier,
 } from "./marketplace-membership.ts";
+
+describe("isRecurringMarketplacePlan", () => {
+	it("funds the publisher pool only from A Major Pass", () => {
+		expect(isRecurringMarketplacePlan("marketplace-membership")).toBe(true);
+		for (const plan of ["pro", "max", "teams", "business"] as const) {
+			expect(isRecurringMarketplacePlan(plan)).toBe(false);
+		}
+	});
+});
 
 describe("annualizedMarketplacePriceMinor", () => {
 	it("annualizes monthly subscription pricing", () => {

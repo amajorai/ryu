@@ -71,6 +71,7 @@ import { useDownloadsStream } from "@/src/hooks/useDownloadsStream.ts";
 import { useEditorUploader } from "@/src/hooks/useEditorUploader.ts";
 import { useMeetingStream } from "@/src/hooks/useMeetingStream.ts";
 import { useMonitorAlertsStream } from "@/src/hooks/useMonitorAlertsStream.ts";
+import { useNavigationEvents } from "@/src/hooks/useNavigationEvents.ts";
 import { useNotificationEvents } from "@/src/hooks/useNotificationEvents.ts";
 import {
 	usePluginContributionRoutes,
@@ -319,6 +320,10 @@ function LayoutContent({
 	// live Inbox feed. Distinct from the broadcast stream above (Core filters
 	// user-targeted pings out of /api/events/all), so the two never double-toast.
 	useNotificationEvents();
+
+	// App-wide subscription to agent/app shell navigation requests. Only the main
+	// window consumes them; tear-off and companion windows stay independent.
+	useNavigationEvents();
 
 	// Opt-in plugin host for chats that were interrupted by a Wi-Fi/LAN or node
 	// outage. The hook stays app-wide so background tabs are included; its feature
@@ -723,6 +728,9 @@ function LayoutContent({
 	});
 	useHotkey("chat.toggle-right-panel", () => {
 		useChatHotkeyTargets.getState().toggleRightPanel?.();
+	});
+	useHotkey("chat.search", () => {
+		useChatHotkeyTargets.getState().toggleSearch?.();
 	});
 	// The floating Ryu chat. `open("floating")` explicitly, never the bare
 	// `open()`: that restores the LAST layout, and when that was `sidebar` the

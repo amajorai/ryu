@@ -1454,11 +1454,11 @@ export function PluginHostPanel({
 					url: `${node.url.replace(/\/+$/, "")}/api/mail/inbound/${inboxId}`,
 				}),
 			// Calendar — the @ryu/calendar companion renders the scheduled-runs
-			// calendar and schedules an agent. Host-direct (the monitors pattern): the
+			// calendar and schedules an agent routine. Host-direct (the monitors pattern): the
 			// host holds the node token and calls the existing `/heartbeat/jobs` (jobs),
 			// `/workflows` (names), and `/api/agents` (picker) reads, forwarding Core's
 			// shapes verbatim over the bridge (calendar:crud). `createAutomation` reuses
-			// the SAME `createScheduledAgentWorkflow` composite the desktop dialog ran, so
+			// the SAME `createScheduledAgentWorkflow` routine composite the desktop dialog ran, so
 			// Core's validation error (bad cron/interval) propagates as the thrown message.
 			calendarJobs: () =>
 				fetchJobs(toTarget(node)) as unknown as Promise<CalendarJobRecord[]>,

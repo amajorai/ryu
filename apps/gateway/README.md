@@ -28,6 +28,10 @@ cargo build --release           # produces the `ryu-gateway` binary in target/re
 
 Configuration is loaded from `~/.ryu/gateway.toml` (providers, cache, rate limits, circuit breaker). Point any OpenAI-compatible client at `http://localhost:7981/v1`.
 
+The standalone root `GET /` redirects people to the Ryu organization dashboard.
+The OpenAI-compatible and Ryu API paths remain available for programmatic
+callers.
+
 Key environment variables:
 
 - `RUST_LOG`: log level (e.g. `ryu_gateway=debug,info`)

@@ -46,7 +46,12 @@ export const MARKETPLACE_PRICE_TIERS: readonly MarketplacePriceTier[] = [
 	{ maxAnnualizedUsd: null, multiplier: 100 },
 ];
 
-/** True only for a recurring plan that can fund the Marketplace publisher pool. */
+/**
+ * True only for a recurring plan whose contract funds the Marketplace publisher
+ * pool. Marketplace access and publisher funding are separate plan properties:
+ * Pro, Max, Teams, and Business can access supported paid apps without making
+ * their managed-inference price carry an unrelated publisher liability.
+ */
 export function isRecurringMarketplacePlan(
 	plan: PlanId | null | undefined
 ): boolean {
@@ -55,7 +60,7 @@ export function isRecurringMarketplacePlan(
 	}
 	const definition = PLANS[plan];
 	return Boolean(
-		definition.marketplaceApps &&
+		definition.marketplacePublisherPool &&
 			(definition.bindings.monthly || definition.bindings.yearly)
 	);
 }

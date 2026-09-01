@@ -44,6 +44,7 @@ export const PAGE_ROUTES: Record<string, string> = {
 	marketplace: "/marketplace",
 	settings: "/settings",
 	timeline: "/timeline",
+	review: "/review",
 	fleet: "/fleet",
 	extensions: "/extensions",
 	apps: "/apps",

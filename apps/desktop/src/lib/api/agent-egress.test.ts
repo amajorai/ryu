@@ -509,7 +509,7 @@ describe("the spawn-time premise the timing caveat rests on", () => {
 		expect(
 			anchor(
 				"apps/core/src/sidecar/adapters/acp.rs",
-				'"CODEX_HOME={home} npx -y @zed-industries/codex-acp"'
+				"\"CODEX_HOME='{}' npx -y @zed-industries/codex-acp\""
 			)
 		).toBe(PRESENT);
 		// The flagship's own injection, inline in `ryu_agent_route`.

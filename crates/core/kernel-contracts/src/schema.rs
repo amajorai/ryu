@@ -1107,8 +1107,8 @@ impl ProviderRegistrationSpec {
 
     /// Whether a declared path remains a path on the fixed loopback origin.
     /// Requiring a leading single slash and rejecting query/fragment/userinfo
-    /// syntax prevents a value such as `@attacker.example/v1` from turning the
-    /// concatenated URL into `http://127.0.0.1:PORT@attacker.example/...`.
+    /// syntax prevents a value such as `@attacker.example/v1` from making the
+    /// request leave the fixed loopback origin through URL user-info syntax.
     pub fn base_path_is_safe(path: &str) -> bool {
         if path.is_empty()
             || !path.starts_with('/')

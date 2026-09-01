@@ -24,6 +24,12 @@ export const POLAR_PRODUCTS = [
 		slug: "marketplace-membership-monthly",
 	},
 	{
+		productId: resolveProductId(
+			bindingFor(PLANS["marketplace-membership"].bindings.yearly)
+		),
+		slug: "marketplace-membership-yearly",
+	},
+	{
 		productId: resolveProductId(bindingFor(PLANS.pro.bindings.monthly)),
 		slug: "pro-monthly",
 	},

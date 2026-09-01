@@ -160,6 +160,10 @@ describe("isWaitlisted", () => {
 	it("is false when the waitlist is bypassed (no admins configured)", () => {
 		expect(isWaitlisted({ role: "waitlist", email: "user@x.io" })).toBe(false);
 	});
+
+	it("keeps an anonymous session gated while guest mode is disabled", () => {
+		expect(isWaitlisted({ isAnonymous: true })).toBe(true);
+	});
 });
 
 describe("generateReferralCode", () => {

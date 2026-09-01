@@ -6,12 +6,12 @@
 //   • Past runs    — real executions from `job.history` (Core keeps up to 50 per
 //                    job), each carrying a success/failure outcome.
 //   • Upcoming runs — projected fire times computed from the job's schedule:
-//                    cron expressions via `cron-parser` (UTC, matching Core's
-//                    scheduler), fixed intervals via simple stepping.
+//                    cron expressions via `cron-parser` (the job's UTC/IANA
+//                    zone, matching Core's scheduler), fixed intervals via stepping.
 //
-// Cron and intervals are evaluated in UTC because Core's scheduler runs in UTC
-// (the create dialog labels its hour picker "UTC"). The resulting `Date`s are
-// absolute instants; the calendar renders them in the user's local zone.
+// Cron expressions use the job's optional IANA zone (or UTC when absent), and
+// intervals are absolute durations. The resulting `Date`s are instants; the
+// calendar renders them in the user's local zone.
 //
 // High-frequency schedules (sub-hourly intervals, or cron expressions that fire
 // many times a day) would flood a month grid with thousands of cells, so those
@@ -284,7 +284,7 @@ function cronOccurrences(
 		const iter = CronExpressionParser.parse(expr, {
 			currentDate: windowStart,
 			endDate: windowEnd,
-			tz: "UTC",
+			tz: job.schedule.kind === "cron" ? (job.schedule.tz ?? "UTC") : "UTC",
 		});
 		fires = iter.take(MAX_OCCURRENCES_PER_JOB).map((d) => d.toDate());
 	} catch {

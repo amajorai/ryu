@@ -139,6 +139,14 @@ export const DESKTOP_HOTKEYS: HotkeyRegistry = [
 		category: "Chat",
 		defaultBinding: "Mod+N",
 	},
+	{
+		id: "chat.search",
+		label: "Search Chat or Files",
+		category: "Chat",
+		defaultBinding: "Mod+F",
+		description:
+			"Open search in the focused chat. Press again to switch between chat messages and project files.",
+	},
 	// Both of these act on the FOCUSED chat. Every chat tab stays mounted, so the
 	// handler cannot be registered per-tab (last-writer-wins would let a hidden tab
 	// own it). The active tab publishes into `useChatHotkeyTargets` and Layout

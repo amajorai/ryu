@@ -1514,13 +1514,28 @@ fn refresh_acp_config_in_background(
 /// The probe itself: spawn the agent, `initialize` + `session/new`, read what it
 /// advertises, drop the session. Always hits the subprocess — every caller goes
 /// through [`probe_acp_config`], which is what owns the caching.
+fn acp_agent_from_spawn(spawn_cmd: &str) -> anyhow::Result<AcpAgent> {
+    let agent =
+        AcpAgent::from_str(spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let server = match agent.into_server() {
+        agent_client_protocol::schema::McpServer::Stdio(stdio) => {
+            agent_client_protocol::schema::McpServer::Stdio(
+                crate::agent_sandbox::confine_codex_stdio(stdio).map_err(|error| {
+                    anyhow::anyhow!("preparing the managed Codex OS deletion boundary: {error}")
+                })?,
+            )
+        }
+        other => other,
+    };
+    Ok(AcpAgent::new(server))
+}
+
 async fn probe_acp_config_uncached(
     spawn_cmd: String,
     cwd: PathBuf,
     selections: SessionSelections,
 ) -> anyhow::Result<serde_json::Value> {
-    let agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let agent = acp_agent_from_spawn(&spawn_cmd)?;
     // Which road Ryu's tools take to this agent, resolved from the spawn command
     // BEFORE the subprocess answers anything. Reported alongside the agent's own
     // capabilities because clients must NOT derive it from `mcpCapabilities`: the
@@ -1634,8 +1649,7 @@ async fn probe_acp_config_uncached(
 /// Invalidates the probe cache for this spawn command on success so the next
 /// `acp-config` read reflects the now-authenticated state.
 pub async fn authenticate_acp(spawn_cmd: String, method_id: String) -> anyhow::Result<()> {
-    let agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let agent = acp_agent_from_spawn(&spawn_cmd)?;
     let cache_key = spawn_cmd.clone();
     tokio::time::timeout(
         std::time::Duration::from_secs(300),
@@ -1675,8 +1689,7 @@ pub async fn authenticate_acp(spawn_cmd: String, method_id: String) -> anyhow::R
 /// auth state. A no-op error surfaces to the caller for agents that don't
 /// implement it.
 pub async fn logout_acp(spawn_cmd: String) -> anyhow::Result<()> {
-    let agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let agent = acp_agent_from_spawn(&spawn_cmd)?;
     let cache_key = spawn_cmd.clone();
     tokio::time::timeout(
         ACP_PROBE_TIMEOUT,
@@ -1713,8 +1726,7 @@ pub async fn load_acp_session(
     session_id: String,
     cwd: PathBuf,
 ) -> anyhow::Result<serde_json::Value> {
-    let agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let agent = acp_agent_from_spawn(&spawn_cmd)?;
     // The resumed session's advertised config feeds the same composer pickers the
     // cold probe does, so it gets the same synthesized plan-mode option. Omitting
     // it here would make the pill disappear on exactly the sessions a user resumed.
@@ -1785,8 +1797,7 @@ pub async fn load_acp_session(
 /// `session/new`) returns `{ sessions: [], unsupported: true }` rather than an
 /// error. Returns `{ sessions: [...], nextCursor? }` on success.
 pub async fn list_acp_sessions(spawn_cmd: String) -> anyhow::Result<serde_json::Value> {
-    let agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let agent = acp_agent_from_spawn(&spawn_cmd)?;
     let value = tokio::time::timeout(
         ACP_PROBE_TIMEOUT,
         Client
@@ -1821,8 +1832,7 @@ pub async fn list_acp_sessions(spawn_cmd: String) -> anyhow::Result<serde_json::
 /// Delete/close an ACP agent session (ACP `session/close`). Best-effort — an
 /// agent that doesn't implement it returns an error the caller can surface.
 pub async fn close_acp_session(spawn_cmd: String, session_id: String) -> anyhow::Result<bool> {
-    let agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let agent = acp_agent_from_spawn(&spawn_cmd)?;
     let closed = tokio::time::timeout(
         ACP_PROBE_TIMEOUT,
         Client
@@ -2890,8 +2900,7 @@ pub async fn run_acp_instance(
         crate::pi_config::app_extensions::ensure_pi_extensions_materialized().await;
     }
 
-    let parsed_agent =
-        AcpAgent::from_str(&spawn_cmd).map_err(|e| anyhow::anyhow!("ACP spawn parse: {e}"))?;
+    let parsed_agent = acp_agent_from_spawn(&spawn_cmd)?;
     let server = match parsed_agent.into_server() {
         agent_client_protocol::schema::McpServer::Stdio(mut stdio) => {
             for (name, value) in environment {
@@ -4188,12 +4197,44 @@ fn extract_file_write(tool_call: &serde_json::Value) -> Option<String> {
     None
 }
 
+fn patch_deletes_file_in_value(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            for key in ["patch", "diff"] {
+                if object
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(ryu_deletion_guard::patch_deletes_file)
+                {
+                    return true;
+                }
+            }
+            object.values().any(patch_deletes_file_in_value)
+        }
+        serde_json::Value::Array(items) => items.iter().any(patch_deletes_file_in_value),
+        _ => false,
+    }
+}
+
 /// Run an ACP tool call through the gateway command-approval scanner. Scans the
 /// shell command for exec tools, else a synthesized `"write <path>"` for
 /// file-mutating tools, so native file tools are governed too (not just shell
-/// exec). `Allow` when nothing scannable is recoverable; `check_exec_scan` itself
-/// short-circuits to `Allow` when `RYU_EXEC_APPROVAL_MODE` is unset or `off`.
+/// exec). An explicit `apply_patch` deletion marker is checked locally before
+/// extraction because it may not carry a path/content shape the generic write
+/// synthesizer recognizes. `Allow` means no scannable mutation was recovered;
+/// the permanent-deletion guard remains active even when pattern approval is off.
 async fn acp_exec_scan_verdict(tool_call: &serde_json::Value, agent: &str) -> ExecScanOutcome {
+    if !ryu_deletion_guard::permanent_delete_allowed(
+        std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok().as_deref(),
+    ) && (patch_deletes_file_in_value(tool_call)
+        || extract_exec_command(tool_call)
+            .as_deref()
+            .is_some_and(ryu_deletion_guard::patch_deletes_file))
+    {
+        return ExecScanOutcome::Deny(
+            "permanent file deletion through apply_patch is blocked by Ryu; use the host Trash or Recycle Bin command instead".to_owned(),
+        );
+    }
     match extract_exec_command(tool_call).or_else(|| extract_file_write(tool_call)) {
         Some(scannable) => check_exec_scan("acp", &scannable, None, Some(agent)).await,
         None => ExecScanOutcome::Allow,
@@ -4804,8 +4845,10 @@ fn codex_acp_cmd_for_agent(agent_id: Option<&str>) -> String {
     });
     // Windows: inject env vars via `cmd /c set VAR=val&& ...` so the AcpAgent
     // subprocess inherits them. This mirrors pi_acp_cmd()'s approach.
+    let safety_home = crate::codex_config::safety_home();
     format!(
-        "cmd /c set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& npx -y @agentclientprotocol/codex-acp@latest"
+        "cmd /c set \"CODEX_HOME={}\"&& set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& npx -y @agentclientprotocol/codex-acp@latest",
+        safety_home.to_string_lossy()
     )
 }
 
@@ -4825,8 +4868,15 @@ fn codex_acp_cmd_for_agent(agent_id: Option<&str>) -> String {
         tracing::error!(error = %e, "codex_acp_cmd: no gateway bearer on remote data plane; hosted gateway will reject");
         "ryu-local".to_owned()
     });
-    // POSIX: prefix the command with inline env var assignments.
-    format!("OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} npx -y @agentclientprotocol/codex-acp@latest")
+    // POSIX: prefix the command with inline env var assignments. The safety home
+    // is materialized by `agent_route` immediately before this command is used;
+    // keeping it in the command also prevents an inherited user CODEX_HOME from
+    // silently bypassing Ryu's isolated hook/rules layer.
+    let safety_home = crate::codex_config::safety_home();
+    format!(
+        "CODEX_HOME='{}' OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} npx -y @agentclientprotocol/codex-acp@latest",
+        safety_home.to_string_lossy().replace('\'', "'\\''")
+    )
 }
 
 /// The three env vars the managed Pi's extensions need to reach Core, rendered for
@@ -5008,22 +5058,23 @@ pub fn openai_gateway_v1(agent_id: Option<&str>) -> String {
 ///
 /// Applied only when [`crate::codex_config::is_gateway_routing`] is on (the default
 /// for new/routable ACP agents; explicit direct-egress opt-out).
-pub fn codex_acp_gateway_cmd() -> String {
+pub fn codex_acp_gateway_cmd() -> anyhow::Result<String> {
     // (Re)write the isolated CODEX_HOME (provider config + refreshed auth) and
-    // resolve its path. On any IO failure fall back to the user's default home so
-    // Codex still starts (ungoverned) rather than failing the turn.
-    let home = crate::codex_config::ensure_gateway_home().unwrap_or_else(|_| {
-        crate::codex_config::codex_home()
-            .to_string_lossy()
-            .into_owned()
-    });
+    // resolve its path. Failure is returned so the route refuses to start Codex
+    // instead of falling back to the user's ungoverned CODEX_HOME.
+    let home = crate::codex_config::ensure_gateway_home()?;
     #[cfg(target_os = "windows")]
     {
-        format!("cmd /c set CODEX_HOME={home}&& npx -y @zed-industries/codex-acp")
+        Ok(format!(
+            "cmd /c set \"CODEX_HOME={home}\"&& npx -y @zed-industries/codex-acp"
+        ))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        format!("CODEX_HOME={home} npx -y @zed-industries/codex-acp")
+        Ok(format!(
+            "CODEX_HOME='{}' npx -y @zed-industries/codex-acp",
+            home.replace('\'', "'\\''")
+        ))
     }
 }
 
@@ -5765,6 +5816,28 @@ impl Default for AcpAgentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn codex_acp_spawns_through_the_os_runner() {
+        let agent = acp_agent_from_spawn("npx -y @zed-industries/codex-acp@latest")
+            .expect("Codex must have a supported OS runner");
+        match agent.server() {
+            agent_client_protocol::schema::McpServer::Stdio(stdio) => {
+                assert_eq!(
+                    stdio.command,
+                    std::env::current_exe().expect("current executable")
+                );
+                assert_eq!(
+                    stdio.args.first().map(String::as_str),
+                    Some(crate::agent_sandbox::AGENT_SANDBOX_RUNNER_ARG)
+                );
+                assert_eq!(stdio.args.get(1).map(String::as_str), Some("--"));
+                assert_eq!(stdio.args.get(2).map(String::as_str), Some("npx"));
+            }
+            _ => panic!("Codex ACP must use stdio transport"),
+        }
+    }
 
     #[test]
     fn managed_openrouter_credit_failure_has_managed_recovery_copy() {
@@ -7149,6 +7222,36 @@ mod tests {
         // A shell exec (has a command, no file payload) is out of scope here.
         let tc = serde_json::json!({ "command": "ls" });
         assert!(extract_file_write(&tc).is_none());
+    }
+
+    #[tokio::test]
+    async fn acp_patch_deletion_is_denied_before_gateway_scan() {
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let previous = std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok();
+        std::env::remove_var("RYU_ALLOW_PERMANENT_DELETE");
+        let tool_call = serde_json::json!({
+            "kind": "edit",
+            "rawInput": { "command": "*** Delete File: src/old.ts\n" }
+        });
+        let outcome = acp_exec_scan_verdict(&tool_call, "acp:codex").await;
+        match previous {
+            Some(value) => std::env::set_var("RYU_ALLOW_PERMANENT_DELETE", value),
+            None => std::env::remove_var("RYU_ALLOW_PERMANENT_DELETE"),
+        }
+        assert!(
+            matches!(&outcome, ExecScanOutcome::Deny(reason) if reason.contains("apply_patch")),
+            "ACP file deletion must be denied before any gateway fallback: {outcome:?}"
+        );
+
+        let nested_patch = serde_json::json!({
+            "kind": "edit",
+            "rawInput": { "patch": "*** Delete File: src/nested-old.ts\n" }
+        });
+        let nested_outcome = acp_exec_scan_verdict(&nested_patch, "acp:codex").await;
+        assert!(
+            matches!(&nested_outcome, ExecScanOutcome::Deny(reason) if reason.contains("apply_patch")),
+            "nested apply_patch deletion must be denied before any gateway fallback: {nested_outcome:?}"
+        );
     }
 
     // ── Pi as default-installed+enabled agent (U041) ──────────────────────────

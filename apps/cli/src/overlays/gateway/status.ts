@@ -1,9 +1,9 @@
 // Gateway status fetch + narrowing helpers, reused from the legacy read-only
 // snapshot in src/tabs/gateway.tsx. One raw GET /api/gateway/status call (like the
 // Rust client) returns `{ reachable, url, health, metrics, effective_config }`.
-// `effective_config` is the on-disk gateway.toml and stays populated even when the
-// gateway PROCESS is down, so every policy indicator is read from it with
-// fall-to-false defaults. We deliberately do NOT use the typed fetchGatewayStatus
+// `effective_config` is the credential-redacted on-disk gateway.toml and stays
+// populated even when the gateway PROCESS is down, so every policy indicator is
+// read from it with fall-to-false defaults. We deliberately do NOT use the typed fetchGatewayStatus
 // (it normalizes effective_config away) or fetchGatewayConfig (it 502s when the
 // gateway is down — the very state this overlay exists to report), instead doing
 // the single raw fetch the Rust client does.

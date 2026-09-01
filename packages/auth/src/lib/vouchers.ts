@@ -15,13 +15,10 @@
  * slug → product-id mapping stays in `constants.ts` where the script resolves it.
  *
  * WHY THE ELIGIBLE SET IS A LIST AND NOT "EVERYTHING": a 10% discount is not
- * uniformly affordable across the catalog. Every plan includes a credit pool
- * (capped at 40% of price by `INCLUDED_CREDIT_FRACTION_MAX`), so the same 10%
- * eats a different share of the margin per plan and — much more sharply — per
- * billing INTERVAL, since Polar's `once` covers a whole billing period. The
- * exclusions below are load-bearing money decisions, each one recorded with the
- * arithmetic that produced it. See `docs/polar-products.md` ("First-purchase
- * voucher") for the full worst-case table.
+ * uniformly affordable across the catalog. Managed plans have plan-specific
+ * pools and margins, and Polar's `once` duration covers a whole billing period.
+ * The exclusions below keep the printed first-month offer scoped to the one
+ * checkout path that has been provisioned and margin-checked.
  */
 
 /** How the discount recurs. `once` = the first billing period only. */
@@ -38,7 +35,7 @@ export const FIRST_PURCHASE_VOUCHER_BASIS_POINTS = 1000;
  *
  * READ THIS BEFORE WIDENING THE ELIGIBLE SET. Polar's `once` means the first
  * BILLING PERIOD, not the first month: on a yearly product it discounts the
- * whole first year (10% of $2000 is $200, not $16.67). Verified against the API,
+ * whole first year rather than one month's amount. Verified against the API,
  * not inferred — a sandbox checkout for the yearly Pro product went $390.00 →
  * $351.00 when the code was applied.
  *
@@ -91,19 +88,26 @@ export const FIRST_PURCHASE_VOUCHER_EXCLUSIONS: Readonly<
 	// nobody asked for, and describing it accurately on the card would mean
 	// printing two different offers on one page.
 	//
-	// This USED to be a money rule as well: at the old $200/mo Max with its 75%
-	// credit pool, a yearly redemption lost about $120. The 2026-08-14 repricing
-	// removed that hazard ($990/yr against a $30/mo pool clears ~55%), so only
-	// the copy rule remains — which is enough on its own, and is the reason kept
-	// here. Max MONTHLY is fine and IS listed.
+	// The current campaign is deliberately Pro-only. Max is a hidden compatibility
+	// offer, and Teams/Business use organization checkout; none are this card's
+	// first-month path.
 	"pro-yearly":
 		"`once` covers the whole first year, but the offer promises a first MONTH",
 	"teams-yearly":
 		"`once` covers the whole first year, but the offer promises a first MONTH",
+	"business-yearly":
+		"`once` covers the whole first year, but the offer promises a first MONTH",
 	"max-yearly":
 		"`once` covers the whole first year, but the offer promises a first MONTH",
-	"max-monthly": "Max is an internal scale tier, not a public campaign offer",
-	"teams-monthly": "Teams is retired for new sales",
+	"marketplace-membership-monthly":
+		"A Major Pass provides Marketplace access only, not the Pro managed plan",
+	"marketplace-membership-yearly":
+		"A Major Pass provides Marketplace access only, not the Pro managed plan",
+	"max-monthly":
+		"Max is a hidden compatibility offer, not this card campaign's path",
+	"teams-monthly": "Teams uses a separate organization checkout and is not Pro",
+	"business-monthly":
+		"Business uses a separate organization checkout and is not Pro",
 	// The desktop licence already carries the server-applied LIFETIME129 discount
 	// ($71 off a $200 product = the advertised $129). Polar allows one discount
 	// per checkout, so stacking is impossible either way; a voucher would only
@@ -111,8 +115,8 @@ export const FIRST_PURCHASE_VOUCHER_EXCLUSIONS: Readonly<
 	lifetime:
 		"already discounted by LIFETIME129 to $129; a second percentage offer would conflict with the launch price",
 	// Credit top-ups are not a plan. Their entire margin IS the deposit fee, and
-	// that fee only just covers OpenRouter's 5.5% plus Polar's cut — so a 10%
-	// discount does not trim the margin, it inverts it.
+	// the fee covers the provider costs — so a 10% discount would trim the margin
+	// materially.
 	credits: "not a plan; the deposit fee IS the margin, so 10% off cancels it",
 	// Ad-hoc cloud instances are an add-on subscription with a dynamic
 	// per-checkout price, not a plan the voucher advertises.

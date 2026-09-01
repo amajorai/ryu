@@ -1,6 +1,6 @@
 [package]
 name = "ryu-core"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -33,9 +33,14 @@ ryu-email-send = { path = "../../crates/core/email-send" }
 ryu-a2a = { path = "../../crates/core/a2a" }
 ryu-app-events = { path = "../../crates/core/app-events" }
 ryu-egress = { path = "../../crates/core/egress" }
+# Shared permanent-deletion classifier used by Core's local preflight, ACP/MCP
+# seams, and the Gateway scanner. The crate is pure and has no filesystem side
+# effects, so every execution transport can apply the same default-deny policy.
+ryu-deletion-guard = { path = "../../crates/core/deletion-guard" }
 ryu-safe-actions = { path = "../../crates/core/safe-actions" }
 dirs = "5"
 anyhow = "1"
+libc = "0.2"
 notify = "6"
 url = "2"
 futures-util = "0.3"

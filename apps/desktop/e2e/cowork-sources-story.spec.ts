@@ -10,6 +10,8 @@
 //     OUTPUT, not the input, so a query-only implementation fails here);
 //   • a `dynamic-tool` MCP call is attributed to its server rather than dropped,
 //     which is how MCP tools arrive over the ACP bridge;
+//   • app-qualified and Composio-qualified tool calls are visible in both the
+//     pinned summary and the complete workspace inventory;
 //   • expanding a group grows the enclosing accordion section instead of
 //     clipping — the reason this is a browser spec at all.
 
@@ -70,7 +72,7 @@ test("summary headers keep counts beside the title and actions on the right", as
 			'[data-testid="pinned-summary"] [data-slot="cowork-section-count"]'
 		)
 	).toHaveCount(1);
-	await expect(page.getByRole("button", { name: /^Sources 4/ })).toBeVisible();
+	await expect(page.getByRole("button", { name: /^Sources 8/ })).toBeVisible();
 
 	const header = await sources.boundingBox();
 	const actionBox = await action.boundingBox();
@@ -160,6 +162,49 @@ test("an MCP call arriving as a dynamic tool is attributed to its server", async
 	const pinned = page.getByTestId("pinned-summary");
 	await expect(pinned.getByText("create issue")).toBeVisible();
 	await expect(pinned.getByText("Brighten the dark-mode ramp")).toBeVisible();
+});
+
+test("MCP, app, and Composio calls appear in both source surfaces", async ({
+	page,
+}) => {
+	await page.setViewportSize({ height: 1200, width: 1280 });
+	await openSources(page);
+	const pinned = page.getByTestId("pinned-summary");
+	const workspace = page.getByTestId("workspace-sources-proof");
+
+	await expect(page.getByRole("button", { name: /^Composio 1/ })).toBeVisible();
+	await expect(page.getByRole("button", { name: /^Tauri 1/ })).toBeVisible();
+	await expect(page.getByRole("button", { name: /^Sentry 1/ })).toBeVisible();
+	await expect(page.getByRole("button", { name: /^Expect 1/ })).toBeVisible();
+
+	await page.getByRole("button", { name: /^Composio 1/ }).click();
+	await expect(
+		pinned.getByText("Slack send message", { exact: true })
+	).toBeVisible();
+	await page.getByRole("button", { name: /^Tauri 1/ }).click();
+	await expect(
+		pinned.getByText("Driver session", { exact: true })
+	).toBeVisible();
+	await page.getByRole("button", { name: /^Sentry 1/ }).click();
+	await expect(
+		pinned.getByText("search issues", { exact: true })
+	).toBeVisible();
+
+	await expect(workspace.getByText("Composio", { exact: true })).toBeVisible();
+	await expect(
+		workspace.getByText("Slack send message", { exact: true })
+	).toBeVisible();
+	await expect(workspace.getByText("Tauri", { exact: true })).toBeVisible();
+	await expect(
+		workspace.getByText("Driver session", { exact: true })
+	).toBeVisible();
+	await expect(workspace.getByText("Sentry", { exact: true })).toBeVisible();
+	await expect(workspace.getByText("Expect", { exact: true })).toBeVisible();
+
+	await page.screenshot({
+		fullPage: true,
+		path: "/Users/jiawei/.codex/visualizations/2026/08/31/01a05665-d52a-72a0-8ad4-c4e4d69d2277/cowork-sources-mcp-app-integrations-proof.png",
+	});
 });
 
 test("expanding a group grows the section instead of clipping the list", async ({

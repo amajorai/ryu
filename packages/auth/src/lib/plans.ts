@@ -18,14 +18,19 @@
  *  - Desktop license  one-time $200 list (launch $129 via the LIFETIME129 discount;
  *                     Polar license-key benefit, 7-day trial, 1yr updates).
  *                     Grants desktop access, NO managed inference.
- *  - Pro              $39/mo legacy plan; hidden from the public business shelf;
- *                     fixed $15 pool.
- *  - Max              $99/mo legacy plan; hidden from the public business shelf;
- *                     fixed $30 pool.
+ *  - A Major Pass      $20/month or $200/year for one individual user;
+ *                     supported paid Marketplace access and publisher-pool funding.
+ *  - Pro              $49/mo individual plan; shown on the public individual
+ *                     shelf; fixed $15 pool. Existing $39 contracts remain
+ *                     grandfathered at their recorded pricing version.
+ *  - Max              $99/mo individual plan; shown on the public individual
+ *                     shelf; fixed $30 pool.
  *  - Teams            $50/member seat/mo, five-seat minimum ($250 floor),
  *                     organization-owned; pooled credits grow by $50 per five
  *                     billed seats in the current pricing version.
- *  - Credits top-up   deposit fee 15% base (13% Pro, 12% Max) + $2.40
+ *  - Business         $300/month for five seats, then $50 per seat; pooled
+ *                     credits grow by $100 per completed five-seat bundle.
+ *  - Credits top-up   deposit fee 17% base (16.5% Pro, 16% Max/org) + $2.75
  *                     floor; usage debits AT COST (markup 0).
  *
  * The credit pool / markup is captured at DEPOSIT, not per-usage. The wallet is
@@ -87,7 +92,11 @@ export type SeatModel =
 	| { kind: "per_seat"; minSeats: number }; // billed per user/seat
 
 /** Whether the included managed-inference pool is fixed or grows with seats. */
-export type CreditPoolModel = "fixed" | "per_seat" | "per_bundle";
+export type CreditPoolModel =
+	| "fixed"
+	| "per_seat"
+	| "per_bundle"
+	| "per_completed_bundle";
 
 /** Whether a recurring plan is for one person's workspace or an organization. */
 export type PlanAudience = "individual" | "organization";
@@ -139,15 +148,15 @@ export interface Plan {
 	/**
 	 * Whether this plan includes Agent Inboxes (Ryu Mail — the AgentMail-style
 	 * email-as-a-service over AWS SES: store inboxes, receive + send email).
-	 * The free baseline and recurring subscription plans include it; the desktop
-	 * license remains local-only and does not.
+	 * The free baseline and managed recurring plans include it; the apps-only
+	 * A Major Pass and the desktop license remain without hosted mail.
 	 */
 	readonly emailEnabled: boolean;
 	/**
 	 * Max number of Agent Inboxes the plan may create (0 when disabled). The free
-	 * baseline allows one inbox; paid plans (pro/max/teams) allow UNLIMITED
-	 * inboxes ({@link Number.POSITIVE_INFINITY}); the cap is on STORAGE
-	 * ({@link emailStorageLimitGb}), not count.
+	 * baseline allows one inbox; managed plans (pro/max/teams/business) allow
+	 * UNLIMITED inboxes ({@link Number.POSITIVE_INFINITY}); the cap is on
+	 * STORAGE ({@link emailStorageLimitGb}), not count. A Major Pass has no mail.
 	 */
 	readonly emailInboxLimit: number;
 	/** Max outbound emails the plan may send per calendar month (0 when off). */
@@ -155,27 +164,33 @@ export interface Plan {
 	/**
 	 * Max total stored Agent Inbox bytes the plan may hold, expressed in whole GB
 	 * (0 when email is disabled). This — not inbox count — is what caps Agent
-	 * Inboxes: free 1, desktop 0, pro 20, max 100, teams 20. Enforced by the mail router;
-	 * the byte figure is derived via {@link emailStorageLimitBytes}.
+	 * Inboxes: free 1, desktop 0, A Major Pass 0, pro 20, max 100, teams 20,
+	 * and business 20. Enforced by the mail router; the byte figure is derived
+	 * via {@link emailStorageLimitBytes}.
 	 */
 	readonly emailStorageLimitGb: number;
 	readonly id: PlanId;
 	/** Whether this plan includes Ryu-managed inference (a credit pool). */
 	readonly managedInference: boolean;
-	/** Whether this plan contributes to the optional Marketplace publisher pool. */
+	/** Whether this plan unlocks supported paid Marketplace apps. */
 	readonly marketplaceApps: boolean;
 	/**
-	 * Included monthly credit pool in micro-USD, DERIVED from the price by the
-	 * single 50%-default rule ({@link includedCreditPoolMicroUsd}); 0 for plans
-	 * without a recurring price (the one-time desktop license). Refreshed each
-	 * billing period. Kept as a materialized field so every consumer reads one
-	 * number, but it is NEVER hand-typed — change the price (or the fraction) and
-	 * the grant follows.
+	 * Whether this recurring plan contributes to the Marketplace publisher pool.
+	 * This is deliberately separate from `marketplaceApps`: access is a plan
+	 * capability, while publisher funding is a commercial funding rule.
+	 */
+	readonly marketplacePublisherPool: boolean;
+	/**
+	 * Included monthly credit pool in micro-USD. The value is materialized because
+	 * the version table must preserve the exact pool promised at checkout; fixed
+	 * and seat-bundled contracts are not all a single percentage of price. The
+	 * {@link includedCreditPoolMicroUsd} helper supplies the 30%-default fallback
+	 * for plans that use a proportional pool. Refreshed each billing period.
 	 */
 	readonly monthlyCreditPoolMicroUsd: number;
 	/**
 	 * The plan's RECURRING price in micro-USD — per month for single plans, per
-	 * SEAT per month for per-seat plans (Teams). 0 for plans with no recurring
+	 * SEAT per month for per-seat plans (Teams and Business). 0 for plans with no recurring
 	 * price (the one-time desktop license). The base the included credit pool is
 	 * derived from; the yearly binding's discounted price is a checkout concern
 	 * and does not change the monthly grant.
@@ -192,88 +207,74 @@ export interface Plan {
 /**
  * One-time deposit fee (markup) on credit top-ups. Ryu's PREPAID model: a
  * customer buys credits up front, then spends them — models are metered AT COST
- * (no per-token markup) and Composio tool calls at a flat $0.50/1k; the
+ * (no per-token markup) and tool calls use the configured provider rate; the
  * platform's inference margin is captured once here, at deposit. Lives ONLY here.
  *
- * The fee is `max(plan % of the top-up, $2.40 floor)` — a MINIMUM, not an add-on
- * (the OpenRouter model). The floor makes tiny top-ups poor value and nudges
- * users to deposit MORE for more value: below the crossover the floor dominates,
- * above it the percentage takes over. At the base 15% the crossover is $16.
- * Examples: $5 → $2.40 (48% eff.), $16 → $2.40 (15%), $50 → $7.50 (15%).
+ * The fee is `max(plan % of the top-up, $2.75 floor)` — a MINIMUM, not an
+ * add-on. The safe schedule is 17% for the unqualified/base rate, 16.5% for
+ * Pro, and 16% for Max and organization plans. It covers the current
+ * OpenRouter funding fee and the highest listed Polar card-processing path,
+ * including the international-card surcharge, without adding a usage markup.
  *
  * The floor is NOT a free parameter — see {@link DEPOSIT_FEE_FIXED_MICRO_USD} for
- * why $2.40 specifically, and why lowering a plan rate below 12% reopens a band
- * of deposits that lose money.
+ * why $2.75 specifically, and why lowering a managed-plan rate below 16% reopens
+ * a band of deposits that lose money.
  */
-export const DEPOSIT_FEE_BPS = 1500; // 15.00% base markup (no plan) in basis points
+export const DEPOSIT_FEE_BPS = 1700; // 17.00% base rate in basis points
 
 /**
- * The minimum fee on any top-up. **$2.40, and the number is load-bearing.**
+ * The minimum fee on any top-up. **$2.75, and the number is load-bearing.**
  *
- * It was $1.50, which left a band where every deposit lost money. The floor and
- * the percentage have to overlap: below the crossover the floor is the fee, above
- * it the percentage is, and the floor has to stay profitable at least as far as
- * the crossover or there is a gap between them.
+ * The floor and percentage have to overlap under the current conservative
+ * processor case: OpenRouter 5.5% with a $0.80 minimum and Polar 6.5% + $0.50
+ * on a transaction. At the 16% managed-plan rate the percentage
+ * curve starts clearing its own costs at about $16.89; the $2.75 floor remains
+ * safe through the rounded-cent crossover. The economics test walks every
+ * whole-cent value through $600 so a sampled list cannot hide a loss band.
  *
- *  - a flat fee `F` nets `F − 0.095·face − 0.096 − 0.40`, so `F = 1.50` stops
- *    covering its face at **$10.94**;
- *  - Pro's 13% does not break even until **$13.42**, Max/Teams' 12% not until
- *    **$19.80** ({@link topupBreakEvenUsd}).
- *
- * So $10.95–$13.42 lost money on Pro and $10.95–$19.80 on Max and Teams. Small
- * per deposit (−$0.03 to −$0.15) but structural, and it landed squarely on a $15
- * top-up — the size a $15 monthly pool trains a customer to buy.
- *
- * $2.40 is the smallest floor that closes it for every plan at once: it stays
- * profitable to a face of **$20.04**, just past Max's $19.80 crossover, so no
- * plan has a gap. It is derived from the WORST rate on the ladder, which means
- * lowering any rate below 12% reopens the hole — {@link
- * DEPOSIT_FEE_BPS_BY_PLAN} says so at the rate, and `plan-economics.test.ts`
- * asserts the no-gap property structurally rather than by sampling sizes.
- * Sampling is what missed this: the suite tested [5, 10, 20, 50, 100, 500], six
- * values that straddle the band without landing in it.
- *
- * Consequence worth knowing rather than discovering: small top-ups are now
- * visibly expensive. $5 costs $7.40 (48% effective), $10 costs $12.40 (24%).
- * That is the floor doing its job — it has always made tiny deposits poor value
- * on purpose — but it is a bigger nudge than it was.
+ * A $5 face value therefore costs $7.75 and a $10 face value costs $12.75 at
+ * the base floor. The checkout returns the exact face, fee, and total before
+ * the buyer leaves Ryu.
  */
-export const DEPOSIT_FEE_FIXED_MICRO_USD = usdToMicro(2.4);
+export const DEPOSIT_FEE_FIXED_MICRO_USD = usdToMicro(2.75);
+
+/** Current conservative external cost inputs used by the top-up economics guard. */
+export const TOPUP_OPENROUTER_FEE_BPS = 550;
+export const TOPUP_OPENROUTER_MINIMUM_USD = 0.8;
+export const TOPUP_POLAR_PROCESSING_BPS = 650;
+export const TOPUP_POLAR_PROCESSING_FIXED_USD = 0.5;
 
 /**
- * WHY 15% AND NOT 10% — the arithmetic that sets the floor under every rate
- * below, written out because the old 10% was set as if a granted credit cost us
- * its face value, and it does not.
+ * WHY 17% / 16% — the arithmetic that sets the floor under every rate below.
  *
  * Two costs sit under every top-up, and the fee has to clear BOTH:
  *
- *  - **OpenRouter charges 5.5%** to buy the credits we then meter out at cost
- *    (`https://openrouter.ai/api/v1` is the gateway's provider; `markup_bps` is
- *    pinned to 0 on purpose). $100 of wallet costs us $105.50 to fund.
- *  - **Polar takes 4% + $0.40** of the charge as merchant of record.
+ *  - **OpenRouter charges 5.5%**, with a current $0.80 minimum, to buy the
+ *    credits we then meter out at cost (`markup_bps` is pinned to 0 on purpose).
+ *  - The conservative Polar case is **6.5% + $0.50**: the current Starter
+ *    transaction rate plus the listed international-card surcharge.
  *
  * The buyer pays `face + fee` and the wallet is credited `face`
  * (`computeTopupQuote`), so per top-up:
  *
- *     net = 0.96 × fee − 0.095 × face − 0.40
+ *     net = (1 − 0.065) × fee − (0.055 + 0.065) × face − 0.50
  *
- * which is non-negative only when `fee ≥ (0.095 × face + 0.40) / 0.96` — a rate
- * of **~10.3%** at any meaningful size. The previous 10% base was therefore a
- * fraction UNDER water on every top-up, and the 5% "premium perk" lost roughly
- * $5 on every $100 a Max customer deposited: the better the customer, the worse
- * the trade.
+ * The 16% managed-plan rate and $2.75 floor are the smallest rounded schedule
+ * in this catalog that stays non-negative through the floor/percentage join in
+ * that conservative case. The fee is the only Ryu spread on inference; usage
+ * remains at cost.
  *
- * 15% clears it with room for the international-card surcharge (+1.5%) and
- * leaves the "models are metered AT COST, no per-token markup" promise intact —
- * the fee is what covers the two costs above, and it is the only place Ryu takes
- * a spread on inference.
+ * The 16% managed-plan rate clears it with room for the international-card
+ * surcharge (+1.5%) and leaves the "models are metered AT COST, no per-token
+ * markup" promise intact — the fee is what covers the two costs above, and it
+ * is the only place Ryu takes a spread on inference.
  */
 
 /**
- * The smallest top-up that is profitable at a given rate, in whole USD —
- * `0.40 / (0.96 × rate − 0.095)`, the size at which the percentage finally
- * overtakes Polar's fixed $0.40. At 15% that is ~$8.16, at 13% ~$13.42, at 12%
- * ~$19.80.
+ * The smallest top-up that is profitable at a given rate, in whole USD under
+ * the conservative processor case — the size at which the percentage finally
+ * covers the variable and fixed provider costs. A non-viable rate returns
+ * `Infinity`.
  *
  * {@link DEPOSIT_FEE_FIXED_MICRO_USD} exists to cover everything below those
  * points — but only up to the face where the FLOOR itself stops paying, which is
@@ -282,8 +283,26 @@ export const DEPOSIT_FEE_FIXED_MICRO_USD = usdToMicro(2.4);
  * check the no-gap assertion in `plan-economics.test.ts`: the floor must stay
  * profitable at least as far as the largest break-even here.
  */
-export const topupBreakEvenUsd = (bps: number): number =>
-	0.4 / ((0.96 * bps) / 10_000 - 0.095);
+export const topupBreakEvenUsd = (bps: number): number => {
+	const rate = bps / 10_000;
+	const polarRate = TOPUP_POLAR_PROCESSING_BPS / 10_000;
+	const openRouterRate = TOPUP_OPENROUTER_FEE_BPS / 10_000;
+	const minimumRegimeBoundary = TOPUP_OPENROUTER_MINIMUM_USD / openRouterRate;
+	const minimumRegimeRate = rate * (1 - polarRate) - polarRate;
+	const minimumRegimeBreakEven =
+		minimumRegimeRate > 0
+			? (TOPUP_OPENROUTER_MINIMUM_USD + TOPUP_POLAR_PROCESSING_FIXED_USD) /
+				minimumRegimeRate
+			: Number.POSITIVE_INFINITY;
+	if (minimumRegimeBreakEven <= minimumRegimeBoundary) {
+		return minimumRegimeBreakEven;
+	}
+	const percentageRegimeRate =
+		rate * (1 - polarRate) - (openRouterRate + polarRate);
+	return percentageRegimeRate > 0
+		? TOPUP_POLAR_PROCESSING_FIXED_USD / percentageRegimeRate
+		: Number.POSITIVE_INFINITY;
+};
 
 /**
  * Deposit-fee rate (bps) by active plan.
@@ -291,43 +310,32 @@ export const topupBreakEvenUsd = (bps: number): number =>
  * TOP-UPS REQUIRE A SUBSCRIPTION. `POST /api/credits/topup` refuses any
  * entitlement without `managedInference`, so free users AND Lifetime licence
  * holders cannot top up at all — renting Ryu's keys is a subscription feature,
- * and letting a one-time $69 licence buy credits forever would make Pro
+ * and letting a one-time $129 desktop licence buy credits forever would make Pro
  * pointless. The `desktop-license` row below is therefore UNREACHABLE in
  * practice; it exists so the map is total over `PlanId` and a future policy
  * change has an obvious place to land, not because Lifetime has a rate.
  *
- * Pro pays 13%. Max and Teams get 12% — a real discount at every top-up size,
- * and still above the ~10.3% break-even.
+ * Pro pays 16.5%. Max, Teams, and Business pay 16%. All are below the 17% base
+ * rate while remaining above the conservative break-even.
  */
 export const DEPOSIT_FEE_BPS_BY_PLAN: Record<PlanId, number> = {
-	"desktop-license": DEPOSIT_FEE_BPS, // 15%: Lifetime PAYG top-ups, base rate
+	"desktop-license": DEPOSIT_FEE_BPS, // total map; route does not allow this plan to top up
 	"marketplace-membership": DEPOSIT_FEE_BPS,
-	pro: 1300, // 13% — the first discount a paid plan earns
-	// 12%, not the 10% originally chosen: at 10% the break-even top-up is $400
-	// (`topupBreakEvenUsd(1000)`), so every deposit under that size would LOSE
-	// money — a perk that punishes the ordinary case and only stops hurting for
-	// whales. 12% breaks even at ~$19.80.
-	//
-	// **12% IS THE FLOOR'S DESIGN INPUT.** `DEPOSIT_FEE_FIXED_MICRO_USD` is $2.40
-	// precisely because it has to stay profitable past this rate's $19.80
-	// crossover; a lower rate here pushes the crossover out and reopens a band of
-	// deposits that lose money. Lowering it for headline optics is therefore a
-	// TWO-line change — raise the floor to match — and `plan-economics.test.ts`
-	// fails if only one of them moves.
-	max: 1200,
-	teams: 1200, // 12% (business tier, same as Max)
-	business: 1200, // 12% (business tier)
+	pro: 1650,
+	max: 1600,
+	teams: 1600,
+	business: 1600,
 };
 
-/** The deposit-fee rate (bps) for a buyer on `plan`, falling back to the base 15%. */
+/** The deposit-fee rate (bps) for a buyer on `plan`, falling back to the base rate. */
 export const depositFeeBps = (plan: PlanId | null): number =>
 	plan ? (DEPOSIT_FEE_BPS_BY_PLAN[plan] ?? DEPOSIT_FEE_BPS) : DEPOSIT_FEE_BPS;
 
 /**
  * The deposit fee on a top-up of `amountMicroUsd` for a buyer on `plan`: the
  * GREATER of the (plan-discounted) percentage and the fixed minimum floor. The
- * amount credited to the wallet is the gross paid minus this fee (computed by the
- * top-up unit). `plan` defaults to null (the base 10% rate).
+ * amount credited to the wallet is the face value, and the buyer pays face plus
+ * this fee (computed by the top-up unit). `plan` defaults to null (the base rate).
  */
 export const depositFee = (
 	amountMicroUsd: number,
@@ -355,18 +363,17 @@ export const CREDITS_TOPUP_BINDING: PolarBinding = {
 
 /**
  * The ONE rule for a plan's included credit pool: a fixed FRACTION of its
- * recurring price, documented once, here. The default is 50% — a $40/mo plan
- * grants $20/mo of credits. Teams' current version instead grants one $50
+ * recurring price, documented once, here. The default is 30% — a $40/mo plan
+ * grants $12/mo of credits. Teams' current version instead grants one $50
  * organization pool for each five billed seats, applied by
  * {@link resolveEntitlement}. A plan
  * with no recurring price (the one-time desktop license) grants 0.
  *
- * This is the "nothing hardcoded" seam: to change what a plan includes, change
- * its price in {@link PLAN_MONTHLY_PRICE_MICRO_USD} below (or, rarely, pass a
- * non-default fraction to {@link includedCreditPoolMicroUsd} in that plan's row)
- * and the granted amount — and the Polar subscription webhook that credits the
- * wallet each period — follows automatically. No dollar figure for the GRANT is
- * written anywhere else.
+ * This is the proportional-pool helper. Bundled and grandfathered contracts
+ * keep their explicit pool in `PLANS` and `PLAN_VERSIONS`; changing one of those
+ * contracts requires changing its current/version row and its checkout
+ * snapshot deliberately. No grant amount is inferred from a buyer-controlled
+ * checkout value.
  */
 export const INCLUDED_CREDIT_FRACTION_DEFAULT = 0.3;
 
@@ -374,19 +381,18 @@ export const INCLUDED_CREDIT_FRACTION_DEFAULT = 0.3;
  * THE CAP, and the real invariant — no plan's included pool may exceed 40% of
  * its price.
  *
- * This replaces a "one rule, 50%" claim that every plan had already overridden,
+ * This replaces a "one rule, 30%" claim that every plan had already overridden,
  * which is the failure mode a derived default has: once each row pins its own
  * number the rule describes nothing. A CAP survives that, because it constrains
  * the overrides instead of competing with them, and `plans.test.ts` asserts it.
  *
- * 40% is where the arithmetic puts it, not a preference. A granted credit costs
- * `pool × 1.055` (OpenRouter's 5.5%), the free node costs ~$6/mo, and Polar
- * takes ~4.5% of a subscription — and ANNUAL is the binding case, because a
- * yearly plan bills 10 months while serving 12 pool grants. Solving
- * `12 × pool × 1.055 + 12 × node + fee < 10 × monthly` gives
- * `pool < (9.6 × monthly − 120) / 12.66`, i.e. ~29% at $39/mo and ~40% at
- * $200/mo. Capping at 40% keeps every tier — monthly and yearly — above water
- * without needing a per-plan yearly override.
+ * 40% is a solvency cap, not the launch-margin target. A granted credit costs
+ * `pool × 1.055` (OpenRouter's 5.5%), the free node has a plan-specific reserve,
+ * and Polar has a percentage plus fixed subscription fee. ANNUAL is the binding
+ * case because a yearly plan bills 10 months while serving 12 pool grants.
+ * The economics guard separately requires each current yearly offer to clear a
+ * 20% contribution-margin floor; a plan can be solvent and still be too thin
+ * to launch.
  *
  * The old 75% Max override is exactly what this forbids: $2000/yr against 12 ×
  * $150 of credits was a LOSS at full list price before any discount existed.
@@ -412,7 +418,7 @@ export const includedCreditPoolMicroUsd = (
 
 /**
  * The map keyed by plan → recurring list price (micro-USD): per month for single
- * plans, per SEAT per month for Teams. The one-time desktop license has no
+ * plans, per SEAT per month for Teams and Business. The one-time desktop license has no
  * recurring price (0). These are the ONLY plan-price figures in the codebase;
  * the included credit grant is DERIVED from them by
  * {@link includedCreditPoolMicroUsd}, never hand-typed per row.
@@ -420,7 +426,7 @@ export const includedCreditPoolMicroUsd = (
 export const PLAN_MONTHLY_PRICE_MICRO_USD: Record<PlanId, number> = {
 	"desktop-license": 0, // one-time list price; no recurring price
 	"marketplace-membership": usdToMicro(20),
-	pro: usdToMicro(39),
+	pro: usdToMicro(49),
 	max: usdToMicro(99),
 	// Per-seat list price. Five Teams seats therefore start at $250/mo.
 	teams: usdToMicro(50),
@@ -439,7 +445,7 @@ export interface PlanVersion {
 	readonly additionalSeatPriceMicroUsd?: number;
 	/** Total price at the version's minimum seat count, when graduated. */
 	readonly baseMonthlyPriceMicroUsd?: number;
-	/** Bundle size for a `per_bundle` historical pool. */
+	/** Bundle size for a bundled historical pool. */
 	readonly creditPoolBundleSize?: number;
 	/** Historical pool scaling, when it differs from the current plan model. */
 	readonly creditPoolModel?: CreditPoolModel;
@@ -558,6 +564,13 @@ export const PLAN_VERSIONS: Record<PlanId, readonly PlanVersion[]> = {
 			monthlyPriceMicroUsd: usdToMicro(39),
 			monthlyCreditPoolMicroUsd: usdToMicro(15),
 		},
+		{
+			// New Pro contracts move to the margin-safe $49/$490 ladder. Older
+			// contracts remain pinned to the price and pool in their version row.
+			version: 6,
+			monthlyPriceMicroUsd: usdToMicro(49),
+			monthlyCreditPoolMicroUsd: usdToMicro(15),
+		},
 	],
 	max: [
 		{
@@ -630,6 +643,19 @@ export const PLAN_VERSIONS: Record<PlanId, readonly PlanVersion[]> = {
 			baseMonthlyPriceMicroUsd: usdToMicro(300),
 			additionalSeatPriceMicroUsd: usdToMicro(50),
 		},
+		{
+			// Current Business contracts grant one pool for each COMPLETED
+			// five-seat bundle: 5–9 seats receive $100, 10–14 receive $200.
+			// v1 remains append-only for any grandfathered subscriber.
+			version: 2,
+			monthlyPriceMicroUsd: usdToMicro(60),
+			monthlyCreditPoolMicroUsd: usdToMicro(100),
+			creditPoolModel: "per_completed_bundle",
+			creditPoolBundleSize: 5,
+			seatPriceTiers: BUSINESS_SEAT_PRICE_TIERS,
+			baseMonthlyPriceMicroUsd: usdToMicro(300),
+			additionalSeatPriceMicroUsd: usdToMicro(50),
+		},
 	],
 };
 
@@ -640,10 +666,10 @@ export const CURRENT_PLAN_VERSION = 5;
 export const CURRENT_PLAN_VERSION_BY_PLAN: Record<PlanId, number> = {
 	"desktop-license": 4,
 	"marketplace-membership": 6,
-	pro: 4,
+	pro: 6,
 	max: 4,
 	teams: 5,
-	business: 1,
+	business: 2,
 };
 
 export const currentPlanVersionFor = (plan: PlanId): number =>
@@ -685,8 +711,10 @@ export const creditPoolModelForVersion = (
  * Calculate the monthly included pool for a plan at a billed seat count.
  *
  * Teams v5 uses a five-seat bundle: five billed seats receive $50, ten receive
- * $100, and so on. The version row owns the scaling rule so older fixed-pool
- * contracts remain grandfathered when the public offer changes.
+ * $100, and so on. Current Business uses completed bundles: five through nine
+ * billed seats receive $100, ten through fourteen receive $200, and so on. The
+ * version row owns the scaling rule so older contracts remain grandfathered
+ * when the public offer changes.
  */
 export const monthlyCreditPoolMicroUsdForSeats = (input: {
 	plan: Plan;
@@ -713,9 +741,11 @@ export const monthlyCreditPoolMicroUsdForSeats = (input: {
 					: 1)
 		)
 	);
-	return (
-		input.version.monthlyCreditPoolMicroUsd * Math.ceil(seats / bundleSize)
-	);
+	const bundleCount =
+		model === "per_completed_bundle"
+			? Math.max(1, Math.floor(seats / bundleSize))
+			: Math.ceil(seats / bundleSize);
+	return input.version.monthlyCreditPoolMicroUsd * bundleCount;
 };
 
 /** Calculate the actual recurring price for one plan at one billed seat count. */
@@ -745,7 +775,10 @@ export const monthlyPriceMicroUsdForSeats = (input: {
 
 /**
  * The free "base" managed cloud node (the BASE cloud tier: cx23 → 2 vCPU · 4 GB
- * · 40 GB SSD) is included with every RECURRING plan — Pro, Max and Teams. Its
+ * · 40 GB SSD) is included with every RECURRING plan in a supported/default
+ * region — Pro, Max, Teams and Business. Pro and Max do not promise a free
+ * regional node in Singapore because those shapes exceed their safe annual
+ * cost envelope; the server-side location resolver owns that exception. Its
  * compute cost is absorbed into the plan price; there is no separate Polar
  * product for BASE, so holding a qualifying subscription is what grants it. Any
  * larger instance is a dynamically-priced, ad-hoc paid cloud-instance
@@ -764,8 +797,9 @@ export const monthlyPriceMicroUsdForSeats = (input: {
 /**
  * The plan catalog. Product id DEFAULTS reference the existing sandbox UUIDs in
  * `constants.ts` where a matching product already exists (pro/max monthly+
- * yearly, lifetime → reused as the desktop license placeholder). Max/Teams/
- * desktop license bindings that need NEW Polar products use a clearly-fake
+ * yearly, lifetime → reused as the desktop license placeholder). Business,
+ * Teams, and desktop license bindings that need NEW Polar products use a
+ * clearly-fake
  * placeholder default ("polar_product_<slug>") so a misconfigured deploy fails
  * loudly rather than silently charging the wrong product. See
  * `docs/polar-products.md`.
@@ -777,8 +811,9 @@ export const PLANS: Record<PlanId, Plan> = {
 		name: "Ryu Desktop",
 		desktopAccess: true,
 		marketplaceApps: false,
+		marketplacePublisherPool: false,
 		managedInference: false,
-		// One-time $200 list license — no RECURRING price, so the 50% rule derives a 0
+		// One-time $200 list license — no RECURRING price, so the default fraction derives a 0
 		// monthly grant (no managed inference).
 		monthlyPriceMicroUsd: PLAN_MONTHLY_PRICE_MICRO_USD["desktop-license"],
 		monthlyCreditPoolMicroUsd: includedCreditPoolMicroUsd(
@@ -811,16 +846,23 @@ export const PLANS: Record<PlanId, Plan> = {
 		monthlyPriceMicroUsd:
 			PLAN_MONTHLY_PRICE_MICRO_USD["marketplace-membership"],
 		monthlyCreditPoolMicroUsd: 0,
+		marketplacePublisherPool: true,
 		emailEnabled: false,
 		emailInboxLimit: 0,
 		emailMonthlySendLimit: 0,
 		emailStorageLimitGb: 0,
 		emailBrandingRemovable: false,
-		seatModel: { kind: "per_seat", minSeats: 1 },
+		// A Major Pass is for one individual user. Shared Marketplace access is
+		// not an organization-seat product; teams should use Teams or Business.
+		seatModel: { kind: "single" },
 		bindings: {
 			monthly: {
 				productIdEnv: "POLAR_PRODUCT_MARKETPLACE_MEMBERSHIP_MONTHLY",
 				productIdDefault: "fc584f73-9eb9-4e2a-8a94-3f6463734ea2",
+			},
+			yearly: {
+				productIdEnv: "POLAR_PRODUCT_MARKETPLACE_MEMBERSHIP_YEARLY",
+				productIdDefault: "polar_product_marketplace_membership_yearly",
 			},
 		},
 		creditPoolModel: "fixed",
@@ -832,10 +874,11 @@ export const PLANS: Record<PlanId, Plan> = {
 		desktopAccess: true,
 		marketplaceApps: true,
 		managedInference: true,
-		// Ryu Pro — the original $39/mo individual plan. It is for one person's
+		// Ryu Pro — the current $49/mo individual plan. It is for one person's
 		// managed workspace; shared organization ownership belongs to Teams.
 		monthlyPriceMicroUsd: PLAN_MONTHLY_PRICE_MICRO_USD.pro,
 		monthlyCreditPoolMicroUsd: usdToMicro(15),
+		marketplacePublisherPool: false,
 		// Agent Inboxes: UNLIMITED count for a personal workspace; capped by 20 GB
 		// of stored mail (emailStorageLimitGb), not by inbox count.
 		emailEnabled: true,
@@ -868,6 +911,7 @@ export const PLANS: Record<PlanId, Plan> = {
 		// automation offer is Teams; Max is not a substitute for shared ownership.
 		monthlyPriceMicroUsd: PLAN_MONTHLY_PRICE_MICRO_USD.max,
 		monthlyCreditPoolMicroUsd: usdToMicro(30),
+		marketplacePublisherPool: false,
 		// Agent Inboxes: UNLIMITED count; capped by 100 GB of stored mail.
 		emailEnabled: true,
 		emailInboxLimit: Number.POSITIVE_INFINITY,
@@ -903,6 +947,7 @@ export const PLANS: Record<PlanId, Plan> = {
 		// organization level and grows by $50 for each additional five billed seats.
 		monthlyPriceMicroUsd: PLAN_MONTHLY_PRICE_MICRO_USD.teams,
 		monthlyCreditPoolMicroUsd: usdToMicro(50),
+		marketplacePublisherPool: false,
 		// Agent Inboxes: UNLIMITED count; capped by a flat org-wide 20 GB of stored
 		// mail.
 		emailEnabled: true,
@@ -933,6 +978,7 @@ export const PLANS: Record<PlanId, Plan> = {
 		managedInference: true,
 		monthlyPriceMicroUsd: PLAN_MONTHLY_PRICE_MICRO_USD.business,
 		monthlyCreditPoolMicroUsd: usdToMicro(100),
+		marketplacePublisherPool: false,
 		seatPriceTiers: BUSINESS_SEAT_PRICE_TIERS,
 		baseMonthlyPriceMicroUsd: usdToMicro(300),
 		additionalSeatPriceMicroUsd: usdToMicro(50),
@@ -942,7 +988,7 @@ export const PLANS: Record<PlanId, Plan> = {
 		emailStorageLimitGb: 20,
 		emailBrandingRemovable: true,
 		seatModel: { kind: "per_seat", minSeats: 5 },
-		creditPoolModel: "per_bundle",
+		creditPoolModel: "per_completed_bundle",
 		creditPoolBundleSize: 5,
 		bindings: {
 			monthly: {
@@ -1019,7 +1065,13 @@ export const KERNEL_QUOTAS = {
 		label: "Concurrent runs",
 		owner: null,
 		// The one REAL compute lever, so it stays finite even on paid rows.
-		paid: { "desktop-license": 3, pro: 3, max: 3, teams: 8 },
+		paid: {
+			"desktop-license": 3,
+			pro: 3,
+			max: 3,
+			teams: 8,
+			business: 8,
+		},
 		unit: "count",
 	},
 	maxEvalRunsMonthly: {
@@ -1041,7 +1093,13 @@ export const KERNEL_QUOTAS = {
 		label: "Space storage",
 		owner: null,
 		// Real storage cost, so finite on paid rows too.
-		paid: { "desktop-license": 20, pro: 20, max: 50, teams: 50 },
+		paid: {
+			"desktop-license": 20,
+			pro: 20,
+			max: 50,
+			teams: 50,
+			business: 50,
+		},
 		unit: "gigabytes",
 	},
 } as const satisfies Record<string, QuotaSpec>;
@@ -1220,7 +1278,7 @@ export interface SubscriptionView {
 	/** The Polar product id the subscription is for. */
 	readonly productId?: string | null;
 	readonly quantity?: number | null;
-	/** Seat count for per-seat (Teams) subscriptions, when present. */
+	/** Seat count for per-seat (Teams/Business) subscriptions, when present. */
 	readonly seats?: number | null;
 	/** Polar status, e.g. "active" | "trialing" | "canceled". */
 	readonly status?: string | null;
@@ -1251,15 +1309,14 @@ export interface Entitlement {
 
 /**
  * Number of external channel users an entitlement may configure for hosted bots.
- * Personal plans resolve to one seat; Teams resolves to the billed seat count.
- * A desktop license / free baseline has no hosted-channel allowance.
+ * Only managed-inference plans may use hosted bots. Personal managed plans
+ * resolve to one seat; Teams and Business resolve to the billed seat count.
+ * A Major Pass has Marketplace access only and therefore has no allowance.
  */
 export const channelUserLimitForEntitlement = (
 	entitlement: Entitlement
 ): number =>
-	entitlement.plan && entitlement.plan !== "desktop-license"
-		? entitlement.seats
-		: 0;
+	entitlement.managedInference && entitlement.plan ? entitlement.seats : 0;
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
 
@@ -1285,10 +1342,11 @@ const ENTITLEMENT_NONE: Entitlement = {
 
 /**
  * Resolve a user's entitlement from their active Polar subscription and/or a
- * desktop license. A subscription (pro/max/teams) takes precedence over a
- * license for the managed-inference fields; a desktop license alone grants
- * desktop access with no credit pool. Returns the un-entitled baseline when
- * neither is present/active.
+ * desktop license. An active subscription (including the apps-only A Major Pass)
+ * takes precedence over a license; managed plans additionally grant inference,
+ * while A Major Pass grants Marketplace access only. A desktop license alone
+ * grants desktop access with no credit pool. Returns the un-entitled baseline
+ * when neither is present/active.
  *
  * Pure and env-injectable: pass `read` to map product ids without touching
  * `process.env` (used by the tests).
@@ -1300,7 +1358,7 @@ export const resolveEntitlement = (
 ): Entitlement => {
 	const index = planByProductId(read);
 
-	// 1) An active subscription wins (pro/max/teams).
+	// 1) An active subscription wins (A Major Pass or a managed plan).
 	if (subscription?.productId && isActiveSubscription(subscription)) {
 		const match = index.get(subscription.productId);
 		if (match) {
@@ -1351,9 +1409,10 @@ export const resolveEntitlement = (
  *
  * This is what opens PAYG to Lifetime (`desktop-license`): that plan keeps
  * `managedInference:false` (no included pool) yet still qualifies here whenever
- * `balanceMicroUsd > 0`. Any app-access holder may hold and spend a balance; the
- * free (no-access) baseline never can. Single source of truth for "can this user
- * use managed inference" — never inline the sub-tier check at a call-site.
+ * `balanceMicroUsd > 0`. The apps-only A Major Pass has no desktop access and
+ * cannot use managed inference; the free (no-access) baseline never can. Single
+ * source of truth for "can this user use managed inference" — never inline the
+ * sub-tier check at a call-site.
  */
 export const managedInferenceAvailable = (
 	entitlement: Entitlement,
@@ -1365,7 +1424,8 @@ export const managedInferenceAvailable = (
 /* -------------------------------------------------------------------------- *
  * Desktop trial + paywall gate (epic #496, Unit C1).
  *
- * The desktop is a PAID product (one-time $69 license or a Pro/Max/Teams sub),
+ * The desktop is a PAID product ($200 list / $129 launch one-time license or a
+ * Pro/Max/Teams/Business subscription),
  * but Ryu is open-core: BASIC local/free chat must stay usable forever. So the
  * gate covers only Pro features + managed inference; it never blocks the app
  * shell. A fresh install gets a 7-day trial of full access; after expiry, with
@@ -1498,7 +1558,7 @@ export const capabilityTier = (cap: GatedCapability): CapabilityTier =>
 
 /** Why access is currently granted (or why it is not). */
 export type AccessReason =
-	| "subscription" // an active Pro/Max/Teams subscription
+	| "subscription" // an active Pro/Max/Teams/Business subscription
 	| "license" // a valid desktop license key
 	| "beta" // free-during-beta flag is on (no trial clock, no paywall)
 	| "trial" // still inside the 7-day trial window
@@ -1706,7 +1766,7 @@ export const decideDesktopAccess = (
  * Agent Inbox lifecycle (subscription lapse → grace → deactivated → deletable).
  *
  * Agent Inboxes (Ryu Mail) are a hosted feature: the free baseline gets a small
- * allowance, while an active Pro/Max/Teams plan carries the larger
+ * allowance, while an active Pro/Max/Teams/Business plan carries the larger
  * `emailEnabled` quota. When hosted mail entitlement LAPSES an inbox must not
  * simply vanish (its address is a real, published identity and its stored mail
  * is the user's data), nor keep costing Ryu SES/storage forever. This is the one
@@ -1952,7 +2012,7 @@ export const updatesCutoffMs = (
  * Whether the lifetime updates window governs this plan at all.
  *
  * Only a desktop-license holder with NO active recurring plan. A lifetime owner
- * who later subscribes to Pro/Max/Teams resolves to that plan
+ * who later subscribes to Pro/Max/Teams/Business resolves to that plan
  * ({@link resolveEntitlement} gives a subscription precedence over a license),
  * and an actively-paying subscriber must never be pinned to old builds or
  * upsold a licence they already have.

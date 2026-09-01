@@ -9,8 +9,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@ryu/ui/components/card";
-import { Input } from "@ryu/ui/components/input";
-import { RangeSlider } from "@ryu/ui/components/motion/range-slider";
 import { NumberTicker } from "@ryu/ui/components/number-ticker";
 import {
 	PlanBadge,
@@ -27,6 +25,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
 import { cn } from "@ryu/ui/lib/utils";
 import {
+	ArrowLeft,
 	Bot,
 	Calendar,
 	ChevronDown,
@@ -49,12 +48,10 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import {
-	BUSINESS_ADDITIONAL_SEAT_USD,
 	businessIncludedCreditUsd,
 	businessMonthlyPriceUsd,
 } from "./business-pricing.ts";
 import {
-	HOSTED_AGENT_SLIDER_MAX,
 	normalizeTeamsSeatCount,
 	TEAMS_MAX_SEATS,
 	TEAMS_MIN_SEATS,
@@ -79,6 +76,7 @@ export {
 export type PricingPlanSlug =
 	| "lifetime"
 	| "marketplace-membership-monthly"
+	| "marketplace-membership-yearly"
 	| "pro-monthly"
 	| "pro-yearly"
 	| "max-monthly"
@@ -114,15 +112,17 @@ export interface CloudHostingTier {
 	readonly diskGb: number;
 	/** Canonical tier id (BASE / 2X / 3X). */
 	readonly id: string;
-	/** True for the generic base candidate; the server resolves the exact plan. */
+	/** True for the generic base candidate; retained for compatibility. */
 	readonly includedWithMax: boolean;
+	/** True when this exact tier is included by the selected plan and region. */
+	readonly includedWithPlan?: boolean;
 	readonly memoryGb: number;
 	/** Monthly add-on price (USD). 0 for the generic included-base candidate. */
 	readonly monthlyAddUsd: number;
 	readonly name: string;
 	/** User-facing performance label ("Cost-optimized" | "Performance"). */
 	readonly perfLabel: string;
-	/** The checkout slug, e.g. "cloud-2x". BASE has no checkout (bundled with Max). */
+	/** The checkout slug, e.g. "cloud-2x". BASE has no standalone checkout. */
 	readonly slug: PricingPlanSlug;
 }
 
@@ -140,9 +140,11 @@ const noop = () => {
  * same cards without a billing client. Change a price in `plans.ts` and change
  * it here in the same commit.
  * -------------------------------------------------------------------------- */
-export const PRO_MONTHLY_USD = 39;
+export const PRO_MONTHLY_USD = 49;
 /** The recurring A Major Pass price per user. */
 export const MARKETPLACE_PASS_MONTHLY_USD = 20;
+/** A Major Pass yearly price per user (two months free). */
+export const MARKETPLACE_PASS_YEARLY_USD = 200;
 /**
  * Max is the original hidden individual plan price. The public business shelf
  * uses the separate Teams automation offer below.
@@ -366,7 +368,7 @@ const PAID_MONTHS_ON_ANNUAL = MONTHS_PER_YEAR - FREE_MONTHS_ON_ANNUAL;
  * this is the per-month *equivalent* of the annual price (two months free, i.e.
  * billed for 10 of 12 months); on monthly it is the list price. Anchoring on the
  * smaller monthly number is the standard SaaS psychology play. With monthly
- * $39/$99 this lands the annual totals on $390/$990 (Pro/Max), matching the
+ * $49/$99 this lands the annual totals on $490/$990 (Pro/Max), matching the
  * Polar yearly prices.
  */
 export function effectiveMonthlyPrice(
@@ -374,7 +376,7 @@ export function effectiveMonthlyPrice(
 	isYearly: boolean
 ): number {
 	return isYearly
-		? Math.round((monthly * PAID_MONTHS_ON_ANNUAL) / MONTHS_PER_YEAR)
+		? (monthly * PAID_MONTHS_ON_ANNUAL) / MONTHS_PER_YEAR
 		: monthly;
 }
 
@@ -384,9 +386,8 @@ export function annualTotalPrice(monthly: number): number {
 }
 
 /**
- * The price block for a recurring plan. Always shows the *monthly* figure with a
- * "/mo" suffix (see {@link effectiveMonthlyPrice}), with the true annual total
- * spelled out beneath.
+ * The price block for a recurring plan. Always shows the whole-dollar monthly
+ * list price with a "/mo" suffix, with the true annual total spelled out beneath.
  *
  * The headline is always the PER-PERSON price — the number the plan is
  * advertised at — so the comparison across cards stays apples-to-apples; the
@@ -410,21 +411,23 @@ function PriceBlock({
 	totalMonthly?: boolean;
 }) {
 	const annualTotal = annualTotalPrice(monthly);
-	const perMonth = effectiveMonthlyPrice(monthly, isYearly);
+	const perMonth = monthly;
 	const seat = perSeat ? "/seat" : "";
 	// Only more than one seat has a total worth spelling out; at one seat the
 	// total IS the headline.
 	const showSeatTotal = !totalMonthly && seats > 1;
 	const seatTotal = perMonth * seats;
 	const seatAnnualTotal = annualTotal * seats;
+	const priceAmount = (value: number, className: string) => (
+		<NumberTicker className={className} prefix="$" value={Math.round(value)} />
+	);
 	return (
 		<>
 			<div className="mb-1 flex items-baseline">
-				<NumberTicker
-					className="font-heading font-semibold text-4xl tabular-nums"
-					prefix="$"
-					value={perMonth}
-				/>
+				{priceAmount(
+					perMonth,
+					"font-heading font-semibold text-4xl tabular-nums"
+				)}
 				<span className="ml-1 text-muted-foreground">{`${seat}/mo`}</span>
 			</div>
 			{/* The seat total and the annual total spin like the headline rather
@@ -433,29 +436,28 @@ function PriceBlock({
 			    one reads as the static one having failed to update. */}
 			{showSeatTotal ? (
 				<p className="mb-1 flex items-baseline font-medium text-sm">
-					<NumberTicker
-						className="font-heading tabular-nums"
-						prefix="$"
-						value={seatTotal}
-					/>
+					{priceAmount(seatTotal, "font-heading tabular-nums")}
 					<span className="ml-1">/mo for {seats} seats</span>
 				</p>
 			) : null}
 			{isYearly ? (
 				<p className="mb-6 flex items-baseline text-muted-foreground text-xs">
 					<span className="mr-1">Billed</span>
-					<NumberTicker
-						className="font-heading tabular-nums"
-						prefix="$"
-						value={showSeatTotal ? seatAnnualTotal : annualTotal}
-					/>
+					{priceAmount(
+						showSeatTotal ? seatAnnualTotal : annualTotal,
+						"font-heading tabular-nums"
+					)}
 					<span className="ml-1">
-						{showSeatTotal ? "" : seat}/year · 2 months free
+						{showSeatTotal
+							? `per year for ${seats} seats`
+							: `${seat ? "per seat " : ""}per year, two months free`}
 					</span>
 				</p>
 			) : (
 				<p className="mb-6 text-muted-foreground text-xs">
-					{`Billed monthly${perSeat ? " · per seat" : ""} · cancel anytime`}
+					{perSeat
+						? "Billed monthly per seat, cancel anytime"
+						: "Billed monthly, cancel anytime"}
 				</p>
 			)}
 		</>
@@ -463,139 +465,16 @@ function PriceBlock({
 }
 
 /**
- * Shared effort-style control for the hosted automation shelf. One slider owns
- * the member-seat quantity so the Teams price and Enterprise handoff update
- * together.
- */
-function hostedAgentBenchmark(agentCount: number): {
-	description: string;
-	label: string;
-} {
-	if (agentCount <= 5) {
-		return {
-			description: "A set of recurring processes owned by one team.",
-			label: "A five-person team",
-		};
-	}
-	if (agentCount <= 10) {
-		return {
-			description: "Several processes sharing a team or department.",
-			label: "One function",
-		};
-	}
-	if (agentCount <= PRO_AGENT_MAX_ORG_MEMBERS) {
-		return {
-			description: "A broader process portfolio across multiple teams.",
-			label: "Multiple teams",
-		};
-	}
-	return {
-		description: "Scope the right rollout, governance, and deployment with us.",
-		label: "Enterprise scale",
-	};
-}
-
-export function HostedAgentEffortSlider({
-	agentCount = HOSTED_AGENT_SLIDER_MIN,
-	onAgentCountChange = noop,
-}: {
-	agentCount?: number;
-	onAgentCountChange?: (agentCount: number) => void;
-}) {
-	const selectedCount = Math.min(
-		HOSTED_AGENT_SLIDER_MAX,
-		normalizeTeamsSeatCount(agentCount)
-	);
-	const benchmark = hostedAgentBenchmark(selectedCount);
-	const includedCredits = hostedAgentIncludedCreditUsd("teams", selectedCount);
-
-	return (
-		<div className="mx-auto mb-10 max-w-5xl px-1 sm:px-2">
-			<div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-				<div>
-					<h2 className="font-heading font-semibold text-xl tracking-tight">
-						Choose who needs to use the software
-					</h2>
-					<p className="mt-1 max-w-xl text-muted-foreground text-sm">
-						Choose the people who run or review the workflows. Teams adds seats
-						one at a time; Business starts at five seats with a larger pooled
-						grant.
-					</p>
-				</div>
-				<div className="flex items-baseline gap-2 sm:text-right">
-					<NumberTicker
-						className="font-heading font-semibold text-4xl tabular-nums"
-						value={selectedCount}
-					/>
-					<span className="text-muted-foreground text-sm">
-						{selectedCount === 1 ? "seat" : "seats"}
-					</span>
-				</div>
-			</div>
-			<div className="mt-7">
-				<RangeSlider
-					aria-label="Number of Teams member seats"
-					className="h-10"
-					formatValueText={(value) =>
-						`${value} ${value === 1 ? "seat" : "seats"}`
-					}
-					max={HOSTED_AGENT_SLIDER_MAX}
-					min={HOSTED_AGENT_SLIDER_MIN}
-					onValueChange={(value) =>
-						onAgentCountChange(normalizeTeamsSeatCount(value))
-					}
-					step={1}
-					value={selectedCount}
-				/>
-			</div>
-			<div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 font-medium text-muted-foreground text-xs tabular-nums sm:grid-cols-4">
-				<span>5 · minimum</span>
-				<span>10 · one function</span>
-				<span>25 · multiple teams</span>
-				<span>51+ · enterprise</span>
-			</div>
-			<div className="mt-5 flex flex-col gap-1 text-muted-foreground text-xs sm:flex-row sm:items-baseline sm:justify-between">
-				<span>
-					<strong className="font-medium text-foreground">
-						{benchmark.label}
-					</strong>{" "}
-					· {benchmark.description}
-				</span>
-				<span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-					<span>
-						Teams:{" "}
-						<NumberTicker
-							className="font-medium text-foreground tabular-nums"
-							prefix="$"
-							value={includedCredits}
-						/>
-						/month pooled credits
-					</span>
-					<span>
-						Business:{" "}
-						<NumberTicker
-							className="font-medium text-foreground tabular-nums"
-							prefix="$"
-							value={businessIncludedCreditUsd(selectedCount)}
-						/>
-						/month pooled credits
-					</span>
-				</span>
-			</div>
-		</div>
-	);
-}
-
-/**
- * Which public shelf is rendered. Individual includes A Major Pass, Pro, and
- * Max; the business shelf owns Teams, Business, and Enterprise.
+ * Which public shelf is rendered. Individual includes the local desktop license,
+ * Pro, Max, and A Major Pass; the business shelf owns Teams, Business, and
+ * Enterprise.
  */
 export type PricingAudience = "business" | "individual";
 
 /** Which plans each audience sees, and in which order. */
 export const PRICING_AUDIENCE_PLANS = {
 	business: ["teams", "business", "enterprise"],
-	individual: ["marketplace-membership", "pro", "max"],
+	individual: ["desktop-license", "pro", "max", "marketplace-membership"],
 } as const;
 
 /** Where the customer runs Ryu — the outermost pricing choice. */
@@ -626,8 +505,12 @@ export function PricingDeploymentToggle({
 				value={deployment}
 			>
 				<TabsList className="min-w-max" manageLayout={false} variant="text">
-					<TabsTrigger value="platform">Managed by Ryu</TabsTrigger>
-					<TabsTrigger value="self-hosted">Run it yourself</TabsTrigger>
+					<TabsTrigger className="text-xl!" value="platform">
+						Ryu Platform
+					</TabsTrigger>
+					<TabsTrigger className="text-xl!" value="self-hosted">
+						Self-Hosted
+					</TabsTrigger>
 				</TabsList>
 			</Tabs>
 		</div>
@@ -688,9 +571,14 @@ export function PricingBillingToggle({
 					manageLayout={false}
 					variant="default"
 				>
-					<TabsTrigger value="monthly">Monthly</TabsTrigger>
 					<TabsTrigger
-						className="[&_span]:text-primary data-active:[&_span]:text-foreground dark:data-active:[&_span]:text-foreground"
+						className="data-active:bg-foreground data-active:text-background! dark:data-active:bg-foreground dark:data-active:text-background!"
+						value="monthly"
+					>
+						Monthly
+					</TabsTrigger>
+					<TabsTrigger
+						className="data-active:bg-foreground data-active:text-background! dark:data-active:bg-foreground dark:data-active:text-background! [&_span]:text-primary data-active:[&_span]:text-background! dark:data-active:[&_span]:text-background!"
 						value="yearly"
 					>
 						Yearly
@@ -715,12 +603,10 @@ function CloudUpgradePanel({
 	tiers,
 	loadingPlan,
 	onCheckout,
-	planLabel,
 }: {
 	tiers: readonly CloudHostingTier[];
 	loadingPlan: PricingPlanSlug | null;
 	onCheckout: (slug: PricingPlanSlug) => void;
-	planLabel: string;
 }) {
 	const [expanded, setExpanded] = useState(false);
 
@@ -749,9 +635,8 @@ function CloudUpgradePanel({
 				/>
 			</button>
 			<p className="mt-1 text-muted-foreground text-xs">
-				Your {planLabel} plan includes a free managed server, so your AI keeps
-				running 24/7 even when your computer is off. Upgrade for more
-				performance — billed monthly, on top of {planLabel}.
+				Included managed server, upgrade for more performance, add-ons billed
+				monthly
 			</p>
 			<AnimatePresence initial={false}>
 				{expanded ? (
@@ -763,16 +648,17 @@ function CloudUpgradePanel({
 						transition={{ duration: 0.24, ease: "easeOut" }}
 					>
 						{tiers.map((tier) => {
-							const specs = `${tier.cores} vCPU · ${tier.memoryGb} GB RAM · ${tier.diskGb} GB SSD`;
+							const specs = `${tier.cores} vCPU, ${tier.memoryGb} GB RAM, and ${tier.diskGb} GB SSD`;
 							// BASE ships free with the plan: shown, never a checkout.
-							if (tier.includedWithMax) {
+							const isIncluded = tier.includedWithPlan ?? tier.includedWithMax;
+							if (isIncluded) {
 								return (
 									<li key={tier.slug}>
 										<div className="mt-3 flex w-full items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3 text-left">
 											<Cloud className="size-4 shrink-0 text-primary" />
 											<span className="flex-1">
 												<span className="block font-medium text-sm">
-													{tier.name} · {tier.perfLabel}
+													{tier.name} is {tier.perfLabel}
 												</span>
 												<span className="block text-muted-foreground text-xs">
 													{specs}
@@ -797,7 +683,7 @@ function CloudUpgradePanel({
 										<Cpu className="size-4 shrink-0 text-primary" />
 										<span className="flex-1">
 											<span className="block font-medium text-sm">
-												{tier.name} · {tier.perfLabel}
+												{tier.name} is {tier.perfLabel}
 											</span>
 											<span className="block text-muted-foreground text-xs">
 												{specs}
@@ -808,10 +694,7 @@ function CloudUpgradePanel({
 												<Loader2 className="size-4 animate-spin" />
 											) : (
 												<span className="font-heading font-semibold text-sm tabular-nums">
-													+${tier.monthlyAddUsd}
-													<span className="text-muted-foreground text-xs">
-														/mo
-													</span>
+													${tier.monthlyAddUsd} per month
 												</span>
 											)}
 										</span>
@@ -903,8 +786,7 @@ interface SeatPlanCardProps extends PlanCardProps {
 }
 
 interface MarketplacePassPlanCardProps extends PlanCardProps {
-	onUsersChange?: (users: number) => void;
-	users?: number;
+	isYearly?: boolean;
 }
 
 /** The footer CTA shared by every plan card (current / processing / label). */
@@ -937,15 +819,19 @@ function PlanCta({
 /** Keeps inherited entitlements visually separate from a plan's own features. */
 function IncludedPlanBanner({ plan }: { plan: string }) {
 	return (
-		<div className="mb-6 border-border/70 border-t pt-4">
-			<p className="text-muted-foreground text-xs">
-				Everything in {plan}, plus:
+		<div className="mb-6 border-border/70 border-b pb-3">
+			<p className="flex items-center gap-2 text-foreground text-sm">
+				<ArrowLeft
+					aria-hidden="true"
+					className="size-4 shrink-0 text-foreground"
+				/>
+				<span>Everything in {plan}, plus</span>
 			</p>
 		</div>
 	);
 }
 
-/** Local desktop license card — retained for the desktop paywall, not hosted pricing. */
+/** Local desktop license card — shown on the Individual shelf and desktop paywall. */
 export function LifetimePlanCard({
 	loadingPlan = null,
 	onCheckout = noop,
@@ -960,13 +846,14 @@ export function LifetimePlanCard({
 					<PlanBadge label="One-time" plan="desktop-license" size="md" />
 				</CardTitle>
 				<CardDescription>
-					Use Ryu on your own hardware; hosted business automation is separate.
+					Ryu runs on your own hardware, and hosted business automation is
+					separate
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
 				<div className="mb-1 flex items-baseline gap-2">
 					<NumberTicker
-						className="font-heading font-semibold text-4xl tabular-nums"
+						className="font-heading font-semibold text-4xl text-primary tabular-nums"
 						prefix="$"
 						value={129}
 					/>
@@ -976,28 +863,31 @@ export function LifetimePlanCard({
 					<span className="ml-1 text-muted-foreground">once</span>
 				</div>
 				<p className="mb-6 font-medium text-primary text-xs">
-					Launch price · save 36%
+					Launch price with 36% savings
 				</p>
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Monitor className="mr-2 size-4" />
-						<span>Run local agents and workflows on your computer</span>
+						<span>You can run local agents and workflows on your computer</span>
 					</li>
 					<li className="flex items-center">
 						<Key className="mr-2 size-4" />
-						<span>Use your own keys for cloud AI (optional)</span>
+						<span>You can use your own keys for cloud AI if you want</span>
 					</li>
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
-						<span>No hosted agents, server, or monthly credits included</span>
+						<span>
+							Hosted agents, managed servers, and monthly credits are not
+							included
+						</span>
 					</li>
 					<li className="flex items-center">
 						<Calendar className="mr-2 size-4" />
-						<span>One year of updates included</span>
+						<span>One year of updates is included</span>
 					</li>
 					<li className="flex items-center">
 						<Star className="mr-2 size-4" />
-						<span>7-day local trial, no card needed</span>
+						<span>The local trial lasts 7 days and needs no card</span>
 					</li>
 				</ul>
 			</CardContent>
@@ -1016,94 +906,67 @@ export function LifetimePlanCard({
 
 /** A Major Pass: recurring access to supported paid Marketplace apps. */
 export function MarketplacePassPlanCard({
+	isYearly = false,
 	loadingPlan = null,
 	onCheckout = noop,
-	onUsersChange = noop,
 	currentPlan = null,
-	users = 1,
 }: MarketplacePassPlanCardProps) {
 	const isCurrent = currentPlan === "marketplace-membership";
-	const selectedUsers = Number.isInteger(users) && users >= 1 ? users : 1;
-	const monthlyTotal = selectedUsers * MARKETPLACE_PASS_MONTHLY_USD;
+	const monthlyTotal = MARKETPLACE_PASS_MONTHLY_USD;
 	return (
-		<Card className="relative flex h-full flex-col border border-primary/30">
+		<PricingCardBorder variant="marketplace-membership">
 			<CardHeader>
 				<CardTitle className="flex items-center gap-2 text-xl">
 					A Major Pass
-					<span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary text-xs">
-						App access
-					</span>
+					<PlanBadge
+						label="A Major Pass"
+						plan="marketplace-membership"
+						size="md"
+					/>
 				</CardTitle>
 				<CardDescription>
-					One pass for all supported paid Marketplace apps and publishers.
+					One pass gives one individual user access to supported paid
+					Marketplace apps
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
-				<div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+				<div className="mb-6">
 					<div>
-						<span className="font-heading font-semibold text-4xl tabular-nums">
-							${monthlyTotal.toFixed(2)}
-						</span>
-						<span className="text-muted-foreground">/month</span>
-						<p className="mt-1 text-muted-foreground text-xs">
-							${MARKETPLACE_PASS_MONTHLY_USD.toFixed(2)}/user/month
-						</p>
-					</div>
-					<div className="grid gap-1">
-						<label
-							className="font-medium text-muted-foreground text-xs"
-							htmlFor="marketplace-pass-users"
-						>
-							Users
-						</label>
-						<Input
-							aria-describedby="marketplace-pass-users-help"
-							className="w-24 text-right tabular-nums"
-							id="marketplace-pass-users"
-							inputMode="numeric"
-							min={1}
-							onChange={(event) => {
-								const nextUsers = Number.parseInt(event.target.value, 10);
-								onUsersChange(
-									Number.isFinite(nextUsers) ? Math.max(1, nextUsers) : 1
-								);
-							}}
-							step={1}
-							type="number"
-							value={selectedUsers}
+						<PriceBlock
+							isYearly={isYearly}
+							monthly={monthlyTotal}
+							totalMonthly
 						/>
-						<span
-							className="text-muted-foreground text-xs"
-							id="marketplace-pass-users-help"
-						>
-							1 user minimum
-						</span>
+						<p className="-mt-4 text-muted-foreground text-xs">
+							One individual user is included
+						</p>
 					</div>
 				</div>
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Download className="mr-2 size-4" />
-						<span>Access all supported paid Marketplace apps</span>
-					</li>
-					<li className="flex items-center">
-						<Users className="mr-2 size-4" />
 						<span>
-							{selectedUsers} {selectedUsers === 1 ? "user" : "users"} · billed
-							per user
+							One person can access all supported paid Marketplace apps
 						</span>
 					</li>
 					<li className="flex items-center">
+						<Users className="mr-2 size-4" />
+						<span>The pass is for one individual user</span>
+					</li>
+					<li className="flex items-center">
 						<Star className="mr-2 size-4" />
-						<span>See the ticket marker before you install</span>
+						<span>You can see the ticket marker before you install</span>
 					</li>
 					<li className="flex items-center">
 						<Calendar className="mr-2 size-4" />
-						<span>Cancel anytime; access lasts through your paid period</span>
+						<span>
+							You can cancel anytime, and access lasts through your paid period
+						</span>
 					</li>
 					<li className="flex items-center text-muted-foreground">
 						<Cloud className="mr-2 size-4" />
 						<span>
-							No managed AI, cloud server, or monthly credits included
+							Managed AI, cloud servers, and monthly credits are not included
 						</span>
 					</li>
 				</ul>
@@ -1111,12 +974,23 @@ export function MarketplacePassPlanCard({
 			<CardFooter>
 				<PlanCta
 					isCurrent={isCurrent}
-					isLoading={loadingPlan === "marketplace-membership-monthly"}
+					isLoading={
+						loadingPlan ===
+						(isYearly
+							? "marketplace-membership-yearly"
+							: "marketplace-membership-monthly")
+					}
 					label="Get A Major Pass"
-					onClick={() => onCheckout("marketplace-membership-monthly")}
+					onClick={() =>
+						onCheckout(
+							isYearly
+								? "marketplace-membership-yearly"
+								: "marketplace-membership-monthly"
+						)
+					}
 				/>
 			</CardFooter>
-		</Card>
+		</PricingCardBorder>
 	);
 }
 
@@ -1139,7 +1013,7 @@ export function ProPlanCard({
 					<PlanBadge plan="pro" size="md" />
 				</CardTitle>
 				<CardDescription>
-					Managed AI for one person. Bring a shared workspace to Teams.
+					Managed AI for one person. Bring a shared workspace to Teams
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
@@ -1147,19 +1021,19 @@ export function ProPlanCard({
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Users className="mr-2 size-4" />
-						<span>One person · personal workspace</span>
+						<span>1 personal workspace</span>
 					</li>
 					<li className="flex items-center">
 						<Download className="mr-2 size-4" />
-						<span>The full app on all your devices</span>
+						<span>Full app on all your devices</span>
 					</li>
 					<li className="flex items-center">
 						<Bot className="mr-2 size-4" />
-						<span>Personal chats, agents, and spaces within your plan</span>
+						<span>Personal chats, agents, and spaces</span>
 					</li>
 					<li className="flex items-center">
 						<Cloud className="mr-2 size-4" />
-						<span>300+ cloud AI models, ready to use</span>
+						<span>300+ cloud AI models</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4" />
@@ -1167,34 +1041,43 @@ export function ProPlanCard({
 							<span className="font-heading tabular-nums">
 								${PRO_INCLUDED_USD}
 							</span>
-							/month of AI usage included
+							/month AI usage included
 						</span>
 					</li>
 					<li className="flex items-center">
 						<Zap className="mr-2 size-4" />
-						<span>We handle setup for your personal workspace</span>
+						<span>Guided setup for your personal workspace</span>
 					</li>
 					<li className="flex items-center">
 						<Monitor className="mr-2 size-4" />
-						<span>Run AI on your computer too</span>
+						<span>Run AI on your computer</span>
 					</li>
 					<li className="flex items-center">
 						<Mail className="mr-2 size-4" />
-						<span>Agent Inboxes · 10,000 sends/month · 20 GB mail storage</span>
+						<span>
+							Agent Inboxes, 10,000 monthly sends, and 20 GB mail storage
+						</span>
+					</li>
+					<li className="flex items-center">
+						<Coins className="mr-2 size-4" />
+						<span>16.5% deposit fee ($2.75 minimum)</span>
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
-						<span>Space data limited only by your disk</span>
+						<span>20 GB of space storage</span>
 					</li>
 					{/* A qualifying hosted plan receives one plan- and region-specific
 					    managed server. The server is the authority for the exact shape. */}
 					<li className="flex items-center">
 						<Cloud className="mr-2 size-4" />
-						<span>Managed cloud server (2 vCPU · 4 GB · 40 GB)</span>
+						<span>
+							Managed server with 2 vCPU, 4 GB RAM, and 40 GB SSD. Singapore is
+							a paid add-on
+						</span>
 					</li>
 					<li className="flex items-center">
 						<Key className="mr-2 size-4" />
-						<span>Use your own API keys (optional)</span>
+						<span>Bring your own API keys</span>
 					</li>
 				</ul>
 			</CardContent>
@@ -1244,7 +1127,8 @@ export function MaxPlanCard({
 					<PlanBadge plan="max" size="md" />
 				</CardTitle>
 				<CardDescription>
-					More throughput for one person. Shared business work belongs in Teams.
+					More throughput for one person. Shared agent deployments belong in
+					Teams
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
@@ -1253,23 +1137,22 @@ export function MaxPlanCard({
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Users className="mr-2 size-4" />
-						<span>One person · personal workspace</span>
+						<span>1 personal workspace</span>
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
 						<span>
-							<strong>Dedicated cloud server</strong> — 2 vCPU · 8 GB · 80 GB
+							Managed server with 4 vCPU, 8 GB RAM, and 80 GB SSD. Singapore is
+							a paid add-on
 						</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4" />
-						<span>
-							<strong>Cheaper top-ups</strong> — 12% deposit fee, not 13%
-						</span>
+						<span>16% deposit fee ($2.75 minimum)</span>
 					</li>
 					<li className="flex items-center">
 						<Bot className="mr-2 size-4" />
-						<span>Higher-throughput personal agents and workflows</span>
+						<span>Higher throughput for personal agents and workflows</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4" />
@@ -1277,12 +1160,14 @@ export function MaxPlanCard({
 							<span className="font-heading tabular-nums">
 								${MAX_INCLUDED_USD}
 							</span>
-							/month of AI usage included
+							/month AI usage included
 						</span>
 					</li>
 					<li className="flex items-center">
 						<Mail className="mr-2 size-4" />
-						<span>Agent Inboxes · 100,000 sends/month · 100 GB storage</span>
+						<span>
+							Agent Inboxes, 100,000 monthly sends, and 100 GB storage
+						</span>
 					</li>
 					<li className="flex items-center">
 						<Shield className="mr-2 size-4" />
@@ -1292,7 +1177,6 @@ export function MaxPlanCard({
 				<CloudUpgradePanel
 					loadingPlan={loadingPlan}
 					onCheckout={onCheckout}
-					planLabel="Max"
 					tiers={cloudTiers}
 				/>
 			</CardContent>
@@ -1332,7 +1216,7 @@ export function TeamsPlanCard({
 					<PlanBadge plan="teams" size="md" />
 				</CardTitle>
 				<CardDescription>
-					Shared business software your team can customise by asking Ryu.
+					A shared deployment for agents your team can run and oversee
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
@@ -1345,48 +1229,36 @@ export function TeamsPlanCard({
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Bot className="mr-2 size-4" />
-						<span>Five member seats in one shared workspace</span>
+						<span>5 seats included</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4" />
-						<span>
-							<span className="font-heading tabular-nums">
-								${TEAMS_INCLUDED_USD}
-							</span>
-							/month of shared AI credits across the organization
-						</span>
+						<span>${TEAMS_INCLUDED_USD}/month shared AI credits</span>
 					</li>
 					<li className="flex items-center">
 						<Shield className="mr-2 size-4" />
-						<span>Roles &amp; permissions</span>
+						<span>Access controls, spend controls, and audit history</span>
 					</li>
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
-						<span>Guided setup, then customise workflows by asking Ryu</span>
+						<span>Guided setup for agent workflows</span>
 					</li>
 					<li className="flex items-center">
 						<Mail className="mr-2 size-4" />
-						<span>
-							Workflow apps you can customise by asking Ryu · 100,000
-							sends/month · 20 GB storage
-						</span>
+						<span>100,000 monthly sends and 20 GB mail storage</span>
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
-						<span>
-							Managed server for your organization · 2 vCPU · 4 GB; local
-							inference off by default
-						</span>
+						<span>Managed server with 2 vCPU, 4 GB RAM, and 40 GB SSD</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4" />
-						<span>12% deposit fee on top-ups</span>
+						<span>16% deposit fee ($2.75 minimum)</span>
 					</li>
 				</ul>
 				<CloudUpgradePanel
 					loadingPlan={loadingPlan}
 					onCheckout={onCheckout}
-					planLabel="Teams"
 					tiers={cloudTiers}
 				/>
 			</CardContent>
@@ -1456,19 +1328,6 @@ export function HostedAgentPlanCard({
 		planId,
 		isTeams || isBusiness ? displayAgentCount : effectiveAgentCount
 	);
-	const firstAddOnPrice =
-		isTeams || isBusiness
-			? isBusiness
-				? BUSINESS_ADDITIONAL_SEAT_USD
-				: TEAMS_MONTHLY_PER_SEAT_USD
-			: isPro
-				? PRO_AGENT_STANDARD_USD
-				: MAX_AGENT_STANDARD_USD;
-	const bulkAddOnPrice = isTeams
-		? TEAMS_AGENT_PACK_USD
-		: isPro
-			? PRO_AGENT_PACK_USD
-			: MAX_AGENT_PACK_USD;
 	const planName = isTeams
 		? "Teams"
 		: isBusiness
@@ -1502,16 +1361,15 @@ export function HostedAgentPlanCard({
 				</CardTitle>
 				<CardDescription>
 					{isTeams
-						? "Shared business software your team can customise by asking Ryu."
+						? "A shared deployment for agents your team can run and oversee"
 						: isBusiness
-							? "More capacity for the same customisable business software."
+							? "More capacity for managed agent deployments with your tools and workflows"
 							: isPro
-								? "Personal Ryu access for running and customising workflows."
-								: "Custom capacity, deployment, and governance for your organization."}
+								? "Personal Ryu access for running and customising workflows"
+								: "Custom capacity, deployment, and governance for your organization"}
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
-				{isBusiness ? <IncludedPlanBanner plan="Teams" /> : null}
 				<PriceBlock
 					isYearly={isYearly}
 					monthly={monthlyPrice}
@@ -1519,18 +1377,14 @@ export function HostedAgentPlanCard({
 					seats={isTeams || isBusiness ? displayAgentCount : 1}
 					totalMonthly={isTeams || isBusiness}
 				/>
-				<p className="-mt-4 mb-6 text-muted-foreground text-xs">
-					{isTeams || isBusiness
-						? `${displayAgentCount} member ${displayAgentCount === 1 ? "seat" : "seats"} total`
-						: `For ${effectiveAgentCount} business-automation ${effectiveAgentCount === 1 ? "agent" : "agents"}`}
-				</p>
+				{isBusiness ? <IncludedPlanBanner plan="Teams" /> : null}
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Bot className="mr-2 size-4" />
 						<span>
 							{isTeams || isBusiness
-								? `Shared access for ${displayAgentCount} people`
-								: `${effectiveAgentCount} ${effectiveAgentCount === 1 ? "agent" : "agents"} for a named business process`}
+								? `${displayAgentCount} seats included`
+								: `${effectiveAgentCount} ${effectiveAgentCount === 1 ? "agent" : "agents"} can run a named business process`}
 						</span>
 					</li>
 					<li className="flex items-center">
@@ -1539,57 +1393,46 @@ export function HostedAgentPlanCard({
 							<span className="font-heading tabular-nums">
 								${includedCredits}
 							</span>
-							/month of shared AI credits across the organization
+							/month shared AI credits
 						</span>
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
 						<span>
 							{isBusiness
-								? "Performance managed server · 4 vCPU · 8 GB · 160 GB; local inference off by default"
-								: isTeams || isPro
-									? "Managed server for your organization · 2 vCPU · 4 GB; local inference off by default"
-									: "Dedicated managed server · 2 dedicated vCPU · 8 GB; local inference configurable"}
+								? "Performance server with 4 vCPU, 8 GB RAM, and 160 GB SSD"
+								: isTeams
+									? "Managed server with 2 vCPU, 4 GB RAM, and 40 GB SSD"
+									: isPro
+										? "Managed server with 2 vCPU and 4 GB RAM"
+										: "Dedicated managed server with 2 vCPU and 8 GB RAM"}
 						</span>
 					</li>
 					<li className="flex items-center">
 						<Shield className="mr-2 size-4" />
-						<span>Org-scoped access, spend controls, and audit history</span>
+						<span>
+							{isTeams || isBusiness
+								? "Access controls, spend controls, and audit history"
+								: "Spend controls and audit history"}
+						</span>
 					</li>
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
 						<span>
-							{isTeams || isBusiness || isPro
-								? "Guided setup, then customise workflows by asking Ryu"
-								: "White-label delivery and named onboarding support"}
+							{isTeams || isBusiness
+								? "Guided setup for agent workflows"
+								: isPro
+									? "Guided setup for your workflows"
+									: "White-label delivery and named onboarding support"}
 						</span>
 					</li>
+					{isTeams || isBusiness ? (
+						<li className="flex items-center">
+							<Coins className="mr-2 size-4" />
+							<span>16% deposit fee ($2.75 minimum)</span>
+						</li>
+					) : null}
 				</ul>
-				{isTeams ? (
-					<p className="mt-4 text-muted-foreground text-xs">
-						Additional member seats are ${firstAddOnPrice}/month each. The
-						shared AI-credit pool adds $50 for every additional five billed
-						seats (10 seats includes $100/month); organizations above 50 seats
-						move to Enterprise.
-					</p>
-				) : isBusiness ? (
-					<p className="mt-4 text-muted-foreground text-xs">
-						Starts at $300/month for five human seats. Additional member seats
-						are $50/month each; pooled AI credits start at $100/month and add
-						$100 for every additional five billed seats. Built for larger teams;
-						organizations above 50 seats move to Enterprise.
-					</p>
-				) : isPro ? null : (
-					<p className="mt-4 text-muted-foreground text-xs">
-						Additional bundles: ${firstAddOnPrice * HOSTED_AGENT_BUNDLE_SIZE}{" "}
-						per 5 agents through the first band, then $
-						{bulkAddOnPrice * HOSTED_AGENT_BUNDLE_SIZE} per 5 agents at higher
-						volume.{" "}
-						{isTeams
-							? "Organizations above 50 people move to Enterprise for custom terms."
-							: "Max is the plan for larger organizations and custom commercial terms."}
-					</p>
-				)}
 			</CardContent>
 			<CardFooter>
 				{exceedsTeamsSelfServe ? (
@@ -1648,7 +1491,7 @@ export function EnterprisePlanCard({
 				</CardTitle>
 				<CardDescription>
 					For organizations that need a governed rollout, custom capacity, or
-					deployment terms.
+					deployment terms
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
@@ -1656,17 +1499,17 @@ export function EnterprisePlanCard({
 				    absence of one is the point of the tier. */}
 				<div className="mb-1 font-semibold text-4xl">Custom</div>
 				<p className="mb-6 text-muted-foreground text-xs">
-					Tailored to your org · annual contract
+					This is a tailored annual contract for your organization
 				</p>
 				<IncludedPlanBanner plan="Business" />
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Key className="mr-2 size-4" />
-						<span>SSO &amp; SCIM provisioning</span>
+						<span>SSO and SCIM provisioning</span>
 					</li>
 					<li className="flex items-center">
 						<Shield className="mr-2 size-4" />
-						<span>Audit logs, custom SLA &amp; DPA</span>
+						<span>Audit logs, custom SLA, and DPA</span>
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
@@ -1678,11 +1521,11 @@ export function EnterprisePlanCard({
 					</li>
 					<li className="flex items-center">
 						<Users className="mr-2 size-4" />
-						<span>Named contact &amp; onboarding</span>
+						<span>Named contact and onboarding</span>
 					</li>
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
-						<span>Invoicing, PO &amp; custom terms</span>
+						<span>Invoicing, purchase orders, and custom terms</span>
 					</li>
 				</ul>
 			</CardContent>
@@ -1732,7 +1575,7 @@ export function SelfHostedOssCard() {
 			<CardHeader>
 				<CardTitle className="text-xl">Open source</CardTitle>
 				<CardDescription>
-					Run the whole engine on your own machines.
+					Run the whole engine on your own machines
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
@@ -1740,28 +1583,30 @@ export function SelfHostedOssCard() {
 					$0
 				</div>
 				<p className="mb-6 text-muted-foreground text-xs">
-					Free forever · self-supported
+					Free forever with community support
 				</p>
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Scale className="mr-2 size-4 shrink-0" />
-						<span>Apache-2.0 core · AGPL-3.0 gateway</span>
+						<span>The core uses Apache-2.0 and the gateway uses AGPL-3.0</span>
 					</li>
 					<li className="flex items-center">
 						<Bot className="mr-2 size-4 shrink-0" />
-						<span>Agents, workflows, memory &amp; tools · no Ryu plan cap</span>
+						<span>
+							Agents, workflows, memory, and tools with no Ryu plan cap
+						</span>
 					</li>
 					<li className="flex items-center">
 						<Shield className="mr-2 size-4 shrink-0" />
-						<span>Gateway routing, firewall &amp; budgets</span>
+						<span>Gateway routing, firewall rules, and budgets</span>
 					</li>
 					<li className="flex items-center">
 						<Key className="mr-2 size-4 shrink-0" />
-						<span>Your own provider keys</span>
+						<span>You use your own provider keys</span>
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4 shrink-0" />
-						<span>Zero egress — nothing leaves your network</span>
+						<span>Nothing leaves your network</span>
 					</li>
 					<li className="flex items-center">
 						<Users className="mr-2 size-4 shrink-0" />
@@ -1794,39 +1639,39 @@ export function SelfHostedLicensedCard() {
 					<PlanBadge label="Enterprise" plan="enterprise" size="md" />
 				</CardTitle>
 				<CardDescription>
-					A commercial licence, on your infrastructure.
+					A commercial licence, on your infrastructure
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
 				<div className="mb-1 font-semibold text-4xl">Custom</div>
 				<p className="mb-6 text-muted-foreground text-xs">
-					Flat annual fee · no per-seat or per-token metering
+					You pay a flat annual fee with no per-seat or per-token metering
 				</p>
 				<IncludedPlanBanner plan="open source" />
 				<ul className="space-y-3">
 					<li className="flex items-center">
 						<Scale className="mr-2 size-4 shrink-0" />
-						<span>Commercial licence — no AGPL obligations</span>
+						<span>Commercial licence with no AGPL obligations</span>
 					</li>
 					<li className="flex items-center">
 						<Key className="mr-2 size-4 shrink-0" />
-						<span>SSO &amp; SCIM provisioning</span>
+						<span>SSO and SCIM provisioning</span>
 					</li>
 					<li className="flex items-center">
 						<Shield className="mr-2 size-4 shrink-0" />
-						<span>Audit logs, custom SLA &amp; DPA</span>
+						<span>Audit logs, custom SLA, and DPA</span>
 					</li>
 					<li className="flex items-center">
 						<Cpu className="mr-2 size-4 shrink-0" />
-						<span>Air-gapped &amp; offline deployment</span>
+						<span>Air-gapped and offline deployment</span>
 					</li>
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4 shrink-0" />
-						<span>Named support engineer &amp; onboarding</span>
+						<span>Named support engineer and onboarding</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4 shrink-0" />
-						<span>Invoicing, PO &amp; custom terms</span>
+						<span>Invoicing, purchase orders, and custom terms</span>
 					</li>
 				</ul>
 			</CardContent>
@@ -1857,15 +1702,15 @@ export function SelfHostedPlanGrid() {
 
 /**
  * The pricing plans, presentational: the self-serve plans for one AUDIENCE in a
- * grid. The public page uses the business shelf — one Teams card and one
- * Enterprise conversation path. The individual shelf remains available to
- * non-public callers and existing account surfaces. Cloud hosting is NOT here —
- * it lives in the org dashboard (post-auth).
+ * grid. The public page uses the business shelf — Teams, Business, and
+ * Enterprise. The individual shelf shows the local desktop license, Pro, and
+ * Max, with A Major Pass below them. Cloud
+ * hosting is NOT here — it lives in the org dashboard (post-auth).
  *
- * The grid is two columns on both shelves, not four. Column count has to track
- * the card count: a `lg:grid-cols-4` holding two cards renders them at quarter
- * width with half the row empty, which reads as a page that failed to load
- * rather than as a deliberate two-plan shelf.
+ * The individual shelf is three columns and the organization shelf is three
+ * columns. Column count tracks the card count so the local license, two
+ * individual managed plans, or the Teams/Business/Enterprise shelf never
+ * renders at an accidental quarter-width.
  */
 export function PricingPlanGrid({
 	audience = "individual",
@@ -1873,12 +1718,10 @@ export function PricingPlanGrid({
 	isYearly = false,
 	loadingPlan = null,
 	onCheckout = noop,
-	onHostedAgentCountChange = noop,
 	currentPlan = null,
 	maxSeats,
 	onMaxSeatsChange,
 	maxMinSeats = MAX_MIN_SEATS,
-	onSeatsChange = noop,
 	seats,
 }: {
 	/** Which shelf to render — see {@link PRICING_AUDIENCE_PLANS}. */
@@ -1909,7 +1752,12 @@ export function PricingPlanGrid({
 }) {
 	if (audience === "individual") {
 		return (
-			<div className="mx-auto mb-12 grid max-w-5xl grid-cols-1 gap-8 md:grid-cols-2">
+			<div className="mx-auto mb-12 grid max-w-7xl grid-cols-1 gap-8 md:grid-cols-3">
+				<LifetimePlanCard
+					currentPlan={currentPlan}
+					loadingPlan={loadingPlan}
+					onCheckout={onCheckout}
+				/>
 				<ProPlanCard
 					currentPlan={currentPlan}
 					isYearly={isYearly}
@@ -1929,36 +1777,29 @@ export function PricingPlanGrid({
 		);
 	}
 	const selectedSeats = normalizeTeamsSeatCount(seats ?? hostedAgentCount);
-	const setSelectedSeats = onSeatsChange ?? onHostedAgentCountChange;
 
 	return (
-		<>
-			<HostedAgentEffortSlider
+		<div className="mx-auto mb-12 grid max-w-7xl grid-cols-1 gap-8 md:grid-cols-3">
+			<HostedAgentPlanCard
 				agentCount={selectedSeats}
-				onAgentCountChange={setSelectedSeats}
+				currentPlan={currentPlan}
+				isRecommended={false}
+				isYearly={isYearly}
+				loadingPlan={loadingPlan}
+				onCheckout={onCheckout}
+				planId="teams"
 			/>
-			<div className="mx-auto mb-12 grid max-w-7xl grid-cols-1 gap-8 md:grid-cols-3">
-				<HostedAgentPlanCard
-					agentCount={selectedSeats}
-					currentPlan={currentPlan}
-					isRecommended={false}
-					isYearly={isYearly}
-					loadingPlan={loadingPlan}
-					onCheckout={onCheckout}
-					planId="teams"
-				/>
-				<HostedAgentPlanCard
-					agentCount={selectedSeats}
-					currentPlan={currentPlan}
-					isRecommended={selectedSeats <= TEAMS_MAX_SEATS}
-					isYearly={isYearly}
-					loadingPlan={loadingPlan}
-					onCheckout={onCheckout}
-					planId="business"
-				/>
-				<EnterprisePlanCard isRecommended={selectedSeats > TEAMS_MAX_SEATS} />
-			</div>
-		</>
+			<HostedAgentPlanCard
+				agentCount={selectedSeats}
+				currentPlan={currentPlan}
+				isRecommended={selectedSeats <= TEAMS_MAX_SEATS}
+				isYearly={isYearly}
+				loadingPlan={loadingPlan}
+				onCheckout={onCheckout}
+				planId="business"
+			/>
+			<EnterprisePlanCard isRecommended={selectedSeats > TEAMS_MAX_SEATS} />
+		</div>
 	);
 }
 
@@ -1973,8 +1814,10 @@ export interface PricingCloudInstance {
 	readonly availableInLocation: boolean;
 	readonly cores: number;
 	readonly diskGb: number;
-	/** True for the generic base candidate (shown as "Included"). */
+	/** True for the generic base candidate; retained for compatibility. */
 	readonly includedWithMax: boolean;
+	/** True when this exact instance is included by the selected plan and region. */
+	readonly includedWithPlan?: boolean;
 	readonly memoryGb: number;
 	/** Customer-facing monthly USD (live × markup); 0 for the included base. */
 	readonly monthlyUsd: number;
@@ -2033,13 +1876,13 @@ export function PricingInstancePicker({
 					Ryu Cloud
 				</h2>
 				<p className="mt-1 text-muted-foreground">
-					We host your server: Core, Gateway, and 24/7 agents. Your hosted plan
-					includes a base server; add a bigger server whenever you need more
-					performance.
+					We host Core, Gateway, and your agents on your server. Your hosted
+					plan includes a base server, and you can add a bigger server when you
+					need more performance
 				</p>
 				<p className="mt-1 text-muted-foreground text-xs">
 					Servers are billed monthly at live cost. The yearly toggle
-					doesn&apos;t apply to Cloud servers.
+					doesn&apos;t apply to Cloud servers
 				</p>
 			</div>
 			{locations.length > 0 ? (
@@ -2079,7 +1922,8 @@ export function PricingInstancePicker({
 			) : null}
 			<div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 				{instances.map((instance) => {
-					const isIncluded = instance.includedWithMax;
+					const isIncluded =
+						instance.includedWithPlan ?? instance.includedWithMax;
 					const isLoading = loadingType === instance.type;
 					const unavailable = !(isIncluded || instance.availableInLocation);
 					return (
@@ -2101,7 +1945,8 @@ export function PricingInstancePicker({
 									{instance.perfLabel}
 								</CardTitle>
 								<CardDescription>
-									{instance.cores} vCPU · {instance.memoryGb} GB RAM
+									{instance.cores} vCPU, {instance.memoryGb} GB RAM, and{" "}
+									{instance.diskGb} GB SSD
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="flex-1">
@@ -2150,7 +1995,7 @@ export function PricingInstancePicker({
 										onClick={() => onSelectInstance(instance.type)}
 									>
 										{isLoading
-											? "Processing…"
+											? "Processing"
 											: unavailable
 												? "Not in this region"
 												: "Deploy server"}
@@ -2163,10 +2008,10 @@ export function PricingInstancePicker({
 			</div>
 			<p className="mt-4 text-center text-muted-foreground text-xs">
 				{live
-					? "Prices track live compute cost."
-					: "Estimated pricing — live catalog unavailable."}{" "}
-				Self-hostable too: run `infra/provision.sh` against your own cloud
-				account.
+					? "Prices track live compute cost"
+					: "Estimated pricing because the live catalog is unavailable"}{" "}
+				You can self-host by running `infra/provision.sh` against your own cloud
+				account
 			</p>
 		</div>
 	);

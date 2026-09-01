@@ -34,17 +34,19 @@ import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
 export interface GrantPoolBalance {
 	/** ISO timestamp when this pool's grant money lapses, or null if it does not. */
 	expiresAt: string | null;
+	/** Whether this balance can only be used with an allocated free provider. */
+	isFreeProvider: boolean;
 	/** The pool's user-facing tier name ("Ryu Fast"), never a vendor name. */
 	label: string;
 	/**
 	 * The `CreditPoolId` this row is about, or `null` when this build cannot tell.
 	 *
-	 * The wire carries only the pool's LABEL (see `CampaignPoolBalance`), so the
-	 * id is recovered from the local catalog — a newer control plane may serve a
-	 * pool this build has never heard of. Consumers that key behaviour off the id
-	 * (the composer picker's "already granted, do not upsell" rule) must skip a
-	 * null; consumers that only render (label + amount + expiry) must NOT, because
-	 * the money is real either way.
+	 * The wire carries the pool's LABEL and its free-provider classification (see
+	 * `CampaignPoolBalance`), but no pool id, so the id is recovered from the local
+	 * catalog — a newer control plane may serve a pool this build has never heard
+	 * of. Consumers that key behaviour off the id (the composer picker's "already
+	 * granted, do not upsell" rule) must skip a null; consumers that only render
+	 * label + amount + expiry must NOT, because the money is real either way.
 	 */
 	poolId: CreditPoolId | null;
 	remainingMicroUsd: number;
@@ -70,6 +72,8 @@ const POOL_ID_BY_LABEL: ReadonlyMap<string, CreditPoolId | null> = (() => {
 })();
 
 export interface UseCreditGrantsResult {
+	/** True while the optional allocation read is in flight. */
+	loading: boolean;
 	/**
 	 * Pools with a positive remaining balance, newest server ordering preserved.
 	 * Empty whenever there is nothing to show — signed out, no grants, route
@@ -114,6 +118,7 @@ const selectGrantPools = (
 			poolId: POOL_ID_BY_LABEL.get(entry.poolLabel) ?? null,
 			label: entry.poolLabel,
 			remainingMicroUsd: entry.remainingMicroUsd,
+			isFreeProvider: entry.isFreeProvider,
 			expiresAt: entry.expiresAt,
 		}));
 
@@ -130,5 +135,5 @@ export function useCreditGrants(): UseCreditGrantsResult {
 
 	// A stable empty array, so a consumer that memoizes on `pools` does not
 	// invalidate on every render while the query is idle or in flight.
-	return { pools: query.data ?? NO_POOLS };
+	return { loading: query.isFetching, pools: query.data ?? NO_POOLS };
 }

@@ -1,7 +1,7 @@
 <!--
-Heads up: this repo is a one-way mirror of a private monorepo (the source of truth). We review
-your PR here and replay it into the monorepo with authorship preserved; it returns on the next
-sync. See CONTRIBUTING.md. Your branch SHA on main may be rewritten by that sync — that's normal.
+Heads up: this public repository is generated from the Ryu monorepo. We review your PR here and
+replay accepted changes into the monorepo with authorship preserved; they return on the next sync.
+See CONTRIBUTING.md. The public `main` branch may be rewritten by that sync - this is normal.
 -->
 
 ## What & why

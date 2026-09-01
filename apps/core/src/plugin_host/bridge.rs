@@ -951,6 +951,19 @@ impl PluginHookBridge {
             plugin_id: self.plugin_id.clone(),
             target: target.to_string(),
             params: args.get("params").cloned(),
+            kind: crate::events::NavigationKind::Tab,
+            force_new: false,
+            // A personal node has one trusted operator, so preserve the original
+            // broadcast behavior. Shared nodes must address the verified caller;
+            // otherwise one app click would navigate every connected teammate.
+            target_user_id: crate::server::node_org_id()
+                .is_some()
+                .then(|| {
+                    self.verified_caller
+                        .as_ref()
+                        .map(|caller| caller.user_id.clone())
+                })
+                .flatten(),
         });
         ok(serde_json::json!({ "queued": true, "target": target }))
     }

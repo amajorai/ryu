@@ -539,6 +539,8 @@ export interface AgentChatProps {
 	/** Pending quote shown inside the composer, above the textarea. The surface
 	 * prepends it to the outgoing message on send. */
 	quote?: string | null;
+	/** Message id currently selected by the desktop chat-local search. */
+	searchActiveMessageId?: string;
 	/** Pre-fills the composer once when it transitions to a non-empty value (e.g.
 	 * a `ryu://chat/new?prompt=…` deep link). Never sends — the user reviews and
 	 * submits. Subsequent user edits are not clobbered. */

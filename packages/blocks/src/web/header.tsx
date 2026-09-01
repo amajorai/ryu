@@ -20,7 +20,7 @@ import {
 	MotionNavigationMenuTrigger,
 } from "@ryu/ui/components/motion-navigation-menu";
 import { cn } from "@ryu/ui/lib/utils";
-import { Menu } from "lucide-react";
+import { ArrowLeft, Menu } from "lucide-react";
 // import { Link2 } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
@@ -276,6 +276,9 @@ export default function Header({
 	className,
 	userMenu,
 	orgSlot,
+	portalUtilityMenu,
+	portalContextNav,
+	inverse = false,
 	links = MARKETING_LINKS,
 	showCatalogMenus = true,
 	homeHref = "/",
@@ -284,14 +287,20 @@ export default function Header({
 }: {
 	className?: string;
 	signedIn?: boolean;
+	/** Render the portal chrome with foreground/background roles inverted. */
+	inverse?: boolean;
 	variant?: "marketing" | "portal";
 	userMenu?: ReactNode;
 	/**
-	 * Workspace context rendered immediately after the logo/badge. Portal surfaces
-	 * pass the organization switcher here so the current workspace stays visible
-	 * while people move between the primary routes.
+	 * Workspace context rendered after the account controls in the portal header.
+	 * Portal surfaces pass the organization switcher here so the current workspace
+	 * stays visible while people move between the primary routes.
 	 */
 	orgSlot?: ReactNode;
+	/** Utility actions kept on the right side of the portal header. */
+	portalUtilityMenu?: ReactNode;
+	/** Contextual tabs rendered in the portal header instead of the global nav. */
+	portalContextNav?: ReactNode;
 	/** Nav links to render. Defaults to the marketing links. */
 	links?: readonly HeaderLink[];
 	/**
@@ -300,7 +309,7 @@ export default function Header({
 	 * signed-in Dashboard shortcut now lives in the user menu dropdown.
 	 */
 	showCatalogMenus?: boolean;
-	/** Where the logo links to. Marketing → "/", portal → "/dashboard". */
+	/** Where the marketing home link goes. Portal surfaces omit the brand link. */
 	homeHref?: string;
 }) {
 	const pathname = usePathname();
@@ -308,39 +317,63 @@ export default function Header({
 	if (variant === "portal") {
 		return (
 			<div className={cn("relative", className)}>
-				<div className="border-border/70 border-b bg-background/85 backdrop-blur-xl">
+				<div
+					className={cn(
+						"backdrop-blur-xl",
+						inverse
+							? "bg-foreground text-background"
+							: "border-border/70 border-b bg-background/85"
+					)}
+				>
 					<div className="mx-auto w-full max-w-7xl">
-						<div className="flex min-h-14 items-center gap-3 px-4 sm:gap-4 sm:px-6">
-							<Link
-								className="group flex shrink-0 items-center gap-2"
-								href={homeHref as Route}
-							>
-								<Logo
-									className="text-foreground"
-									size="26px"
-									variant="outline-static"
-								/>
-								<span className="font-heading font-medium text-base tracking-tight">
-									ryu
-								</span>
-								<Badge
-									className="hidden rounded-full text-[10px] sm:inline-flex"
-									variant="secondary"
-								>
-									Preview
-								</Badge>
-							</Link>
-							{orgSlot ? (
-								<div className="min-w-0 border-border/70 border-l pl-3 sm:pl-4">
-									{orgSlot}
+						<div className="flex min-h-14 items-center gap-2 px-4 sm:px-6">
+							{userMenu ? (
+								<div className="flex min-w-0 items-center gap-1.5">
+									{userMenu}
 								</div>
 							) : null}
-
-							<div className="ml-auto flex items-center gap-1.5">
-								<div className="flex items-center gap-1.5">{userMenu}</div>
-							</div>
+							{orgSlot ? (
+								<div className="flex min-w-0 items-center gap-2">
+									<span
+										aria-hidden="true"
+										className={cn(
+											"select-none text-lg",
+											inverse
+												? "text-background/40"
+												: "text-muted-foreground/40"
+										)}
+									>
+										/
+									</span>
+									<div className="min-w-0">{orgSlot}</div>
+								</div>
+							) : null}
+							{portalUtilityMenu ? (
+								<div className="ml-auto flex items-center gap-1.5">
+									{portalUtilityMenu}
+								</div>
+							) : null}
 						</div>
-						{links.length > 0 ? (
+						{portalContextNav ? (
+							<div className="flex min-h-12 items-center gap-3 px-4 sm:px-6">
+								<Link
+									aria-label="Back to dashboard"
+									className={cn(
+										"inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 font-medium text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+										inverse
+											? "text-background/70 hover:bg-background/10 hover:text-background focus-visible:ring-background"
+											: "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring"
+									)}
+									href="/dashboard"
+								>
+									<ArrowLeft aria-hidden="true" className="size-4" />
+									<span>Dashboard</span>
+								</Link>
+								<div className="min-w-0 flex-1 overflow-x-auto">
+									{portalContextNav}
+								</div>
+							</div>
+						) : links.length > 0 ? (
 							<div className="flex min-h-12 items-center px-4 sm:px-6">
 								<nav
 									aria-label="Workspace navigation"

@@ -23,3 +23,18 @@ describe("Desktop settings dialog shortcuts", () => {
 		).toBe(2);
 	});
 });
+
+describe("chat search shortcut", () => {
+	it("opens and cycles the focused chat's message and file search", () => {
+		const search = DESKTOP_HOTKEYS.find(
+			(action) => action.id === "chat.search"
+		);
+
+		expect(search?.label).toBe("Search Chat or Files");
+		expect(search?.category).toBe("Chat");
+		expect(search?.defaultBinding).toBe("Mod+F");
+		expect(search?.description).toMatch(
+			/between chat messages and project files/
+		);
+	});
+});

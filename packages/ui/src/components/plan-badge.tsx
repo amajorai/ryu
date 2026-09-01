@@ -8,6 +8,7 @@ import { cn } from "@ryu/ui/lib/utils.ts";
  * an `@ryu/auth` dependency.
  */
 export type PlanTier =
+	| "marketplace-membership"
 	| "pro"
 	| "max"
 	| "teams"
@@ -26,6 +27,13 @@ interface TierStyle {
 }
 
 const TIER_STYLES: Record<PlanTier, TierStyle> = {
+	// A Major Pass is the Marketplace tier: a restrained champagne-gold signal
+	// that reads as a premium pass without competing with Pro or Max.
+	"marketplace-membership": {
+		label: "A Major Pass",
+		ink: "#2d2107",
+		gradient: "linear-gradient(15deg,#fff1b8 0%,#c8942e 100%)",
+	},
 	// The signature holographic pastel — near-white, so it needs dark ink.
 	pro: {
 		label: "Pro",
@@ -41,12 +49,11 @@ const TIER_STYLES: Record<PlanTier, TierStyle> = {
 		gradient:
 			"linear-gradient(15deg,#c679c4 0%,#fa3d1d 25%,#ffb005 50%,#e1e1fe 75%,#0358f7 100%)",
 	},
-	// Teams reads "organisation": a confident indigo → blue → cyan.
+	// Teams reads "organisation": a confident indigo → cyan.
 	teams: {
 		label: "Teams",
 		ink: "#ffffff",
-		gradient:
-			"linear-gradient(15deg,#6366f1 0,#3b82f6 42%,#0ea5e9 72%,#22d3ee 100%)",
+		gradient: "linear-gradient(15deg,#4f46e5 0%,#22d3ee 100%)",
 	},
 	business: {
 		label: "Business",
@@ -54,8 +61,8 @@ const TIER_STYLES: Record<PlanTier, TierStyle> = {
 		gradient:
 			"linear-gradient(15deg,#6d28d9 0,#7c3aed 35%,#db2777 72%,#f59e0b 100%)",
 	},
-	// Enterprise is warmer and more grounded than Teams, meant for managed
-	// rollouts and governance-heavy deployments.
+	// Enterprise uses the original green sweep for managed rollouts and
+	// governance-heavy deployments.
 	enterprise: {
 		label: "Enterprise",
 		ink: "#ffffff",
@@ -100,6 +107,7 @@ export function planTierLabel(plan: PlanTier): string {
  * sweep loops seamlessly. Kept beside the badge palette so both stay in sync.
  */
 const TIER_BORDER_COLORS: Record<PlanTier, readonly string[]> = {
+	"marketplace-membership": ["#fff1b8", "#c8942e"],
 	pro: [
 		"#9effef",
 		"#d1ffd6",
@@ -110,7 +118,7 @@ const TIER_BORDER_COLORS: Record<PlanTier, readonly string[]> = {
 		"#ffdda3",
 	],
 	max: ["#c679c4", "#fa3d1d", "#ffb005", "#e1e1fe", "#0358f7"],
-	teams: ["#6366f1", "#3b82f6", "#0ea5e9", "#22d3ee"],
+	teams: ["#4f46e5", "#22d3ee"],
 	business: ["#6d28d9", "#7c3aed", "#db2777", "#f59e0b"],
 	enterprise: ["#0f766e", "#059669", "#84cc16", "#f59e0b"],
 	"desktop-license": ["#eef1f5", "#cdd5e0", "#9aa6b8"],
@@ -160,6 +168,7 @@ export interface PlanBadgeProps {
 }
 
 const TIER_TITLES: Record<PlanTier, string> = {
+	"marketplace-membership": "Ryu A Major Pass",
 	pro: "Ryu Pro",
 	max: "Ryu Max",
 	teams: "Ryu Teams",

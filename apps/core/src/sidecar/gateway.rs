@@ -1729,8 +1729,10 @@ const ENV_CREDITS_WALLET_EMPTY_ACTION: &str = "GATEWAY_CREDITS_WALLET_EMPTY_ACTI
 /// Composio is not free, so on the managed plan each executed `composio.*` tool
 /// call debits the org wallet by this amount (at cost). Operator-provisioned on a
 /// managed node; same name on both sides — Core forwards it to the gateway.
-/// Default `0` ⇒ tool calls stay free until a deployment sets a real rate.
+/// Default `300` ⇒ the current standard $0.30/1,000 execution rate. Deployments
+/// using managed-app or premium-tool contracts can override it explicitly.
 const ENV_CREDITS_COST_PER_TOOL_CALL: &str = "GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD";
+const DEFAULT_CREDITS_COST_PER_TOOL_CALL_MICRO_USD: u64 = 300;
 
 /// Sandbox per-resource billing rates, in **nano-USD per unit-second** (`u64`),
 /// forwarded to the gateway alongside the credits hook. Rates are nano-USD (not
@@ -1905,13 +1907,13 @@ fn credits_spawn_env() -> Vec<(String, String)> {
         .filter(|s| s == "stop" || s == "downgrade")
         .unwrap_or_else(|| "stop".to_owned());
     // Per-tool-call (Composio) cost: forward the operator-provisioned rate,
-    // defaulting to "0" (free) when unset so non-managed installs are unchanged.
-    // Only a valid non-negative integer is honoured; anything else falls to 0.
-    let tool_call_cost = std::env::var(ENV_CREDITS_COST_PER_TOOL_CALL)
-        .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| s.parse::<u64>().is_ok())
-        .unwrap_or_else(|| "0".to_owned());
+    // defaulting to the current standard $0.30/1,000 execution rate. Only a
+    // valid non-negative integer is honoured; malformed input uses the safe
+    // non-zero default so a managed gateway cannot silently under-bill.
+    let tool_call_cost = resolve_u64_env_string(
+        ENV_CREDITS_COST_PER_TOOL_CALL,
+        DEFAULT_CREDITS_COST_PER_TOOL_CALL_MICRO_USD,
+    );
     tracing::info!(
         base_url = %base,
         wallet_empty_action = %action,
@@ -2164,11 +2166,17 @@ pub async fn is_healthy() -> bool {
 //      if the gateway blinks here we log a warning but don't fail the caller).
 //
 // Env: `RYU_ALLOW_GATEWAY_FALLBACK=1` opts into fail-open on the pre-run gate
-// (identical semantics to the chat-path fallback env var).
+// (identical semantics to the chat-path fallback env var). The permanent-file
+// deletion guard is independent of that fallback and remains local/default-deny.
 
 /// Env var name: when set to `1`, a gateway-unreachable pre-run check allows
 /// execution instead of failing closed. Default: fail-closed.
 const ENV_ALLOW_GATEWAY_FALLBACK: &str = "RYU_ALLOW_GATEWAY_FALLBACK";
+
+/// Explicit operator opt-out for the permanent-deletion guard. The absence of
+/// this value is the safe default; it is carried to the authenticated Gateway
+/// scan so Core and its sidecar make the same decision.
+const ENV_ALLOW_PERMANENT_DELETE: &str = "RYU_ALLOW_PERMANENT_DELETE";
 
 /// Env var that controls gateway base-URL injection into ACP subprocess spawns.
 ///
@@ -2368,7 +2376,9 @@ async fn check_exec_budget_request(payload: serde_json::Value) -> ExecBudgetOutc
 // triggers, healing, delegation) auto-approve permission requests, so without
 // this scan they get unattended arbitrary shell/file-write. When armed it is
 // fail-closed on the same terms as the budget gate: unreachable / non-2xx /
-// parse error => Deny unless `RYU_ALLOW_GATEWAY_FALLBACK=1`.
+// parse error => Deny unless `RYU_ALLOW_GATEWAY_FALLBACK=1`. Permanent file and
+// directory deletion is a stronger local hard stop and never follows that
+// fallback unless the operator explicitly changes `RYU_ALLOW_PERMANENT_DELETE`.
 
 /// Env var selecting the command-approval mode. An explicit `off`
 /// (case-insensitive) disables the scan entirely (Core does not call the gateway
@@ -2434,6 +2444,19 @@ pub async fn check_exec_scan(
     session_id: Option<&str>,
     agent: Option<&str>,
 ) -> ExecScanOutcome {
+    let allow_permanent_delete = ryu_deletion_guard::permanent_delete_allowed(
+        std::env::var(ENV_ALLOW_PERMANENT_DELETE).ok().as_deref(),
+    );
+    // Do this before the network call. A gateway outage plus the documented
+    // fallback must not turn a permanent deletion into an allowed command.
+    if ryu_deletion_guard::is_execution_backend(backend) && !allow_permanent_delete {
+        if let Some(rule) = ryu_deletion_guard::detect_command(command) {
+            return ExecScanOutcome::Deny(format!(
+                "permanent file deletion blocked by local Ryu guard: {rule}; move the target to the host Trash or Recycle Bin"
+            ));
+        }
+    }
+
     let (organization_id, project_id, managed_rules) = crate::fleet::command_scan_context();
     // The local off switch disables only the built-in risk scanner. Managed
     // rules remain enforceable, including after an LKG snapshot expires (when
@@ -2458,6 +2481,7 @@ pub async fn check_exec_scan(
             "project_id": project_id,
             "session_id": session_id,
             "agent": agent,
+            "allow_permanent_delete": allow_permanent_delete,
         }));
     if let Some(tok) = token {
         req = req.bearer_auth(tok);
@@ -3001,8 +3025,8 @@ mod tests {
         assert_eq!(get(ENV_CREDITS_INTERNAL_SECRET), Some("top-secret"));
         // Markup pinned to 0 — margin is at deposit (B2).
         assert_eq!(get("GATEWAY_CREDITS_MARKUP_BPS"), Some("0"));
-        // Per-tool-call cost defaults to 0 (free) until a node provisions a rate.
-        assert_eq!(get(ENV_CREDITS_COST_PER_TOOL_CALL), Some("0"));
+        // Per-tool-call cost defaults to the current standard Composio rate.
+        assert_eq!(get(ENV_CREDITS_COST_PER_TOOL_CALL), Some("300"));
         // Wallet-empty action defaults to Stop.
         assert_eq!(get(ENV_CREDITS_WALLET_EMPTY_ACTION), Some("stop"));
         // Base derived from the control-plane URL + the `/api` mount.
@@ -3063,14 +3087,14 @@ mod tests {
             .map(|(_, v)| v.as_str());
         assert_eq!(cost, Some("1500"));
 
-        // Garbage → 0, never propagated as an invalid value.
+        // Garbage → the safe standard rate, never propagated as an invalid value.
         std::env::set_var(ENV_CREDITS_COST_PER_TOOL_CALL, "not-a-number");
         let env = credits_spawn_env();
         let cost = env
             .iter()
             .find(|(k, _)| k == ENV_CREDITS_COST_PER_TOOL_CALL)
             .map(|(_, v)| v.as_str());
-        assert_eq!(cost, Some("0"));
+        assert_eq!(cost, Some("300"));
     }
 
     #[test]
@@ -3726,6 +3750,7 @@ mod tests {
         ENV_EXEC_APPROVAL_MODE,
         ENV_GATEWAY_URL,
         ENV_ALLOW_GATEWAY_FALLBACK,
+        ENV_ALLOW_PERMANENT_DELETE,
     ];
 
     #[test]
@@ -3782,7 +3807,33 @@ mod tests {
         std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
         std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
         std::env::remove_var(ENV_ALLOW_GATEWAY_FALLBACK);
-        let out = check_exec_scan("deno", "rm -rf /", Some("sess"), Some("ryu")).await;
+        let out = check_exec_scan("deno", "echo hi", Some("sess"), Some("ryu")).await;
+        assert_eq!(out, ExecScanOutcome::Allow);
+    }
+
+    #[tokio::test]
+    async fn permanent_deletion_is_denied_before_gateway_fallback() {
+        let _lock = lock_scan_env();
+        let _g = EnvGuard::capture(SCAN_ENV);
+        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
+        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
+        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
+        let out = check_exec_scan("acp", "rm -rf ./disposable", None, Some("ryu")).await;
+        assert!(
+            matches!(&out, ExecScanOutcome::Deny(reason) if reason.contains("permanent file deletion")),
+            "permanent deletion must stay denied even with approval and gateway fallbacks: {out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_permanent_deletion_policy_change_reaches_gateway() {
+        let _lock = lock_scan_env();
+        let _g = EnvGuard::capture(SCAN_ENV);
+        std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
+        std::env::set_var(ENV_ALLOW_PERMANENT_DELETE, "1");
+        std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
+        std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
+        let out = check_exec_scan("acp", "rm -rf ./disposable", None, Some("ryu")).await;
         assert_eq!(out, ExecScanOutcome::Allow);
     }
 

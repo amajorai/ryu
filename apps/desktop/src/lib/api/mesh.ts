@@ -129,26 +129,57 @@ export async function fetchMeshStatus(
 	return normalizeMeshStatus(raw);
 }
 
+/** Live install state for the selected network client. */
+export interface MeshInstallStatus {
+	error: string | null;
+	state: "failed" | "installed" | "installing" | "not_installed";
+}
+
+/**
+ * Read the Core install state used by the mesh enable watcher. This is separate
+ * from mesh status because a failed download must be reported immediately rather
+ * than leaving an enabled-but-unreachable tunnel polling until its deadline.
+ */
+export async function fetchMeshInstallStatus(
+	target: ApiTarget,
+	backend: MeshBackend
+): Promise<MeshInstallStatus> {
+	const name = backend === MESH_BACKEND_TAILCAT ? "tailcat" : "tailscale";
+	const raw = await request<{
+		status?: {
+			error?: string;
+			state?: MeshInstallStatus["state"];
+		};
+	}>(target, `/api/setup/status/${name}`);
+	const state = raw.status?.state;
+	return {
+		error: raw.status?.error ?? null,
+		state:
+			state === "failed" || state === "installed" || state === "installing"
+				? state
+				: "not_installed",
+	};
+}
+
 /**
  * The result of {@link setMeshEnabled}: the live {@link MeshStatus} after the
  * change, plus an optional `startError` when the selected provider could not
- * start (for example, the official Tailscale pair or the Tailcat CLI is absent).
+ * start while its managed client is being installed.
  * The private network is still ON in that case — the caller should reflect the
  * toggle as enabled and surface `startError` as a warning.
  */
 export interface SetMeshEnabledResult {
 	/**
-	 * This node has a route to install the client itself (Linux archive, macOS
-	 * Homebrew, or `RYU_TAILSCALE_RELEASE_URL`). False — Windows, or a Mac with no
-	 * Homebrew — means the only honest response is telling the user how to install
-	 * it themselves; offering an install that is guaranteed to bail is worse.
+	 * This node has a managed route to install the selected client itself. False
+	 * means this build/platform has no managed release route, so the response must
+	 * explain the operator override rather than pretending an install will work.
 	 */
 	canInstall: boolean;
 	/**
-	 * Core started installing the Tailscale client for this enable. The mesh IS
-	 * on; Core starts the daemon itself once the binaries land, so the caller
-	 * shows progress and re-reads the status rather than surfacing `startError` as
-	 * a failure.
+	 * Core started installing the selected network client for this enable. The mesh
+	 * IS on; Core starts the selected daemon itself once the binary lands, so the
+	 * caller shows progress and re-reads the status rather than surfacing
+	 * `startError` as a failure.
 	 */
 	installing: boolean;
 	/** Binaries that could not be resolved anywhere (`tailscaled`, `tailscale`). */
@@ -229,7 +260,7 @@ export async function setMeshBackend(
 // before a node has ever started there is nothing to derive, so the picker reads
 // this instead.
 
-/** Self-hosted Headscale — the default. Needs a control server URL. */
+/** Self-hosted Headscale. Needs a control server URL. */
 export const MESH_BACKEND_HEADSCALE = "headscale";
 /** Tailscale's SaaS coordination server. */
 export const MESH_BACKEND_TAILSCALE = "tailscale";
@@ -248,17 +279,24 @@ export const MESH_LOGIN_SERVER_PREF = "mesh-login-server";
 
 /**
  * Normalize a stored `mesh-backend` value. Unset or unrecognized reads as
- * Headscale — the same default Core's `parse_backend` applies, so the picker and
- * the daemon never disagree about what an unconfigured node will do.
+ * Tailcat — the same fresh-install default Core's `parse_backend` applies, so
+ * the picker and daemon never disagree about an unconfigured node. A legacy
+ * Headscale URL is also treated as the old implicit choice when no backend
+ * preference exists.
  */
-export function parseMeshBackend(raw: string | null | undefined): MeshBackend {
+export function parseMeshBackend(
+	raw: string | null | undefined,
+	legacyLoginServer?: string | null
+): MeshBackend {
 	switch (raw?.trim().toLowerCase()) {
 		case MESH_BACKEND_TAILSCALE:
 			return MESH_BACKEND_TAILSCALE;
 		case MESH_BACKEND_TAILCAT:
 			return MESH_BACKEND_TAILCAT;
 		default:
-			return MESH_BACKEND_HEADSCALE;
+			return legacyLoginServer?.trim()
+				? MESH_BACKEND_HEADSCALE
+				: MESH_BACKEND_TAILCAT;
 	}
 }
 

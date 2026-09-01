@@ -2274,6 +2274,10 @@ pub struct AgentScheduleTemplate {
     pub enabled: bool,
     #[serde(default)]
     pub require_approval: bool,
+    /// Existing conversation to append to. Absent means each firing starts a
+    /// new persistent conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
 
 fn default_schedule_enabled() -> bool {

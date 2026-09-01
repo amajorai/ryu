@@ -105,6 +105,10 @@ import {
 	BtwOverlay,
 	type BtwState,
 } from "@/src/components/chat/BtwOverlay.tsx";
+import {
+	ChatSearchBar,
+	type ChatSearchMode,
+} from "@/src/components/chat/ChatSearchBar.tsx";
 import { DiffReviewPane } from "@/src/components/chat/DiffReviewPane.tsx";
 import {
 	type ForkDestination,
@@ -273,6 +277,7 @@ import {
 	modelRoutingFieldsForInterface,
 	responseModeForInterface,
 } from "@/src/lib/chat-routing.ts";
+import { searchChatMessages } from "@/src/lib/chat-search.ts";
 import { getChatTabBusySpeed } from "@/src/lib/chat-tab-busy-speed.ts";
 import { textToDataUrl } from "@/src/lib/composer/attachments.ts";
 import {
@@ -355,12 +360,20 @@ import { useArtifactStore } from "@/src/store/useArtifactStore.ts";
 import { useChatHotkeyTargets } from "@/src/store/useChatHotkeyTargets.ts";
 import { useCreateAgentDialog } from "@/src/store/useCreateAgentDialog.ts";
 import { useDockPanelRequestStore } from "@/src/store/useDockPanelRequestStore.ts";
+import { useFileTreeSearchStore } from "@/src/store/useFileTreeSearchStore.ts";
 import { useMeetingRecordingStore } from "@/src/store/useMeetingRecordingStore.ts";
 import {
 	publishSidebarTodoProgress,
 	sidebarTodoProgressKey,
 } from "@/src/store/useSidebarTodoProgressStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+
+interface ChatSearchState {
+	mode: ChatSearchMode;
+	nonce: number;
+	open: boolean;
+	query: string;
+}
 
 // How often the focused chat tab re-probes `/api/chat/stream/resume/:id` while it
 // believes it is idle. The endpoint 404s in-memory when nothing is running, so
@@ -1793,6 +1806,35 @@ export default function ChatPage({
 	const [convId, setConvId] = useState<string | null>(
 		tabConversationId ?? null
 	);
+	const [chatSearch, setChatSearch] = useState<ChatSearchState>({
+		mode: "chat",
+		nonce: 0,
+		open: false,
+		query: "",
+	});
+	const [activeChatSearchMatchIndex, setActiveChatSearchMatchIndex] =
+		useState(0);
+	const fileSearchRequest = useMemo(
+		() =>
+			chatSearch.open && chatSearch.mode === "files"
+				? { nonce: chatSearch.nonce, query: chatSearch.query }
+				: null,
+		[chatSearch]
+	);
+	useEffect(() => {
+		setChatSearch((current) =>
+			current.open
+				? {
+						...current,
+						mode: "chat",
+						nonce: current.nonce + 1,
+						open: false,
+						query: "",
+					}
+				: current
+		);
+		setActiveChatSearchMatchIndex(0);
+	}, [convId]);
 	// Agent-level controls are scoped to the conversation that emitted them. Do
 	// not carry a model/effort override into a different thread that happens to
 	// use the same agent.
@@ -5408,6 +5450,25 @@ export default function ChatPage({
 		});
 	}, [stop]);
 
+	const toggleChatSearch = useCallback(() => {
+		setActiveChatSearchMatchIndex(0);
+		setChatSearch((current) =>
+			current.open
+				? {
+						...current,
+						mode: current.mode === "chat" ? "files" : "chat",
+						nonce: current.nonce + 1,
+					}
+				: {
+						...current,
+						mode: "chat",
+						nonce: current.nonce + 1,
+						open: true,
+						query: "",
+					}
+		);
+	}, []);
+
 	// Publish this tab's chat-owned shortcut handlers while it is the FOCUSED tab.
 	// Every chat tab stays mounted, and the hotkey provider keeps one handler per
 	// action id (last-writer-wins), so binding `chat.stop` inside ChatPage would
@@ -5417,9 +5478,12 @@ export default function ChatPage({
 	const hotkeyOwner = useId();
 	const publishHotkeyTargets = useChatHotkeyTargets((s) => s.publish);
 	const clearHotkeyTargets = useChatHotkeyTargets((s) => s.clearIfOwner);
+	const publishFileTreeSearch = useFileTreeSearchStore((s) => s.publish);
+	const clearFileTreeSearch = useFileTreeSearchStore((s) => s.clearIfOwner);
 	useEffect(() => {
 		if (!isActiveTab) {
 			clearHotkeyTargets(hotkeyOwner);
+			clearFileTreeSearch(hotkeyOwner);
 			return;
 		}
 		publishHotkeyTargets(hotkeyOwner, {
@@ -5431,15 +5495,25 @@ export default function ChatPage({
 			startVoiceMode: voiceMode.start,
 			toggleBottomPanel: () => setBottomPanelOpen((v) => !v),
 			toggleRightPanel: () => setRightPanelOpen((v) => !v),
+			toggleSearch: toggleChatSearch,
 		});
-		return () => clearHotkeyTargets(hotkeyOwner);
+		publishFileTreeSearch(hotkeyOwner, fileSearchRequest);
+		return () => {
+			clearHotkeyTargets(hotkeyOwner);
+			clearFileTreeSearch(hotkeyOwner);
+		};
 	}, [
+		chatSearch,
+		clearFileTreeSearch,
+		fileSearchRequest,
 		isActiveTab,
 		hotkeyOwner,
 		effectiveStatus,
 		handleStop,
 		voiceMode.start,
+		toggleChatSearch,
 		publishHotkeyTargets,
+		publishFileTreeSearch,
 		clearHotkeyTargets,
 	]);
 
@@ -6264,6 +6338,79 @@ export default function ChatPage({
 				: processedMessages,
 		[merged.messages, processedMessages]
 	);
+	const chatSearchMatches = useMemo(
+		() =>
+			chatSearch.mode === "chat"
+				? searchChatMessages(renderedMessages, chatSearch.query)
+				: [],
+		[chatSearch.mode, chatSearch.query, renderedMessages]
+	);
+	const activeChatSearchMatch =
+		chatSearchMatches[activeChatSearchMatchIndex] ?? null;
+	useEffect(() => {
+		setActiveChatSearchMatchIndex((current) =>
+			chatSearchMatches.length === 0
+				? 0
+				: Math.min(current, chatSearchMatches.length - 1)
+		);
+	}, [chatSearchMatches.length]);
+	useEffect(() => {
+		if (
+			!(chatSearch.open && chatSearch.mode === "chat" && activeChatSearchMatch)
+		) {
+			return;
+		}
+		const frame = window.requestAnimationFrame(() => {
+			window.dispatchEvent(
+				new CustomEvent("ryu:scroll-to-message", {
+					detail: { messageId: activeChatSearchMatch.anchorMessageId },
+				})
+			);
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [
+		activeChatSearchMatch?.anchorMessageId,
+		activeChatSearchMatch?.messageId,
+		chatSearch.mode,
+		chatSearch.open,
+	]);
+
+	const closeChatSearch = useCallback(() => {
+		setActiveChatSearchMatchIndex(0);
+		setChatSearch((current) => ({
+			...current,
+			mode: "chat",
+			nonce: current.nonce + 1,
+			open: false,
+			query: "",
+		}));
+	}, []);
+	const changeChatSearchMode = useCallback((mode: ChatSearchMode) => {
+		setActiveChatSearchMatchIndex(0);
+		setChatSearch((current) =>
+			current.mode === mode
+				? current
+				: { ...current, mode, nonce: current.nonce + 1, open: true }
+		);
+	}, []);
+	const changeChatSearchQuery = useCallback((query: string) => {
+		setActiveChatSearchMatchIndex(0);
+		setChatSearch((current) => ({ ...current, query, open: true }));
+	}, []);
+	const nextChatSearchMatch = useCallback(() => {
+		setActiveChatSearchMatchIndex((current) =>
+			chatSearchMatches.length === 0
+				? 0
+				: (current + 1) % chatSearchMatches.length
+		);
+	}, [chatSearchMatches.length]);
+	const previousChatSearchMatch = useCallback(() => {
+		setActiveChatSearchMatchIndex((current) =>
+			chatSearchMatches.length === 0
+				? 0
+				: (current - 1 + chatSearchMatches.length) % chatSearchMatches.length
+		);
+	}, [chatSearchMatches.length]);
 
 	// #415: Stable slot reference for the custom InputBar. Using useMemo with an
 	// empty dep array so the component identity is stable across renders, avoiding
@@ -7382,6 +7529,7 @@ export default function ChatPage({
 				}}
 				cowork={coworkData}
 				fileReviewRequest={fileReviewRequest}
+				fileSearchRequest={fileSearchRequest}
 				folder={folder}
 				onBottomOpenChange={setBottomPanelOpen}
 				onRightOpenChange={setRightPanelOpen}
@@ -7420,6 +7568,20 @@ export default function ChatPage({
 						onDragOver={handleDragOver}
 						onDrop={handleDrop}
 					>
+						{chatSearch.open && (
+							<ChatSearchBar
+								activeMatchIndex={activeChatSearchMatchIndex}
+								folderAvailable={Boolean(folder)}
+								matches={chatSearchMatches}
+								mode={chatSearch.mode}
+								onClose={closeChatSearch}
+								onModeChange={changeChatSearchMode}
+								onNextMatch={nextChatSearchMatch}
+								onPreviousMatch={previousChatSearchMatch}
+								onQueryChange={changeChatSearchQuery}
+								query={chatSearch.query}
+							/>
+						)}
 						<WidgetHostContext.Provider value={widgetHostValue}>
 							<AgentChat
 								agentMessageContext={agentMessageContext}
@@ -7562,6 +7724,11 @@ export default function ChatPage({
 								onWorkflowResume={handleWorkflowResume}
 								previewResolvers={linkPreviewResolvers}
 								quote={quote}
+								searchActiveMessageId={
+									chatSearch.open && chatSearch.mode === "chat"
+										? activeChatSearchMatch?.messageId
+										: undefined
+								}
 								seedDraft={composerSeed}
 								selectionActions={contributedSelectionActions}
 								showCopyToolbar

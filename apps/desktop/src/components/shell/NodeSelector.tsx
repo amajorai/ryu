@@ -2706,15 +2706,15 @@ const TUNNEL_LABEL: Record<MeshBackend, string> = {
  * It sits in the Toolkits block because that is what the user is picking — the
  * thing behind "can my nodes reach each other" — but it is NOT a capability
  * contribution: no plugin provides a tunnel, so it reads the node's own
- * `mesh-backend` pref instead of the capability ladder. Headscale is the default,
- * because self-hosting the control plane is the point. Tailcat is point-to-point:
+ * `mesh-backend` pref instead of the capability ladder. Tailcat is the fresh
+ * install default because it needs no account or control server. Tailcat is point-to-point:
  * it exposes this Core through a short-lived address and does not provide peer
  * discovery or a persistent tailnet.
  *
- * Turning it on starts the selected backend. Tailscale/Headscale need the official
- * `tailscale`/`tailscaled` pair, and Core downloads (or brews) one when this node
- * has none. Tailcat is adopted from a user-installed `tailcat` binary.
- * `installing` on the enable response is the Tailscale/Headscale signal;
+ * Turning it on starts the selected backend. Core downloads the official
+ * `tailscale`/`tailscaled` pair for Tailscale/Headscale or the Tailcat CLI for
+ * Tailcat when this node has none. `installing` on the enable response is the
+ * selected-client signal;
  * {@link watchMeshInstall} waits it out.
  *
  * A backend swap is a SETTING, not a migration: a node already enrolled with
@@ -2735,7 +2735,7 @@ function useTunnel(target: ApiTarget) {
 			]);
 			return {
 				status,
-				backend: parseMeshBackend(backendPref),
+				backend: parseMeshBackend(backendPref, loginServer),
 				loginServer: loginServer?.trim() ?? "",
 			};
 		},
@@ -2756,7 +2756,7 @@ function TunnelLayer({
 	const openGateway = useGatewayDialog((s) => s.openGateway);
 
 	const status = query.data?.status ?? null;
-	const backend = query.data?.backend ?? MESH_BACKEND_HEADSCALE;
+	const backend = query.data?.backend ?? MESH_BACKEND_TAILCAT;
 	const loginServer = query.data?.loginServer ?? "";
 	const enabled = status?.enabled ?? false;
 	const needsControlServer =
@@ -2767,7 +2767,7 @@ function TunnelLayer({
 			const result = await setMeshEnabled(target, next);
 			await query.refetch();
 			if (next && result.installing) {
-				await watchMeshInstall(target);
+				await watchMeshInstall(target, backend);
 				await query.refetch();
 				return;
 			}
@@ -2776,8 +2776,8 @@ function TunnelLayer({
 					title: result.canInstall
 						? "Mesh on, but the tunnel didn't connect"
 						: backend === MESH_BACKEND_TAILCAT
-							? "Tailcat selected — install the Tailcat CLI"
-							: "Mesh on — install the Tailscale client",
+							? "Tailcat could not be installed automatically"
+							: "Mesh client could not be installed automatically",
 					description: result.startError,
 				});
 				return;
@@ -2816,7 +2816,7 @@ function TunnelLayer({
 		}
 		await query.refetch();
 		if (enabled && result.installing) {
-			await watchMeshInstall(target);
+			await watchMeshInstall(target, next);
 			await query.refetch();
 			return;
 		}

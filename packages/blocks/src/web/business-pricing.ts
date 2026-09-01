@@ -20,7 +20,15 @@ export const businessMonthlyPriceUsd = (seats: number): number => {
 	);
 };
 
-/** Pooled monthly AI credits at a billed human-seat quantity. */
+/**
+ * Pooled monthly AI credits at a billed human-seat quantity.
+ *
+ * Business uses completed five-seat bundles: 5–9 seats receive $100, 10–14
+ * receive $200, and so on. That keeps the credit grant stable when one person
+ * is added and matches the versioned server-side entitlement contract.
+ */
 export const businessIncludedCreditUsd = (seats: number): number =>
-	Math.ceil(normalizedBusinessSeats(seats) / BUSINESS_CREDIT_BUNDLE_SIZE) *
-	BUSINESS_INCLUDED_CREDIT_USD;
+	Math.max(
+		1,
+		Math.floor(normalizedBusinessSeats(seats) / BUSINESS_CREDIT_BUNDLE_SIZE)
+	) * BUSINESS_INCLUDED_CREDIT_USD;

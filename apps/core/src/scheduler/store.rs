@@ -43,6 +43,10 @@ pub enum JobTarget {
         prompt: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        /// Existing conversation to append to. `None` means every firing gets
+        /// its own new persistent conversation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<String>,
     },
     /// Run one website-monitor check (fetch → compare → alert). The monitor engine
     /// runs OUT-OF-PROCESS (`ryu-monitors` sidecar); the tick dispatches over loopback
@@ -140,6 +144,13 @@ pub struct ScheduledJob {
     /// something. `None` (a job Core or the desktop owns) is never gated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_app: Option<String>,
+    /// Verified user who owns this routine on a shared node. Absent on personal
+    /// nodes and legacy/system jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<String>,
+    /// Organization that owns this routine on a shared node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     /// ISO timestamp of the last time this job fired (success or failure).
@@ -248,6 +259,8 @@ mod tests {
             enabled: true,
             require_approval: false,
             owner_app: None,
+            owner_user_id: None,
+            org_id: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
             last_run_at: None,
@@ -304,6 +317,7 @@ mod tests {
                 agent_id: "a".into(),
                 prompt: "p".into(),
                 model: None,
+                conversation_id: None,
             }
         );
         assert_eq!(

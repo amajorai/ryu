@@ -101,6 +101,18 @@ pub fn subscribe() -> broadcast::Receiver<DesktopNotification> {
 /// `host.navigate` primitive. A sandboxed app UI cannot deep-link or navigate the
 /// shell itself; it emits this and the connected surface (desktop/web/…) consumes
 /// the SSE stream and performs the navigation. Fire-and-forget, like a notification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationKind {
+    /// Open or focus a normal top-level workspace tab.
+    #[default]
+    Tab,
+    /// Open or focus a page in the focused chat's workspace dock.
+    Panel,
+    /// Open or focus the embedded Browser app and load the requested URL.
+    Browser,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct NavigationRequest {
     /// The plugin that requested the navigation (audit + so the shell can scope the
@@ -112,6 +124,26 @@ pub struct NavigationRequest {
     /// Optional structured params for the target (query/state). Opaque here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
+    /// Which host surface should consume the request. Old `host.navigate` callers
+    /// omit this field and retain the original top-level-tab behavior.
+    #[serde(default, skip_serializing_if = "is_default_navigation_kind")]
+    pub kind: NavigationKind,
+    /// Whether a top-level tab request should force a fresh tab instead of using
+    /// the user's normal tab-reuse preference.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub force_new: bool,
+    /// Verified owner for an agent request on a shared node. A targeted event is
+    /// delivered only to that user's shell; it is never a broadcast control signal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_user_id: Option<String>,
+}
+
+fn is_default_navigation_kind(kind: &NavigationKind) -> bool {
+    *kind == NavigationKind::Tab
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 static NAV_EVENTS: OnceLock<broadcast::Sender<NavigationRequest>> = OnceLock::new();

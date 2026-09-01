@@ -1911,6 +1911,9 @@ export interface AgentSettingsFormProps {
 	 *  the tab (e.g. for brand-new agents that have no record yet). */
 	promptStudioPanel?: ReactNode;
 
+	/** Injected: persistent agent routines with run destinations and controls. */
+	routinesPanel?: ReactNode;
+
 	// Rules
 	rules: string[];
 	/** Injected Agent Edit panel supplied by a plugin (for example Rules). */
@@ -2242,6 +2245,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		evalsPanel,
 		calendarPanel,
 		historyPanel,
+		routinesPanel,
 		systemPrompt,
 		onOpenPromptStudio,
 		rules,
@@ -2482,130 +2486,132 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	const triggersPanel = (
 		<>
 			{/* 3. Trigger — schedule + Composio event triggers */}
-			<SettingsSection
-				caption="Run this agent automatically on a schedule."
-				title="Schedule"
-			>
-				<SettingsGroup>
-					<SettingsItem
-						actions={
-							<Switch
-								checked={scheduleEnabled}
-								disabled={isLocked}
-								id="schedule-toggle"
-								onCheckedChange={onScheduleEnabledChange}
+			{routinesPanel ?? (
+				<SettingsSection
+					caption="Run this agent automatically on a schedule."
+					title="Schedule"
+				>
+					<SettingsGroup>
+						<SettingsItem
+							actions={
+								<Switch
+									checked={scheduleEnabled}
+									disabled={isLocked}
+									id="schedule-toggle"
+									onCheckedChange={onScheduleEnabledChange}
+								/>
+							}
+							title="Run on a schedule"
+						/>
+						{scheduleEnabled ? (
+							<SettingsItem
+								actions={
+									<Select
+										disabled={isLocked}
+										items={SCHEDULE_PHRASE_ITEMS}
+										onValueChange={(v) => onSchedulePhraseChange?.(v ?? "")}
+										value={schedulePhrase}
+									>
+										<SelectTrigger
+											className="h-8 w-44 flex-shrink-0 text-sm"
+											id="schedule-phrase"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{SCHEDULE_PHRASE_ITEMS.map((opt) => (
+												<SelectItem key={opt.value} value={opt.value}>
+													{opt.label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								}
+								title="Frequency"
 							/>
-						}
-						title="Run on a schedule"
-					/>
-					{scheduleEnabled ? (
-						<SettingsItem
-							actions={
-								<Select
-									disabled={isLocked}
-									items={SCHEDULE_PHRASE_ITEMS}
-									onValueChange={(v) => onSchedulePhraseChange?.(v ?? "")}
-									value={schedulePhrase}
-								>
-									<SelectTrigger
-										className="h-8 w-44 flex-shrink-0 text-sm"
-										id="schedule-phrase"
+						) : null}
+						{scheduleEnabled && showTimeField ? (
+							<SettingsItem
+								actions={
+									<Input
+										aria-label="Time"
+										className="h-8 w-32"
+										disabled={isLocked}
+										id="daily-time"
+										onChange={(e) => onDailyTimeChange?.(e.target.value)}
+										type="time"
+										value={dailyTime}
+									/>
+								}
+								title="Time"
+							/>
+						) : null}
+						{scheduleEnabled && schedulePhrase === "weekly" ? (
+							<SettingsItem
+								actions={
+									<Select
+										disabled={isLocked}
+										items={WEEKDAYS.map((d) => ({
+											value: d,
+											label: d.charAt(0).toUpperCase() + d.slice(1),
+										}))}
+										onValueChange={(v) => onWeeklyDayChange?.(v ?? "")}
+										value={weeklyDay}
 									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{SCHEDULE_PHRASE_ITEMS.map((opt) => (
-											<SelectItem key={opt.value} value={opt.value}>
-												{opt.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							}
-							title="Frequency"
-						/>
-					) : null}
-					{scheduleEnabled && showTimeField ? (
-						<SettingsItem
-							actions={
-								<Input
-									aria-label="Time"
-									className="h-8 w-32"
-									disabled={isLocked}
-									id="daily-time"
-									onChange={(e) => onDailyTimeChange?.(e.target.value)}
-									type="time"
-									value={dailyTime}
-								/>
-							}
-							title="Time"
-						/>
-					) : null}
-					{scheduleEnabled && schedulePhrase === "weekly" ? (
-						<SettingsItem
-							actions={
-								<Select
-									disabled={isLocked}
-									items={WEEKDAYS.map((d) => ({
-										value: d,
-										label: d.charAt(0).toUpperCase() + d.slice(1),
-									}))}
-									onValueChange={(v) => onWeeklyDayChange?.(v ?? "")}
-									value={weeklyDay}
-								>
-									<SelectTrigger
-										className="h-8 w-36 flex-shrink-0 text-sm"
-										id="weekly-day"
-									>
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{WEEKDAYS.map((d) => (
-											<SelectItem key={d} value={d}>
-												{d.charAt(0).toUpperCase() + d.slice(1)}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							}
-							title="Day"
-						/>
-					) : null}
-					{scheduleEnabled && schedulePhrase === "weekly" ? (
-						<SettingsItem
-							actions={
-								<Input
-									aria-label="Time"
-									className="h-8 w-32"
-									disabled={isLocked}
-									id="weekly-time"
-									onChange={(e) => onWeeklyTimeChange?.(e.target.value)}
-									type="time"
-									value={weeklyTime}
-								/>
-							}
-							title="Time"
-						/>
-					) : null}
-					{scheduleEnabled && schedulePhrase === "custom" ? (
-						<SettingsItem
-							actions={
-								<Input
-									aria-label="Cron expression"
-									className="h-8 w-44 font-mono"
-									disabled={isLocked}
-									id="custom-cron"
-									onChange={(e) => onCustomCronChange?.(e.target.value)}
-									placeholder="e.g. 0 9 * * 1-5"
-									value={customCron}
-								/>
-							}
-							description="Standard 5-field cron: minute hour day month weekday."
-							title="Cron expression"
-						/>
-					) : null}
-				</SettingsGroup>
-			</SettingsSection>
+										<SelectTrigger
+											className="h-8 w-36 flex-shrink-0 text-sm"
+											id="weekly-day"
+										>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{WEEKDAYS.map((d) => (
+												<SelectItem key={d} value={d}>
+													{d.charAt(0).toUpperCase() + d.slice(1)}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								}
+								title="Day"
+							/>
+						) : null}
+						{scheduleEnabled && schedulePhrase === "weekly" ? (
+							<SettingsItem
+								actions={
+									<Input
+										aria-label="Time"
+										className="h-8 w-32"
+										disabled={isLocked}
+										id="weekly-time"
+										onChange={(e) => onWeeklyTimeChange?.(e.target.value)}
+										type="time"
+										value={weeklyTime}
+									/>
+								}
+								title="Time"
+							/>
+						) : null}
+						{scheduleEnabled && schedulePhrase === "custom" ? (
+							<SettingsItem
+								actions={
+									<Input
+										aria-label="Cron expression"
+										className="h-8 w-44 font-mono"
+										disabled={isLocked}
+										id="custom-cron"
+										onChange={(e) => onCustomCronChange?.(e.target.value)}
+										placeholder="e.g. 0 9 * * 1-5"
+										value={customCron}
+									/>
+								}
+								description="Standard 5-field cron: minute hour day month weekday."
+								title="Cron expression"
+							/>
+						) : null}
+					</SettingsGroup>
+				</SettingsSection>
+			)}
 
 			{showComposioTriggers ? (
 				<SettingsSection

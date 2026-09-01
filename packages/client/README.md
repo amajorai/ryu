@@ -5,7 +5,7 @@
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
 [![Stack](https://shieldcn.dev/badge/TypeScript-Client-3178C6.svg?logo=typescript&logoColor=white)](../../README.md)
 
-`@ryu/client` is a Mastra-style typed client over Ryu Core's HTTP API (:7980): create a client, pick an agent, and stream. It has no internal Ryu dependencies and zero runtime dependencies. It uses native `fetch` and works in Node 18+, Bun, Deno, and modern browsers. It pairs with the open Core.
+`@ryuhq/client` is a typed client over Ryu Core's HTTP API: create a client, pick an agent, and stream. It has no internal Ryu dependencies and zero runtime dependencies. It uses native `fetch` and works in Node 18+, Bun, Deno, and modern browsers. It pairs with the open Core.
 
 **Tier:** OSS, Apache-2.0
 

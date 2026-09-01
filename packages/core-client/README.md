@@ -7,7 +7,7 @@
 
 `@ryu/core-client` is the shared HTTP client every surface uses to talk to a Ryu Core (and Gateway) node. It has **no platform dependencies** (no `localStorage`, no Tauri, no React), so the desktop (Tauri webview) and mobile (React Native / Expo) share the same domain modules verbatim. The base URL and bearer token always come from the caller's active node (`{ url, token }`), never hardcoded: Core listens on `:7980` but the active node may be remote.
 
-**Tier:** Closed, proprietary (A Major Pte. Ltd.)
+**Tier:** OSS, Apache-2.0
 
 ## What it provides
 

@@ -101,7 +101,7 @@ an app. Give each run the controls and history needed for real work.
 
 ## What's here
 
-This repository is the read-only public mirror of Ryu's open-core stack:
+This public repository contains Ryu's open-core stack and source-available desktop layer:
 
 - Open-source Core, Gateway, CLI/TUI clients, SDKs, and capability crates.
 - Source-available Desktop, Island, and shared UI packages.
@@ -144,6 +144,7 @@ Ryu is pre-1.0. Interfaces, APIs, and on-disk formats may change between release
 
 ## Contributing
 
-Contributions to the open-source units are welcome. Start with the
-[contribution guide](./.github/CONTRIBUTING.md), and report security issues through
-[SECURITY.md](./.github/SECURITY.md).
+Contributions to the open-source units and source-available layer are welcome. Open a pull
+request in this repository and start with the [contribution guide](./CONTRIBUTING.md). Accepted
+changes are carried back into the Ryu monorepo by maintainers and included in a later sync.
+Report security issues through [SECURITY.md](./.github/SECURITY.md).

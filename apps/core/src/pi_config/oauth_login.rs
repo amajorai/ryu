@@ -224,6 +224,13 @@ async fn reap_or_kill(
     child: &mut Child,
     wait: std::time::Duration,
 ) -> Option<std::process::ExitStatus> {
+    // A bridge can close stdout and exit before this function is reached. Reap
+    // that common terminal path synchronously so a busy Tokio runtime cannot
+    // spend the whole status ceiling waiting for an exit notification that is
+    // already available from the OS.
+    if let Ok(Some(status)) = child.try_wait() {
+        return Some(status);
+    }
     match tokio::time::timeout(wait, child.wait()).await {
         Ok(Ok(status)) => Some(status),
         _ => {

@@ -32,7 +32,7 @@ import type {
 	ContextMenuItem as FileTreeContextMenuItem,
 	ContextMenuOpenContext as FileTreeContextMenuOpenContext,
 } from "@pierre/trees";
-import { FileTree, useFileTree } from "@pierre/trees/react";
+import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -181,7 +181,12 @@ import type {
 import PluginCompanionPage from "@/src/pages/PluginCompanionPage.tsx";
 import PluginViewPage from "@/src/pages/PluginViewPage.tsx";
 import { useAssistantStore } from "@/src/store/useAssistantStore.ts";
+import { useBrowserOpenRequestStore } from "@/src/store/useBrowserOpenRequestStore.ts";
 import { useDockPanelRequestStore } from "@/src/store/useDockPanelRequestStore.ts";
+import {
+	type FileTreeSearchRequest,
+	useFileTreeSearchStore,
+} from "@/src/store/useFileTreeSearchStore.ts";
 import {
 	type ProjectDockTab,
 	useProjectDockStore,
@@ -1298,10 +1303,19 @@ function PanelEmptyState({
 
 // ── File tree panel (@pierre/trees) ──────────────────────────────────────────
 
-export function FileTreePanel({ folder }: { folder?: string | null }) {
+export function FileTreePanel({
+	active = true,
+	folder,
+}: {
+	active?: boolean;
+	folder?: string | null;
+}) {
 	const [paths, setPaths] = useState<readonly string[]>([]);
 	const [loading, setLoading] = useState(false);
 	const terminalShell = useWorkspaceStore((s) => s.terminalShell);
+	const searchRequest = useFileTreeSearchStore((state) =>
+		active ? state.request : null
+	);
 
 	useEffect(() => {
 		if (!folder) {
@@ -1324,7 +1338,11 @@ export function FileTreePanel({ folder }: { folder?: string | null }) {
 	}, [folder, terminalShell]);
 
 	const prefs = useFileTreePrefs();
-	const options = useMemo(() => fileTreePrefsToOptions(prefs), [prefs]);
+	const searchEnabled = prefs.showSearch || searchRequest !== null;
+	const options = useMemo(
+		() => fileTreePrefsToOptions({ ...prefs, showSearch: searchEnabled }),
+		[prefs, searchEnabled]
+	);
 	const themeStyles = useFileTreeThemeStyles(prefs);
 	const availableEditorIds = useAvailableEditorIds();
 	const availableEditors = useMemo(
@@ -1425,6 +1443,7 @@ export function FileTreePanel({ folder }: { folder?: string | null }) {
 					key={JSON.stringify(options)}
 					options={options}
 					paths={paths}
+					searchRequest={searchRequest}
 					style={themeStyles}
 				/>
 			</div>
@@ -1442,18 +1461,43 @@ function FileTreeView({
 	folder,
 	paths,
 	options,
+	searchRequest,
 	style,
 }: {
 	availableEditors: readonly EditorDef[];
 	folder: string;
 	options: ReturnType<typeof fileTreePrefsToOptions>;
 	paths: readonly string[];
+	searchRequest: FileTreeSearchRequest | null;
 	style?: CSSProperties;
 }) {
 	const { model } = useFileTree({ ...options, paths });
+	const fileTreeSearch = useFileTreeSearch(model);
+	const requestWasActiveRef = useRef(false);
+	const lastRequestNonceRef = useRef<number | null>(null);
 	useEffect(() => {
 		model.resetPaths(paths);
 	}, [paths, model]);
+	useEffect(() => {
+		if (!searchRequest) {
+			if (requestWasActiveRef.current) {
+				requestWasActiveRef.current = false;
+				lastRequestNonceRef.current = null;
+				fileTreeSearch.close();
+			}
+			return;
+		}
+
+		requestWasActiveRef.current = true;
+		if (lastRequestNonceRef.current !== searchRequest.nonce) {
+			lastRequestNonceRef.current = searchRequest.nonce;
+			fileTreeSearch.open(searchRequest.query);
+			return;
+		}
+		if (fileTreeSearch.value !== searchRequest.query) {
+			fileTreeSearch.setValue(searchRequest.query);
+		}
+	}, [fileTreeSearch, searchRequest]);
 	return (
 		<FileTree
 			className="h-full w-full"
@@ -2067,6 +2111,11 @@ function IframePanel({
 	const [slow, setSlow] = useState(false);
 
 	useEffect(() => {
+		setSrc(initialUrl);
+		setInputVal(initialUrl);
+	}, [initialUrl]);
+
+	useEffect(() => {
 		setLoading(true);
 		setSlow(false);
 		const t = setTimeout(() => setSlow(true), 4000);
@@ -2156,11 +2205,36 @@ export function BrowserTabPanel({
 	title: string;
 }) {
 	const { apps } = useApps();
+	const pendingOpen = useBrowserOpenRequestStore((state) => state.pending);
+	const clearPendingOpen = useBrowserOpenRequestStore((state) => state.clear);
+	const [consumedOpen, setConsumedOpen] = useState<{
+		nonce: number;
+		url: string;
+	} | null>(null);
+	useEffect(() => {
+		if (!pendingOpen) {
+			return;
+		}
+		setConsumedOpen(pendingOpen);
+		clearPendingOpen();
+	}, [clearPendingOpen, pendingOpen]);
+	const requestedOpen = pendingOpen ?? consumedOpen;
 	const enabled = apps.some((a) => a.id === BROWSER_PLUGIN_ID && a.enabled);
 	if (enabled) {
-		return <BrowserSidecarPanel active={active} />;
+		return (
+			<BrowserSidecarPanel
+				active={active}
+				requestedNonce={requestedOpen?.nonce}
+				requestedUrl={requestedOpen?.url}
+			/>
+		);
 	}
-	return <IframePanel initialUrl="https://www.google.com" title={title} />;
+	return (
+		<IframePanel
+			initialUrl={requestedOpen?.url ?? "https://www.google.com"}
+			title={title}
+		/>
+	);
 }
 
 function formatBrowserContext(context: BrowserContextResult | null): string {
@@ -2214,7 +2288,15 @@ function formatBrowserContext(context: BrowserContextResult | null): string {
 	return lines.join("\n");
 }
 
-function BrowserSidecarPanel({ active = true }: { active?: boolean }) {
+function BrowserSidecarPanel({
+	active = true,
+	requestedNonce,
+	requestedUrl,
+}: {
+	active?: boolean;
+	requestedNonce?: number;
+	requestedUrl?: string;
+}) {
 	const node = useActiveNode();
 	const [tabs, setTabs] = useState<SidecarTab[]>([]);
 	const [activeId, setActiveId] = useState<string | null>(null);
@@ -2361,6 +2443,13 @@ function BrowserSidecarPanel({ active = true }: { active?: boolean }) {
 		},
 		[call, headers, refresh]
 	);
+
+	useEffect(() => {
+		if (!requestedUrl) {
+			return;
+		}
+		openTab(requestedUrl).catch(() => undefined);
+	}, [openTab, requestedNonce, requestedUrl]);
 
 	const screenshot = useCallback(
 		async (id: string) => {
@@ -3500,7 +3589,13 @@ function TabContent({
 		);
 	}
 	if (tab.kind === "files") {
-		return <FileTreePanel folder={folder} key={`${tab.uid}-${folder}`} />;
+		return (
+			<FileTreePanel
+				active={active}
+				folder={folder}
+				key={`${tab.uid}-${folder}`}
+			/>
+		);
 	}
 	if (tab.kind === "gitgraph") {
 		return (
@@ -3765,6 +3860,8 @@ export interface WorkspacePanelsProps {
 	cowork?: CoworkData;
 	/** Opens a path-scoped Changes view for one completed assistant turn. */
 	fileReviewRequest?: FileReviewRequest | null;
+	/** Request from the focused chat to open and drive the Files tree search. */
+	fileSearchRequest?: FileTreeSearchRequest | null;
 	folder?: string | null;
 	/**
 	 * A request to inspect a raw message part (tool call / image / citations) in
@@ -3825,6 +3922,7 @@ export function WorkspacePanels(props: WorkspacePanelsProps) {
 function WorkspacePanelsImpl({
 	children,
 	fileReviewRequest,
+	fileSearchRequest,
 	folder,
 	cowork,
 	bottomOpen,
@@ -4171,6 +4269,23 @@ function WorkspacePanelsImpl({
 	// the effect fires once per click (the nonce makes each request distinct).
 	const openRightTabRef = useRef(rightLocal.openTab);
 	openRightTabRef.current = rightLocal.openTab;
+	const fileSearchNonce = fileSearchRequest?.nonce;
+	useEffect(() => {
+		if (fileSearchNonce === undefined) {
+			return;
+		}
+		const projectFiles = visibleRightProject.find(
+			(tab) => tab.kind === "files"
+		);
+		if (projectFiles) {
+			setRightActiveUid(projectFiles.uid);
+		} else {
+			openRightTabRef.current("files", "Files");
+		}
+		if (!rightOpen) {
+			onRightOpenChange(true);
+		}
+	}, [fileSearchNonce, onRightOpenChange, rightOpen, visibleRightProject]);
 	useEffect(() => {
 		setSubagentView(null);
 	}, [cowork?.runId]);
@@ -4582,6 +4697,7 @@ function WorkspacePanelsImpl({
 					<ProjectDockContentSlot active uid={activeBottomTab.uid} />
 				) : activeBottomTab ? (
 					<TabContent
+						active={isFocusedWindowTab}
 						contextView={contextView}
 						dockPanels={dockPanels}
 						fileReviewRequest={fileReviewRequest}
@@ -4626,6 +4742,7 @@ function WorkspacePanelsImpl({
 					<ProjectDockContentSlot active uid={activeRightTab.uid} />
 				) : activeRightTab ? (
 					<TabContent
+						active={isFocusedWindowTab}
 						contextView={contextView}
 						cowork={cowork}
 						dockPanels={dockPanels}

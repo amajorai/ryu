@@ -1,8 +1,8 @@
-//! Command execution scanner: hardline blocklist (always deny) + ~55 risk
-//! patterns evaluated under an approval mode. Coverage spans destructive shell
-//! commands plus Claw-Patrol-style database (SQL exfil/RCE/DDL) and Kubernetes
-//! (exec, secrets, delete, privileged, RBAC) operations, matched as
-//! shell-invocation strings.
+//! Command execution scanner: permanent-deletion blocklist + hardline blocklist
+//! (always deny) + ~55 risk patterns evaluated under an approval mode. Coverage
+//! spans destructive shell commands plus Claw-Patrol-style database
+//! (SQL exfil/RCE/DDL) and Kubernetes (exec, secrets, delete, privileged, RBAC)
+//! operations, matched as shell-invocation strings.
 //!
 //! Pure and env-free: the [`ApprovalMode`] is a parameter, so every decision is
 //! deterministic and unit-testable. The env var (`RYU_EXEC_APPROVAL_MODE`) is
@@ -10,8 +10,9 @@
 //!
 //! Two regex sets are compiled ONCE at call time from static tables (never in a
 //! loop): a small HARDLINE set that always denies regardless of mode, and a
-//! larger PATTERN set whose severities drive the manual/smart escalation. All
-//! patterns are plain top-level regex literals.
+//! larger PATTERN set whose severities drive the manual/smart escalation. The
+//! shared permanent-deletion classifier runs before both sets' mode handling.
+//! All patterns are plain top-level regex literals.
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -110,7 +111,9 @@ pub struct ManagedRuleFinding {
     pub argv: Vec<String>,
 }
 
-/// Scan a command for governance. Pure over `(backend, command, mode)`.
+/// Scan a command for governance. Pure over `(backend, command, mode)` and
+/// always applies the permanent-deletion guard. Callers that have an explicit
+/// operator policy change may use [`scan_command_with_policy`].
 ///
 /// Decision order:
 /// 1. HARDLINE set first — any match ⇒ `Deny` (always, regardless of mode or a
@@ -121,7 +124,20 @@ pub struct ManagedRuleFinding {
 /// 4. `Manual` with ≥1 finding ⇒ `ApprovalRequired`.
 /// 5. `Smart`: max severity — `Critical` ⇒ `Deny`; `High`/`Medium` ⇒
 ///    `ApprovalRequired`; only `Low` ⇒ `Allow`.
-pub fn scan_command(_backend: &str, command: &str, mode: ApprovalMode) -> ScanVerdict {
+pub fn scan_command(backend: &str, command: &str, mode: ApprovalMode) -> ScanVerdict {
+    scan_command_with_policy(backend, command, mode, false)
+}
+
+/// Scan a command with the explicit permanent-deletion policy supplied by the
+/// authenticated caller. The default is `false`; this argument is intentionally
+/// not inferred from the approval mode because `off` must not silently disable
+/// the machine-safety block.
+pub fn scan_command_with_policy(
+    backend: &str,
+    command: &str,
+    mode: ApprovalMode,
+    allow_permanent_delete: bool,
+) -> ScanVerdict {
     // 1. Hardline blocklist — always denies.
     for (name, re) in build_hardline() {
         if re.is_match(command) {
@@ -158,7 +174,18 @@ pub fn scan_command(_backend: &str, command: &str, mode: ApprovalMode) -> ScanVe
         };
     }
 
-    // 2. Off mode: nothing beyond hardline is enforced.
+    // 1c. Permanent file deletion is a separate, cross-surface hard stop. It
+    // runs after the legacy catastrophic hardlines so existing audit reasons for
+    // `rm -rf /` remain stable, but before mode/rule processing so neither
+    // `off` nor a managed allow rule can turn it back on accidentally.
+    if ryu_deletion_guard::is_execution_backend(backend) && !allow_permanent_delete {
+        if let Some(rule) = ryu_deletion_guard::detect_command(command) {
+            return permanent_delete_verdict(rule);
+        }
+    }
+
+    // 2. Off mode: nothing beyond the hardline/permanent-deletion blocks is
+    // enforced.
     if mode == ApprovalMode::Off {
         return ScanVerdict {
             decision: Decision::Allow,
@@ -224,6 +251,21 @@ pub fn scan_command(_backend: &str, command: &str, mode: ApprovalMode) -> ScanVe
     }
 }
 
+fn permanent_delete_verdict(rule: &str) -> ScanVerdict {
+    ScanVerdict {
+        decision: Decision::Deny,
+        reason: Some(format!(
+            "permanent file deletion blocked by Ryu: {rule}; move the target to the host Trash or Recycle Bin"
+        )),
+        findings: vec![Finding {
+            pattern: rule.to_owned(),
+            category: "permanent_deletion".to_owned(),
+            severity: Severity::Critical,
+        }],
+        managed_rule: None,
+    }
+}
+
 fn split_shell_segments(command: &str) -> Option<Vec<Vec<String>>> {
     let mut segments = Vec::new();
     let mut current = String::new();
@@ -277,7 +319,8 @@ fn rule_matches(
 }
 
 /// Apply authenticated organization rules between the immutable hardline scan
-/// and the built-in risk-pattern scanner.
+/// and the built-in risk-pattern scanner. Permanent deletion remains denied
+/// unless the caller uses the explicit policy-aware variant.
 pub fn scan_command_with_rules(
     backend: &str,
     command: &str,
@@ -285,12 +328,27 @@ pub fn scan_command_with_rules(
     rules: &[ManagedCommandRule],
     project_id: Option<&str>,
 ) -> ScanVerdict {
-    let hardline = scan_command(backend, command, ApprovalMode::Off);
+    scan_command_with_rules_policy(backend, command, mode, rules, project_id, false)
+}
+
+/// [`scan_command_with_rules`] with an explicit operator policy change for
+/// permanent deletion. The surrounding Core/Gateway auth boundary is
+/// responsible for ensuring that `allow_permanent_delete` is not agent input.
+pub fn scan_command_with_rules_policy(
+    backend: &str,
+    command: &str,
+    mode: ApprovalMode,
+    rules: &[ManagedCommandRule],
+    project_id: Option<&str>,
+    allow_permanent_delete: bool,
+) -> ScanVerdict {
+    let hardline =
+        scan_command_with_policy(backend, command, ApprovalMode::Off, allow_permanent_delete);
     if hardline.decision == Decision::Deny {
         return hardline;
     }
     if rules.is_empty() {
-        return scan_command(backend, command, mode);
+        return scan_command_with_policy(backend, command, mode, allow_permanent_delete);
     }
     let Some(segments) = split_shell_segments(command) else {
         return ScanVerdict {
@@ -342,7 +400,7 @@ pub fn scan_command_with_rules(
                 continue;
             }
             let segment = shell_words::join(argv);
-            let verdict = scan_command(backend, &segment, mode);
+            let verdict = scan_command_with_policy(backend, &segment, mode, allow_permanent_delete);
             if verdict.decision != Decision::Allow {
                 return verdict;
             }
@@ -360,7 +418,7 @@ pub fn scan_command_with_rules(
             }),
         };
     }
-    scan_command(backend, command, mode)
+    scan_command_with_policy(backend, command, mode, allow_permanent_delete)
 }
 
 fn severity_rank(s: Severity) -> u8 {
@@ -825,11 +883,17 @@ mod tests {
 
     #[test]
     fn off_skips_non_hardline() {
-        // Recursive destructive but NOT rooted → a PATTERN, not hardline. Off
-        // mode ignores patterns, so this is allowed.
-        let v = scan_command("bash", "rm -rf /home/user/tmp", ApprovalMode::Off);
+        // A risk pattern that is not a permanent deletion remains mode-gated.
+        let v = scan_command("bash", "systemctl stop nginx", ApprovalMode::Off);
         assert_eq!(v.decision, Decision::Allow, "got {v:?}");
         assert!(v.findings.is_empty());
+    }
+
+    #[test]
+    fn permanent_deletion_is_denied_even_when_pattern_approval_is_off() {
+        let v = scan_command("bash", "rm -rf /home/user/tmp", ApprovalMode::Off);
+        assert_eq!(v.decision, Decision::Deny, "got {v:?}");
+        assert_eq!(v.findings[0].category, "permanent_deletion");
     }
 
     #[test]
@@ -871,11 +935,11 @@ mod tests {
 
     #[test]
     fn non_root_recursive_rm_is_pattern_not_hardline() {
-        // Under Manual this recursive rm must escalate (approval), proving it is
-        // a PATTERN and never silently allowed.
+        // The permanent-deletion block now sits above the older risk pattern, so
+        // this is an unconditional deny rather than an approval request.
         let v = scan_command("bash", "rm -rf /home/user/tmp", ApprovalMode::Manual);
-        assert_eq!(v.decision, Decision::ApprovalRequired);
-        assert!(v.findings.iter().any(|f| f.pattern == "rm_recursive"));
+        assert_eq!(v.decision, Decision::Deny);
+        assert_eq!(v.findings[0].category, "permanent_deletion");
     }
 
     #[test]
@@ -919,10 +983,17 @@ mod tests {
 
     #[test]
     fn benign_recursive_force_rm_is_not_hardline() {
-        // Recursive + force but NOT targeting bare root. Off ignores risk
-        // PATTERNs, so these are allowed - proving they are not hardline-denied.
+        // Recursive + force but NOT targeting bare root is no longer a legacy
+        // hardline match, but it remains blocked by the permanent-deletion
+        // policy. An explicit policy change reaches the old mode behavior.
         for cmd in ["rm -rf ./build", "rm -rf /home/user/tmp/x"] {
-            let v = scan_command("bash", cmd, ApprovalMode::Off);
+            let denied = scan_command("bash", cmd, ApprovalMode::Off);
+            assert_eq!(
+                denied.decision,
+                Decision::Deny,
+                "cmd {cmd:?} got {denied:?}"
+            );
+            let v = scan_command_with_policy("bash", cmd, ApprovalMode::Off, true);
             assert_eq!(v.decision, Decision::Allow, "cmd {cmd:?} got {v:?}");
             assert!(v.findings.is_empty(), "cmd {cmd:?} got {v:?}");
         }
@@ -930,25 +1001,24 @@ mod tests {
 
     #[test]
     fn longform_recursive_rm_no_force_nonroot_is_not_hardline() {
-        // `rm --recursive` (no force, non-root) must NOT be hardline. It should
-        // still escalate under Manual via the broadened rm_recursive pattern.
+        // `rm --recursive` (no force, non-root) is denied by the permanent-delete
+        // policy before the older approval pattern is considered.
         let v = scan_command(
             "bash",
             "rm --recursive /home/user/proj",
             ApprovalMode::Manual,
         );
-        assert_eq!(v.decision, Decision::ApprovalRequired, "got {v:?}");
-        assert!(v.reason.as_deref().unwrap_or("").contains("manual"));
-        assert!(v.findings.iter().any(|f| f.pattern == "rm_recursive"));
+        assert_eq!(v.decision, Decision::Deny, "got {v:?}");
+        assert_eq!(v.findings[0].category, "permanent_deletion");
     }
 
     #[test]
     fn uppercase_recursive_rm_escalates_under_manual() {
-        // `rm -R` (uppercase, non-root) escalates via the case-insensitive
-        // broadened pattern.
+        // `rm -R` (uppercase, non-root) is denied by the case-insensitive shared
+        // guard.
         let v = scan_command("bash", "rm -R /home/user/proj", ApprovalMode::Manual);
-        assert_eq!(v.decision, Decision::ApprovalRequired, "got {v:?}");
-        assert!(v.findings.iter().any(|f| f.pattern == "rm_recursive"));
+        assert_eq!(v.decision, Decision::Deny, "got {v:?}");
+        assert_eq!(v.findings[0].category, "permanent_deletion");
     }
 
     // ── Database (SQL) governance — Claw Patrol parity ────────────────────────
@@ -1140,8 +1210,35 @@ mod tests {
             &rules,
             None,
         );
-        assert_eq!(verdict.decision, Decision::ApprovalRequired);
+        assert_eq!(verdict.decision, Decision::Deny);
         assert!(verdict.managed_rule.is_none());
+    }
+
+    #[test]
+    fn permanent_deletion_cannot_be_allowed_by_a_managed_rule() {
+        let rules = vec![managed_rule(
+            "allow-rm",
+            ManagedRuleDecision::Allow,
+            &["rm"],
+        )];
+        let verdict =
+            scan_command_with_rules("bash", "rm -rf ./tmp", ApprovalMode::Off, &rules, None);
+        assert_eq!(verdict.decision, Decision::Deny);
+        assert!(verdict.managed_rule.is_none());
+
+        let opted_in = scan_command_with_rules_policy(
+            "bash",
+            "rm -rf ./tmp",
+            ApprovalMode::Off,
+            &rules,
+            None,
+            true,
+        );
+        assert_eq!(opted_in.decision, Decision::Allow);
+        assert_eq!(
+            opted_in.managed_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("allow-rm")
+        );
     }
 
     #[test]

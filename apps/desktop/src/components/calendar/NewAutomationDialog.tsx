@@ -15,6 +15,7 @@ import {
 } from "@ryu/ui/components/native-select";
 import { Switch } from "@ryu/ui/components/switch";
 import { useMemo, useState } from "react";
+import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAgents } from "@/src/hooks/useAgents.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -49,14 +50,17 @@ export function NewAutomationDialog({
 	onOpenChange,
 	onCreated,
 	defaultAgentId,
+	defaultConversationId,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onCreated: () => void;
 	defaultAgentId?: string;
+	defaultConversationId?: string;
 }) {
 	const activeNode = useActiveNode();
 	const { agents } = useAgents();
+	const { conversations } = useChatHistoryContext();
 	const activeAgents = useMemo(
 		() => agents.filter((agent) => agent.lifecycleStatus === "active"),
 		[agents]
@@ -68,6 +72,12 @@ export function NewAutomationDialog({
 	const [weeklyDay, setWeeklyDay] = useState("monday");
 	const [weeklyTime, setWeeklyTime] = useState("09:00");
 	const [customCron, setCustomCron] = useState("");
+	const [destination, setDestination] = useState<"new" | "existing">(
+		defaultConversationId ? "existing" : "new"
+	);
+	const [conversationId, setConversationId] = useState(
+		defaultConversationId ?? ""
+	);
 	const [requireApproval, setRequireApproval] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -76,6 +86,50 @@ export function NewAutomationDialog({
 	const selectedAgentId = activeAgents.some((agent) => agent.id === agentId)
 		? agentId
 		: (activeAgents[0]?.id ?? "");
+	const agentConversations = useMemo(
+		() =>
+			conversations
+				.filter((conversation) => conversation.agentId === selectedAgentId)
+				.sort((a, b) => b.updatedAt - a.updatedAt),
+		[selectedAgentId, conversations]
+	);
+	const currentConversation = agentConversations.find(
+		(conversation) => conversation.id === defaultConversationId
+	);
+	const orderedConversations = currentConversation
+		? [
+				currentConversation,
+				...agentConversations.filter(
+					(conversation) => conversation.id !== currentConversation.id
+				),
+			]
+		: agentConversations;
+
+	const handleAgentChange = (nextAgentId: string) => {
+		setAgentId(nextAgentId);
+		if (destination !== "existing") {
+			return;
+		}
+		const selectedConversation = conversations.find(
+			(conversation) =>
+				conversation.id === conversationId &&
+				conversation.agentId === nextAgentId
+		);
+		if (!selectedConversation) {
+			setConversationId(
+				conversations.find(
+					(conversation) => conversation.agentId === nextAgentId
+				)?.id ?? ""
+			);
+		}
+	};
+
+	const handleDestinationChange = (nextDestination: "new" | "existing") => {
+		setDestination(nextDestination);
+		if (nextDestination === "existing" && !conversationId) {
+			setConversationId(agentConversations[0]?.id ?? "");
+		}
+	};
 
 	const handleCreate = async () => {
 		const agent = activeAgents.find((a) => a.id === selectedAgentId);
@@ -85,6 +139,10 @@ export function NewAutomationDialog({
 		}
 		if (phrase === "custom" && customCron.trim().length === 0) {
 			setError("Enter a cron expression.");
+			return;
+		}
+		if (destination === "existing" && !conversationId) {
+			setError("Choose a persistent chat.");
 			return;
 		}
 		setSaving(true);
@@ -98,6 +156,7 @@ export function NewAutomationDialog({
 			await createScheduledAgentWorkflow(target, {
 				agentId: agent.id,
 				agentName: agent.name,
+				conversationId: destination === "existing" ? conversationId : null,
 				schedule: phraseToSchedule(
 					phrase,
 					dailyTime,
@@ -125,8 +184,8 @@ export function NewAutomationDialog({
 				<DialogHeader>
 					<DialogTitle>New automation</DialogTitle>
 					<DialogDescription>
-						Run an agent automatically on a schedule. This creates a workflow
-						you can later open and extend.
+						Run an agent automatically on a durable routine. Its result appears
+						in the agent's routine and run-history views.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -136,7 +195,7 @@ export function NewAutomationDialog({
 						<NativeSelect
 							className="w-full"
 							id="automation-agent"
-							onChange={(e) => setAgentId(e.target.value)}
+							onChange={(e) => handleAgentChange(e.target.value)}
 							value={selectedAgentId}
 						>
 							{activeAgents.length === 0 ? (
@@ -221,6 +280,65 @@ export function NewAutomationDialog({
 							/>
 						</div>
 					)}
+
+					<div className="flex flex-col gap-1.5">
+						<Label htmlFor="automation-destination">
+							Transcript destination
+						</Label>
+						<NativeSelect
+							className="w-full"
+							id="automation-destination"
+							onChange={(e) =>
+								handleDestinationChange(e.target.value as "new" | "existing")
+							}
+							value={destination}
+						>
+							<NativeSelectOption value="new">
+								New chat each run
+							</NativeSelectOption>
+							<NativeSelectOption value="existing">
+								Keep one persistent chat
+							</NativeSelectOption>
+						</NativeSelect>
+						<p className="text-muted-foreground text-xs">
+							{destination === "existing"
+								? defaultConversationId === conversationId
+									? "This schedule will keep appending to the chat you started from."
+									: "Every firing appends to the selected chat."
+								: "Each firing gets a clean durable transcript you can open from history."}
+						</p>
+					</div>
+
+					{destination === "existing" ? (
+						<div className="flex flex-col gap-1.5">
+							<Label htmlFor="automation-chat">Persistent chat</Label>
+							<NativeSelect
+								className="w-full"
+								disabled={orderedConversations.length === 0}
+								id="automation-chat"
+								onChange={(e) => setConversationId(e.target.value)}
+								value={conversationId}
+							>
+								{orderedConversations.length === 0 ? (
+									<NativeSelectOption value="">
+										No agent chats yet
+									</NativeSelectOption>
+								) : (
+									orderedConversations.map((conversation) => (
+										<NativeSelectOption
+											key={conversation.id}
+											value={conversation.id}
+										>
+											{conversation.id === defaultConversationId
+												? "Current chat · "
+												: ""}
+											{conversation.title || "Untitled chat"}
+										</NativeSelectOption>
+									))
+								)}
+							</NativeSelect>
+						</div>
+					) : null}
 
 					<div className="flex items-start justify-between gap-3 rounded-lg border p-3">
 						<div className="flex flex-col gap-0.5">

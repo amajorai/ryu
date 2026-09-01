@@ -1,0 +1,11 @@
+[package]
+name = "ryu-deletion-guard"
+version = "0.2.5"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/amajorai/ryu"
+description = "Pure, cross-surface detection of permanent file deletion attempts"
+
+[dependencies]
+regex = "1"
+shell-words = "1"

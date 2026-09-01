@@ -28,6 +28,24 @@ export interface WindowTabRegistration {
 	key: string;
 }
 
+/** Only the main shell consumes app/agent navigation events. Tear-off and
+ * companion windows render the same Layout, but a broadcast request must not
+ * open or replace a tab in every window at once. */
+export function isMainWindow(): boolean {
+	try {
+		const tauriWindow: Window & {
+			__TAURI_INTERNALS__?: {
+				metadata?: { currentWindow?: { label?: unknown } };
+			};
+		} = window;
+		const label =
+			tauriWindow.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+		return typeof label !== "string" || label === "main";
+	} catch {
+		return true;
+	}
+}
+
 /** Conversation ids are Core-owned identifiers, so they are the stable key
  * shared by renderers. Encoding keeps the protocol unambiguous even if a
  * future importer uses punctuation that looks like a key separator. */

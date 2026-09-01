@@ -2287,12 +2287,22 @@ fn agent_route_with_user_jwt(
                 // Responses egress is governed while the OAuth subscription
                 // credential is forwarded upstream unchanged. Overrides the
                 // default API-key OPENAI_BASE_URL injection baked into the entry.
-                acp::codex_acp_gateway_cmd()
+                match acp::codex_acp_gateway_cmd() {
+                    Ok(command) => command,
+                    Err(error) => {
+                        tracing::error!(error = %error, "agent_route: refusing Codex because its safe deletion home could not be prepared");
+                        return None;
+                    }
+                }
             } else if entry.id == "acp:codex" && crate::agent_routing::is_gateway_routing(route_id)
             {
                 // API-key Codex remains on the OpenAI-compatible path when the
                 // subscription-preserving toggle is off; keep its spend under
                 // the selected agent as well.
+                if let Err(error) = crate::codex_config::ensure_safety_home() {
+                    tracing::error!(error = %error, "agent_route: refusing Codex because its safe deletion home could not be prepared");
+                    return None;
+                }
                 match acp::openai_gateway_cmd_for_agent(spawn_cmd, Some(route_id)) {
                     Ok(c) => c,
                     Err(e) => {
@@ -2313,6 +2323,12 @@ fn agent_route_with_user_jwt(
                         return None;
                     }
                 }
+            } else if entry.id == "acp:codex" {
+                if let Err(error) = crate::codex_config::ensure_safety_home() {
+                    tracing::error!(error = %error, "agent_route: refusing direct Codex because its safe deletion home could not be prepared");
+                    return None;
+                }
+                spawn_cmd.clone()
             } else {
                 spawn_cmd.clone()
             };

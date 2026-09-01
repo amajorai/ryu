@@ -46,8 +46,9 @@
 //!     DENIED (it could pre-subscribe to an id another user will later create).
 //!
 //! The discriminator for "this is the local single user" is a genuine loopback
-//! peer ([`std::net::SocketAddr::ip`] `.is_loopback()`) — NOT the node's
-//! org-binding ([`crate::sidecar::control_plane::registered_org`]), which is
+//! peer ([`std::net::SocketAddr::ip`] `.is_loopback()`) that is not the
+//! Core-owned Tailcat forwarding listener — NOT the node's org-binding
+//! ([`crate::sidecar::control_plane::registered_org`]), which is
 //! `None` for every self-hosted MULTI-user node and would therefore treat such a
 //! node as single-tenant, fail-OPEN, and hand any holder of the shared
 //! `RYU_TOKEN` full access to other users' scoped resources.
@@ -192,12 +193,12 @@ pub async fn realtime_ws(
         None => None,
     };
 
-    // Whether the upgrade came from a genuine loopback peer. This gates the
-    // single-user local-allow for unpersisted (unknown) rooms — NOT the node's
-    // org-binding, which is `None` for self-hosted multi-user nodes and so cannot
-    // distinguish "the local single user" from "any holder of the shared
-    // RYU_TOKEN". See `decide_access`.
-    let peer_is_loopback = peer.ip().is_loopback();
+    // Whether the upgrade came from a genuine local peer. Tailcat re-originates
+    // remote streams as loopback TCP connections, so its active forwarding
+    // listener must not receive the single-user local allowance for unknown
+    // rooms. This is still independent of the node's org binding.
+    let peer_is_loopback =
+        super::is_trusted_local_peer(peer.ip(), crate::sidecar::tailcat::proxy_is_active());
 
     ws.on_upgrade(move |socket| handle_socket(socket, state, caller, peer_is_loopback))
 }
@@ -234,10 +235,11 @@ enum AccessOutcome {
 /// access to other users' scoped resources — the exact credential-downgrade
 /// bypass this function must refuse.
 ///
-/// Caveat: behind a reverse proxy the peer is the proxy (often `127.0.0.1`), so
-/// the unknown-room loopback grant widens to all proxied clients. That window is
-/// narrow (only unpersisted rooms; scoped rows are never affected) and is the
-/// inherent cost of loopback-based local detection — documented, not gated here.
+/// Caveat: behind an unrecognized reverse proxy the peer is the proxy (often
+/// `127.0.0.1`), so the unknown-room loopback grant can widen to all proxied
+/// clients. Core's Tailcat proxy is recognized and excluded; other proxies must
+/// provide their own end-to-end authorization boundary. The window is narrow
+/// (only unpersisted rooms; scoped rows are never affected).
 fn decide_access(
     meta: anyhow::Result<Option<ResourceTenancy>>,
     caller: Option<&VerifiedCaller>,

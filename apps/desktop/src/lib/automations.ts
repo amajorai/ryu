@@ -1,19 +1,25 @@
 // apps/desktop/src/lib/automations.ts
 //
 // Shared "automation" helpers. The standalone Automations page was merged into
-// Workflows (full collapse): scheduling an agent is modelled as a 1-node
-// workflow (Input → Prompt(agent) → Output) with a `schedule` trigger, which
-// Core reconciles into the same heartbeat job the old agent-target job used.
+// Workflows (full collapse), but an agent schedule is a first-class heartbeat
+// routine now: it owns its prompt, history, and persistent-chat destination.
 //
 // This module is the single source of truth for that conversion so the two
 // surfaces that create scheduled agents — the agent editor (AgentEditPage) and
 // the calendar's "New automation" dialog — stay in lockstep.
 
 import type { ApiTarget } from "./api/client.ts";
-import { deleteJob, fetchJobs, type Schedule } from "./api/schedules.ts";
 import {
-	createWorkflow,
+	createJob,
+	fetchJobs,
+	type JobTarget,
+	type Schedule,
+	updateJob,
+} from "./api/schedules.ts";
+import {
+	deleteWorkflow,
 	fetchWorkflows,
+	type Workflow,
 	type WorkflowTrigger,
 } from "./api/workflows.ts";
 
@@ -125,45 +131,87 @@ export function scheduledAgentWorkflow(
 }
 
 /**
- * Create (or update) the scheduled workflow that runs an agent on a schedule.
+ * Create (or update) the quick agent routine used by the legacy schedule picker.
  *
- * Idempotent per agent: it matches an existing scheduled workflow for the agent
- * (a prompt node bound to the agent id + a schedule trigger) and overwrites it
- * in place, so re-saving never spawns a duplicate. It then drains any legacy
- * agent-target scheduler job for the agent (created by the retired Automations
- * page) so the agent can't double-fire.
+ * The function name is retained for the Calendar companion bridge contract, but
+ * the saved target is now a first-class agent routine. That keeps the quick
+ * picker and the agent editor on the same durable-chat path as `routines.create`.
  */
 export async function createScheduledAgentWorkflow(
 	target: ApiTarget,
 	args: {
 		agentId: string;
 		agentName: string;
+		conversationId?: string | null;
 		schedule: Schedule;
 		requireApproval?: boolean;
 	}
 ): Promise<void> {
-	const workflows = await fetchWorkflows(target);
-	const existing = workflows.find(
-		(w) =>
-			w.triggers.some((t) => t.type === "schedule") &&
-			w.nodes.some((n) => n.type === "prompt" && n.agent_id === args.agentId)
-	);
-	await createWorkflow(
-		target,
-		scheduledAgentWorkflow(
-			args.agentId,
-			args.agentName,
-			args.schedule,
-			existing?.id ?? "",
-			args.requireApproval ?? false
-		)
-	);
+	const routineName = `${args.agentName}${SCHEDULED_AGENT_SUFFIX}`;
+	const agentTarget: JobTarget = {
+		type: "agent",
+		agentId: args.agentId,
+		conversationId: args.conversationId ?? null,
+		prompt: "Run",
+	};
 	const jobs = await fetchJobs(target);
-	await Promise.all(
-		jobs
-			.filter(
-				(j) => j.target.type === "agent" && j.target.agentId === args.agentId
-			)
-			.map((j) => deleteJob(target, j.id).catch(() => undefined))
+	const existingRoutine = jobs.find(
+		(job) =>
+			job.name === routineName &&
+			job.target.type === "agent" &&
+			job.target.agentId === args.agentId
+	);
+	if (existingRoutine) {
+		await updateJob(target, existingRoutine.id, {
+			name: routineName,
+			schedule: args.schedule,
+			target: agentTarget,
+			enabled: true,
+			requireApproval: args.requireApproval ?? false,
+		});
+	} else {
+		await createJob(target, {
+			name: routineName,
+			schedule: args.schedule,
+			target: agentTarget,
+			enabled: true,
+			requireApproval: args.requireApproval ?? false,
+		});
+	}
+
+	// Older versions represented this quick schedule as a tiny workflow. Delete
+	// only the exact generated shape, never a user-authored workflow that merely
+	// happens to call this agent.
+	try {
+		const workflows = await fetchWorkflows(target);
+		await Promise.all(
+			workflows
+				.filter((workflow) =>
+					isGeneratedScheduledAgentWorkflow(workflow, args.agentId)
+				)
+				.map((workflow) =>
+					deleteWorkflow(target, workflow.id).catch(() => undefined)
+				)
+		);
+	} catch {
+		// Routine creation already succeeded. Legacy workflow cleanup is a best
+		// effort migration and must not turn a working routine into a reported error
+		// when the caller lacks workflow visibility on a shared node.
+	}
+}
+
+function isGeneratedScheduledAgentWorkflow(
+	workflow: Workflow,
+	agentId: string
+): boolean {
+	return (
+		workflow.name.endsWith(SCHEDULED_AGENT_SUFFIX) &&
+		workflow.nodes.length === 3 &&
+		workflow.nodes.some(
+			(node) => node.type === "prompt" && node.agent_id === agentId
+		) &&
+		workflow.nodes.some((node) => node.type === "input") &&
+		workflow.nodes.some((node) => node.type === "output") &&
+		workflow.triggers.some((trigger) => trigger.type === "schedule")
 	);
 }

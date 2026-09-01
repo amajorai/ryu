@@ -21,6 +21,7 @@ pub mod composio;
 pub mod delegate;
 pub mod notify_tool;
 pub mod orchestrator;
+pub mod routines_tool;
 pub mod sandbox;
 pub mod search_conversations;
 pub mod skills_tool;
@@ -28,6 +29,7 @@ pub mod spaces_tool;
 pub mod threads;
 pub mod ui_tool;
 pub mod web_fetch;
+pub mod workspace_tool;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -2822,6 +2824,8 @@ impl McpRegistry {
             || name == orchestrator::SERVER_NAME
             || name == skills_tool::SERVER_NAME
             || name == ui_tool::SERVER_NAME
+            || name == workspace_tool::SERVER_NAME
+            || name == routines_tool::SERVER_NAME
             || name == crate::safe_actions::SERVER_NAME
             // The capability facade's reserved names (`web`, `browser`, `computer`,
             // `memory`). Reserved unconditionally, not only while a provider is
@@ -3027,6 +3031,32 @@ impl McpRegistry {
                     "Built-in generative UI: render a rich interactive UI inline in the chat \
                      (ui.render) from a native json-render spec or an A2UI v0.9 message \
                      sequence, using the app's own shadcn components."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+                ..Default::default()
+            },
+            ServerSummary {
+                name: workspace_tool::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in workspace actions: open safe Ryu pages in normal tabs or the \
+                     chat workspace panel, and open the embedded Browser panel."
+                        .to_owned(),
+                ),
+                enabled: true,
+                available: Some(true),
+                ..Default::default()
+            },
+            ServerSummary {
+                name: routines_tool::SERVER_NAME.to_owned(),
+                command: "(built-in)".to_owned(),
+                args: vec![],
+                description: Some(
+                    "Built-in routines: list, create, edit, delete, and run persistent \
+                     agent schedules with optional chat destinations."
                         .to_owned(),
                 ),
                 enabled: true,
@@ -3626,6 +3656,12 @@ impl McpRegistry {
         // Built-in generative-UI tool — render a rich UI inline in chat from a
         // json-render spec. Always listed; client-rendered (Core dispatch is a no-op).
         all.extend(ui_tool::tools());
+        // Built-in workspace shell actions — safe page-key navigation and the
+        // embedded Browser panel bridge. The desktop consumes their event bus.
+        all.extend(workspace_tool::tools());
+        // Built-in routines — persisted cron/interval CRUD and run-now. The
+        // normal MCP approval/lifecycle gate surrounds their mutations.
+        all.extend(routines_tool::tools());
         // Include self-build tools (U57) — always listed, dispatch fails gracefully
         // if the self_build context was not wired (test / CLI contexts).
         all.extend(crate::runnable::self_build::tools());
@@ -4230,6 +4266,21 @@ impl McpRegistry {
                 .collect::<Vec<_>>()
         });
         let allowlist = normalized_allowlist.as_deref();
+
+        // A filesystem-shaped delete tool is a second way for an agent to
+        // remove a path without producing a shell command. Keep this check in
+        // the no-gate dispatch core so an approved re-dispatch, an app alias,
+        // and an agent-less internal caller cannot bypass the default-deny
+        // safety policy. The explicit operator opt-out is the only escape hatch;
+        // a normal approval or `approval-mode=off` is not enough.
+        if !ryu_deletion_guard::permanent_delete_allowed(
+            std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok().as_deref(),
+        ) && ryu_deletion_guard::is_filesystem_delete_tool(tool_id)
+        {
+            return Err(anyhow!(
+                "permanent filesystem deletion blocked by Ryu; use the host Trash or Recycle Bin command instead"
+            ));
+        }
 
         // Approved agent calls retain the lifecycle/read-only gate here so an
         // internal caller cannot bypass it by selecting the ungated entry
@@ -4839,6 +4890,55 @@ impl McpRegistry {
                 }
             }
             return ui_tool::dispatch(tool, arguments).await;
+        }
+
+        // Built-in workspace shell actions. They publish a server-derived,
+        // user-scoped navigation request; the connected Desktop consumes it and
+        // applies the same page-key allowlist as the workspace dock.
+        if server == workspace_tool::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            let principal = match self.conversations.as_ref() {
+                Some(store) => ToolPrincipal::resolve(store, host_conversation_id).await,
+                None if crate::sidecar::control_plane::registered_org().is_none() => {
+                    ToolPrincipal::Unrestricted
+                }
+                None => ToolPrincipal::Unresolved,
+            };
+            return workspace_tool::dispatch(tool, arguments, &principal).await;
+        }
+
+        // Built-in routine CRUD. The routine tool receives the same
+        // server-derived principal and host conversation scope as Spaces and
+        // conversation tools; model-supplied user ids never become authority.
+        if server == routines_tool::SERVER_NAME {
+            if let Some(list) = allowlist {
+                let candidate = RegistryTool::candidate(tool_id, server, tool);
+                if !tool_allowed(&candidate, list) {
+                    return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
+                }
+            }
+            let principal = match self.conversations.as_ref() {
+                Some(store) => ToolPrincipal::resolve(store, host_conversation_id).await,
+                None if crate::sidecar::control_plane::registered_org().is_none() => {
+                    ToolPrincipal::Unrestricted
+                }
+                None => ToolPrincipal::Unresolved,
+            };
+            return routines_tool::dispatch(
+                tool,
+                arguments,
+                &principal,
+                self.agent_store.as_ref(),
+                self.conversations.as_ref(),
+                agent_id,
+                host_conversation_id,
+            )
+            .await;
         }
 
         // Built-in send-to-channel provider (#456): posts to a Slack/Discord
@@ -7764,9 +7864,16 @@ mod tests {
         // declarative `http` tools reaching a Core loopback bridge).
         // Plus the 4 capability-facade servers (`web`, `browser`, `computer`,
         // `memory`), which are listed unconditionally because their names are
-        // reserved whether or not a provider is currently selected.
+        // reserved whether or not a provider is currently selected, and the
+        // workspace/routines built-ins.
         let summaries = reg.server_summaries();
-        assert_eq!(summaries.len(), 18);
+        assert_eq!(summaries.len(), 20);
+        assert!(summaries
+            .iter()
+            .any(|s| s.name == workspace_tool::SERVER_NAME));
+        assert!(summaries
+            .iter()
+            .any(|s| s.name == routines_tool::SERVER_NAME));
         assert!(
             !summaries.iter().any(|s| s.name == "research"),
             "`research` is no longer a hardcoded built-in — it registers (or does \

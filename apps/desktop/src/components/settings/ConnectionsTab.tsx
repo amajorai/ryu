@@ -8,6 +8,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+	ACCOUNT_LINKING_PROVIDERS,
+	type LinkedAccountProvider,
+} from "@ryu/blocks/web/linked-account-providers.ts";
+import { DISCORD_SVGL, SvglIcon } from "@ryu/blocks/web/svgl-icon.tsx";
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -39,6 +44,7 @@ import {
 	TabsTrigger,
 } from "@ryu/ui/components/tabs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Github } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { WEB_URL } from "@/lib/app-urls.ts";
@@ -835,8 +841,10 @@ interface AccountInfo {
 
 export function ConnectionsTab() {
 	const queryClient = useQueryClient();
-	const [isLinking, setIsLinking] = useState(false);
-	const [isUnlinking, setIsUnlinking] = useState(false);
+	const [linkingProvider, setLinkingProvider] =
+		useState<LinkedAccountProvider | null>(null);
+	const [unlinkingProvider, setUnlinkingProvider] =
+		useState<LinkedAccountProvider | null>(null);
 
 	const { data: accounts, isLoading } = useQuery({
 		queryKey: ["linked-accounts"],
@@ -849,14 +857,15 @@ export function ConnectionsTab() {
 		},
 	});
 
-	const googleAccount = accounts?.find((a) => a.providerId === "google");
-
-	const handleLinkGoogle = async () => {
-		setIsLinking(true);
+	const handleLinkAccount = async (provider: LinkedAccountProvider) => {
+		setLinkingProvider(provider);
+		const label =
+			ACCOUNT_LINKING_PROVIDERS.find((item) => item.id === provider)?.label ??
+			provider;
 		try {
-			const callbackUrl = `${WEB_URL}/profile?tab=linked-accounts`;
+			const callbackUrl = `${WEB_URL}/settings?tab=connections`;
 			const result = await authClient.linkSocial({
-				provider: "google",
+				provider,
 				callbackURL: callbackUrl,
 			});
 			if (result.error) {
@@ -866,10 +875,12 @@ export function ConnectionsTab() {
 			const url = (result.data as { url?: string } | null)?.url;
 			if (url) {
 				await openExternal(url);
-				sileo.success({ title: "Complete Google sign-in in your browser" });
+				sileo.success({
+					title: `Complete ${label} account linking in your browser`,
+				});
 			} else {
 				sileo.error({
-					title: "Couldn't start Google sign-in",
+					title: `Couldn't start ${label} account linking`,
 					description: "Please try again in a moment.",
 				});
 			}
@@ -878,36 +889,39 @@ export function ConnectionsTab() {
 				title:
 					error instanceof Error
 						? error.message
-						: "Failed to link Google account",
+						: `Failed to link ${label} account`,
 			});
 		} finally {
-			setIsLinking(false);
+			setLinkingProvider(null);
 		}
 	};
 
-	const handleUnlinkGoogle = async () => {
-		if (!googleAccount) {
+	const handleUnlinkAccount = async (account: AccountInfo) => {
+		const provider = ACCOUNT_LINKING_PROVIDERS.find(
+			(item) => item.id === account.providerId
+		);
+		if (!provider) {
 			return;
 		}
-		setIsUnlinking(true);
+		setUnlinkingProvider(provider.id);
 		try {
 			const result = await authClient.unlinkAccount({
-				accountId: googleAccount.accountId,
+				accountId: account.accountId,
 			});
 			if (result.error) {
 				throw new Error(result.error.message);
 			}
-			sileo.success({ title: "Google account unlinked" });
+			sileo.success({ title: `${provider.label} account unlinked` });
 			queryClient.invalidateQueries({ queryKey: ["linked-accounts"] });
 		} catch (error) {
 			sileo.error({
 				title:
 					error instanceof Error
 						? error.message
-						: "Failed to unlink Google account",
+						: `Failed to unlink ${provider.label} account`,
 			});
 		} finally {
-			setIsUnlinking(false);
+			setUnlinkingProvider(null);
 		}
 	};
 
@@ -947,77 +961,107 @@ export function ConnectionsTab() {
 					<NodeAccessSettings />
 					<ConnectedDevicesSection />
 					<SettingsSection
-						caption="Connect third-party accounts to sign in faster."
+						caption="Link individual social identities to this Ryu account. Social sign-in remains Google-only."
 						title="Linked accounts"
 					>
 						<SettingsGroup>
-							<SettingsItem
-								actions={
-									googleAccount ? (
-										<AlertDialog>
-											<AlertDialogTrigger
-												render={
-													<Button
-														disabled={isUnlinking}
-														size="sm"
-														variant="ghost"
-													/>
-												}
-											>
-												<HugeiconsIcon
-													className="mr-2 size-4"
-													icon={Unlink01Icon}
-												/>
-												Unlink
-											</AlertDialogTrigger>
-											<AlertDialogContent>
-												<AlertDialogHeader>
-													<AlertDialogTitle>
-														Unlink Google Account?
-													</AlertDialogTitle>
-													<AlertDialogDescription>
-														You won't be able to sign in with Google anymore.
-														Make sure you have another sign-in method (password
-														or magic link) before unlinking.
-													</AlertDialogDescription>
-												</AlertDialogHeader>
-												<AlertDialogFooter>
-													<AlertDialogCancel>Cancel</AlertDialogCancel>
-													<AlertDialogAction
-														disabled={isUnlinking}
-														onClick={handleUnlinkGoogle}
+							{ACCOUNT_LINKING_PROVIDERS.map((provider) => {
+								const account = accounts?.find(
+									(candidate) => candidate.providerId === provider.id
+								);
+								const isLinking = linkingProvider === provider.id;
+								const isUnlinking = unlinkingProvider === provider.id;
+								return (
+									<SettingsItem
+										actions={
+											account ? (
+												<AlertDialog>
+													<AlertDialogTrigger
+														render={
+															<Button
+																disabled={unlinkingProvider !== null}
+																size="sm"
+																variant="ghost"
+															/>
+														}
 													>
+														<HugeiconsIcon
+															className="mr-2 size-4"
+															icon={Unlink01Icon}
+														/>
 														{isUnlinking ? "Unlinking…" : "Unlink"}
-													</AlertDialogAction>
-												</AlertDialogFooter>
-											</AlertDialogContent>
-										</AlertDialog>
-									) : (
-										<Button
-											disabled={isLinking}
-											onClick={handleLinkGoogle}
-											size="sm"
-											variant="ghost"
-										>
-											<HugeiconsIcon
-												className="mr-2 size-4"
-												icon={Link01Icon}
-											/>
-											{isLinking ? "Opening browser…" : "Link"}
-										</Button>
-									)
-								}
-								description={googleAccount ? "Connected" : "Not connected"}
-								title={
-									<span className="flex items-center gap-3">
-										<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background">
-											<HugeiconsIcon className="size-4" icon={GoogleIcon} />
-										</span>
-										Google
-									</span>
-								}
-							/>
+													</AlertDialogTrigger>
+													<AlertDialogContent>
+														<AlertDialogHeader>
+															<AlertDialogTitle>
+																Unlink {provider.label} account?
+															</AlertDialogTitle>
+															<AlertDialogDescription>
+																This removes the account link from your Ryu
+																user. Your existing Ryu sign-in methods stay
+																unchanged.
+															</AlertDialogDescription>
+														</AlertDialogHeader>
+														<AlertDialogFooter>
+															<AlertDialogCancel>Cancel</AlertDialogCancel>
+															<AlertDialogAction
+																disabled={isUnlinking}
+																onClick={() => {
+																	void handleUnlinkAccount(account);
+																}}
+															>
+																Unlink
+															</AlertDialogAction>
+														</AlertDialogFooter>
+													</AlertDialogContent>
+												</AlertDialog>
+											) : (
+												<Button
+													disabled={
+														linkingProvider !== null ||
+														unlinkingProvider !== null
+													}
+													onClick={() => {
+														void handleLinkAccount(provider.id);
+													}}
+													size="sm"
+													variant="ghost"
+												>
+													<HugeiconsIcon
+														className="mr-2 size-4"
+														icon={Link01Icon}
+													/>
+													{isLinking ? "Opening browser…" : "Link"}
+												</Button>
+											)
+										}
+										description={account ? "Connected" : provider.description}
+										key={provider.id}
+										title={
+											<span className="flex items-center gap-3">
+												<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background">
+													{provider.id === "google" ? (
+														<HugeiconsIcon
+															className="size-4"
+															icon={GoogleIcon}
+														/>
+													) : provider.id === "github" ? (
+														<Github className="size-4" />
+													) : (
+														<SvglIcon size={16} spec={DISCORD_SVGL} />
+													)}
+												</span>
+												{provider.label}
+											</span>
+										}
+									/>
+								);
+							})}
 						</SettingsGroup>
+						<p className="px-3 text-muted-foreground text-xs">
+							Telegram Login is organization/channel-level, so it is not
+							included here.
+						</p>
 					</SettingsSection>
 					<SettingsSection
 						caption="Scan the QR code with the Ryu mobile app to connect your phone to this device."

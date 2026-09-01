@@ -108,6 +108,10 @@ pub enum PendingAction {
     /// Run a scheduler job target (the job was flagged `require_approval`).
     ScheduledJob {
         target: crate::scheduler::store::JobTarget,
+        /// New requests carry the source job id so approval execution updates
+        /// that job's durable history instead of running an untracked copy.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
     },
     /// Resume a workflow run suspended at its `Awakeable` gate.
     WorkflowResume { run_id: String },
@@ -314,6 +318,7 @@ impl ApprovalRequest {
             ),
             Some(PendingAction::ScheduledJob {
                 target: job.target.clone(),
+                job_id: Some(job.id.clone()),
             }),
         );
         req.question = Some(format!("Run \"{}\" now?", job.name));
@@ -743,10 +748,42 @@ impl ApprovalEngine {
     /// tool's output, recorded onto the row for the inbox), `None` otherwise.
     async fn execute_action(&self, action: &PendingAction) -> anyhow::Result<Option<String>> {
         match action {
-            PendingAction::ScheduledJob { target } => {
-                crate::scheduler::run_target(target)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?;
+            PendingAction::ScheduledJob { target, job_id } => {
+                if let Some(job_id) = job_id {
+                    let mut job = crate::scheduler::store::load_job(job_id).map_err(|_| {
+                        anyhow::anyhow!("scheduled routine '{job_id}' no longer exists")
+                    })?;
+                    let started_at = chrono::Utc::now().to_rfc3339();
+                    let result = crate::scheduler::run_target_for_job(&job).await;
+                    let finished_at = chrono::Utc::now().to_rfc3339();
+                    let (outcome, run_id, error) = match result {
+                        Ok(run_id) => (crate::scheduler::store::ExecOutcome::Success, run_id, None),
+                        Err(error) => (
+                            crate::scheduler::store::ExecOutcome::Failure,
+                            None,
+                            Some(error),
+                        ),
+                    };
+                    job.record_execution(crate::scheduler::store::ExecRecord {
+                        started_at,
+                        finished_at,
+                        outcome,
+                        run_id,
+                        error: error.clone(),
+                    });
+                    crate::scheduler::store::save_job(&job).map_err(|save_error| {
+                        anyhow::anyhow!("saving scheduled routine history: {save_error}")
+                    })?;
+                    if let Some(error) = error {
+                        return Err(anyhow::anyhow!(error));
+                    }
+                } else {
+                    // Backward compatibility for approvals persisted before the
+                    // source job id was added.
+                    crate::scheduler::run_target(target)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
                 Ok(None)
             }
             PendingAction::WorkflowResume { run_id } => {
@@ -1030,10 +1067,13 @@ mod tests {
                 agent_id: "ryu".to_owned(),
                 prompt: "Summarize the inbox".to_owned(),
                 model: None,
+                conversation_id: None,
             },
             enabled: true,
             require_approval: true,
             owner_app: None,
+            owner_user_id: None,
+            org_id: None,
             created_at: "2026-08-20T00:00:00Z".to_owned(),
             updated_at: "2026-08-20T00:00:00Z".to_owned(),
             last_run_at: None,

@@ -2375,7 +2375,7 @@ mod tests {
         // A value packed with shell metacharacters must arrive as ONE literal argv
         // element — proving there is no shell (this asserts literal argv, NOT scan
         // denial; the scan is disarmed in this test env).
-        let payload = "; rm -rf / $(whoami) `id` && echo pwned";
+        let payload = "; echo $(whoami) `id` && echo pwned";
         let (_script_dir, command_args) = test_command_args("echo", &["msg"]);
         let out = run_command_tool(
             "echo",

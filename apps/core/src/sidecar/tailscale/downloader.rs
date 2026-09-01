@@ -16,15 +16,13 @@
 //!   sibling `.sha256`. This is a real archive and is the leg implemented here.
 //! - **macOS**: `Tailscale-<ver>-macos.zip` is the `macsys` GUI **app bundle** with
 //!   a Network Extension. It contains no entry named `tailscaled` at all, so there
-//!   is nothing for an archive downloader to extract. Homebrew's `tailscale`
-//!   formula ships both binaries, so macOS goes through `brew` — modelled on
-//!   `providers/apfel/installer.rs`, which adopts-or-brews for the same reason.
+//!   is nothing for an archive downloader to extract. Ryu release assets therefore
+//!   carry the two userspace binaries built from the pinned upstream source; an
+//!   existing Homebrew/PATH pair is still adopted first.
 //! - **Windows**: MSI/EXE **installers** only. An installer that registers a
 //!   root-privileged system service is precisely what Ryu's userspace, no-root
-//!   design must not run, and the administrative-extract route
-//!   (`msiexec /a … TARGETDIR=…`) is unverified on a real Windows host. So Windows
-//!   has no automatic leg: it gets [`RELEASE_URL_ENV`] plus an actionable bail,
-//!   rather than a guess that fails at spawn time.
+//!   design must not run. Ryu release assets therefore carry the two userspace
+//!   binaries built from the pinned upstream source.
 //!
 //! ## Never `brew services start tailscale`
 //!
@@ -63,9 +61,13 @@ pub const TAILSCALE_TARGET_VERSION: &str = "1.102.2";
 
 /// Env carrying a FULL per-platform archive URL (not a base directory), mirroring
 /// `RYU_GHOST_RELEASE_URL`. It is the escape hatch for a self-built archive, a
-/// pre-release, an internal mirror — and today it is the ONLY install route on
-/// Windows. When it is set, the archive leg runs on every platform.
+/// pre-release, or an internal mirror. When it is set, the archive leg runs on
+/// every platform.
 const RELEASE_URL_ENV: &str = "RYU_TAILSCALE_RELEASE_URL";
+
+/// Env overriding the Ryu release base carrying clean-host mesh binaries.
+const RYU_RELEASE_BASE_ENV: &str = "RYU_TAILSCALE_RELEASE_BASE";
+const DEFAULT_RYU_RELEASE_BASE: &str = "https://github.com/amajorai/ryu/releases/latest/download";
 
 /// The two binaries the mesh needs. Both must be present for the mesh to run at
 /// all: `tailscaled` is the daemon, `tailscale` the CLI that enrolls and queries
@@ -168,8 +170,7 @@ fn archive_url() -> Result<(String, bool)> {
 /// failure is either an offer ("install it") or advice ("here is how to install it
 /// yourself") — never a dead-end toast. It must be honest in the negative
 /// direction: offering an install that is guaranteed to bail is worse than not
-/// offering one, which is why Windows-without-override and a Mac-without-brew both
-/// answer false.
+/// offering one.
 ///
 /// Cheap and synchronous on purpose (a PATH probe, no subprocess), because
 /// [`super::ensure_mesh_binaries`] is a pure boot-time check.
@@ -184,26 +185,61 @@ pub(crate) fn can_install() -> bool {
     }
     #[cfg(target_os = "macos")]
     {
-        // Homebrew is the macOS route; without it there is nothing to offer. We
-        // probe PATH rather than spawning `brew --version` so this stays usable
-        // from a synchronous check.
-        super::binary_resolves("brew")
+        // A clean Mac uses Ryu's release-owned userspace binaries. Homebrew stays
+        // a fallback for older releases that predate those assets.
+        ryu_platform().is_some() || super::binary_resolves("brew")
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    {
+        ryu_platform().is_some()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         false
     }
 }
 
+fn ryu_platform_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
+        ("macos", "aarch64") => Some("macos-arm64"),
+        ("macos", "x86_64") => Some("macos-x86_64"),
+        ("windows", "x86_64") => Some("windows-x86_64"),
+        ("windows", "aarch64") => Some("windows-aarch64"),
+        _ => None,
+    }
+}
+
+fn ryu_platform() -> Option<&'static str> {
+    ryu_platform_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn ryu_release_base() -> String {
+    super::env_bin(RYU_RELEASE_BASE_ENV).unwrap_or_else(|| DEFAULT_RYU_RELEASE_BASE.to_owned())
+}
+
+fn ryu_asset_url(binary: &str, platform: &str) -> String {
+    let extension = if platform.starts_with("windows-") {
+        ".exe"
+    } else {
+        ""
+    };
+    format!(
+        "{}/{}-{TAILSCALE_TARGET_VERSION}-{platform}{extension}",
+        ryu_release_base().trim_end_matches('/'),
+        binary
+    )
+}
+
 /// Whether [`TailscaleDownloader::ensure_installed`] will take the Homebrew leg on
-/// this node, i.e. macOS with no archive override.
+/// this node. Supported clean Macs use the Ryu release asset first; this is only
+/// the fallback for an unsupported architecture.
 ///
 /// Exists so the install route can pick its progress shape: brew emits no byte
 /// counts, so that leg registers as an INDETERMINATE task in the download overlay
 /// (exactly like `apfel`), while the archive leg streams through `DownloadCenter`
 /// and reports real bytes.
 pub(crate) fn is_brew_leg() -> bool {
-    cfg!(target_os = "macos") && url_override().is_none()
+    cfg!(target_os = "macos") && url_override().is_none() && ryu_platform().is_none()
 }
 
 /// Downloads (or brews) the official Tailscale client into the profile's bin dir.
@@ -228,9 +264,9 @@ impl TailscaleDownloader {
     /// returning the version string recorded in `versions.json`.
     ///
     /// Routes by asset reality, not by uniformity: the override (any platform) and
-    /// Linux take the pinned-archive leg; macOS takes Homebrew; anything else bails
-    /// with instructions. See the module doc for why that asymmetry is upstream's,
-    /// not ours.
+    /// Linux take the pinned upstream archive leg; clean macOS/Windows hosts take
+    /// the Ryu release-owned userspace binaries; macOS Homebrew remains a fallback
+    /// for an older release that has no Ryu mesh assets yet.
     pub async fn ensure_installed(
         &self,
         downloads: &crate::downloads::DownloadCenter,
@@ -244,10 +280,26 @@ impl TailscaleDownloader {
         }
         #[cfg(target_os = "macos")]
         {
-            let _ = downloads; // brew reports no byte progress; nothing to stream.
+            if ryu_platform().is_some() {
+                match self.install_from_ryu_release(downloads).await {
+                    Ok(version) => return Ok(version),
+                    Err(error) if super::binary_resolves("brew") => {
+                        tracing::warn!(
+                            "Ryu mesh client asset unavailable; falling back to Homebrew: {error:#}"
+                        );
+                        return ensure_installed_via_brew().await;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            let _ = downloads;
             return ensure_installed_via_brew().await;
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(target_os = "windows")]
+        {
+            return self.install_from_ryu_release(downloads).await;
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         {
             let _ = downloads;
             anyhow::bail!(
@@ -419,6 +471,82 @@ impl TailscaleDownloader {
         );
         Ok(record_version.to_owned())
     }
+
+    /// Download the two direct, userspace binaries Ryu publishes for clean
+    /// macOS/Windows hosts. The release workflow emits a sibling checksum for
+    /// each binary, so this path is verified before either file is used.
+    async fn install_from_ryu_release(
+        &self,
+        downloads: &crate::downloads::DownloadCenter,
+    ) -> Result<String> {
+        let platform = ryu_platform().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Ryu publishes no managed Tailscale userspace binaries for {}/{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )
+        })?;
+
+        for binary in [DAEMON_BIN, CLI_BIN] {
+            let url = ryu_asset_url(binary, platform);
+            let checksum = fetch_sibling_sha256(&self.client, &url)
+                .await
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no usable checksum published for the Ryu Tailscale asset at {}",
+                        sha256_sibling_url(&url)
+                    )
+                })?;
+            let temporary = ryu_dir().join("tmp").join(format!(
+                "tailscale-{TAILSCALE_TARGET_VERSION}-{platform}-{binary}.download"
+            ));
+            let downloaded = downloads
+                .download_blocking(crate::downloads::DownloadSpec {
+                    kind: crate::downloads::DownloadKind::Tool,
+                    role: crate::downloads::DownloadRole::Tool,
+                    label: "Tailscale".to_owned(),
+                    url,
+                    dest: temporary,
+                    sha256: Some(checksum),
+                    version_record: None,
+                })
+                .await
+                .with_context(|| format!("downloading the managed Tailscale {binary} binary"))?;
+            install_raw_binary(&downloaded, &managed_path(binary)).await?;
+        }
+
+        VersionStore::set_version_persisted("tailscale", TAILSCALE_TARGET_VERSION)
+            .context("writing the managed Tailscale version")?;
+        Ok(TAILSCALE_TARGET_VERSION.to_owned())
+    }
+}
+
+async fn install_raw_binary(source: &std::path::Path, destination: &std::path::Path) -> Result<()> {
+    if let Some(parent) = destination.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let staged = destination.with_extension("download-tmp");
+    tokio::fs::copy(source, &staged)
+        .await
+        .with_context(|| format!("staging {}", destination.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&staged)?.permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&staged, permissions)?;
+    }
+    #[cfg(target_os = "windows")]
+    if destination.exists() {
+        tokio::fs::remove_file(destination)
+            .await
+            .with_context(|| format!("replacing {}", destination.display()))?;
+    }
+    tokio::fs::rename(&staged, destination)
+        .await
+        .with_context(|| format!("installing {}", destination.display()))?;
+    let _ = tokio::fs::remove_file(source).await;
+    Ok(())
 }
 
 /// Install the mesh client through the download overlay, picking the progress
@@ -431,9 +559,7 @@ impl TailscaleDownloader {
 /// pref is already on. Keeping the leg choice here means a new leg is added once.
 ///
 /// The brew leg emits no byte counts, so it registers as an INDETERMINATE task
-/// (like `apfel`); the archive leg streams real bytes through `DownloadCenter`
-/// on its own. Collapsing the two would either fake a progress bar or lose the
-/// overlay row entirely.
+/// (like `apfel`); release assets stream real bytes through `DownloadCenter`.
 pub async fn install_mesh_client(downloads: &crate::downloads::DownloadCenter) -> Result<String> {
     let dl = TailscaleDownloader::new();
     if is_brew_leg() {
@@ -667,12 +793,41 @@ mod tests {
 
     #[test]
     fn an_override_makes_every_platform_installable() {
-        // Including Windows, which has no automatic leg. `can_install` drives the
+        // Including Windows, which uses the Ryu release-owned userspace assets.
         // desktop's offer-vs-advise branch, so it must answer true exactly when a
         // route exists.
         let _lock = lock_env();
         let _g = EnvGuard::set("https://mirror.test/ts.tgz");
         assert!(can_install());
+    }
+
+    #[test]
+    fn clean_host_release_assets_cover_supported_non_linux_targets() {
+        assert_eq!(ryu_platform_for("macos", "aarch64"), Some("macos-arm64"));
+        assert_eq!(ryu_platform_for("macos", "x86_64"), Some("macos-x86_64"));
+        assert_eq!(
+            ryu_platform_for("windows", "x86_64"),
+            Some("windows-x86_64")
+        );
+        assert_eq!(
+            ryu_platform_for("windows", "aarch64"),
+            Some("windows-aarch64")
+        );
+        assert_eq!(ryu_platform_for("linux", "x86_64"), None);
+    }
+
+    #[test]
+    fn clean_host_release_asset_names_keep_windows_extensions() {
+        assert_eq!(
+            ryu_asset_url("tailscaled", "macos-arm64"),
+            format!("{DEFAULT_RYU_RELEASE_BASE}/tailscaled-{TAILSCALE_TARGET_VERSION}-macos-arm64")
+        );
+        assert_eq!(
+            ryu_asset_url("tailscale", "windows-x86_64"),
+            format!(
+                "{DEFAULT_RYU_RELEASE_BASE}/tailscale-{TAILSCALE_TARGET_VERSION}-windows-x86_64.exe"
+            )
+        );
     }
 
     #[test]

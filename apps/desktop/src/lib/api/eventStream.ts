@@ -21,7 +21,8 @@ export type EventChannel =
 	| "quests"
 	| "monitors"
 	| "approvals"
-	| "downloads";
+	| "downloads"
+	| "navigation";
 
 /** A per-channel subscriber. `data` is the parsed JSON of that channel's event. */
 type ChannelHandler = (data: unknown) => void;

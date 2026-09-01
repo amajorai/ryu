@@ -545,6 +545,21 @@ describe("asCalendarCreateAutomationArg validates the tagged schedule union", ()
 		});
 	});
 
+	it("accepts a persistent chat destination", () => {
+		expect(
+			asCalendarCreateAutomationArg({
+				...base,
+				conversationId: "conv-1",
+				schedule: { kind: "cron", expr: "0 9 * * *" },
+			})
+		).toEqual({
+			agentId: "ag1",
+			agentName: "Agent",
+			conversationId: "conv-1",
+			schedule: { kind: "cron", expr: "0 9 * * *" },
+		});
+	});
+
 	it("rejects an unknown schedule kind, a missing tag field, and a non-bool requireApproval", () => {
 		expect(
 			asCalendarCreateAutomationArg({ ...base, schedule: { kind: "weekly" } })
@@ -560,6 +575,20 @@ describe("asCalendarCreateAutomationArg validates the tagged schedule union", ()
 				...base,
 				schedule: { kind: "cron", expr: "x" },
 				requireApproval: "yes",
+			})
+		).toBeNull();
+		expect(
+			asCalendarCreateAutomationArg({
+				...base,
+				conversationId: 42,
+				schedule: { kind: "cron", expr: "x" },
+			})
+		).toBeNull();
+		expect(
+			asCalendarCreateAutomationArg({
+				...base,
+				conversationId: "",
+				schedule: { kind: "cron", expr: "x" },
 			})
 		).toBeNull();
 		expect(

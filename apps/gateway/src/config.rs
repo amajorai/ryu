@@ -524,8 +524,8 @@ pub struct CreditsConfig {
     /// Per-tool-call cost in micro-USD for billable (Composio) tool executions.
     ///
     /// AT COST, and that is the whole pricing position: Composio charges per
-    /// action execution at $0.299/1k on the overage rate, so this defaults to
-    /// 299 micro-USD per call and the customer is billed exactly what the
+    /// action execution at $0.30/1k on the standard rate, so this defaults to
+    /// 300 micro-USD per call and the customer is billed exactly what the
     /// provider bills us. Margin lives in the deposit fee, never in a per-unit
     /// markup (`markup_bps` is 0) — see `docs/pricing-remaining-work.md` item 6.
     ///
@@ -985,7 +985,7 @@ impl CreditsConfig {
             anyhow::bail!(
                 "credits are ENABLED but GATEWAY_CREDITS_COST_PER_TOOL_CALL_MICRO_USD is 0, \
 so every Composio tool call bills the customer nothing while Composio still charges us. \
-Unset it to take the at-cost default (299 = $0.299/1k), or set \
+Unset it to take the at-cost default (300 = $0.30/1k), or set \
 GATEWAY_CREDITS_ALLOW_FREE_MODALITIES=1 to give tool calls away on purpose."
             );
         }
@@ -1407,10 +1407,12 @@ impl ControlPlaneConfig {
     }
 }
 
-/// Composio's own overage rate, $0.299 per 1000 executions, in micro-USD per
-/// call. Billed straight through at cost.
+/// Composio's current standard rate, $0.30 per 1000 executions, in micro-USD
+/// per call. Billed straight through at cost. Managed-app and premium-tool
+/// contracts can override this deployment value when their provider invoice
+/// is higher.
 fn default_cost_per_tool_call_micro_usd() -> u64 {
-    299
+    300
 }
 
 /// Replicate's published Nvidia L40S rate, $0.000975/sec, in micro-USD.
@@ -6423,10 +6425,10 @@ mode = "pass_through"
 
     #[test]
     fn the_tool_call_rate_defaults_to_composios_cost() {
-        // AT COST. Composio's overage is $0.299/1k executions, so the default is
-        // 299 micro-USD per call and the customer pays exactly what we pay.
+        // AT COST. Composio's standard rate is $0.30/1k executions, so the
+        // default is 300 micro-USD per call and the customer pays exactly what we pay.
         // Margin is the deposit fee, never a per-unit markup.
-        assert_eq!(CreditsConfig::default().cost_per_tool_call_micro_usd, 299);
+        assert_eq!(CreditsConfig::default().cost_per_tool_call_micro_usd, 300);
         assert_eq!(CreditsConfig::default().markup_bps, 0);
     }
 

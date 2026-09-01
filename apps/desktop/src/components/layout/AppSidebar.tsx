@@ -9568,6 +9568,7 @@ export function SidebarPanelContent({
 					conversations.find((item) => item.id === scheduledConversationId)
 						?.agentId ?? undefined
 				}
+				defaultConversationId={scheduledConversationId ?? undefined}
 				key={scheduledConversationId ?? "closed-scheduled-chat"}
 				onCreated={() => setScheduledConversationId(null)}
 				onOpenChange={(open) => {

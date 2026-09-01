@@ -102,6 +102,13 @@ export const env = createEnv({
 		// Auth providers
 		GOOGLE_CLIENT_ID: z.string().optional(),
 		GOOGLE_CLIENT_SECRET: z.string().optional(),
+		// Optional user-level account-linking providers. These providers are
+		// available from Settings → Connections when both credentials are set;
+		// the public social sign-in flow remains Google-only.
+		DISCORD_CLIENT_ID: z.string().optional(),
+		DISCORD_CLIENT_SECRET: z.string().optional(),
+		GITHUB_CLIENT_ID: z.string().optional(),
+		GITHUB_CLIENT_SECRET: z.string().optional(),
 		// Optional Telegram Login (OIDC) shortcut for the hosted bot. The client id
 		// and secret come from the official Ryu bot's BotFather Login Widget setup;
 		// the username is public and lets the success page link back to the bot.
@@ -139,6 +146,7 @@ export const env = createEnv({
 		// $129 launch offer. The checkout route fails closed when it is absent.
 		POLAR_LIFETIME_LAUNCH_DISCOUNT_ID: z.string().optional(),
 		POLAR_PRODUCT_MARKETPLACE_MEMBERSHIP_MONTHLY: z.string().optional(),
+		POLAR_PRODUCT_MARKETPLACE_MEMBERSHIP_YEARLY: z.string().optional(),
 		POLAR_PRODUCT_PRO_MONTHLY: z.string().optional(),
 		POLAR_PRODUCT_PRO_YEARLY: z.string().optional(),
 		POLAR_PRODUCT_MAX_MONTHLY: z.string().optional(),
@@ -221,6 +229,11 @@ export const env = createEnv({
 		// Optional shared secret appended to the inbound webhook URL as `?token=`
 		// for defence-in-depth on top of SNS signature verification.
 		RYU_MAIL_INBOUND_SECRET: z.string().optional(),
+		// Hosted Box control-plane bridge. The URL is server-only and the token map
+		// is keyed by Better Auth organization id; plaintext tokens never reach the
+		// browser or the organization API response.
+		RYU_BOX_SERVICE_URL: z.url().optional(),
+		RYU_BOX_ORG_TOKENS: z.string().optional(),
 		// Public marketing URL the "Sent from Ryu" agent-email footer links to (the
 		// growth-loop CTA). Optional: falls back to the DEFAULT_BRAND_URL in
 		// @ryu/mail. This is the brand site, NOT the app (FRONTEND_URL).

@@ -275,7 +275,7 @@ impl Scheduler {
 
             tracing::info!("scheduler firing job '{}' ({})", job.name, job.id);
             let started_at = Utc::now().to_rfc3339();
-            let result = run_target(&job.target).await;
+            let result = run_target_for_job(&job).await;
             let finished_at = Utc::now().to_rfc3339();
 
             let record = match result {
@@ -338,6 +338,25 @@ impl Default for Scheduler {
     }
 }
 
+/// Validate a persisted schedule before it is written by an HTTP or MCP caller.
+/// Keeping this in the scheduler module makes both surfaces agree on cron zones
+/// and interval syntax.
+pub(crate) fn validate_schedule(schedule: &Schedule) -> Result<(), String> {
+    match schedule {
+        Schedule::Cron { expr, tz } => {
+            CronSchedule::parse(expr).map_err(|error| error.to_string())?;
+            if let Some(zone) = tz {
+                cron::parse_tz(zone).map_err(|error| error.to_string())?;
+            }
+        }
+        Schedule::Every { interval } => {
+            humantime::parse_duration(interval)
+                .map_err(|_| format!("invalid interval '{interval}'"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Run a job's target to completion. On success returns the workflow run id
 /// when applicable; on failure returns a human-readable error string.
 ///
@@ -345,6 +364,19 @@ impl Default for Scheduler {
 /// approves a `require_approval` automation (the approved run is then identical to
 /// the autonomous run it replaced).
 pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, String> {
+    run_target_with_job(target, None).await
+}
+
+/// Run a target with the routine metadata needed to persist agent turns into a
+/// new or selected conversation.
+pub(crate) async fn run_target_for_job(job: &ScheduledJob) -> Result<Option<String>, String> {
+    Box::pin(run_target_with_job(&job.target, Some(job))).await
+}
+
+async fn run_target_with_job(
+    target: &JobTarget,
+    job: Option<&ScheduledJob>,
+) -> Result<Option<String>, String> {
     match target {
         JobTarget::Workflow { workflow_id, input } => {
             let workflow = crate::workflow::store::load_workflow(workflow_id)
@@ -438,6 +470,7 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
             agent_id,
             prompt,
             model,
+            conversation_id,
         } => {
             // Route directly through the global agent runner so the *configured*
             // agent handles the prompt via the real chat path (its engine binding,
@@ -445,18 +478,42 @@ pub(crate) async fn run_target(target: &JobTarget) -> Result<Option<String>, Str
             // the job's last-outcome log. Falls back to the ephemeral single-node
             // Prompt workflow when no runner is published (headless/tests) — that
             // path now also routes the agent correctly via `run_prompt`.
-            let run_id = format!("agentrun_{}", uuid::Uuid::new_v4().simple());
+            let run_id = conversation_id
+                .clone()
+                .unwrap_or_else(|| format!("agentrun_{}", uuid::Uuid::new_v4().simple()));
             if let Some(runner) = crate::sidecar::agent_runner::global_agent_runner() {
-                runner
-                    .run_with_model(
-                        Some(agent_id.clone()),
-                        run_id.clone(),
-                        prompt.clone(),
-                        model.clone(),
-                    )
-                    .await
-                    .map_err(|e| e.to_string())?;
+                if let Some(job) = job {
+                    runner
+                        .run_scheduled(
+                            agent_id.clone(),
+                            run_id.clone(),
+                            job.name.clone(),
+                            prompt.clone(),
+                            model.clone(),
+                            job.owner_user_id.clone(),
+                            job.org_id.clone(),
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    runner
+                        .run_with_model(
+                            Some(agent_id.clone()),
+                            run_id.clone(),
+                            prompt.clone(),
+                            model.clone(),
+                        )
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
                 return Ok(Some(run_id));
+            }
+
+            // A persistent routine cannot silently degrade to an ephemeral
+            // workflow when the runner is unavailable: that would report success
+            // while dropping the promised chat history.
+            if conversation_id.is_some() || job.is_some() {
+                return Err("persistent scheduled agent runs are unavailable: agent runner is not initialized".to_owned());
             }
 
             let workflow = ephemeral_agent_workflow(agent_id, prompt);
@@ -515,10 +572,13 @@ mod tests {
                 agent_id: "plain".to_string(),
                 prompt: "hi".to_string(),
                 model: None,
+                conversation_id: None,
             },
             enabled: true,
             require_approval: false,
             owner_app: None,
+            owner_user_id: None,
+            org_id: None,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
             last_run_at: None,

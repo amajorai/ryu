@@ -219,6 +219,8 @@ fn sync_backing_job(monitor_id: &str, name: &str, interval: &str, enabled: bool)
         require_approval: false,
         // Core-owned (reconciled by Core itself), not an App-created job.
         owner_app: None,
+        owner_user_id: None,
+        org_id: None,
         created_at: existing
             .as_ref()
             .map(|j| j.created_at.clone())

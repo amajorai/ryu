@@ -5,7 +5,7 @@
 // toggle, a live status line, the Tailcat address, and the Headscale URL.
 //
 // Tailscale/Headscale use the official `tailscale` + `tailscaled` client; Tailcat
-// uses the separately installed `tailcat` CLI. Enabling writes the
+// uses a Ryu-managed `tailcat` CLI. Enabling writes the
 // `mesh-enabled` pref through `POST /api/mesh/config`; Core then starts the
 // selected backend, so this is the writer the rest of the network surface keys
 // off.
@@ -59,9 +59,8 @@ export function NetworkSettings() {
 	const [headscaleUrl, setHeadscaleUrlValue] = useState("");
 	const [headscaleLoaded, setHeadscaleLoaded] = useState(false);
 	const [savingHeadscale, setSavingHeadscale] = useState(false);
-	const [meshBackend, setMeshBackend] = useState<MeshBackend>(
-		MESH_BACKEND_HEADSCALE
-	);
+	const [meshBackend, setMeshBackend] =
+		useState<MeshBackend>(MESH_BACKEND_TAILCAT);
 	const [tailcatCopied, setTailcatCopied] = useState(false);
 
 	useEffect(() => {
@@ -73,7 +72,7 @@ export function NetworkSettings() {
 		]).then(([loginServer, backend]) => {
 			if (!cancelled) {
 				setHeadscaleUrlValue(loginServer ?? "");
-				setMeshBackend(parseMeshBackend(backend));
+				setMeshBackend(parseMeshBackend(backend, loginServer));
 				setHeadscaleLoaded(true);
 			}
 		});
@@ -112,7 +111,7 @@ export function NetworkSettings() {
 				await setMeshEnabled(target, enabled);
 			setMeshStatus(status);
 			if (enabled && installing) {
-				await watchMeshInstall(target, setMeshStatus);
+				await watchMeshInstall(target, meshBackend, setMeshStatus);
 				return;
 			}
 			if (enabled && startError) {
@@ -120,8 +119,8 @@ export function NetworkSettings() {
 					title: canInstall
 						? "Mesh enabled, but the daemon didn't start"
 						: meshBackend === MESH_BACKEND_TAILCAT
-							? "Network enabled — install the Tailcat CLI"
-							: "Mesh enabled — install the Tailscale client",
+							? "Tailcat could not be installed automatically"
+							: "Mesh client could not be installed automatically",
 					description: startError,
 				});
 				return;
@@ -199,7 +198,7 @@ export function NetworkSettings() {
 
 	return (
 		<SettingsSection
-			caption="Connect this node privately with Tailscale, Headscale, or a short-lived Tailcat address. Tailscale and Headscale use the official tailscale + tailscaled client in userspace networking mode; Tailcat uses the separately installed tailcat CLI. Pick the backend from Tunnel in the node menu."
+			caption="Connect this node privately with Tailscale, Headscale, or a short-lived Tailcat address. Ryu installs the selected network client automatically; Headscale still needs the URL of its control server. Pick the backend from Tunnel in the node menu."
 			title="Network (Tailscale / Headscale / Tailcat)"
 		>
 			<SettingsGroup>
@@ -283,20 +282,20 @@ export function NetworkSettings() {
 							</Button>
 						</div>
 						<p className="text-muted-foreground text-xs">
-							Point the mesh at a self-hosted Headscale server instead of
-							Tailscale SaaS. Leave empty to use Tailscale SaaS. Passed as{" "}
-							<code>--login-server</code> to <code>tailscale up</code>. It
-							applies the next time this node enrolls.
+							Ryu installs the Tailscale client automatically. This URL is the
+							Headscale control server that coordinates the private network; it
+							is still required for Headscale and applies the next time this
+							node enrolls.
 						</p>
 					</SettingsItem>
 				) : meshBackend === MESH_BACKEND_TAILSCALE ? (
 					<SettingsItem
-						description="Tailscale uses its hosted coordination server. No control server URL is needed."
+						description="Ryu installs the Tailscale client automatically and uses Tailscale's hosted coordination server."
 						title="Control server"
 					/>
 				) : (
 					<SettingsItem
-						description="Tailcat has no account, control server, or tailnet. It creates a short-lived address for this node."
+						description="Ryu installs Tailcat automatically. Tailcat has no account, control server, or tailnet; it creates a short-lived address for this node."
 						title="Control server"
 					/>
 				)}

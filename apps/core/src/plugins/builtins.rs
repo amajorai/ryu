@@ -206,6 +206,11 @@ pub const EXPENSES_PLUGIN_ID: &str = "@ryu/expenses";
 /// remains opt-in so no outbound surface appears on a fresh node.
 pub const OUTREACH_PLUGIN_ID: &str = "@ryu/outreach";
 
+/// Autopilot is the company-level orchestration layer over Ryu's existing agent
+/// and app surfaces. It stays opt-in because running a tool-using company cycle
+/// spends model budget and can propose changes across enabled apps.
+pub const AUTOPILOT_PLUGIN_ID: &str = "@ryu/autopilot";
+
 /// Projects is the local work-management layer between a customer record and
 /// an automation run. It is a Core-tier, opt-in Companion over shared storage.
 pub const PROJECTS_PLUGIN_ID: &str = "@ryu/projects";
@@ -298,8 +303,9 @@ pub const TEAMS_PLUGIN_ID: &str = "@ryu/teams";
 
 /// The Clips app's plugin id — the `/api/clips/*` Core→Shadow capture proxy. It
 /// `requires` the `shadow` app (its recordings live in Shadow), so the graph
-/// refuses to disable Shadow out from under an enabled Clips. Pre-installed;
-/// compile-out-able behind the `clips` cargo feature.
+/// refuses to disable Shadow out from under an enabled Clips. Core-tier and
+/// installable on demand; its optional Companion bundle is carried by the app seed
+/// table, while the capture surface remains compile-out-able behind the `clips` feature.
 pub const CLIPS_PLUGIN_ID: &str = "@ryu/clips";
 
 /// The Recipes app's plugin id — the `/api/recipes/*` record→replay surface over
@@ -921,6 +927,7 @@ pub const CORE_PLUGINS: &[&str] = &[
     // carried by the explicit install path and an MCP server for the ledger agent.
     EXPENSES_PLUGIN_ID,
     OUTREACH_PLUGIN_ID,
+    AUTOPILOT_PLUGIN_ID,
     PROJECTS_PLUGIN_ID,
     INVOICES_PLUGIN_ID,
     PEOPLE_PLUGIN_ID,

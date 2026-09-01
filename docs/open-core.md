@@ -25,6 +25,7 @@ Every unit in the monorepo carries its own `LICENSE` file and maps to one of the
 | `apps/fumadocs` → [`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs) | OSS | Apache-2.0 | Documentation site. Published as its own repo, not part of this tree. |
 | `packages/sdk` + `packages/create-ryu-app` | OSS | Apache-2.0 | Dev SDK + scaffolder; must be open to grow the plugin ecosystem. |
 | `packages/client` | OSS | Apache-2.0 | TS client for the open Core API; no internal deps. |
+| `packages/core-client` + `packages/protocol` | OSS | Apache-2.0 | Typed Core/Gateway client and shared wire helpers, published with the SDK hub. |
 | `crates/ryu-sdk{,-ffi,-napi}` | OSS | Apache-2.0 | SDK kernel + FFI/Node-API bindings. |
 | `apps/raycast` | OSS | MIT | Already MIT; fenced out of the workspace with its own toolchain. |
 | `apps/desktop` | Closed — proprietary | Proprietary | The primary UX surface: making agents as easy as installing an app on desktop. |

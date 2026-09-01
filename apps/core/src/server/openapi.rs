@@ -585,12 +585,16 @@ use utoipa::OpenApi;
         super::widgets::widget_follow_up,
         super::widgets::widget_state,
         // Workflows
+        super::create_job,
+        super::delete_job,
         super::create_workflow_version,
         super::get_job,
         super::get_workflow_version,
         super::list_jobs,
         super::list_workflow_versions,
         super::restore_workflow_version,
+        super::run_job_now,
+        super::update_job,
         super::workflow_webhook,
         // Worktree
         super::worktree_status_handler,

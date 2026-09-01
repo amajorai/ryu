@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gw-firewall"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
@@ -11,3 +11,4 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 shell-words = "1"
 tracing = "0.1"
+ryu-deletion-guard = { path = "../../core/deletion-guard" }

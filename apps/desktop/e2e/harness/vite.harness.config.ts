@@ -94,6 +94,10 @@ export default defineConfig({
 					harnessDir,
 					"agent-setup-composer-proof.html"
 				),
+				agentRoutinesProof: path.resolve(
+					harnessDir,
+					"agent-routines-proof.html"
+				),
 				answerNowProof: path.resolve(harnessDir, "answer-now-proof.html"),
 				agentMessage: path.resolve(harnessDir, "agent-message-story.html"),
 				agentConversationBranchProof: path.resolve(
@@ -140,6 +144,7 @@ export default defineConfig({
 				),
 				newTabMenuProof: path.resolve(harnessDir, "new-tab-menu-proof.html"),
 				chatRecovery: path.resolve(harnessDir, "chat-recovery-story.html"),
+				chatSearch: path.resolve(harnessDir, "chat-search-story.html"),
 				reconnectRetryProof: path.resolve(
 					harnessDir,
 					"reconnect-retry-proof.html"

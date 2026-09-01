@@ -9,6 +9,8 @@
 //     with a count and an empty list, which is worse than the old behaviour;
 //   - a `dynamic-tool` part (how MCP tools arrive over the ACP bridge) is
 //     attributed to its server instead of being dropped;
+//   - canonical/legacy MCP ids, app namespaces, and Composio actions all land
+//     in the same inventory even though each transport names them differently;
 //   - web results come from the tool OUTPUT, so a search shows the links it
 //     found and not just the query string;
 //   - user attachments come from the same file parts the transcript renders;
@@ -201,10 +203,80 @@ describe("extractSources", () => {
 		expect(sources[0].items[0].detail).toBe("Fix the rail");
 	});
 
+	test("attributes canonical and legacy MCP part names to their server", () => {
+		const sources = extractSources([
+			toolMessage([
+				{
+					type: "tool-mcp-sentry.search_issues",
+					input: { query: "is:unresolved" },
+				},
+				{
+					type: "tool-mcp__sentry__update_issue",
+					input: { id: "issue-42" },
+				},
+			]),
+		]);
+
+		expect(sources).toHaveLength(1);
+		expect(sources[0].id).toBe("mcp-sentry");
+		expect(sources[0].label).toBe("Sentry");
+		expect(sources[0].items.map((item) => item.label)).toEqual([
+			"search issues",
+			"update issue",
+		]);
+	});
+
+	test("lists Composio integrations and app tools beside MCP sources", () => {
+		const sources = extractSources([
+			toolMessage([
+				{
+					type: "dynamic-tool",
+					toolName: "composio.SLACK_SEND_MESSAGE",
+					input: { arguments: { channel: "#ryu", text: "Ship it" } },
+				},
+				{
+					type: "dynamic-tool",
+					toolName: "composio__GITHUB_CREATE_ISSUE",
+					input: { title: "Track the source rail" },
+				},
+				{
+					type: "dynamic-tool",
+					toolName: "app.tauri.driver_session",
+					input: { name: "browser QA" },
+				},
+				{
+					type: "tool-expect.console_logs",
+					input: { query: "errors" },
+				},
+			]),
+		]);
+
+		expect(sources.map((source) => source.id)).toEqual([
+			"composio",
+			"app-tauri",
+			"mcp-expect",
+		]);
+		expect(sources[0].label).toBe("Composio");
+		expect(sources[0].items.map((item) => item.label)).toEqual([
+			"Slack send message",
+			"Github create issue",
+		]);
+		expect(sources[0].items[0].detail).toBe("#ryu");
+		expect(sources[1].label).toBe("Tauri");
+		expect(sources[1].items[0].label).toBe("Driver session");
+		expect(sources[2].label).toBe("Expect");
+		expect(sources[2].items[0].label).toBe("console logs");
+	});
+
 	test("ignores tool calls that aren't an external source", () => {
 		expect(
 			extractSources([
-				toolMessage([{ type: "tool-TodoWrite", input: { todos: [] } }]),
+				toolMessage([
+					{ type: "tool-TodoWrite", input: { todos: [] } },
+					{ type: "tool-ui.render", input: { spec: {} } },
+					{ type: "tool-artifact.render", input: { content: "" } },
+					{ type: "tool-agents.ask", input: { prompt: "hello" } },
+				]),
 			])
 		).toEqual([]);
 	});

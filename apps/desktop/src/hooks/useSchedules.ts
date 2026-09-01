@@ -3,8 +3,11 @@ import type { ApiTarget } from "@/src/lib/api/client.ts";
 import {
 	createJob as apiCreateJob,
 	deleteJob as apiDeleteJob,
+	runJobNow as apiRunJobNow,
+	updateJob as apiUpdateJob,
 	fetchJobs,
 	type JobInput,
+	type JobUpdateInput,
 	type ScheduledJob,
 } from "@/src/lib/api/schedules.ts";
 import { useCoreRefresh } from "@/src/lib/core-refresh.ts";
@@ -17,6 +20,8 @@ export interface UseSchedulesResult {
 	loading: boolean;
 	reload: () => Promise<void>;
 	remove: (id: string) => Promise<void>;
+	runNow: (id: string) => Promise<string | null>;
+	update: (id: string, input: JobUpdateInput) => Promise<ScheduledJob>;
 }
 
 /// Loads scheduled (heartbeat) jobs from the active Core node and exposes
@@ -48,7 +53,7 @@ export function useSchedules(): UseSchedulesResult {
 		} finally {
 			setLoading(false);
 		}
-	}, [url, token]);
+	}, [url, token, userJwt]);
 
 	useEffect(() => {
 		reload().catch(() => undefined);
@@ -63,7 +68,7 @@ export function useSchedules(): UseSchedulesResult {
 			setJobs((prev) => [...prev, job]);
 			return job;
 		},
-		[url, token]
+		[url, token, userJwt]
 	);
 
 	const remove = useCallback(
@@ -71,8 +76,28 @@ export function useSchedules(): UseSchedulesResult {
 			await apiDeleteJob({ url, token, userJwt }, id);
 			setJobs((prev) => prev.filter((j) => j.id !== id));
 		},
-		[url, token]
+		[url, token, userJwt]
 	);
 
-	return { jobs, loading, error, reload, create, remove };
+	const update = useCallback(
+		async (id: string, input: JobUpdateInput) => {
+			const job = await apiUpdateJob({ url, token, userJwt }, id, input);
+			setJobs((prev) =>
+				prev.map((current) => (current.id === id ? job : current))
+			);
+			return job;
+		},
+		[url, token, userJwt]
+	);
+
+	const runNow = useCallback(
+		async (id: string) => {
+			const runId = await apiRunJobNow({ url, token, userJwt }, id);
+			await reload();
+			return runId;
+		},
+		[url, token, userJwt, reload]
+	);
+
+	return { jobs, loading, error, reload, create, remove, update, runNow };
 }

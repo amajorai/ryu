@@ -6,6 +6,7 @@ import {
 	GITHUB_REPO,
 	LATEST_RELEASE_API,
 } from "./download.tsx";
+import { GitHubStars } from "./github-stars.tsx";
 import { GITHUB_SVGL, SvglIcon } from "./svgl-icon.tsx";
 
 const siteVersion = process.env.NEXT_PUBLIC_APP_VERSION;
@@ -18,7 +19,11 @@ function shortSha(sha: string) {
 const linkClass =
 	"transition-colors hover:text-foreground underline-offset-4 hover:underline";
 
-export default function FooterBuildInfo() {
+export default function FooterBuildInfo({
+	githubStargazersCount,
+}: {
+	githubStargazersCount?: number | null;
+}) {
 	const [latestRelease, setLatestRelease] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -51,7 +56,11 @@ export default function FooterBuildInfo() {
 				rel="noopener noreferrer"
 				target="_blank"
 			>
-				<SvglIcon size={16} spec={GITHUB_SVGL} />
+				{githubStargazersCount != null && githubStargazersCount > 0 ? (
+					<GitHubStars stargazersCount={githubStargazersCount} />
+				) : (
+					<SvglIcon size={16} spec={GITHUB_SVGL} />
+				)}
 			</a>
 			{latestRelease ? (
 				<a

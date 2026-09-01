@@ -14,12 +14,12 @@
 //! startup and owns that value for subsequent preference updates. A
 //! hand-exported env override remains authoritative.
 //!
-//! We intentionally do NOT add filesystem hooks (Claude `settings.json` /
-//! Codex `config.toml`): that would re-implement the tool gate the ACP
-//! `request_permission` seam already provides, and would cost either a
-//! folder-trust supply-chain hole (adding `project`/`local` settingSources) or a
-//! subscription-credential migration (relocating `CLAUDE_CONFIG_DIR`). The ACP
-//! seam governs every agent uniformly with neither cost.
+//! Ryu's own Codex route also materializes a Codex-home instruction, rules file,
+//! and `PreToolUse` hook. Those are useful defense in depth and make the policy
+//! visible to Codex, but they are not the enforcement boundary: Codex requires a
+//! one-time review/trust decision for non-managed hooks, and the Core/Gateway
+//! deletion guard remains active even when a hook is skipped or a gateway
+//! fallback is enabled.
 
 /// Env var the gateway scan gate reads (`sidecar::gateway`). Kept in sync here so
 /// the pref maps onto exactly the value that module checks.

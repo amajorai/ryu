@@ -23,7 +23,7 @@ use crate::sidecar::{BoxFuture, HealthStatus, Sidecar};
 
 pub const SIDECAR_NAME: &str = "tailcat";
 
-const ENV_TAILCAT_BIN: &str = "RYU_TAILCAT_BIN";
+pub(crate) const ENV_TAILCAT_BIN: &str = "RYU_TAILCAT_BIN";
 const ENV_DERP_MAP_URL: &str = "RYU_TAILCAT_DERP_MAP_URL";
 const ADDRESS_FILE_NAME: &str = "tailcat.address";
 const CORE_PORT_DEFAULT: u16 = 7980;
@@ -32,6 +32,14 @@ const CORE_PORT_DEFAULT: u16 = 7980;
 /// manager owns the process handle. This flag is only a fast process-global
 /// indication; `health_check` clears it when the child exits.
 static RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the Core-owned Tailcat forwarding listener is currently considered
+/// active. This is intentionally fail-closed: the flag becomes true only after
+/// Tailcat publishes its address, and remains true while an asynchronous stop is
+/// still trying to terminate the child.
+pub(crate) fn proxy_is_active() -> bool {
+    RUNNING.load(Ordering::Acquire)
+}
 
 /// A missing Tailcat executable is structured so the mesh config endpoint can
 /// return an actionable response without scraping a spawn error string.
@@ -42,17 +50,10 @@ impl std::fmt::Display for MissingTailcat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Tailcat is not installed: `tailcat` was not found. Install it with "
-        )?;
-        write!(
-            f,
-            "`go install github.com/tailscale/tailcat/cmd/tailcat@latest` "
-        )?;
-        write!(
-            f,
-            "or download a release from https://github.com/tailscale/tailcat/releases, "
-        )?;
-        write!(f, "then retry enabling Tailcat or set {ENV_TAILCAT_BIN}.")
+            "Tailcat is not available yet. Ryu will attempt a managed install when a release is \
+             available; retry enabling Tailcat or set {ENV_TAILCAT_BIN} for an operator-managed \
+             binary."
+        )
     }
 }
 
@@ -99,13 +100,12 @@ fn lookup_in_path(bin: &str) -> Option<PathBuf> {
         .map(canonical_or_original)
 }
 
-/// Resolve the Tailcat executable from an explicit override or `PATH`.
+/// Resolve the Tailcat executable from an explicit override, `PATH`, or the
+/// Core-managed profile binary.
 ///
-/// Tailcat is deliberately adopted rather than auto-installed. Its upstream
-/// CLI and wire format currently carry no stability promise, and macOS uses a
-/// source/Go-toolchain install path while Linux and Windows also publish
-/// release archives. Keeping installation outside Core avoids pretending those
-/// distribution paths are one managed artifact.
+/// PATH still wins so an operator can deliberately adopt a system installation.
+/// The managed path is the normal release fallback: Core downloads and verifies
+/// it before marking this sidecar installed.
 pub(crate) fn resolve_binary() -> Result<PathBuf, MissingTailcat> {
     if let Some(raw) = env_value(ENV_TAILCAT_BIN) {
         let path = PathBuf::from(&raw);
@@ -118,7 +118,12 @@ pub(crate) fn resolve_binary() -> Result<PathBuf, MissingTailcat> {
             }
         }
     }
-    lookup_in_path("tailcat").ok_or(MissingTailcat)
+    lookup_in_path("tailcat")
+        .or_else(|| {
+            let managed = crate::sidecar::tailcat_downloader::managed_path();
+            managed.is_file().then_some(managed)
+        })
+        .ok_or(MissingTailcat)
 }
 
 /// Return the Tailcat address only while the Core-owned listener is live.
@@ -261,7 +266,7 @@ impl Drop for TailcatManager {
         // awaiting every async `stop()` future. Remove the bearer synchronously
         // as a final defense; the child handle's `kill_on_drop` still stops the
         // listener itself.
-        RUNNING.store(false, Ordering::Relaxed);
+        RUNNING.store(false, Ordering::Release);
         let _ = std::fs::remove_file(address_path());
     }
 }
@@ -293,10 +298,10 @@ impl Sidecar for TailcatManager {
 
             let binary = resolve_binary()?;
             if daemon.is_running() && address().is_some() {
-                RUNNING.store(true, Ordering::Relaxed);
+                RUNNING.store(true, Ordering::Release);
                 return Ok(());
             }
-            RUNNING.store(false, Ordering::Relaxed);
+            RUNNING.store(false, Ordering::Release);
             if daemon.is_running() {
                 let _ = daemon.stop().await;
             }
@@ -315,17 +320,25 @@ impl Sidecar for TailcatManager {
                 address_path().to_string_lossy().into_owned(),
             )];
             let binary_string = binary.to_string_lossy().into_owned();
-            daemon
+            // Mark the forwarding path active before the child can publish an
+            // address. A request that races startup must lose the local-only
+            // shortcut rather than win it while this guard is still false.
+            RUNNING.store(true, Ordering::Release);
+            if let Err(error) = daemon
                 .start_path_with_scrubbed_env_quiet(&binary_string, &args, &env)
                 .await
-                .with_context(|| format!("spawning Tailcat ({})", binary.display()))?;
+                .with_context(|| format!("spawning Tailcat ({})", binary.display()))
+            {
+                RUNNING.store(false, Ordering::Release);
+                return Err(error);
+            }
 
             if let Err(error) = wait_for_address(&daemon).await {
                 let _ = daemon.stop().await;
                 let _ = tokio::fs::remove_file(address_path()).await;
+                RUNNING.store(false, Ordering::Release);
                 return Err(error);
             }
-            RUNNING.store(true, Ordering::Relaxed);
             tracing::info!(
                 binary = %binary.display(),
                 port = core_port(),
@@ -338,9 +351,12 @@ impl Sidecar for TailcatManager {
     fn stop(&self) -> BoxFuture<anyhow::Result<()>> {
         let daemon = self.daemon.clone();
         Box::pin(async move {
-            RUNNING.store(false, Ordering::Relaxed);
+            let result = daemon.stop().await;
+            if !daemon.is_running() {
+                RUNNING.store(false, Ordering::Release);
+            }
             let _ = tokio::fs::remove_file(address_path()).await;
-            daemon.stop().await
+            result
         })
     }
 
@@ -348,11 +364,13 @@ impl Sidecar for TailcatManager {
         let daemon = self.daemon.clone();
         Box::pin(async move {
             if !daemon.is_running() {
-                RUNNING.store(false, Ordering::Relaxed);
+                RUNNING.store(false, Ordering::Release);
                 return HealthStatus::Unhealthy("Tailcat listener is not running".into());
             }
             if address().is_none() {
-                RUNNING.store(false, Ordering::Relaxed);
+                // Keep the proxy guard active while the child is still alive:
+                // an existing stream may continue to reach Core even if the
+                // address file was removed or became unreadable.
                 return HealthStatus::Degraded("Tailcat address is not available".into());
             }
             HealthStatus::Healthy
@@ -374,15 +392,17 @@ impl Sidecar for TailcatManager {
     fn uninstall(&self, delete_data: bool) -> BoxFuture<anyhow::Result<()>> {
         let daemon = self.daemon.clone();
         Box::pin(async move {
-            RUNNING.store(false, Ordering::Relaxed);
-            let _ = daemon.stop().await;
+            let result = daemon.stop().await;
+            if !daemon.is_running() {
+                RUNNING.store(false, Ordering::Release);
+            }
             if delete_data {
                 crate::sidecar::remove_dir(&mesh_dir()).await;
             } else {
                 let _ = tokio::fs::remove_file(address_path()).await;
             }
             tracing::info!("tailcat network backend uninstalled");
-            Ok(())
+            result
         })
     }
 }
@@ -394,8 +414,7 @@ mod tests {
     #[test]
     fn missing_tailcat_message_names_all_install_paths() {
         let message = MissingTailcat.to_string();
-        assert!(message.contains("go install github.com/tailscale/tailcat/cmd/tailcat@latest"));
-        assert!(message.contains("github.com/tailscale/tailcat/releases"));
+        assert!(message.contains("managed install"));
         assert!(message.contains(ENV_TAILCAT_BIN));
     }
 

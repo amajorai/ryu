@@ -773,6 +773,11 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // `plugins::seed` row. OPT-IN: not in `CORE_PREINSTALLED`, so a normal install never
     // spawns the sidecar unless a user enables the app.
     include_str!("../../../../apps-store/social/manifest.json"),
+    // Autopilot is a full-page Companion over the generic agent, storage, catalog,
+    // shell, and toast host bridges. It owns the company brief and cycle ledger;
+    // the selected Ryu agent owns the actual tool loop. It is opt-in because a
+    // cycle can spend model budget and propose work across enabled apps.
+    include_str!("../../../../apps-store/autopilot/manifest.json"),
     // Content — a local-first short-form content app. It owns no
     // sidecar; its frame talks only through the generic model/media/storage bridges
     // and can optionally hand captions to Outpost through `social:crud`.
@@ -1481,6 +1486,10 @@ pub const NEWS_UI_HTML: &str = include_str!("fixtures/news.ui.html");
 /// `scripts/sync-app-fixtures.sh outreach`.
 pub const OUTREACH_UI_HTML: &str = include_str!("fixtures/outreach.ui.html");
 
+/// The Autopilot app's prebuilt, self-contained UI bundle. Refresh with
+/// `scripts/sync-app-fixtures.sh autopilot` after changing the Companion.
+pub const AUTOPILOT_UI_HTML: &str = include_str!("fixtures/autopilot.ui.html");
+
 /// The Projects app's prebuilt, self-contained UI bundle. Refresh with
 /// `scripts/sync-app-fixtures.sh projects`.
 pub const PROJECTS_UI_HTML: &str = include_str!("fixtures/projects.ui.html");
@@ -1662,6 +1671,14 @@ pub const SOCIAL_UI_HTML: &str = include_str!("fixtures/social.ui.html");
 /// `bun run --cwd apps-store/rlm/ui build` (or `scripts/sync-app-fixtures.sh rlm`)
 /// and copy `dist/index.html` to `fixtures/rlm.ui.html` to refresh it.
 pub const RLM_UI_HTML: &str = include_str!("fixtures/rlm.ui.html");
+
+/// The Clips app's prebuilt, self-contained UI bundle (a
+/// `vite-plugin-singlefile` build of `apps-store/clips/ui`, all JS/CSS and the
+/// local demo media asset inlined). It is attached on explicit install through the
+/// generic companion table; the frame reaches its own sidecar through `app:http`.
+/// Rebuild with `bun run --cwd apps-store/clips/ui build` (or
+/// `scripts/sync-app-fixtures.sh clips`) and refresh `fixtures/clips.ui.html`.
+pub const CLIPS_UI_HTML: &str = include_str!("fixtures/clips.ui.html");
 
 /// The Subtitles app's prebuilt, self-contained UI bundle (a
 /// `vite-plugin-singlefile` build of `apps-store/subtitles/ui`, all JS/CSS — incl.

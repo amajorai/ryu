@@ -170,16 +170,21 @@ export function fetchSubscriptionStatus(): Promise<SubscriptionStatus> {
 
 /** Member-seat state for the active organization. Polar owns billedSeats. */
 export interface TeamsSeatStatus {
+	allocatedSeats: number;
+	availableSeats: number | null;
 	billedSeats: number | null;
 	bonusExpiresAt: string | null;
 	bonusSeats: number;
+	canInvite: boolean;
 	includedCreditPoolMicroUsd: number | null;
 	includedSeats: number | null;
+	invitationBlockedReason: string | null;
 	memberCount: number;
 	minRequired: number;
 	minSeats: number;
 	organizationId: string;
 	overAllocated: boolean;
+	pendingInvitations: number;
 	pendingSeatReservations: number;
 	plan: string | null;
 }
@@ -316,6 +321,10 @@ export interface WalletView {
 	balanceMicroUsd: number;
 	currency: string;
 	id: string;
+	/** Remaining included plan credit for the current billing period. */
+	subscriptionBalanceMicroUsd: number;
+	/** Remaining purchased credit; this balance rolls over. */
+	topupBalanceMicroUsd: number;
 }
 
 export function fetchWallet(): Promise<{ wallet: WalletView }> {

@@ -18,11 +18,10 @@ import {
  * breaks a test rather than a P&L.
  *
  * Note what this file does NOT decide any more: yearly products are excluded by
- * the COPY rule ("your first month"), not by their margin. They were once
- * excluded by both — Max yearly lost $120 per redemption at the old $200/$150
- * pricing — and the repricing of 2026-08-14 fixed the money while leaving the
- * copy rule untouched. See `plan-economics.test.ts` for the margin invariants
- * that now guard the catalog itself.
+ * the COPY rule ("your first month"), not by their margin. Polar's `once`
+ * duration covers the whole billing period, so a yearly product would receive
+ * about ten times the advertised first-month discount. See
+ * `plan-economics.test.ts` for the margin invariants that guard the catalog.
  *
  * WORST CASE means the assumption that makes the number a FLOOR: the subscriber
  * spends 100% of the included credit pool. Pools are use-it-or-lose-it (the
@@ -35,21 +34,17 @@ import {
  */
 
 /**
- * Monthly infrastructure cost of the free base cloud node (`cx23`), which every
- * RECURRING plan includes — Pro, Max and Teams (`base-node.ts`). EUR 5.49 read
- * live from Hetzner's own API, at the repo's 1.08 EUR/USD default.
+ * Conservative monthly infrastructure reserve for Pro's included base node.
  */
-const BASE_NODE_USD_PER_MONTH = 5.93;
+const BASE_NODE_USD_PER_MONTH = 12;
 
 /**
- * Polar is the merchant of record. The A Major org predates 2026-05-27 so it
- * holds Early Member pricing — 4% + $0.40, PLUS 0.5% on subscriptions, hence
- * 4.5% here. NOT a repo constant: it is an external rate, restated so the
- * assumption is visible. The headroom check below re-runs at 6% to cover the
- * international-card surcharge (+1.5%).
+ * Polar is the merchant of record. Use the conservative current subscription
+ * processing case: 6.5% + $0.50, including the listed international-card
+ * surcharge.
  */
-const PROCESSOR_RATE = 0.045;
-const PROCESSOR_FIXED_USD = 0.4;
+const PROCESSOR_RATE = 0.065;
+const PROCESSOR_FIXED_USD = 0.5;
 
 /** Yearly plans bill 10 months and serve 12 ("two months free"). */
 const YEARLY_MONTHS_BILLED = 10;
@@ -67,7 +62,7 @@ interface Offering {
 
 /**
  * Every recurring offering in the catalog, with the seat count a real checkout
- * would carry (Teams' floor is 2; Max's is 1). The one-time desktop licence and
+ * would carry (Teams' floor is 5; Max's is 1). The one-time desktop licence and
  * the ad-hoc cloud instance are absent on purpose — neither has a credit pool or
  * a billing period, so this model says nothing about them and they are excluded
  * from the voucher for reasons `vouchers.ts` records separately.
@@ -77,8 +72,8 @@ const OFFERINGS: readonly Offering[] = [
 	{ slug: "pro-yearly", plan: "pro", interval: "yearly", seats: 1 },
 	{ slug: "max-monthly", plan: "max", interval: "monthly", seats: 1 },
 	{ slug: "max-yearly", plan: "max", interval: "yearly", seats: 1 },
-	{ slug: "teams-monthly", plan: "teams", interval: "monthly", seats: 2 },
-	{ slug: "teams-yearly", plan: "teams", interval: "yearly", seats: 2 },
+	{ slug: "teams-monthly", plan: "teams", interval: "monthly", seats: 5 },
+	{ slug: "teams-yearly", plan: "teams", interval: "yearly", seats: 5 },
 ];
 
 /**
@@ -107,9 +102,11 @@ function firstPeriodMarginUsd(
 	const list = monthlyPrice * monthsBilled * offering.seats;
 	const charged = list * (1 - discountBps / 10_000);
 
-	// Credits scale with seats (resolveEntitlement multiplies the pool by the
-	// seat count); the free base node is ONE node per org, so it does not.
-	const credits = monthlyPool * monthsServed * offering.seats;
+	// OpenRouter's 5.5% funding fee is above its $0.80 minimum for Pro's pool.
+	// The free base node is ONE node per org, so it does not scale with seats.
+	const poolFunding =
+		monthlyPool > 0 ? monthlyPool + Math.max(monthlyPool * 0.055, 0.8) : 0;
+	const credits = poolFunding * monthsServed * offering.seats;
 	const node = BASE_NODE_USD_PER_MONTH * monthsServed;
 	const fee = charged * processorRate + PROCESSOR_FIXED_USD;
 
@@ -149,7 +146,8 @@ describe("first-purchase voucher", () => {
 	// THE COPY GUARD. The card page and the Polar discount name both promise "your
 	// first month", and Polar's `once` is a first BILLING PERIOD — the two are the
 	// same sentence only while every eligible product bills monthly. Adding a
-	// yearly product silently turns an advertised $3.90 into $39, so the promise
+	// yearly product silently turns a first-month discount into a first-year
+	// discount, so the promise
 	// is defended here rather than in a comment above the copy.
 	it("is monthly-only, so 'your first month' is literally true", () => {
 		for (const slug of FIRST_PURCHASE_VOUCHER_SLUGS) {
@@ -185,15 +183,11 @@ describe("first-purchase voucher margin", () => {
 		});
 	}
 
-	// WHY YEARLY IS EXCLUDED, now that the repricing has made it profitable.
+	// WHY YEARLY IS EXCLUDED: the discount is scoped to the first billing period.
 	//
-	// This test used to assert that max-yearly LOST money at 10% off, which was
-	// true at $2000 against a $150/mo pool and is no longer true at $990 against
-	// $30. Deleting it outright would have quietly removed the only mechanical
-	// defence of the exclusion, so it is replaced by the reason that does not
-	// depend on any price: a Polar `once` discount covers a whole BILLING PERIOD,
-	// and a yearly period is ten months of billing. A card promising "10% off
-	// your first month" would therefore pay out about ten times what it says.
+	// A Polar `once` discount covers a whole BILLING PERIOD, and a yearly period is
+	// ten months of billing. A card promising "10% off your first month" would
+	// therefore pay out about ten times what it says.
 	it("a yearly product would discount ~10x what the card advertises", () => {
 		const yearly = offeringFor("max-yearly");
 		const monthly = offeringFor("max-monthly");

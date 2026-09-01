@@ -108,6 +108,7 @@ export function AgentChat({
 	contextSize,
 	conversationKey,
 	goalCompletion,
+	searchActiveMessageId,
 	statsPluginEnabled,
 	statsUsage,
 	statsModelName,
@@ -428,6 +429,7 @@ export function AgentChat({
 				onUndoFileEdits={onUndoFileEdits}
 				onWorkflowResume={onWorkflowResume}
 				previewResolvers={previewResolvers}
+				searchActiveMessageId={searchActiveMessageId}
 				selectionActions={selectionActions}
 				showCopyToolbar={showCopyToolbar}
 				slots={slots}

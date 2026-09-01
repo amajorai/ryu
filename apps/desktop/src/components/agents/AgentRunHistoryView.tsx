@@ -34,17 +34,31 @@ import {
 	EmptyMedia,
 	EmptyTitle,
 } from "@ryu/ui/components/empty";
+import {
+	RunStatusTimeline,
+	RunStatusTimelineLegend,
+} from "@ryu/ui/components/run-status-timeline";
 import { ScrollArea } from "@ryu/ui/components/scroll-area";
 import { cn } from "@ryu/ui/lib/utils";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { useCallback, useMemo } from "react";
 import { useChatHistoryContext } from "@/src/contexts/ChatHistoryContext.tsx";
 import { useTabsContext } from "@/src/contexts/TabsContext.tsx";
 import { type RunSummary, useRuns } from "@/src/hooks/useRuns.ts";
+import { useSchedules } from "@/src/hooks/useSchedules.ts";
+import type { ScheduledJob } from "@/src/lib/api/schedules.ts";
+import {
+	buildCalendarEvents,
+	buildRunStatusTimelineEntries,
+	describeSchedule,
+	groupEventsByJob,
+} from "@/src/lib/calendar/events.ts";
 import { conversationRunStatusMeta } from "@/src/lib/conversation-run-status.ts";
 
 /** Prefix Core uses for the ephemeral conversation id of a workflow node run. */
 const WORKFLOW_RUN_PREFIX = "wfrun-";
+/** Prefix Core uses for a new persistent conversation created by a routine. */
+const AGENT_RUN_PREFIX = "agentrun_";
 
 /** A unified history entry, whether it originated as a chat or an automated run. */
 interface HistoryEntry {
@@ -63,7 +77,11 @@ interface HistoryEntry {
 /** An automated run is one Core drove on its own: it either carries a run
  *  lifecycle status, or it is a workflow node's ephemeral conversation. */
 function isAutomated(id: string, runStatus?: string): boolean {
-	return Boolean(runStatus) || id.startsWith(WORKFLOW_RUN_PREFIX);
+	return (
+		Boolean(runStatus) ||
+		id.startsWith(WORKFLOW_RUN_PREFIX) ||
+		id.startsWith(AGENT_RUN_PREFIX)
+	);
 }
 
 function statusMeta(status: string | undefined): {
@@ -240,10 +258,94 @@ function HistorySection({
 	);
 }
 
+function AgentRunOverview({ jobs }: { jobs: ScheduledJob[] }) {
+	const now = new Date();
+	const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+	const events = buildCalendarEvents(jobs, start, now);
+	const eventsByJob = groupEventsByJob(events);
+	const failed = events.filter(
+		(event) => event.kind === "past" && event.outcome === "failure"
+	).length;
+	const completed = events.filter(
+		(event) => event.kind === "past" && event.outcome === "success"
+	).length;
+
+	return (
+		<section
+			className="flex flex-col gap-3 rounded-[10px] bg-muted/40 p-3.5"
+			data-testid="agent-run-overview"
+		>
+			<div className="flex flex-wrap items-start justify-between gap-3">
+				<div>
+					<h3 className="font-medium text-sm">Run status · last 24 hours</h3>
+					<p className="mt-1 text-muted-foreground text-xs">
+						{completed} completed · {failed} failed · {jobs.length}{" "}
+						{jobs.length === 1 ? "routine" : "routines"}
+					</p>
+				</div>
+				<RunStatusTimelineLegend />
+			</div>
+			<RunStatusTimeline
+				ariaLabel={`All ${jobs.length} agent routine statuses for the last 24 hours`}
+				endAt={now.getTime()}
+				entries={buildRunStatusTimelineEntries(start, now, events)}
+				nowAt={now.getTime()}
+				showScale
+				startAt={start.getTime()}
+			/>
+			<div className="grid gap-2 border-t pt-3 sm:grid-cols-2">
+				{jobs.map((job) => {
+					const jobEvents = eventsByJob.get(job.id) ?? [];
+					const last = [...job.history].sort(
+						(a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt)
+					)[0];
+					return (
+						<div className="min-w-0" key={job.id}>
+							<div className="flex items-center justify-between gap-2 text-xs">
+								<span className="truncate font-medium">{job.name}</span>
+								<span className="shrink-0 text-muted-foreground">
+									{job.enabled ? describeSchedule(job.schedule) : "Paused"}
+								</span>
+							</div>
+							<RunStatusTimeline
+								ariaLabel={`${job.name} status for the last 24 hours`}
+								className="mt-1"
+								endAt={now.getTime()}
+								entries={buildRunStatusTimelineEntries(start, now, jobEvents)}
+								startAt={start.getTime()}
+							/>
+							<p className="mt-1 truncate text-[11px] text-muted-foreground">
+								{last
+									? `${last.outcome === "success" ? "Succeeded" : "Failed"} ${formatDistanceToNow(new Date(last.startedAt), { addSuffix: true })}`
+									: "No runs yet"}
+							</p>
+						</div>
+					);
+				})}
+			</div>
+			<p className="text-[11px] text-muted-foreground">
+				Window ending {format(now, "MMM d, HH:mm")}. Open an automated run below
+				to inspect its full persistent transcript.
+			</p>
+		</section>
+	);
+}
+
 export function AgentRunHistoryView({ agentId }: AgentRunHistoryViewProps) {
 	const { refresh, setActiveConversationId } = useChatHistoryContext();
 	const { openTab } = useTabsContext();
 	const history = useAgentHistory(agentId);
+	const { jobs } = useSchedules();
+	const routines = useMemo(
+		() =>
+			jobs.filter(
+				(job) =>
+					!job.system &&
+					job.target.type === "agent" &&
+					job.target.agentId === agentId
+			),
+		[agentId, jobs]
+	);
 
 	const openRun = useCallback(
 		(id: string) => {
@@ -276,6 +378,8 @@ export function AgentRunHistoryView({ agentId }: AgentRunHistoryViewProps) {
 					Refresh
 				</Button>
 			</div>
+
+			{routines.length > 0 ? <AgentRunOverview jobs={routines} /> : null}
 
 			{history.length === 0 ? (
 				<Empty className="min-h-64">

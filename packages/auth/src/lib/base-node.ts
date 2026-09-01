@@ -65,23 +65,24 @@ export const BASE_NODE_TYPE_BY_PLAN: Readonly<Record<string, string>> = {
 };
 
 /**
- * Singapore's catalog does not offer the EU `cx23`. Keep the same Pro compute
- * promise there with the regional `cpx22`; Max already uses the dedicated
- * `ccx13`, which is available in Singapore. This is a runtime placement choice,
- * not a billing boundary: the organization still owns one included node.
+ * Singapore's catalog does not offer the EU `cx23`, and its available shapes are
+ * materially more expensive than the EU defaults. Teams and Business have
+ * enough organization-seat margin to include their regional profiles. Pro and
+ * Max do not: their global prices cannot safely absorb a Singapore node on the
+ * annual term, so those customers can still choose Singapore through a priced
+ * cloud-instance add-on but are not promised a free regional node.
  */
 export const BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE: Readonly<
 	Record<string, string>
 > = {
-	pro: "cpx22",
-	max: "ccx13",
 	teams: "cpx22",
 	business: "cpx32",
 };
 
 /**
  * The type a plan's included node is provisioned at, or null when it gets none.
- * Teams resolves through the seat ladder; everything else is fixed per plan.
+ * Teams resolves through the seat ladder; Business has a fixed performance
+ * profile and everything else is fixed per plan.
  */
 export const baseNodeTypeForPlan = (
 	plan: PlanId | null | undefined,
@@ -109,7 +110,7 @@ export const baseNodeTypeForPlanAtLocation = (
 		if (plan === "teams") {
 			return BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE.teams ?? "cpx22";
 		}
-		return BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE[plan] ?? "cpx22";
+		return BASE_NODE_TYPE_BY_PLAN_IN_SINGAPORE[plan] ?? null;
 	}
 	return baseNodeTypeForPlan(plan, seats);
 };
@@ -176,13 +177,9 @@ export const teamsNodeTierForSeats = (seats: number): TeamsNodeTier => {
 /**
  * How many free nodes a plan grants at `seats`.
  *
- * Everything except Teams gets exactly one, which is what the platform enforces
- * today: `POST /api/servers` refuses a second node for an org with a 409.
- *
- * NOTE FOR WHOEVER IMPLEMENTS THE 2-NODE TIER: that 409 is currently
- * unconditional, so granting more than one requires relaxing it to read this
- * function rather than assuming 1. Until then the 50+ tier's second node is a
- * DECLARED entitlement, not a provisioned one.
+ * Everything except Teams gets exactly one. Teams reaches two included nodes at
+ * the 50-seat tier; the server route and the slot index both resolve that count
+ * from this function so the declared capacity is provisioned and race-safe.
  */
 export const baseNodeCountForPlan = (
 	plan: PlanId | null | undefined,
@@ -198,16 +195,30 @@ export const baseNodeCountForPlan = (
 };
 
 /**
+ * How many included nodes a plan grants in a specific region. A null regional
+ * type means the plan has no included node there and the customer must use a
+ * priced cloud-instance add-on.
+ */
+export const baseNodeCountForPlanAtLocation = (
+	plan: PlanId | null | undefined,
+	location: string | null | undefined,
+	seats = 1
+): number =>
+	baseNodeTypeForPlanAtLocation(plan, location, seats) === null
+		? 0
+		: baseNodeCountForPlan(plan, seats);
+
+/**
  * How the qualifying plans are NAMED in customer-facing copy ("…is included
- * with Pro, Max or Teams"). Presentational only — never parse it. Every string
+ * with Pro, Max, Teams or Business"). Presentational only — never parse it. Every string
  * that used to hardcode "Max" reads this, so widening or narrowing the set is
  * one edit here plus {@link PLANS_INCLUDING_BASE_NODE}, not a nine-file sed.
  */
-export const BASE_NODE_PLANS_LABEL = "Pro, Max or Teams";
+export const BASE_NODE_PLANS_LABEL = "Pro, Max, Teams or Business";
 
 /**
- * The same set in a conjunctive sentence position ("included with Pro, Max and
- * Teams"). Two constants rather than one because English needs both and a
+ * The same set in a conjunctive sentence position ("included with Pro, Max,
+ * Teams and Business"). Two constants rather than one because English needs both and a
  * caller that picks the wrong one reads as a typo to a customer.
  */
-export const BASE_NODE_PLANS_LABEL_ALL = "Pro, Max and Teams";
+export const BASE_NODE_PLANS_LABEL_ALL = "Pro, Max, Teams and Business";

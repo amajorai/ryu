@@ -1,7 +1,7 @@
 // apps/desktop/src/components/billing/PaywallModal.tsx
 //
 // The desktop paywall (epic #496, Unit C1). Shown after the 7-day trial expires
-// with no active Pro/Max/Teams subscription AND no valid desktop license key.
+// with no active Pro/Max/Teams/Business subscription AND no valid desktop license key.
 //
 // Open-core: this gates Pro features + managed inference, NOT the app shell. It
 // is DISMISSIBLE — closing it drops the user into free local chat (which stays

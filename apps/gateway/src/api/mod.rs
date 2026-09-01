@@ -20,7 +20,7 @@ pub mod traffic;
 
 use axum::{
     http::HeaderValue,
-    response::Response,
+    response::{Redirect, Response},
     routing::{any, get, post},
     Router,
 };
@@ -44,6 +44,9 @@ async fn stamp_policy_alert(mut response: Response) -> Response {
 
 pub fn router(state: SharedState) -> Router {
     Router::new()
+        // The standalone service domain is a portal entry point for people;
+        // keep the API routes below available to programmatic callers.
+        .route("/", get(product_dashboard_redirect))
         // OpenAI-compatible chat endpoint
         .route("/v1/chat/completions", post(chat::chat_completions))
         // ACP subprocesses use this agent-scoped alias so the Gateway can bind
@@ -199,6 +202,14 @@ pub fn router(state: SharedState) -> Router {
         .with_state(state)
 }
 
+async fn product_dashboard_redirect() -> Redirect {
+    let target = std::env::var("RYU_PRODUCT_DASHBOARD_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "https://app.ryuhq.com/dashboard".to_owned());
+    Redirect::temporary(&target)
+}
+
 #[cfg(test)]
 mod stamp_tests {
     use super::*;
@@ -265,6 +276,35 @@ mod route_tests {
         assert!(
             route_accepts_get(&app, "/v1/traffic").await,
             "GET /v1/traffic must route to the SSE handler"
+        );
+    }
+
+    #[tokio::test]
+    async fn standalone_home_redirects_to_the_portal_dashboard() {
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let state = std::sync::Arc::new(AppState::new_for_test_default());
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::TEMPORARY_REDIRECT
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .unwrap(),
+            "https://app.ryuhq.com/dashboard"
         );
     }
 

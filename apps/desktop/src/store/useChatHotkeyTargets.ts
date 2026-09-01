@@ -39,6 +39,8 @@ interface ChatHotkeyHandlers {
 	toggleBottomPanel: (() => void) | null;
 	/** Show/hide this chat's right dock. */
 	toggleRightPanel: (() => void) | null;
+	/** Open or cycle the focused chat's message/file search. */
+	toggleSearch: (() => void) | null;
 }
 
 interface ChatHotkeyTargetsState extends ChatHotkeyHandlers {
@@ -56,6 +58,7 @@ const EMPTY: ChatHotkeyHandlers = {
 	startVoiceMode: null,
 	toggleBottomPanel: null,
 	toggleRightPanel: null,
+	toggleSearch: null,
 };
 
 export const useChatHotkeyTargets = create<ChatHotkeyTargetsState>((set) => ({

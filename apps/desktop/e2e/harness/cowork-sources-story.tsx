@@ -3,7 +3,8 @@
 //
 // The section used to render one row per CONNECTOR ("Web search", "Local files")
 // and nothing else, so a user could see THAT the run searched the web without
-// ever seeing WHICH links or files. Each connector now expands in place.
+// ever seeing WHICH links or files. Each connector now expands in place, and
+// qualified MCP, app, and Composio calls are kept in the same inventory.
 //
 // This is a real-browser story rather than a unit test because the expansion is
 // nested inside the `BouncyAccordion`, whose open height comes from a
@@ -104,6 +105,30 @@ const MESSAGES = [
 				state: "output-available",
 				input: { name: "Brighten the dark-mode ramp" },
 			},
+			{
+				type: "dynamic-tool",
+				toolName: "composio.SLACK_SEND_MESSAGE",
+				state: "output-available",
+				input: {
+					arguments: { channel: "#design", text: "Review the new rail" },
+				},
+			},
+			{
+				type: "dynamic-tool",
+				toolName: "app.tauri.driver_session",
+				state: "output-available",
+				input: { name: "Sources proof" },
+			},
+			{
+				type: "tool-mcp-sentry.search_issues",
+				state: "output-available",
+				input: { query: "is:unresolved" },
+			},
+			{
+				type: "tool-expect.console_logs",
+				state: "output-available",
+				input: { query: "errors" },
+			},
 		],
 	},
 ];
@@ -113,7 +138,7 @@ const queryClient = new QueryClient();
 function Story() {
 	return (
 		<QueryClientProvider client={queryClient}>
-			<div className="dark grid h-screen grid-cols-[18rem_minmax(0,1fr)] bg-background text-foreground">
+			<div className="dark grid min-h-screen grid-cols-[18rem_minmax(0,1fr)] bg-background text-foreground">
 				<div className="min-w-0 p-2" data-testid="pinned-summary-sources-proof">
 					<CoworkContextPanel
 						maxItemsPerSection={5}

@@ -27,7 +27,7 @@ import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
  * One pool's remaining restricted balance, in the server's wire shape.
  *
  * FLAT, and deliberately so: `/api/campaigns/mine` emits
- * `{ poolLabel, remainingMicroUsd, expiresAt }` — there is no nested
+ * `{ poolLabel, remainingMicroUsd, expiresAt, isFreeProvider }` — there is no nested
  * `pool: { id, label }` object and no pool ID on the wire at all. This type
  * previously modelled the nested form, which made `normalizePools` reject every
  * real row; because that normalizer is fail-quiet the Credits card just rendered
@@ -43,6 +43,7 @@ import { BACKEND_URL, TOKEN_KEY } from "@/lib/auth-client.ts";
  */
 export interface CampaignPoolBalance {
 	expiresAt: string | null;
+	isFreeProvider: boolean;
 	poolLabel: string;
 	remainingMicroUsd: number;
 }
@@ -119,6 +120,7 @@ function normalizePools(input: unknown): CampaignPoolBalance[] {
 		out.push({
 			poolLabel: label,
 			remainingMicroUsd: remaining,
+			isFreeProvider: row?.isFreeProvider === true,
 			// Optional on the wire (a pool whose grants never lapse omits it), so a
 			// missing or non-string value is normalized to "no expiry" rather than
 			// treated as a malformed row.

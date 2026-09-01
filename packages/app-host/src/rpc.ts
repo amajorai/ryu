@@ -275,7 +275,7 @@ export type Capability =
 	// agent via the New-automation dialog. Host-direct (the monitors pattern): the
 	// host holds the node token and calls the existing `/heartbeat/jobs` (jobs),
 	// `/workflows` (names), and `/api/agents` (picker) reads, plus the idempotent
-	// `createScheduledAgentWorkflow` composite. One capability gates the whole
+	// `createScheduledAgentWorkflow` routine composite. One capability gates the whole
 	// `calendar.*` family.
 	| "calendar.crud"
 	// Learning (grant `learning:crud`) — the `@ryu/learning` app renders the
@@ -630,6 +630,7 @@ export interface WarmupRunNowPayload {
 export interface CalendarCreateAutomationPayload {
 	agentId: string;
 	agentName: string;
+	conversationId?: string | null;
 	requireApproval?: boolean;
 	schedule:
 		| { kind: "cron"; expr: string }
@@ -4215,7 +4216,7 @@ export async function dispatchRpc(
 			if (!input) {
 				throw new CodedRpcError(
 					"invalid_args",
-					"calendar.createAutomation requires a { agentId: string, agentName: string, schedule: { kind: 'cron', expr } | { kind: 'every', interval }, requireApproval?: boolean }"
+					"calendar.createAutomation requires a { agentId: string, agentName: string, conversationId?: string | null, schedule: { kind: 'cron', expr } | { kind: 'every', interval }, requireApproval?: boolean }"
 				);
 			}
 			if (!services.calendarCreateAutomation) {
@@ -7245,8 +7246,8 @@ export function asSkillTitleArg(data: unknown): { title: string } | null {
 	return { title: o.title };
 }
 
-/** Narrow a calendar New-automation payload `{ agentId, agentName, schedule,
- *  requireApproval? }`. The `schedule` must be a tagged `{ kind: "cron", expr }` or
+/** Narrow a calendar New-automation payload `{ agentId, agentName,
+ *  conversationId?, schedule, requireApproval? }`. The `schedule` must be a tagged `{ kind: "cron", expr }` or
  *  `{ kind: "every", interval }`; Core validates the cron/interval server-side. Any
  *  other shape returns null so a malformed call never reaches the composite. */
 export function asCalendarCreateAutomationArg(
@@ -7280,9 +7281,19 @@ export function asCalendarCreateAutomationArg(
 	) {
 		return null;
 	}
+	if (
+		o.conversationId !== undefined &&
+		o.conversationId !== null &&
+		(typeof o.conversationId !== "string" || o.conversationId.length === 0)
+	) {
+		return null;
+	}
 	return {
 		agentId: o.agentId,
 		agentName: o.agentName,
+		...(o.conversationId === undefined
+			? {}
+			: { conversationId: o.conversationId as string | null }),
 		schedule,
 		...(o.requireApproval === undefined
 			? {}

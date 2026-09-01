@@ -16,6 +16,7 @@ import {
 	INGRESS_URL_PREF,
 	ingressLabel,
 	isOwnRelayKind,
+	MESH_BACKEND_HEADSCALE,
 	MESH_BACKEND_TAILCAT,
 	normalizeMeshStatus,
 	parseMeshBackend,
@@ -96,6 +97,17 @@ describe("normalizeMeshStatus enabled gate", () => {
 });
 
 describe("Tailcat backend", () => {
+	test("uses Tailcat for an unconfigured fresh node", () => {
+		expect(parseMeshBackend(null)).toBe(MESH_BACKEND_TAILCAT);
+		expect(parseMeshBackend("unknown-backend")).toBe(MESH_BACKEND_TAILCAT);
+	});
+
+	test("keeps a legacy Headscale URL as the implicit backend", () => {
+		expect(parseMeshBackend(null, "https://headscale.example.com")).toBe(
+			MESH_BACKEND_HEADSCALE
+		);
+	});
+
 	test("normalizes and labels the point-to-point backend", () => {
 		expect(parseMeshBackend(" tailcat ")).toBe(MESH_BACKEND_TAILCAT);
 		expect(

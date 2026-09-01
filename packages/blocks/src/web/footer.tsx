@@ -2,15 +2,14 @@
 
 import { Logo } from "@ryu/ui/components/logo.tsx";
 
+import Aurora from "./aurora.tsx";
 import BackedBy from "./backed-by.tsx";
 import FooterBuildInfo from "./footer-build-info.tsx";
-import { GitHubStars } from "./github-stars.tsx";
 import { ThemeToggle } from "./theme-toggle.tsx";
 import "./footer.css";
 
 // Cache Components requires client prerenders to be deterministic.
 const COPYRIGHT_YEAR = 2026;
-const GITHUB_CORE_URL = "https://github.com/amajorai/ryu";
 
 export default function Footer({
 	githubStargazersCount,
@@ -19,7 +18,7 @@ export default function Footer({
 }) {
 	return (
 		<footer className="relative overflow-x-clip pt-16">
-			{/* Content sits above the outline mark and stays on shared surfaces. */}
+			{/* Content sits above the Aurora and outline mark and stays on shared surfaces. */}
 			<div className="container relative z-10 mx-auto px-4">
 				{/* Two column links */}
 				<div className="mb-12 grid grid-cols-1 gap-12 md:grid-cols-2">
@@ -28,8 +27,8 @@ export default function Footer({
 							The universal AI integration layer
 						</h3>
 						<p className="max-w-md text-muted-foreground">
-							We deploy it, keep it running, and connect the tools, models, and
-							workflows you already use.
+							We deploy and keep your agents running for you. Connect the tools
+							it needs and integrate where you want it to run.
 						</p>
 						<BackedBy className="pt-2" />
 					</div>
@@ -104,18 +103,6 @@ export default function Footer({
 								>
 									MCP
 								</a>
-								<a
-									className="inline-flex items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
-									href={GITHUB_CORE_URL}
-									rel="noopener noreferrer"
-									target="_blank"
-								>
-									<span>Open Source</span>
-									{githubStargazersCount != null &&
-									githubStargazersCount > 0 ? (
-										<GitHubStars stargazersCount={githubStargazersCount} />
-									) : null}
-								</a>
 							</div>
 						</div>
 
@@ -153,7 +140,7 @@ export default function Footer({
 
 				{/* Horizontal links + copyright */}
 				<div className="mt-32 space-y-4 text-center">
-					<FooterBuildInfo />
+					<FooterBuildInfo githubStargazersCount={githubStargazersCount} />
 					<div className="flex items-center justify-center gap-8 text-muted-foreground text-sm">
 						<ThemeToggle />
 						<a
@@ -196,6 +183,13 @@ export default function Footer({
 						/>
 					</p>
 				</div>
+			</div>
+
+			<div
+				aria-hidden="true"
+				className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[38rem] [mask-image:linear-gradient(to_top,black_72%,transparent)]"
+			>
+				<Aurora amplitude={0.2} blend={0.65} fan={0.65} speed={2.5} />
 			</div>
 
 			{/* Giant Ryu outline — only the top half rises into view; the eyes track the cursor. */}

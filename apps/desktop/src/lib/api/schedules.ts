@@ -40,6 +40,8 @@ export type JobTarget =
 			 * Absent runs the agent on its configured model.
 			 */
 			model?: string | null;
+			/** Append each firing to this existing persistent chat when set. */
+			conversationId?: string | null;
 			prompt: string;
 	  };
 
@@ -94,6 +96,15 @@ export interface JobInput {
 	target: JobTarget;
 }
 
+/** Mutable fields for an existing routine. Omitted fields remain unchanged. */
+export interface JobUpdateInput {
+	enabled?: boolean;
+	name?: string;
+	requireApproval?: boolean;
+	schedule?: Schedule;
+	target?: JobTarget;
+}
+
 // ── Wire shapes (snake_case, tagged unions exactly as Core serializes them) ──
 
 interface ScheduleWire {
@@ -107,6 +118,7 @@ interface ScheduleWire {
 // "learning_cycle") through this shape, so `type` stays an open string.
 interface TargetWire {
 	agent_id?: string;
+	conversation_id?: string | null;
 	input?: Record<string, string>;
 	model?: string | null;
 	prompt?: string;
@@ -163,6 +175,7 @@ function toTarget(t: TargetWire): JobTarget {
 	return {
 		type: "agent",
 		agentId: t.agent_id ?? "",
+		conversationId: t.conversation_id ?? null,
 		prompt: t.prompt ?? "",
 		model: t.model ?? null,
 	};
@@ -219,10 +232,32 @@ function toTargetBody(t: JobTarget): Record<string, unknown> {
 		? {
 				type: "agent",
 				agent_id: t.agentId,
+				...(t.conversationId ? { conversation_id: t.conversationId } : {}),
 				prompt: t.prompt,
 				model: t.model,
 			}
-		: { type: "agent", agent_id: t.agentId, prompt: t.prompt };
+		: {
+				type: "agent",
+				agent_id: t.agentId,
+				...(t.conversationId ? { conversation_id: t.conversationId } : {}),
+				prompt: t.prompt,
+			};
+}
+
+function toJobUpdateBody(input: JobUpdateInput): Record<string, unknown> {
+	return {
+		...(input.name === undefined ? {} : { name: input.name }),
+		...(input.schedule === undefined
+			? {}
+			: { schedule: toScheduleBody(input.schedule) }),
+		...(input.target === undefined
+			? {}
+			: { target: toTargetBody(input.target) }),
+		...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+		...(input.requireApproval === undefined
+			? {}
+			: { require_approval: input.requireApproval }),
+	};
 }
 
 /**
@@ -290,7 +325,35 @@ export async function createJob(
 	return toJob(json.job as JobWire);
 }
 
+/** Update a saved routine and return Core's canonical record. */
+export async function updateJob(
+	target: ApiTarget,
+	id: string,
+	input: JobUpdateInput
+): Promise<ScheduledJob> {
+	const resp = await authenticatedFetch(
+		target,
+		`/heartbeat/jobs/${encodeURIComponent(id)}`,
+		{
+			method: "PUT",
+			body: JSON.stringify(toJobUpdateBody(input)),
+		}
+	);
+	const text = await resp.text();
+	const json = text ? JSON.parse(text) : {};
+	if (!resp.ok) {
+		const message =
+			typeof json?.error === "string"
+				? json.error
+				: `Failed to update job (${resp.status})`;
+		throw new Error(message);
+	}
+	return toJob(json.job as JobWire);
+}
+
 /** Delete a scheduled job by id. */
 export async function deleteJob(target: ApiTarget, id: string): Promise<void> {
-	await request<void>(target, `/heartbeat/jobs/${id}`, { method: "DELETE" });
+	await request<void>(target, `/heartbeat/jobs/${encodeURIComponent(id)}`, {
+		method: "DELETE",
+	});
 }

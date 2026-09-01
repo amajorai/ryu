@@ -402,6 +402,8 @@ export const authClient = createAuthClient({
 		},
 	},
 	plugins: [
+		// Retained for deleting legacy guest sessions; sign-in is disabled by the
+		// shared waitlist policy.
 		anonymousClient(),
 		twoFactorClient(),
 		magicLinkClient(),

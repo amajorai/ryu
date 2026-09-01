@@ -3,7 +3,7 @@
   "productName": "Ryu (Research Preview)",
   "mainBinaryName": "Ryu",
   "identifier": "ai.amajor.ryu.desktop",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",

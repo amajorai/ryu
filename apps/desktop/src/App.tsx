@@ -1,3 +1,4 @@
+import { GUEST_MODE_ENABLED } from "@ryu/auth/lib/guest-mode";
 import { ditherAvatarSeed } from "@ryu/ui/components/dither-kit/avatar.tsx";
 import { Logo as OrbLogo } from "@ryu/ui/components/logo.tsx";
 import { Toaster, toast } from "@ryu/ui/components/sileo.tsx";
@@ -735,6 +736,7 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 	const [waitlistGate, setWaitlistGate] = useState<
 		"loading" | "approved" | "pending"
 	>("loading");
+	const disabledGuestCleanupStarted = useRef(false);
 
 	useEffect(() => {
 		if (!authed) {
@@ -749,8 +751,28 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 				timer = null;
 			}
 		};
+		const removeDisabledGuestSession = async () => {
+			if (disabledGuestCleanupStarted.current) {
+				return;
+			}
+			disabledGuestCleanupStarted.current = true;
+			// Remove both the anonymous account and any browser credential. The reload
+			// below also clears the cached client session used by the webapp shell.
+			await authClient.deleteAnonymousUser().catch(() => undefined);
+			await authClient.signOut().catch(() => undefined);
+			await clearSessionToken();
+			if (active) {
+				setIsAuthenticated(false);
+				window.location.reload();
+			}
+		};
 		const check = async () => {
 			if (session?.user?.isAnonymous) {
+				if (!GUEST_MODE_ENABLED) {
+					setWaitlistGate("loading");
+					await removeDisabledGuestSession();
+					return;
+				}
 				setWaitlistGate("approved");
 				stop();
 				return;
@@ -797,6 +819,11 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 						user?: { isAnonymous?: boolean };
 					} | null;
 					if (data?.user?.isAnonymous) {
+						if (!GUEST_MODE_ENABLED) {
+							setWaitlistGate("loading");
+							await removeDisabledGuestSession();
+							return;
+						}
 						setWaitlistGate("approved");
 						stop();
 						return;
