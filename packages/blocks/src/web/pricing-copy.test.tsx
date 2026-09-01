@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+	HostedAgentPlanCard,
 	MarketplacePassPlanCard,
 	PRO_MONTHLY_USD,
 	PricingBillingToggle,
@@ -87,6 +88,26 @@ test("the public Pro offer uses the current margin-safe price", () => {
 	expect(
 		renderToStaticMarkup(<PricingPlanGrid audience="individual" />)
 	).toContain("Pro");
+});
+
+test("the hosted cards use the current included capacity ladder", () => {
+	const teams = renderToStaticMarkup(
+		<HostedAgentPlanCard agentCount={5} planId="teams" />
+	);
+	const teamsAtFifty = renderToStaticMarkup(
+		<HostedAgentPlanCard agentCount={50} planId="teams" />
+	);
+	const business = renderToStaticMarkup(
+		<HostedAgentPlanCard agentCount={5} planId="business" />
+	);
+
+	expect(teams).toContain("8 vCPU, 16 GB RAM, and 160 GB SSD");
+	expect(teamsAtFifty).toContain(
+		"Two managed servers with 8 vCPU, 16 GB RAM, and 160 GB SSD each"
+	);
+	expect(business).toContain("16 vCPU, 32 GB RAM, and 320 GB SSD");
+	expect(teams).not.toContain("2 vCPU, 4 GB RAM, and 40 GB SSD");
+	expect(business).not.toContain("4 vCPU, 8 GB RAM, and 160 GB SSD");
 });
 
 test("annual pricing headlines use whole dollars", () => {

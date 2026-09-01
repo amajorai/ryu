@@ -1517,7 +1517,9 @@ export default function OnboardingPage() {
 			sileo.success({
 				title: `${createdCount} suggested agent${createdCount === 1 ? "" : "s"} added`,
 				description:
-					"They start in Trial mode so you can review them before promoting them.",
+					createdCount === 1
+						? "It is ready for your next task."
+						: "They are ready for your next task.",
 			});
 		}
 

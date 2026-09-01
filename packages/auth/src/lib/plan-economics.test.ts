@@ -57,14 +57,15 @@ const POLAR_RATE_SUBSCRIPTION = TOPUP_POLAR_PROCESSING_BPS / 10_000;
 const POLAR_FIXED_USD = TOPUP_POLAR_PROCESSING_FIXED_USD;
 /**
  * Conservative USD planning reserves by server type. These use the current
- * German gross price + one IPv4, the 2026-08-19 ECB EUR/USD reference rate,
- * a 25% infrastructure buffer, and a final round-up for ordinary drift.
+ * German net price + one IPv4, the 2026-08-19 ECB EUR/USD reference rate,
+ * a 50% infrastructure/operations buffer, and a final round-up for ordinary
+ * drift.
  *
  * NOT one number any more. The free node is sized by PLAN, and for Teams by SEAT
- * COUNT — Max runs a `cx33`, and Teams climbs `cx23` → `cx33` → `cpx32` → 2 ×
- * `cpx32` as the org grows. Charging every plan a flat `cx23` (which this file
- * did until the seat ladder shipped) understates the node cost by up to 13× at
- * the top band, so the margin guard would have passed a band that lost money.
+ * COUNT — Pro runs `cx23`, Max `cx33`, Teams `cx43`, and Business `cx53`.
+ * Teams uses one `cx43` through 49 seats and two at 50. Charging every plan a
+ * flat `cx23` would understate the cost of the larger tiers, so the margin guard
+ * resolves the node from the same plan/seat ladder as provisioning.
  *
  * `nodeUsdPerMonth` resolves through the SAME `baseNodeTypeForPlan` /
  * `baseNodeCountForPlan` the provisioner uses, so a new band cannot be added to
@@ -73,8 +74,8 @@ const POLAR_FIXED_USD = TOPUP_POLAR_PROCESSING_FIXED_USD;
 const NODE_USD_PER_MONTH: Readonly<Record<string, number>> = {
 	cx23: 12,
 	cx33: 16,
-	cpx32: 63,
-	ccx13: 80,
+	cx43: 30,
+	cx53: 55,
 };
 const NODE_USD_PER_MONTH_SINGAPORE: Readonly<Record<string, number>> = {
 	cpx22: 44,
@@ -310,14 +311,14 @@ describe("current pricing worksheet", () => {
 		["pro", 1, true, 123.75, 0.2526],
 		["max", 1, false, 44.415, 0.4486],
 		["max", 1, true, 353.35, 0.3569],
-		["teams", 5, false, 168.5, 0.674],
-		["teams", 5, true, 1560, 0.624],
-		["business", 5, false, 111.5, 0.3717],
-		["business", 5, true, 782.5, 0.2608],
-		["business", 25, false, 624.5, 0.4804],
-		["business", 25, true, 5068.5, 0.3899],
-		["business", 50, false, 1265.75, 0.4964],
-		["business", 50, true, 10_426, 0.4089],
+		["teams", 5, false, 150.5, 0.602],
+		["teams", 5, true, 1344, 0.5376],
+		["business", 5, false, 119.5, 0.3983],
+		["business", 5, true, 878.5, 0.2928],
+		["business", 25, false, 632.5, 0.4865],
+		["business", 25, true, 5164.5, 0.3973],
+		["business", 50, false, 1273.75, 0.4995],
+		["business", 50, true, 10_522, 0.4126],
 	] as const;
 
 	for (const [id, seats, yearly, contribution, margin] of cases) {

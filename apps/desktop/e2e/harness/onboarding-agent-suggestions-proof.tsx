@@ -1,6 +1,8 @@
 import { Button } from "@ryu/ui/components/button";
+import { Toaster } from "@ryu/ui/components/sileo.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { sileo } from "sileo";
 import { OnboardingSetupStep } from "@/src/components/onboarding/OnboardingSetupStep.tsx";
 import type { OnboardingAgentSuggestion } from "@/src/lib/api/onboarding-profile.ts";
 import { EMPTY_AGENT_SELECTION } from "@/src/lib/api/preferences.ts";
@@ -44,7 +46,22 @@ const baseProps = {
 	cloudSelection: EMPTY_AGENT_SELECTION,
 	connectingToolkit: null,
 	connectionQuery: "",
-	connections: [],
+	connections: [
+		{
+			accessLevel: "risk_based",
+			active: true,
+			id: "gmail-1",
+			status: "ACTIVE",
+			toolkit: "gmail",
+		},
+		{
+			accessLevel: "risk_based",
+			active: true,
+			id: "notion-1",
+			status: "ACTIVE",
+			toolkit: "notion",
+		},
+	],
 	connectionsCheckFailed: false,
 	defaultProviderIds: [],
 	freeCloud: false,
@@ -58,12 +75,14 @@ const baseProps = {
 	selectedOrganizationId: null,
 	target: { token: null, url: "http://127.0.0.1:7980", userJwt: null },
 	threadGroups: [],
-	toolkits: [],
+	toolkits: [
+		{ description: "Inbox", logo: null, name: "Gmail", slug: "gmail" },
+		{ description: "Knowledge", logo: null, name: "Notion", slug: "notion" },
+	],
 };
 
 function ProofApp() {
 	const [selected, setSelected] = useState<Set<string>>(new Set());
-	const [added, setAdded] = useState<string[]>([]);
 	const [skipped, setSkipped] = useState(false);
 
 	const toggle = (id: string) => {
@@ -95,11 +114,20 @@ function ProofApp() {
 				onConnectToolkit={async () => undefined}
 				onContinue={() => undefined}
 				onCreateAgentSuggestions={() => {
-					setAdded(
-						suggestions
-							.filter((suggestion) => selected.has(suggestion.id))
-							.map((suggestion) => suggestion.name)
-					);
+					const added = suggestions
+						.filter((suggestion) => selected.has(suggestion.id))
+						.map((suggestion) => suggestion.name);
+					if (added.length === 0) {
+						return;
+					}
+					sileo.success({
+						description:
+							added.length === 1
+								? `${added[0]} is ready for your next task.`
+								: `${added.join(", ")} are ready for your next task.`,
+						id: "agent-suggestions-proof",
+						title: added.length === 1 ? "Agent added" : "Agents added",
+					});
 				}}
 				onImportThreads={() => undefined}
 				onLocalSelectionChange={() => undefined}
@@ -109,17 +137,6 @@ function ProofApp() {
 				onToggleAutoImport={() => undefined}
 			/>
 
-			{added.length > 0 ? (
-				<div
-					className="fixed top-4 right-4 z-10 max-w-sm rounded-xl border border-success/30 bg-background/95 px-4 py-3 shadow-lg backdrop-blur"
-					data-testid="agent-suggestion-success"
-				>
-					<p className="font-medium text-sm">Added to your agent group</p>
-					<p className="mt-1 text-muted-foreground text-xs">
-						{added.join(", ")} · Trial · read-only
-					</p>
-				</div>
-			) : null}
 			{skipped ? (
 				<div className="fixed bottom-4 left-1/2 z-10 -translate-x-1/2">
 					<Button
@@ -130,6 +147,7 @@ function ProofApp() {
 					</Button>
 				</div>
 			) : null}
+			<Toaster position="bottom-right" theme="system" />
 		</main>
 	);
 }

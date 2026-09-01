@@ -1249,7 +1249,7 @@ export function TeamsPlanCard({
 					</li>
 					<li className="flex items-center">
 						<Server className="mr-2 size-4" />
-						<span>Managed server with 2 vCPU, 4 GB RAM, and 40 GB SSD</span>
+						<span>Managed server with 8 vCPU, 16 GB RAM, and 160 GB SSD</span>
 					</li>
 					<li className="flex items-center">
 						<Coins className="mr-2 size-4" />
@@ -1400,9 +1400,11 @@ export function HostedAgentPlanCard({
 						<Server className="mr-2 size-4" />
 						<span>
 							{isBusiness
-								? "Performance server with 4 vCPU, 8 GB RAM, and 160 GB SSD"
+								? "Performance server with 16 vCPU, 32 GB RAM, and 320 GB SSD"
 								: isTeams
-									? "Managed server with 2 vCPU, 4 GB RAM, and 40 GB SSD"
+									? displayAgentCount >= 50
+										? "Two managed servers with 8 vCPU, 16 GB RAM, and 160 GB SSD each"
+										: "Managed server with 8 vCPU, 16 GB RAM, and 160 GB SSD"
 									: isPro
 										? "Managed server with 2 vCPU and 4 GB RAM"
 										: "Dedicated managed server with 2 vCPU and 8 GB RAM"}

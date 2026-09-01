@@ -7,7 +7,7 @@ const PROOF_SCREENSHOT = "e2e/artifacts/onboarding-agent-suggestions-proof.png";
 const PROOF_LOG = "e2e/artifacts/onboarding-agent-suggestions-proof.log.json";
 
 test.describe("onboarding agent suggestions proof", () => {
-	test("shows why, tools, and the prompt before selection", async ({
+	test("shows the agent name, description, and connected apps", async ({
 		page,
 	}) => {
 		await page.goto(STORY_URL);
@@ -15,16 +15,19 @@ test.describe("onboarding agent suggestions proof", () => {
 			page.getByRole("heading", { name: "Suggested agents for your work" })
 		).toBeVisible();
 		await expect(
-			page.getByText("Drafts from your work patterns")
+			page.getByText(
+				"Keeps release checks together and turns them into a short brief."
+			)
 		).toBeVisible();
+		await expect(page.getByText("Connected apps", { exact: true })).toHaveCount(
+			2
+		);
+		await expect(page.getByText("Gmail", { exact: true })).toHaveCount(2);
+		await expect(page.getByText("Notion", { exact: true })).toHaveCount(2);
 		await expect(
-			page.getByText("Release verification appeared repeatedly")
-		).toBeVisible();
-		await expect(
-			page.getByText("Search past chats", { exact: true }).first()
-		).toBeVisible();
-		await expect(
-			page.getByText("Search the web", { exact: true })
+			page.getByRole("img", {
+				name: "onboarding:agent-suggestion-release-desk avatar",
+			})
 		).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: "Select Release Desk" })
@@ -33,10 +36,13 @@ test.describe("onboarding agent suggestions proof", () => {
 			page.getByRole("button", { name: "Select an agent" })
 		).toBeDisabled();
 
-		await page.getByText("View prompt setup", { exact: true }).first().click();
-		await expect(page.getByTestId("suggested-prompt").first()).toContainText(
-			"evidence-backed checklist"
-		);
+		await expect(page.getByText("Why this showed up")).toHaveCount(0);
+		await expect(
+			page.getByText("Search past chats", { exact: true })
+		).toHaveCount(0);
+		await expect(
+			page.getByText("View prompt setup", { exact: true })
+		).toHaveCount(0);
 	});
 
 	test("adds only the selected drafts with one confirmation", async ({
@@ -58,24 +64,20 @@ test.describe("onboarding agent suggestions proof", () => {
 
 		await page.setViewportSize({ width: 1280, height: 1000 });
 		await page.goto(STORY_URL);
-		await page.getByText("View prompt setup", { exact: true }).first().click();
-		await expect(page.getByTestId("suggested-prompt").first()).toContainText(
-			"evidence-backed checklist"
-		);
 		await page.getByRole("button", { name: "Select Release Desk" }).click();
 		await expect(
 			page.getByRole("button", { name: "Add 1 agent" })
 		).toBeVisible();
 		await page.getByRole("button", { name: "Add 1 agent" }).click();
-		await expect(page.getByTestId("agent-suggestion-success")).toContainText(
-			"Release Desk"
-		);
-		await expect(page.getByTestId("agent-suggestion-success")).toContainText(
-			"Trial · read-only"
-		);
+		await expect(page.getByText("Agent added", { exact: true })).toBeVisible();
 		await expect(
-			page.getByTestId("agent-suggestion-success")
-		).not.toContainText("Inbox Triage");
+			page.getByText("Release Desk is ready for your next task.", {
+				exact: true,
+			})
+		).toBeVisible();
+		await expect(page.getByText("Agents added", { exact: true })).toHaveCount(
+			0
+		);
 		await expect(
 			page.getByRole("heading", { name: "Suggested agents for your work" })
 		).toHaveCSS("filter", "none");

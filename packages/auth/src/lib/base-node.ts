@@ -46,10 +46,12 @@ export const planIncludesBaseNode = (
 /**
  * The Hetzner type each plan's FREE node is provisioned at.
  *
- * Max gets a genuinely bigger machine — this is one of the things a top-up
- * cannot sell you, and therefore one of the reasons Max exists at all now that
- * it is no longer a credit pack. `cx33` is 4 vCPU · 8 GB · 80 GB against the
- * `cx23`'s 2 vCPU · 4 GB · 40 GB: double the compute and memory.
+ * Each paid managed tier gets a deliberately larger included machine — this is
+ * one of the things a top-up cannot sell you, and therefore one of the reasons
+ * the tiers exist at all now that they are no longer credit packs. The default
+ * EU ladder is Pro `cx23` (2 vCPU · 4 GB · 40 GB), Max `cx33` (4 vCPU · 8 GB ·
+ * 80 GB), Teams `cx43` (8 vCPU · 16 GB · 160 GB), and Business `cx53` (16 vCPU
+ * · 32 GB · 320 GB).
  *
  * NOT `cpx22`, which reads like the obvious upgrade and is a trap: Hetzner's
  * June 2026 repricing took it from €7.99 to **€19.49**, while `cx33` is €8.49
@@ -60,8 +62,8 @@ export const planIncludesBaseNode = (
 export const BASE_NODE_TYPE_BY_PLAN: Readonly<Record<string, string>> = {
 	pro: "cx23",
 	max: "cx33",
-	teams: "cx23",
-	business: "cpx32",
+	teams: "cx43",
+	business: "cx53",
 };
 
 /**
@@ -129,9 +131,10 @@ export const baseNodeTypeForPlanAtLocation = (
  * seats are licences, compute is sized separately). This ladder is the second
  * thing, not the first.
  *
- * The cost stays trivial against revenue — ~$77/mo of hardware at 100 seats
- * against $4,165 of subscription — and it is both cheaper AND more useful than
- * ten idle `cx23`s.
+ * The cost stays controlled against revenue because the shared node is sized by
+ * plan and seat band, not one idle VM per person. Teams uses one `cx43` through
+ * 49 seats and two at the 50-seat ceiling; Business uses one `cx53` across its
+ * self-serve range.
  *
  * REVERSIBILITY IS WHY THIS IS SAFE TO SCALE DOWN. Hetzner's `change_type` can
  * move a server between types in place, but a resize that GROWS THE DISK is
@@ -157,10 +160,8 @@ export interface TeamsNodeTier {
  * reversibility note above; a `cx23` resized up keeps its 40 GB.
  */
 export const TEAMS_NODE_TIERS: readonly TeamsNodeTier[] = [
-	{ minSeats: 5, type: "cx23", count: 1 },
-	{ minSeats: 10, type: "cx33", count: 1 },
-	{ minSeats: 25, type: "cpx32", count: 1 },
-	{ minSeats: 50, type: "cpx32", count: 2 },
+	{ minSeats: 5, type: "cx43", count: 1 },
+	{ minSeats: 50, type: "cx43", count: 2 },
 ];
 
 /** The Teams node tier in force at `seats` — the highest one reached. */

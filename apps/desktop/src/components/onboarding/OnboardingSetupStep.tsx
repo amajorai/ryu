@@ -56,6 +56,29 @@ export interface OnboardingThreadGroup {
 	threads: NativeThread[];
 }
 
+function connectedAppNames(
+	connections: readonly ComposioConnection[],
+	toolkits: readonly ComposioToolkit[]
+): string[] {
+	const names = new Set<string>();
+	for (const connection of connections) {
+		if (!connection.active) {
+			continue;
+		}
+		const toolkit = toolkits.find((item) => item.slug === connection.toolkit);
+		const fallback = connection.toolkit
+			.split(/[-_]+/)
+			.filter(Boolean)
+			.map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+			.join(" ");
+		const name = toolkit?.name.trim() || fallback;
+		if (name) {
+			names.add(name);
+		}
+	}
+	return [...names];
+}
+
 interface OnboardingSetupStepProps {
 	agentSuggestions: OnboardingAgentSuggestion[];
 	agentSuggestionsError: string | null;
@@ -940,11 +963,12 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 	if (kind === "agent-suggestions") {
 		return (
 			<Shell
-				subtitle="Ryu found repeated workflows in your approved sources. Choose which focused agents to add."
+				subtitle="Choose the helpers you want to add."
 				title="Suggested agents for your work"
 			>
 				<AgentSuggestionsStep
 					busy={props.agentSuggestionsSubmitting}
+					connectedApps={connectedAppNames(props.connections, props.toolkits)}
 					error={props.agentSuggestionsError}
 					onCreate={props.onCreateAgentSuggestions}
 					onSkip={props.onSkip}

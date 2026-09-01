@@ -12,8 +12,10 @@
  *
  * All that remains here is the default EU BASE node definition — the cx23 (2
  * vCPU · 4 GB · 40 GB) profile. The hosted plan resolver selects the exact
- * plan- and region-specific shape (for example CPX22 for Pro in Singapore or
- * CCX13 for Max) and grants it without a standalone Polar product. The user
+ * plan- and region-specific shape (Pro cx23, Max cx33, Teams cx43, Business
+ * cx53 in the default EU region) and grants it without a standalone Polar
+ * product. Singapore keeps its available regional fallback shapes where the
+ * EU CX types are not offered. The user
  * never sees the Hetzner/CX name on marketing surfaces — only CPU / RAM / SSD +
  * a perf label ("Cost-optimized").
  *
