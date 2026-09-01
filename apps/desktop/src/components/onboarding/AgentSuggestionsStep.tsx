@@ -76,6 +76,7 @@ function RyuExpressiveAvatar({
 					animated
 					className="size-full"
 					colors={palette}
+					showEyes={false}
 					size="42px"
 					variant="default"
 				/>
@@ -90,7 +91,7 @@ function RyuExpressiveAvatar({
 					className="size-full"
 					colors={palette}
 					expression="random"
-					eyeScale={1.55}
+					eyeScale={2}
 					size="42px"
 					variant="expressive"
 				/>

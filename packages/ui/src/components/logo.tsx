@@ -33,6 +33,8 @@ interface LogoProps {
 	expression?: ExpressiveExpressionSelection;
 	/** Scale the expressive ghost's eyes without changing its body size. */
 	eyeScale?: number;
+	/** Hide the default variant's eyes when another face is layered over its fill. */
+	showEyes?: boolean;
 	size?: string;
 	variant?:
 		| "default"
@@ -566,6 +568,7 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 	animation,
 	animated = true,
 	expression,
+	showEyes = true,
 }) => {
 	const [isBlinking, setIsBlinking] = useState(false);
 	const [eyePosition, setEyePosition] = useState({ x: 0, y: 0 });
@@ -1349,56 +1352,58 @@ const AnimatedLogo: React.FC<LogoProps> = ({
         }
       `}</style>
 
-			<svg
-				aria-hidden="true"
-				className="pointer-events-none absolute inset-0 h-full w-full"
-				style={{ zIndex: 10 }}
-				viewBox={`0 0 ${sizeValue} ${sizeValue}`}
-			>
-				{isBlinking ? (
-					<>
-						<line
-							stroke="white"
-							strokeLinecap="round"
-							strokeWidth={blinkStrokeWidth}
-							x1={leftBlinkStart}
-							x2={leftBlinkEnd}
-							y1={eyeY}
-							y2={eyeY}
-						/>
-						<line
-							stroke="white"
-							strokeLinecap="round"
-							strokeWidth={blinkStrokeWidth}
-							x1={rightBlinkStart}
-							x2={rightBlinkEnd}
-							y1={eyeY}
-							y2={eyeY}
-						/>
-					</>
-				) : (
-					<>
-						<ellipse
-							cx={leftEyeX + eyePosition.x}
-							cy={eyeY + eyePosition.y}
-							fill="white"
-							rx={eyeWidth}
-							ry={eyeHeight}
-							stroke="white"
-							strokeWidth="0.3"
-						/>
-						<ellipse
-							cx={rightEyeX + eyePosition.x}
-							cy={eyeY + eyePosition.y}
-							fill="white"
-							rx={eyeWidth}
-							ry={eyeHeight}
-							stroke="white"
-							strokeWidth="0.3"
-						/>
-					</>
-				)}
-			</svg>
+			{showEyes ? (
+				<svg
+					aria-hidden="true"
+					className="pointer-events-none absolute inset-0 h-full w-full"
+					style={{ zIndex: 10 }}
+					viewBox={`0 0 ${sizeValue} ${sizeValue}`}
+				>
+					{isBlinking ? (
+						<>
+							<line
+								stroke="white"
+								strokeLinecap="round"
+								strokeWidth={blinkStrokeWidth}
+								x1={leftBlinkStart}
+								x2={leftBlinkEnd}
+								y1={eyeY}
+								y2={eyeY}
+							/>
+							<line
+								stroke="white"
+								strokeLinecap="round"
+								strokeWidth={blinkStrokeWidth}
+								x1={rightBlinkStart}
+								x2={rightBlinkEnd}
+								y1={eyeY}
+								y2={eyeY}
+							/>
+						</>
+					) : (
+						<>
+							<ellipse
+								cx={leftEyeX + eyePosition.x}
+								cy={eyeY + eyePosition.y}
+								fill="white"
+								rx={eyeWidth}
+								ry={eyeHeight}
+								stroke="white"
+								strokeWidth="0.3"
+							/>
+							<ellipse
+								cx={rightEyeX + eyePosition.x}
+								cy={eyeY + eyePosition.y}
+								fill="white"
+								rx={eyeWidth}
+								ry={eyeHeight}
+								stroke="white"
+								strokeWidth="0.3"
+							/>
+						</>
+					)}
+				</svg>
+			) : null}
 		</div>
 	);
 };

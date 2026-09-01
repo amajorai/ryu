@@ -35,7 +35,7 @@ test.describe("onboarding agent suggestions proof", () => {
 		await expect(
 			page
 				.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
-				.locator('[data-expressive-eye-scale="1.55"]')
+				.locator('[data-expressive-eye-scale="2"]')
 		).toBeVisible();
 		await expect(
 			page
