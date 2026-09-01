@@ -123,7 +123,7 @@ export function ConnectionStatusToastView({
 
 /** Connect the presentational toast to the app-wide node/network status spine. */
 export function ConnectionStatusToast() {
-	const { connectionPhase, refresh } = useSystemStatusContext();
+	const { connectionPhase, coreReachable, refresh } = useSystemStatusContext();
 	const nodeName = useNodeStore((state) => state.getActiveNode().name);
 	const [retrying, setRetrying] = useState(false);
 	const [restored, setRestored] = useState(false);
@@ -133,7 +133,7 @@ export function ConnectionStatusToast() {
 		const previousPhase = previousPhaseRef.current;
 		previousPhaseRef.current = connectionPhase;
 
-		if (isConnectionUnavailable(connectionPhase)) {
+		if (isConnectionUnavailable(connectionPhase) || !coreReachable) {
 			setRestored(false);
 			return;
 		}
@@ -148,7 +148,7 @@ export function ConnectionStatusToast() {
 		setRestored(true);
 		const timer = window.setTimeout(() => setRestored(false), 3000);
 		return () => window.clearTimeout(timer);
-	}, [connectionPhase]);
+	}, [connectionPhase, coreReachable]);
 
 	const handleRetry = async () => {
 		setRetrying(true);
