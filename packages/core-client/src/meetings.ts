@@ -5,7 +5,13 @@
 // fetch + ReadableStream (not EventSource) so the bearer token can be attached —
 // same approach as the monitors alert stream.
 
-import { type ApiTarget, apiUrl, makeHeaders, request } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+	request,
+} from "./client.ts";
 
 export type MeetingStatus = "detected" | "recording" | "processing" | "done";
 export type MeetingSource = "manual" | "auto";
@@ -206,11 +212,14 @@ export async function streamMeetingEvents(
 	onEvent: (event: MeetingEvent) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, "/api/meetings/stream"), {
-		method: "GET",
-		headers: makeHeaders(target.token, target.userJwt),
-		signal,
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/meetings/stream"),
+		{
+			method: "GET",
+			headers: makeHeaders(target.token, target.userJwt),
+			signal,
+		}
+	);
 	if (!(resp.ok && resp.body)) {
 		throw new Error(`meeting stream failed: ${resp.status}`);
 	}

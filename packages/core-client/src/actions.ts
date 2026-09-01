@@ -5,7 +5,12 @@
 // execution path or accept the internal budget bypass fields used by the
 // Gateway's own tool loop.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "./client.ts";
 
 /** The result envelope returned by Core for a successful or denied Action call. */
 export interface ActionCallResult {
@@ -43,15 +48,18 @@ export async function callAction(
 	actionId: string,
 	input: ActionCallInput
 ): Promise<ActionCallResult> {
-	const response = await fetch(apiUrl(target, actionPath(actionId)), {
-		method: "POST",
-		headers: makeHeaders(target.token, target.userJwt),
-		body: JSON.stringify({
-			agent_id: input.agentId,
-			arguments: input.arguments,
-			...(input.userId === undefined ? {} : { user_id: input.userId }),
-		}),
-	});
+	const response = await fetchForTarget(target)(
+		apiUrl(target, actionPath(actionId)),
+		{
+			method: "POST",
+			headers: makeHeaders(target.token, target.userJwt),
+			body: JSON.stringify({
+				agent_id: input.agentId,
+				arguments: input.arguments,
+				...(input.userId === undefined ? {} : { user_id: input.userId }),
+			}),
+		}
+	);
 	const text = await response.text();
 	if (!text) {
 		return { ok: response.ok };

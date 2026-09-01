@@ -21,6 +21,7 @@ import {
 	fetchComposioTriggers,
 	initiateComposioConnection,
 } from "@/src/lib/api/composio.ts";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 function useTarget(): ApiTarget {
@@ -112,9 +113,13 @@ export function useComposioConnections(toolkit = "", enabled = true) {
 export function useInitiateComposioConnection() {
 	const target = useTarget();
 	const queryClient = useQueryClient();
-	return useMutation<ComposioConnectInitiate, Error, string>({
-		mutationFn: (toolkit: string) =>
-			initiateComposioConnection(target, toolkit),
+	return useMutation<
+		ComposioConnectInitiate,
+		Error,
+		{ accessLevel: ConnectionAccessLevel; toolkit: string }
+	>({
+		mutationFn: ({ accessLevel, toolkit }) =>
+			initiateComposioConnection(target, toolkit, accessLevel),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
 				queryKey: ["composio", "connections", target.url],

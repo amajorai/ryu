@@ -12,6 +12,9 @@ import {
 	ProgressValue,
 } from "@ryu/ui/components/progress";
 import { Check, ExternalLink, Gift, PlugZap } from "lucide-react";
+import { useState } from "react";
+import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import type { ActivationRecommendation } from "@/src/lib/onboarding-activation.ts";
 import { ActivationStepShell } from "./ActivationStepShell.tsx";
 
@@ -25,11 +28,16 @@ export function ActivationRecommendationsStep({
 }: {
 	busySlug: string | null;
 	error?: string | null;
-	onConnect: (recommendation: ActivationRecommendation) => void;
+	onConnect: (
+		recommendation: ActivationRecommendation,
+		accessLevel: ConnectionAccessLevel
+	) => Promise<void>;
 	onContinue: () => void;
 	recommendations: readonly ActivationRecommendation[];
 	rewardProgress: { completed: number; remaining: number };
 }) {
+	const [pendingRecommendation, setPendingRecommendation] =
+		useState<ActivationRecommendation | null>(null);
 	const percentage = Math.round((rewardProgress.completed / 20) * 100);
 
 	return (
@@ -108,7 +116,7 @@ export function ActivationRecommendationsStep({
 									<Button
 										disabled={busySlug !== null}
 										loading={busySlug === recommendation.appSlug}
-										onClick={() => onConnect(recommendation)}
+										onClick={() => setPendingRecommendation(recommendation)}
 										size="sm"
 										variant="secondary"
 									>
@@ -129,6 +137,23 @@ export function ActivationRecommendationsStep({
 					<Button onClick={onContinue}>Continue</Button>
 				</CardFooter>
 			</Card>
+			<ConnectionPermissionDialog
+				connectionName={pendingRecommendation?.appName ?? "this integration"}
+				connectionType="Composio"
+				onConfirm={async (accessLevel) => {
+					if (!pendingRecommendation) {
+						return;
+					}
+					await onConnect(pendingRecommendation, accessLevel);
+					setPendingRecommendation(null);
+				}}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingRecommendation(null);
+					}
+				}}
+				open={pendingRecommendation !== null}
+			/>
 		</ActivationStepShell>
 	);
 }

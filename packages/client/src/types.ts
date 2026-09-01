@@ -4,9 +4,20 @@
 // snake_case; the SDK surfaces camelCase for TypeScript consumers.
 
 /** Options passed to createRyuClient(). */
+export type RyuFetch = (
+	input: RequestInfo | URL,
+	init?: RequestInit
+) => Promise<Response>;
+
 export interface RyuClientOptions {
 	/** Base URL of the Core server, e.g. "http://localhost:7980". */
 	baseUrl: string;
+	/**
+	 * HTTP implementation. React Native / Expo apps can pass `expo/fetch` for
+	 * response-body streaming; browser, Bun, Deno, and Node use global fetch by
+	 * default.
+	 */
+	fetch?: RyuFetch;
 	/** Optional bearer token for authenticated nodes. */
 	token?: string;
 	/**

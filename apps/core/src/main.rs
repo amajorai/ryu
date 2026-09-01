@@ -19,6 +19,7 @@ mod claude_config;
 mod codex_config;
 mod collab_host;
 mod composio_host;
+mod connection_policy;
 // Composio integration orchestration lives in the extracted `ryu-composio`
 // crate; these aliases keep the in-tree `crate::composio_*` call sites unchanged.
 // The workflow/agent-engine fan-out (`run_workflow_for_trigger`/`run_agent`)

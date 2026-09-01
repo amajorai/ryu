@@ -96,6 +96,7 @@ import { checkoutTeamsOnboarding } from "@/src/lib/api/teams-billing.ts";
 // # 0.1.0: Island disabled — uncomment with the onboarding install below
 // import { installAndLaunchIsland } from "@/src/lib/api/island.ts";
 import { ensureMicPermission } from "@/src/lib/audio/devices.ts";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import { triggerAgentsRefresh } from "@/src/lib/core-refresh.ts";
 import { setFeatureEnabled, TOGGLEABLE_FEATURES } from "@/src/lib/features.ts";
 import {
@@ -1291,33 +1292,43 @@ export default function OnboardingPage() {
 	);
 
 	const connectOnboardingToolkit = useCallback(
-		(toolkit: ComposioToolkit) => {
+		async (toolkit: ComposioToolkit, accessLevel: ConnectionAccessLevel) => {
 			if (connectingToolkit) {
 				return;
 			}
 			setConnectingToolkit(toolkit.slug);
 			const target = toTarget(getActiveNode());
-			void (async () => {
-				try {
-					const result = await initiateComposioConnection(target, toolkit.slug);
-					if (result.redirectUrl) {
-						await openExternal(result.redirectUrl);
-					}
-					await sleep(1800);
-					const connection = await fetchComposioConnectionStatus(
-						target,
-						result.connectionId
-					).catch(() => null);
-					if (connection) {
-						setConnections((current) => [
-							...current.filter((item) => item.id !== connection.id),
-							connection,
-						]);
-					}
-				} finally {
-					setConnectingToolkit(null);
+			try {
+				const result = await initiateComposioConnection(
+					target,
+					toolkit.slug,
+					accessLevel
+				);
+				if (result.redirectUrl) {
+					await openExternal(result.redirectUrl);
 				}
-			})();
+				await sleep(1800);
+				const connection = await fetchComposioConnectionStatus(
+					target,
+					result.connectionId
+				).catch(() => null);
+				if (connection) {
+					setConnections((current) => [
+						...current.filter((item) => item.id !== connection.id),
+						connection,
+					]);
+				}
+			} catch (error) {
+				sileo.error({
+					title:
+						error instanceof Error
+							? error.message
+							: "Could not start the connection.",
+				});
+				throw error;
+			} finally {
+				setConnectingToolkit(null);
+			}
 		},
 		[connectingToolkit, getActiveNode]
 	);
@@ -2125,7 +2136,10 @@ export default function OnboardingPage() {
 	);
 
 	const handleActivationConnect = useCallback(
-		(recommendation: ActivationRecommendation) => {
+		async (
+			recommendation: ActivationRecommendation,
+			accessLevel: ConnectionAccessLevel
+		) => {
 			const appSlug = recommendation.appSlug;
 			if (!appSlug || activationBusySlug) {
 				return;
@@ -2133,54 +2147,57 @@ export default function OnboardingPage() {
 			setActivationBusySlug(appSlug);
 			setActivationError(null);
 			const target = toTarget(getActiveNode());
-			void (async () => {
-				try {
-					const result = await initiateComposioConnection(target, appSlug);
-					if (result.redirectUrl) {
-						await openExternal(result.redirectUrl);
-					}
-					await sleep(1800);
-					const connection = await fetchComposioConnectionStatus(
-						target,
-						result.connectionId
-					);
-					if (!connection.active) {
-						throw new Error("The app connection is not active yet.");
-					}
-					const nextConnections = [
-						...connections.filter((item) => item.id !== connection.id),
-						connection,
-					];
-					setConnections(nextConnections);
-					setActivationRecommendations(
-						buildActivationRecommendations({
-							connections: nextConnections,
-							toolkits,
-						})
-					);
-					if (activationEligibility.rewardAllowed) {
-						try {
-							const reward = await claimActivationReward({
-								appSlug,
-								connectionId: connection.id,
-							});
-							setActivationRewardCount(reward.completed);
-						} catch {
-							setActivationError(
-								"Connected. Your bonus credit is pending and can be retried from this step."
-							);
-						}
-					}
-				} catch (error) {
-					setActivationError(
-						error instanceof Error
-							? error.message
-							: "The app connection could not be completed."
-					);
-				} finally {
-					setActivationBusySlug(null);
+			try {
+				const result = await initiateComposioConnection(
+					target,
+					appSlug,
+					accessLevel
+				);
+				if (result.redirectUrl) {
+					await openExternal(result.redirectUrl);
 				}
-			})();
+				await sleep(1800);
+				const connection = await fetchComposioConnectionStatus(
+					target,
+					result.connectionId
+				);
+				if (!connection.active) {
+					throw new Error("The app connection is not active yet.");
+				}
+				const nextConnections = [
+					...connections.filter((item) => item.id !== connection.id),
+					connection,
+				];
+				setConnections(nextConnections);
+				setActivationRecommendations(
+					buildActivationRecommendations({
+						connections: nextConnections,
+						toolkits,
+					})
+				);
+				if (activationEligibility.rewardAllowed) {
+					try {
+						const reward = await claimActivationReward({
+							appSlug,
+							connectionId: connection.id,
+						});
+						setActivationRewardCount(reward.completed);
+					} catch {
+						setActivationError(
+							"Connected. Your bonus credit is pending and can be retried from this step."
+						);
+					}
+				}
+			} catch (error) {
+				setActivationError(
+					error instanceof Error
+						? error.message
+						: "The app connection could not be completed."
+				);
+				throw error;
+			} finally {
+				setActivationBusySlug(null);
+			}
 		},
 		[
 			activationBusySlug,

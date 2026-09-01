@@ -20,6 +20,7 @@ const connection = (
 	toolkitSlug: string,
 	active: boolean
 ): ComposioConnection => ({
+	accessLevel: "risk_based",
 	active,
 	id: `${toolkitSlug}-connection`,
 	status: active ? "ACTIVE" : "INITIATED",

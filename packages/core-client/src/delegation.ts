@@ -14,7 +14,12 @@
 // stays declarative. Base URL + bearer always come from the node store via the
 // shared client helpers.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "./client.ts";
 
 /** The closed set of permission presets Core advertises to a delegate. */
 export type PermissionPreset =
@@ -129,12 +134,15 @@ export async function streamDelegation(
 	onEvent: (event: DelegateEvent) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, "/api/delegate/stream"), {
-		method: "POST",
-		headers: makeHeaders(target.token, target.userJwt),
-		body: JSON.stringify(body),
-		signal,
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/delegate/stream"),
+		{
+			method: "POST",
+			headers: makeHeaders(target.token, target.userJwt),
+			body: JSON.stringify(body),
+			signal,
+		}
+	);
 	if (!resp.ok) {
 		throw new Error(`delegation failed: ${resp.status}`);
 	}

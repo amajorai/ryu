@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::ServerState;
+use crate::identity::ConnectionAccessLevel;
 use crate::identity_verify::VerifiedCaller;
 use crate::mcp_oauth::{CallbackMode, ConnectSpec};
 
@@ -181,6 +182,35 @@ pub async fn list(
         Ok(connections) => connections,
         Err(message) => return error(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
+    let mut connection_values = Vec::with_capacity(connections.len());
+    for connection in &connections {
+        let access_level = match store
+            .get_connection_access_level(
+                &owner,
+                crate::connection_policy::MCP_PROVIDER,
+                &crate::connection_policy::mcp_connection_key(
+                    &connection.profile_id,
+                    &connection.plugin_id,
+                    &connection.server_name,
+                ),
+            )
+            .await
+        {
+            Ok(level) => level,
+            Err(message) => return error(StatusCode::INTERNAL_SERVER_ERROR, message),
+        };
+        let mut value = match serde_json::to_value(connection) {
+            Ok(value) => value,
+            Err(message) => return error(StatusCode::INTERNAL_SERVER_ERROR, message),
+        };
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "access_level".to_owned(),
+                Value::String(access_level.as_str().to_owned()),
+            );
+        }
+        connection_values.push(value);
+    }
     let servers: Vec<Value> = manifest
         .mcp_servers
         .iter()
@@ -190,9 +220,15 @@ pub async fn list(
                     "server_name": name,
                     "resource": declaration.url,
                     "client_id": auth.client_id(),
-                    "connections": connections
+                    "connections": connection_values
                         .iter()
-                        .filter(|connection| connection.server_name == *name)
+                        .filter(|connection| {
+                            connection
+                                .get("server_name")
+                                .and_then(Value::as_str)
+                                == Some(name.as_str())
+                        })
+                        .cloned()
                         .collect::<Vec<_>>(),
                 })
             })
@@ -207,6 +243,8 @@ pub async fn list(
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ConnectBody {
+    #[serde(default = "default_access_level")]
+    access_level: String,
     #[serde(default = "default_profile")]
     profile_id: String,
     #[serde(default)]
@@ -215,6 +253,10 @@ pub struct ConnectBody {
 
 fn default_profile() -> String {
     crate::mcp_oauth::default_profile_id().to_owned()
+}
+
+fn default_access_level() -> String {
+    ConnectionAccessLevel::default().as_str().to_owned()
 }
 
 /// Start authorization for one manifest-owned remote MCP server.
@@ -258,6 +300,7 @@ pub async fn connect(
     let started = crate::mcp_oauth::global()
         .start_connect(ConnectSpec {
             owner_user_id,
+            access_level: ConnectionAccessLevel::from_str(&body.access_level),
             profile_id: body.profile_id,
             plugin_id,
             server_name,

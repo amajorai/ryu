@@ -10,6 +10,7 @@ import { Switch } from "@ryu/ui/components/switch";
 import { AnimatePresence, motion } from "framer-motion";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
+import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { NativeThread } from "@/src/lib/api/agent-threads.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -20,6 +21,7 @@ import type {
 import type { ProfileJobStatus } from "@/src/lib/api/onboarding-profile.ts";
 import type { PiProvider } from "@/src/lib/api/pi-config.ts";
 import type { AgentSelection } from "@/src/lib/api/preferences.ts";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import {
 	ProviderBrandLogo,
 	svglForProvider,
@@ -69,7 +71,10 @@ interface OnboardingSetupStepProps {
 	onChooseOrganization: (organizationId: string) => void;
 	onCloudSelectionChange: (selection: AgentSelection) => void;
 	onConfigureProvider: (providerId: string, apiKey: string) => void;
-	onConnectToolkit: (toolkit: ComposioToolkit) => void;
+	onConnectToolkit: (
+		toolkit: ComposioToolkit,
+		accessLevel: ConnectionAccessLevel
+	) => Promise<void>;
 	onContinue: () => void;
 	onImportThreads: () => void;
 	onLocalSelectionChange: (selection: AgentSelection) => void;
@@ -423,12 +428,18 @@ function ConnectionSetup({
 	connectionsCheckFailed: boolean;
 	connections: ComposioConnection[];
 	connectingToolkit: string | null;
-	onConnect: (toolkit: ComposioToolkit) => void;
+	onConnect: (
+		toolkit: ComposioToolkit,
+		accessLevel: ConnectionAccessLevel
+	) => Promise<void>;
 	onContinue: () => void;
 	onQuery: (query: string) => void;
 	query: string;
 	toolkits: ComposioToolkit[];
 }) {
+	const [pendingToolkit, setPendingToolkit] = useState<ComposioToolkit | null>(
+		null
+	);
 	const curated = useMemo(() => {
 		const preferred = ["gmail", "notion", "slack", "github"];
 		return preferred
@@ -475,7 +486,7 @@ function ConnectionSetup({
 							<p className="mt-1 text-muted-foreground text-xs">
 								Ryu found{" "}
 								{connections.filter((connection) => connection.active).length}{" "}
-								connected read-only source
+								connected source
 								{connections.filter((connection) => connection.active)
 									.length === 1
 									? ""
@@ -501,7 +512,7 @@ function ConnectionSetup({
 							<p className="font-medium text-sm">Connections are optional</p>
 							<p className="mt-1 text-muted-foreground text-sm">
 								Composio is not configured on this node yet. You can continue
-								now and add read-only sources later in Settings → Connections.
+								now and add connections later in Settings → Connections.
 							</p>
 						</SettingsCard>
 					) : (
@@ -530,13 +541,13 @@ function ConnectionSetup({
 												<p className="text-muted-foreground text-xs">
 													{connection?.active
 														? "Connected"
-														: "Read-only source"}
+														: "Choose an access level before connecting"}
 												</p>
 											</div>
 											<Button
 												disabled={connection?.active}
 												loading={connectingToolkit === toolkit.slug}
-												onClick={() => onConnect(toolkit)}
+												onClick={() => setPendingToolkit(toolkit)}
 												size="sm"
 											>
 												{connection?.active ? "Connected" : "Connect"}
@@ -558,6 +569,28 @@ function ConnectionSetup({
 					<ContinueRow onContinue={onContinue} />
 				</>
 			)}
+			<ConnectionPermissionDialog
+				connectionName={pendingToolkit?.name ?? "this integration"}
+				connectionType="Composio"
+				currentLevel={
+					pendingToolkit
+						? connectionMap.get(pendingToolkit.slug)?.accessLevel
+						: undefined
+				}
+				onConfirm={async (accessLevel) => {
+					if (!pendingToolkit) {
+						return;
+					}
+					await onConnect(pendingToolkit, accessLevel);
+					setPendingToolkit(null);
+				}}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPendingToolkit(null);
+					}
+				}}
+				open={pendingToolkit !== null}
+			/>
 		</div>
 	);
 }

@@ -40,6 +40,10 @@ import { Spinner } from "@ryu/ui/components/spinner";
 import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import {
+	accessLevelSummary,
+	ConnectionPermissionDialog,
+} from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
 import { useApps } from "@/src/hooks/useApps.ts";
 import {
 	useComposioActions,
@@ -64,6 +68,7 @@ import type {
 	AppInfo,
 	McpOAuthServerDeclaration,
 } from "@/src/lib/api/plugins.ts";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 
 export default function ConnectionsTab() {
@@ -216,6 +221,7 @@ export function OAuthServerCard({
 }) {
 	const [profileId, setProfileId] = useState("personal");
 	const [flowId, setFlowId] = useState<string | null>(null);
+	const [permissionDialogOpen, setPermissionDialogOpen] = useState(false);
 	const status = useMcpOAuthConnections(app.id);
 	const flow = useMcpOAuthFlow(app.id, flowId);
 	const connect = useConnectMcpOAuth(app.id);
@@ -248,24 +254,18 @@ export function OAuthServerCard({
 		}
 	}, [app.name, flow.data, flowId, status.refetch]);
 
-	const handleConnect = async () => {
-		try {
-			const started = await connect.mutateAsync({
-				profileId,
-				serverName: server.name,
-			});
-			setFlowId(started.flowId);
-			await openExternal(started.authorizationUrl);
-			sileo.success({
-				description: "Authorize in your browser, then return to Ryu.",
-				title: `Connecting ${app.name}…`,
-			});
-		} catch (error) {
-			sileo.error({
-				title:
-					error instanceof Error ? error.message : "Could not start connect.",
-			});
-		}
+	const handleConnect = async (accessLevel: ConnectionAccessLevel) => {
+		const started = await connect.mutateAsync({
+			accessLevel,
+			profileId,
+			serverName: server.name,
+		});
+		setFlowId(started.flowId);
+		await openExternal(started.authorizationUrl);
+		sileo.success({
+			description: "Authorize in your browser, then return to Ryu.",
+			title: `Connecting ${app.name}…`,
+		});
 	};
 
 	const handleDisconnect = async () => {
@@ -327,6 +327,9 @@ export function OAuthServerCard({
 					Scopes: {connection.scopes.join(", ")}
 				</p>
 			) : null}
+			<Badge className="mt-2 w-fit" variant="outline">
+				Access: {accessLevelSummary(connection?.accessLevel)}
+			</Badge>
 			<div className="mt-3 flex justify-end gap-2">
 				{app.enabled ? null : (
 					<span className="mr-auto self-center text-muted-foreground text-xs">
@@ -346,13 +349,21 @@ export function OAuthServerCard({
 				<Button
 					disabled={profileId.trim().length === 0 || !app.enabled}
 					loading={pending}
-					onClick={handleConnect}
+					onClick={() => setPermissionDialogOpen(true)}
 					size="sm"
 					variant={connected ? "outline" : "default"}
 				>
 					{connected ? "Reconnect" : "Connect"}
 				</Button>
 			</div>
+			<ConnectionPermissionDialog
+				connectionName={app.name}
+				connectionType="MCP"
+				currentLevel={connection?.accessLevel}
+				onConfirm={handleConnect}
+				onOpenChange={setPermissionDialogOpen}
+				open={permissionDialogOpen}
+			/>
 		</article>
 	);
 }
@@ -471,28 +482,25 @@ function ToolkitCard({
 	connection: ComposioConnection | null;
 }) {
 	const [expanded, setExpanded] = useState(false);
+	const [permissionDialogOpen, setPermissionDialogOpen] = useState(false);
 	const initiate = useInitiateComposioConnection();
 	const isConnected = connection?.active ?? false;
 	const isPending = Boolean(connection) && !isConnected;
 
-	const handleConnect = async () => {
-		try {
-			const result = await initiate.mutateAsync(toolkit.slug);
-			if (!result.redirectUrl) {
-				sileo.error({ title: "Composio did not return a connect link." });
-				return;
-			}
-			await openExternal(result.redirectUrl);
-			sileo.success({
-				title: `Connecting ${toolkit.name}…`,
-				description:
-					"Authorize in your browser. The connection turns active here when you return.",
-			});
-		} catch (e) {
-			const message =
-				e instanceof Error ? e.message : "Could not start connect.";
-			sileo.error({ title: message });
+	const handleConnect = async (accessLevel: ConnectionAccessLevel) => {
+		const result = await initiate.mutateAsync({
+			accessLevel,
+			toolkit: toolkit.slug,
+		});
+		if (!result.redirectUrl) {
+			throw new Error("Composio did not return a connect link.");
 		}
+		await openExternal(result.redirectUrl);
+		sileo.success({
+			title: `Connecting ${toolkit.name}…`,
+			description:
+				"Authorize in your browser. The connection turns active here when you return.",
+		});
 	};
 
 	return (
@@ -507,6 +515,9 @@ function ToolkitCard({
 							pending={isPending}
 						/>
 					</div>
+					<Badge className="mt-1 w-fit" variant="outline">
+						Access: {accessLevelSummary(connection?.accessLevel)}
+					</Badge>
 					{toolkit.description ? (
 						<p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
 							{toolkit.description}
@@ -531,8 +542,9 @@ function ToolkitCard({
 				</Button>
 
 				<Button
+					disabled={permissionDialogOpen}
 					loading={initiate.isPending}
-					onClick={handleConnect}
+					onClick={() => setPermissionDialogOpen(true)}
 					size="sm"
 					variant={isConnected ? "outline" : "default"}
 				>
@@ -544,6 +556,14 @@ function ToolkitCard({
 			</div>
 
 			{expanded ? <ToolkitTools toolkit={toolkit.slug} /> : null}
+			<ConnectionPermissionDialog
+				connectionName={toolkit.name}
+				connectionType="Composio"
+				currentLevel={connection?.accessLevel}
+				onConfirm={handleConnect}
+				onOpenChange={setPermissionDialogOpen}
+				open={permissionDialogOpen}
+			/>
 		</div>
 	);
 }

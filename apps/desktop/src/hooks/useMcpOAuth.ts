@@ -6,6 +6,7 @@ import {
 	fetchMcpOAuth,
 	fetchMcpOAuthFlow,
 } from "@/src/lib/api/mcp-oauth.ts";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import { useActiveNode } from "./useActiveNode.ts";
 
 const useTarget = (): ApiTarget => {
@@ -43,12 +44,14 @@ export const useConnectMcpOAuth = (pluginId: string) => {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: ({
+			accessLevel,
 			profileId,
 			serverName,
 		}: {
+			accessLevel: ConnectionAccessLevel;
 			profileId: string;
 			serverName: string;
-		}) => connectMcpOAuth(target, pluginId, serverName, profileId),
+		}) => connectMcpOAuth(target, pluginId, serverName, profileId, accessLevel),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({
 				queryKey: ["mcp-oauth", target.url, pluginId],

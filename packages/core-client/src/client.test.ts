@@ -168,6 +168,16 @@ describe("request", () => {
 		expect(capturedInit?.body).toBeUndefined();
 	});
 
+	test("uses a target-specific fetch implementation", async () => {
+		let called = false;
+		const fetchImpl: NonNullable<ApiTarget["fetch"]> = async () => {
+			called = true;
+			return new Response("{}", { status: 200 });
+		};
+		await request(target({ fetch: fetchImpl }), "/api/x");
+		expect(called).toBe(true);
+	});
+
 	test("returns undefined for an empty response body", async () => {
 		globalThis.fetch = (() =>
 			Promise.resolve(

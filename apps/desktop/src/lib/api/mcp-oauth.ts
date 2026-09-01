@@ -1,10 +1,16 @@
 // Typed, metadata-only client for Core-owned remote MCP OAuth.
 
+import {
+	type ConnectionAccessLevel,
+	DEFAULT_CONNECTION_ACCESS_LEVEL,
+	normalizeConnectionAccessLevel,
+} from "../connection-permissions.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 export type McpOAuthStatus = "connected" | "reauth_required";
 
 export interface McpOAuthConnection {
+	accessLevel: ConnectionAccessLevel;
 	accountLabel: string | null;
 	expiresAt: number | null;
 	id: string;
@@ -23,6 +29,7 @@ export interface McpOAuthServerStatus {
 }
 
 interface ConnectionWire {
+	access_level?: unknown;
 	account_label?: string | null;
 	expires_at?: number | null;
 	id: string;
@@ -41,6 +48,7 @@ interface ServerWire {
 }
 
 export interface McpOAuthConnectStarted {
+	accessLevel: ConnectionAccessLevel;
 	authorizationUrl: string;
 	callbackMode: "loopback" | "hosted";
 	expiresAt: number;
@@ -50,6 +58,7 @@ export interface McpOAuthConnectStarted {
 }
 
 export interface McpOAuthFlow {
+	accessLevel: ConnectionAccessLevel;
 	callbackMode: "loopback" | "hosted";
 	error: string | null;
 	expiresAt: number;
@@ -62,6 +71,7 @@ export interface McpOAuthFlow {
 }
 
 const mapConnection = (wire: ConnectionWire): McpOAuthConnection => ({
+	accessLevel: normalizeConnectionAccessLevel(wire.access_level),
 	accountLabel: wire.account_label ?? null,
 	expiresAt: wire.expires_at ?? null,
 	id: wire.id,
@@ -92,9 +102,11 @@ export async function connectMcpOAuth(
 	target: ApiTarget,
 	pluginId: string,
 	serverName: string,
-	profileId: string
+	profileId: string,
+	accessLevel: ConnectionAccessLevel = DEFAULT_CONNECTION_ACCESS_LEVEL
 ): Promise<McpOAuthConnectStarted> {
 	const response = await request<{
+		access_level?: unknown;
 		authorization_url: string;
 		callback_mode: "loopback" | "hosted";
 		expires_at: number;
@@ -105,11 +117,16 @@ export async function connectMcpOAuth(
 		target,
 		`/api/plugins/${encodeURIComponent(pluginId)}/auth/${encodeURIComponent(serverName)}/connect`,
 		{
-			body: { callback_mode: "auto", profile_id: profileId },
+			body: {
+				access_level: accessLevel,
+				callback_mode: "auto",
+				profile_id: profileId,
+			},
 			method: "POST",
 		}
 	);
 	return {
+		accessLevel: normalizeConnectionAccessLevel(response.access_level),
 		authorizationUrl: response.authorization_url,
 		callbackMode: response.callback_mode,
 		expiresAt: response.expires_at,
@@ -138,6 +155,7 @@ export async function fetchMcpOAuthFlow(
 	flowId: string
 ): Promise<McpOAuthFlow> {
 	const response = await request<{
+		access_level?: unknown;
 		callback_mode: "loopback" | "hosted";
 		error?: string | null;
 		expires_at: number;
@@ -152,6 +170,7 @@ export async function fetchMcpOAuthFlow(
 		`/api/plugins/${encodeURIComponent(pluginId)}/auth/flows/${encodeURIComponent(flowId)}`
 	);
 	return {
+		accessLevel: normalizeConnectionAccessLevel(response.access_level),
 		callbackMode: response.callback_mode,
 		error: response.error ?? null,
 		expiresAt: response.expires_at,

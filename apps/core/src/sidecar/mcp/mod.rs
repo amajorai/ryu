@@ -686,6 +686,8 @@ async fn oauth_target(
     cfg: &McpServerConfig,
     owner_user_id: &str,
     profile_id: &str,
+    action: crate::identity::ConnectionAction,
+    risk_approved: bool,
     force_refresh: bool,
     session_id: Option<String>,
 ) -> Result<McpTarget> {
@@ -715,6 +717,8 @@ async fn oauth_target(
             cfg.auth
                 .as_ref()
                 .and_then(crate::plugin_manifest::McpServerAuthDecl::client_id),
+            action,
+            risk_approved,
             force_refresh,
             session_id,
         )
@@ -733,6 +737,26 @@ async fn oauth_elicitation(
     profile_id: &str,
     challenge: Option<String>,
 ) -> Result<Value> {
+    let access_level = match crate::identity::global() {
+        Some(store) => {
+            store
+                .get_connection_access_level(
+                    owner_user_id,
+                    crate::connection_policy::MCP_PROVIDER,
+                    &crate::connection_policy::mcp_connection_key(
+                        profile_id,
+                        cfg.owner_plugin_id
+                            .as_deref()
+                            .context("OAuth MCP server has no owning plugin")?,
+                        cfg.owner_server_name
+                            .as_deref()
+                            .context("OAuth MCP server has no owning manifest key")?,
+                    ),
+                )
+                .await?
+        }
+        None => crate::identity::ConnectionAccessLevel::default(),
+    };
     let started = crate::mcp_oauth::global()
         .start_connect(crate::mcp_oauth::ConnectSpec {
             owner_user_id: owner_user_id.to_owned(),
@@ -755,6 +779,7 @@ async fn oauth_elicitation(
                 .context("OAuth MCP server has no auth declaration")?,
             callback_mode: crate::mcp_oauth::CallbackMode::Auto,
             static_headers: cfg.headers.clone(),
+            access_level,
             challenge,
         })
         .await?;
@@ -3164,6 +3189,22 @@ impl McpRegistry {
             .or_else(|| Self::split_tool_id(id))
     }
 
+    /// Whether a tool uses an account-backed connection and therefore needs the
+    /// connection-level approval ceiling before a non-read action can proceed.
+    fn is_connection_backed_tool(&self, tool_id: &str) -> bool {
+        if tool_id.starts_with("composio.") {
+            return true;
+        }
+        let Some((server, _)) = self.split_registered_tool_id(tool_id) else {
+            return false;
+        };
+        self.servers
+            .read()
+            .expect("mcp servers RwLock poisoned")
+            .get(server)
+            .is_some_and(|config| config.auth.is_some())
+    }
+
     /// List tools for one enabled server, using the cache when warm.
     ///
     /// The config is extracted under a short read lock, then the lock is dropped
@@ -3187,7 +3228,16 @@ impl McpRegistry {
                 );
             }
             let profile = oauth_profile_for("local", &cfg, &[]).await?;
-            oauth_target(&cfg, "local", &profile, false, None).await?
+            oauth_target(
+                &cfg,
+                "local",
+                &profile,
+                crate::identity::ConnectionAction::Read,
+                false,
+                false,
+                None,
+            )
+            .await?
         } else {
             cfg.to_target()?
         };
@@ -4057,6 +4107,11 @@ impl McpRegistry {
         // their manifest metadata is just as authoritative as an `app.` id's.
         let (gate_id, action_needs_approval) = self.approval_target_for_tool(tool_id).await;
         let (annotations, http_method) = self.tool_effect_metadata(&gate_id).await;
+        let connection_action = crate::connection_policy::action_for_tool(
+            &gate_id,
+            annotations.as_ref(),
+            http_method.as_deref(),
+        );
         let effect = agent_record
             .as_ref()
             .map(|record| {
@@ -4084,6 +4139,21 @@ impl McpRegistry {
             // Reuse Layer A's existing approval queue for the agent-scoped
             // posture. This composes with global smart/manual policy rather than
             // replacing it, and approval re-dispatch still enters no_gate below.
+            agent_approval_tools.push(gate_id.clone());
+        }
+        // A connection's default RiskBased level must use the same human review
+        // path as every other consequential action. Force Layer A for known
+        // connected-account writes/deletes so an innocuous provider verb such as
+        // `update` cannot slip past the global name heuristic. The connection
+        // ceiling still decides whether the approved call is allowed at dispatch.
+        if self.is_connection_backed_tool(&gate_id)
+            && !matches!(connection_action, crate::identity::ConnectionAction::Read)
+            && !matches!(
+                connection_action,
+                crate::identity::ConnectionAction::Unknown
+            )
+            && !agent_approval_tools.iter().any(|id| id == &gate_id)
+        {
             agent_approval_tools.push(gate_id.clone());
         }
         // An approval is a promise that approving makes the action happen. A
@@ -4266,6 +4336,12 @@ impl McpRegistry {
                 .collect::<Vec<_>>()
         });
         let allowlist = normalized_allowlist.as_deref();
+        let (tool_annotations, tool_http_method) = self.tool_effect_metadata(tool_id).await;
+        let connection_action = crate::connection_policy::action_for_tool(
+            tool_id,
+            tool_annotations.as_ref(),
+            tool_http_method.as_deref(),
+        );
 
         // A filesystem-shaped delete tool is a second way for an agent to
         // remove a path without producing a shell command. Keep this check in
@@ -4301,12 +4377,11 @@ impl McpRegistry {
                 crate::safe_actions::authorize_verified_dispatch(agent_id, tool_id, &arguments)
                     .await?;
             }
-            let (annotations, http_method) = self.tool_effect_metadata(tool_id).await;
             crate::agent_execution::ensure_tool_allowed_for_record_with_metadata(
                 &record,
                 tool_id,
-                annotations.as_ref(),
-                http_method.as_deref(),
+                tool_annotations.as_ref(),
+                tool_http_method.as_deref(),
             )?;
         }
 
@@ -4343,7 +4418,56 @@ impl McpRegistry {
                 }
             }
             let slug = tool_id.strip_prefix("composio.").unwrap_or(tool_id);
-            let output = composio::dispatch(&self.http, slug, arguments, user_id).await?;
+            let (owner, composio_entity) = match self.conversations.as_ref() {
+                Some(store) => {
+                    let principal = ToolPrincipal::resolve(store, host_conversation_id).await;
+                    match principal {
+                        ToolPrincipal::Unrestricted => {
+                            ("local".to_owned(), user_id.map(str::to_owned))
+                        }
+                        ToolPrincipal::Owned { user_id, .. } => (user_id.clone(), Some(user_id)),
+                        ToolPrincipal::Unresolved => {
+                            return Err(anyhow!(
+                                "a verified user identity is required for Composio on a shared node"
+                            ));
+                        }
+                    }
+                }
+                None if crate::sidecar::control_plane::registered_org().is_none() => {
+                    ("local".to_owned(), user_id.map(str::to_owned))
+                }
+                None => {
+                    return Err(anyhow!(
+                        "a verified user identity is required for Composio on a shared node"
+                    ));
+                }
+            };
+            let access_level = if let Some(store) = crate::identity::global() {
+                store
+                    .get_connection_access_level(
+                        &owner,
+                        crate::connection_policy::COMPOSIO_PROVIDER,
+                        &crate::connection_policy::composio_connection_key(
+                            crate::connection_policy::composio_toolkit_for_action(tool_id)
+                                .as_deref()
+                                .unwrap_or("unknown"),
+                        ),
+                    )
+                    .await?
+            } else {
+                crate::identity::ConnectionAccessLevel::default()
+            };
+            if !access_level.allows_with_approval(connection_action, agent_id.is_some()) {
+                return Err(anyhow!(crate::connection_policy::denied_message(
+                    "Composio",
+                    &crate::connection_policy::composio_toolkit_for_action(tool_id)
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    access_level,
+                    connection_action,
+                )));
+            }
+            let output =
+                composio::dispatch(&self.http, slug, arguments, composio_entity.as_deref()).await?;
             // Native ACP sessions execute Composio inside this in-process MCP
             // bridge, so the Gateway's OpenAI tool loop never sees the call.
             // A non-empty session id is the bridge marker; the HTTP Gateway
@@ -5365,8 +5489,16 @@ impl McpRegistry {
         };
         let owner_user_id = oauth_owner_from_principal(&principal)?;
         let profile_id = oauth_profile_for(&owner_user_id, &cfg, profile_ids).await?;
-        let cmd = match oauth_target(&cfg, &owner_user_id, &profile_id, false, session_id.clone())
-            .await
+        let cmd = match oauth_target(
+            &cfg,
+            &owner_user_id,
+            &profile_id,
+            connection_action,
+            agent_id.is_some(),
+            false,
+            session_id.clone(),
+        )
+        .await
         {
             Ok(target) => target,
             Err(error) if oauth_requires_connect(&error) => {
@@ -5380,17 +5512,23 @@ impl McpRegistry {
                 Ok(mpp_payment_required(&error, server, tool).expect("checked above"))
             }
             Err(error) if oauth_http_failure(&error, reqwest::StatusCode::UNAUTHORIZED) => {
-                let refreshed =
-                    match oauth_target(&cfg, &owner_user_id, &profile_id, true, session_id.clone())
-                        .await
-                    {
-                        Ok(target) => target,
-                        Err(refresh_error) if oauth_requires_connect(&refresh_error) => {
-                            return oauth_elicitation(&cfg, &owner_user_id, &profile_id, None)
-                                .await;
-                        }
-                        Err(refresh_error) => return Err(refresh_error),
-                    };
+                let refreshed = match oauth_target(
+                    &cfg,
+                    &owner_user_id,
+                    &profile_id,
+                    connection_action,
+                    agent_id.is_some(),
+                    true,
+                    session_id.clone(),
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(refresh_error) if oauth_requires_connect(&refresh_error) => {
+                        return oauth_elicitation(&cfg, &owner_user_id, &profile_id, None).await;
+                    }
+                    Err(refresh_error) => return Err(refresh_error),
+                };
                 match client::call_tool(&refreshed, tool, arguments).await {
                     Ok(result) => Ok(normalize_mpp_result(result, server, tool)),
                     Err(retry_error)

@@ -9,7 +9,7 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Arc;
@@ -36157,7 +36157,17 @@ async fn composio_triggers(
 async fn composio_connections(
     State(state): State<ServerState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    let owner = match crate::mcp_oauth::owner_for_caller(caller.as_ref()) {
+        Ok(owner) => owner,
+        Err(error) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": error.to_string(), "data": [] })),
+            )
+        }
+    };
     // No Composio key is the default state, not a failure: report it as an empty,
     // unconfigured list (200) so callers show a "connect an integration" empty
     // state rather than a load error. 502 stays reserved for real upstream faults.
@@ -36168,8 +36178,17 @@ async fn composio_connections(
         );
     }
     let toolkit = params.get("toolkit").map(String::as_str).unwrap_or("");
-    match crate::composio_connect::list_connections(&state.client, toolkit).await {
-        Ok(value) => (StatusCode::OK, Json(value)),
+    let composio_entity = caller.as_ref().map(|caller| caller.user_id.as_str());
+    match crate::composio_connect::list_connections(&state.client, toolkit, composio_entity).await {
+        Ok(mut value) => {
+            if let Err(error) = decorate_composio_access_levels(&owner, &mut value).await {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": error.to_string(), "data": [] })),
+                );
+            }
+            (StatusCode::OK, Json(value))
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "error": e.to_string(), "data": [] })),
@@ -36180,6 +36199,8 @@ async fn composio_connections(
 /// Body for `POST /api/composio/connections/initiate`.
 #[derive(serde::Deserialize)]
 struct ComposioConnectBody {
+    #[serde(default)]
+    access_level: crate::identity::ConnectionAccessLevel,
     toolkit: String,
 }
 
@@ -36196,15 +36217,87 @@ struct ComposioConnectBody {
 )]
 async fn composio_connection_initiate(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<ComposioConnectBody>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match crate::composio_connect::initiate(&state.client, &body.toolkit).await {
-        Ok(value) => (StatusCode::OK, Json(value)),
+    let owner = match crate::mcp_oauth::owner_for_caller(caller.as_ref()) {
+        Ok(owner) => owner,
+        Err(error) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": error.to_string() })),
+            )
+        }
+    };
+    let Some(store) = crate::identity::global() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "identity store not initialized" })),
+        );
+    };
+    let composio_entity = caller.as_ref().map(|caller| caller.user_id.as_str());
+    match crate::composio_connect::initiate(&state.client, &body.toolkit, composio_entity).await {
+        Ok(mut value) => {
+            let toolkit = body.toolkit.trim();
+            if let Err(error) = store
+                .set_connection_access_level(
+                    &owner,
+                    crate::connection_policy::COMPOSIO_PROVIDER,
+                    &crate::connection_policy::composio_connection_key(toolkit),
+                    body.access_level,
+                )
+                .await
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": format!("Composio connection policy could not be saved: {error}")
+                    })),
+                );
+            }
+            if let Some(object) = value.as_object_mut() {
+                object.insert("access_level".to_owned(), json!(body.access_level.as_str()));
+            }
+            (StatusCode::OK, Json(value))
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "error": e.to_string() })),
         ),
     }
+}
+
+/// Add the owner's stored access ceiling to the metadata-only Composio list.
+/// Missing policy rows resolve to the safe `RiskBased` default, which keeps
+/// connections created by older Core versions governed after an upgrade.
+async fn decorate_composio_access_levels(
+    owner: &str,
+    value: &mut serde_json::Value,
+) -> anyhow::Result<()> {
+    let Some(store) = crate::identity::global() else {
+        return Ok(());
+    };
+    let Some(data) = value.get_mut("data").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for connection in data {
+        let Some(object) = connection.as_object_mut() else {
+            continue;
+        };
+        let toolkit = object.get("toolkit").and_then(Value::as_str).unwrap_or("");
+        let access_level = store
+            .get_connection_access_level(
+                owner,
+                crate::connection_policy::COMPOSIO_PROVIDER,
+                &crate::connection_policy::composio_connection_key(toolkit),
+            )
+            .await?;
+        object.insert(
+            "access_level".to_owned(),
+            Value::String(access_level.as_str().to_owned()),
+        );
+    }
+    Ok(())
 }
 
 /// `GET /api/composio/connections/:id` — poll one connection's status (the client

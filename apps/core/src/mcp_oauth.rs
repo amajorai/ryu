@@ -39,6 +39,7 @@ pub enum CallbackMode {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct ConnectStarted {
+    pub access_level: String,
     pub flow_id: String,
     pub authorization_url: String,
     pub callback_mode: CallbackMode,
@@ -57,6 +58,7 @@ pub enum FlowState {
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct FlowView {
+    pub access_level: String,
     pub flow_id: String,
     pub plugin_id: String,
     pub server_name: String,
@@ -70,6 +72,7 @@ pub struct FlowView {
 
 #[derive(Debug, Clone)]
 pub struct ConnectSpec {
+    pub access_level: crate::identity::ConnectionAccessLevel,
     pub owner_user_id: String,
     pub profile_id: String,
     pub plugin_id: String,
@@ -293,6 +296,7 @@ impl McpOAuthManager {
                 && flow.view.expires_at > now
         }) {
             return Ok(ConnectStarted {
+                access_level: existing.view.access_level.clone(),
                 flow_id: existing.view.flow_id.clone(),
                 authorization_url: existing.authorization_url.clone(),
                 callback_mode: existing.view.callback_mode,
@@ -436,6 +440,7 @@ impl McpOAuthManager {
         }
         let pending = PendingFlow {
             view: FlowView {
+                access_level: spec.access_level.as_str().to_owned(),
                 flow_id: flow_id.clone(),
                 plugin_id: spec.plugin_id,
                 server_name: spec.server_name,
@@ -473,6 +478,7 @@ impl McpOAuthManager {
         }
 
         Ok(ConnectStarted {
+            access_level: spec.access_level.as_str().to_owned(),
             flow_id,
             authorization_url: authorization_url.into(),
             callback_mode,
@@ -639,6 +645,18 @@ impl McpOAuthManager {
                 &SecretState::new(plaintext),
             )
             .await?;
+        store
+            .set_connection_access_level(
+                &pending.owner_user_id,
+                crate::connection_policy::MCP_PROVIDER,
+                &crate::connection_policy::mcp_connection_key(
+                    &pending.view.profile_id,
+                    &pending.view.plugin_id,
+                    &pending.view.server_name,
+                ),
+                crate::identity::ConnectionAccessLevel::from_str(&pending.view.access_level),
+            )
+            .await?;
         let mut flows = self.flows.write().await;
         let flow = flows
             .get_mut(flow_id)
@@ -731,6 +749,8 @@ impl McpOAuthManager {
         server_name: &str,
         expected_resource: &str,
         expected_client_id: Option<&str>,
+        action: crate::identity::ConnectionAction,
+        risk_approved: bool,
         force_refresh: bool,
         session_id: Option<String>,
     ) -> Result<String> {
@@ -746,6 +766,19 @@ impl McpOAuthManager {
             .context("MCP authentication required")?;
         if connection.status != McpOAuthConnectionStatus::Connected {
             bail!("MCP authentication required");
+        }
+        let access_level = store
+            .get_connection_access_level(
+                owner_user_id,
+                crate::connection_policy::MCP_PROVIDER,
+                &crate::connection_policy::mcp_connection_key(profile_id, plugin_id, server_name),
+            )
+            .await?;
+        if !access_level.allows_with_approval(action, risk_approved) {
+            bail!(
+                "{}",
+                crate::connection_policy::denied_message("MCP", server_name, access_level, action,)
+            );
         }
         let stored_bundle = open_bundle_governed(store, &connection, session_id).await?;
         let binding_changed = stored_bundle.mcp_server_url.is_empty()
@@ -1358,6 +1391,7 @@ mod tests {
     fn pending_flow(flow_id: &str) -> PendingFlow {
         PendingFlow {
             view: FlowView {
+                access_level: "risk_based".to_owned(),
                 flow_id: flow_id.to_owned(),
                 plugin_id: "com.example.mail".to_owned(),
                 server_name: "mail".to_owned(),

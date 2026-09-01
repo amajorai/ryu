@@ -11,7 +11,13 @@
 // Per the Core-vs-Gateway rule this is a Core feature (it decides *what runs*).
 // Base URL + bearer always come from the node store via the shared client helpers.
 
-import { type ApiTarget, apiUrl, makeHeaders, request } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+	request,
+} from "./client.ts";
 
 /** Lifecycle state of a single download (mirrors Core's `DownloadState`). */
 export type DownloadState =
@@ -113,11 +119,14 @@ export async function streamDownloads(
 	onEvent: (event: DownloadEvent) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, "/api/downloads/stream"), {
-		method: "GET",
-		headers: makeHeaders(target.token, target.userJwt),
-		signal,
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/downloads/stream"),
+		{
+			method: "GET",
+			headers: makeHeaders(target.token, target.userJwt),
+			signal,
+		}
+	);
 	if (!resp.ok) {
 		throw new Error(`downloads stream failed: ${resp.status}`);
 	}

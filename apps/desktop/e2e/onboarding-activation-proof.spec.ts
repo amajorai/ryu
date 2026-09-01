@@ -8,14 +8,18 @@ test.describe("onboarding activation proof", () => {
 	}) => {
 		await page.goto(STORY_URL);
 		await page.getByRole("radio", { name: "Search" }).click();
-		await page.getByRole("button", { name: "Continue" }).click();
+		await page.getByRole("button", { exact: true, name: "Continue" }).click();
 		await expect(page.getByText("Recommended for you")).toBeVisible();
 		await page
 			.getByRole("button", { name: /Connect · \+\$0\.50/ })
 			.first()
 			.click();
+		await page
+			.getByTestId("connection-permission-dialog")
+			.getByRole("button", { name: "Continue to connect" })
+			.click();
 		await expect(page.getByText("2/20 · $1.00")).toBeVisible();
-		await page.getByRole("button", { name: "Continue" }).click();
+		await page.getByRole("button", { exact: true, name: "Continue" }).click();
 		await page.getByRole("button", { name: "See your first task" }).click();
 		await page
 			.getByRole("button", { name: /Start first month for \$50/ })

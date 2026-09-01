@@ -128,7 +128,15 @@ export async function fetchComposioTriggers(
 }
 
 /** One of the user's Composio connected accounts. */
+export type ConnectionAccessLevel =
+	| "risk_based"
+	| "read_only"
+	| "write"
+	| "full";
+
 export interface ComposioConnection {
+	/** Ryu's per-connection action ceiling; unknown values use the safe default. */
+	accessLevel: ConnectionAccessLevel;
 	/** Whether the connection is active (ready for tool execution). */
 	active: boolean;
 	/** The connected-account id (poll this after the OAuth redirect). */
@@ -140,6 +148,7 @@ export interface ComposioConnection {
 }
 
 interface ConnectionWire {
+	access_level?: unknown;
 	active?: boolean;
 	id?: string;
 	status?: string;
@@ -156,9 +165,22 @@ export async function fetchComposioConnections(
 		: "/api/composio/connections";
 	const json = await request<{ data?: ConnectionWire[] }>(target, path);
 	return (json.data ?? []).map((c) => ({
+		accessLevel: normalizeAccessLevel(c.access_level),
 		id: c.id ?? "",
 		toolkit: c.toolkit ?? toolkit,
 		status: c.status ?? "",
 		active: c.active ?? false,
 	}));
+}
+
+function normalizeAccessLevel(value: unknown): ConnectionAccessLevel {
+	if (
+		value === "risk_based" ||
+		value === "read_only" ||
+		value === "write" ||
+		value === "full"
+	) {
+		return value;
+	}
+	return "risk_based";
 }

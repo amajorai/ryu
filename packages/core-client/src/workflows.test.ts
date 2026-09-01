@@ -152,7 +152,7 @@ describe("wire → camel mapping", () => {
 describe("workflow dry runs", () => {
 	test("sends dryRun and maps the transient result flag", async () => {
 		let requestBody: unknown;
-		globalThis.fetch = ((_input, init) => {
+		globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
 			requestBody = JSON.parse(String(init?.body));
 			return Promise.resolve(
 				new Response(

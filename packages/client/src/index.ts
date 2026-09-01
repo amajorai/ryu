@@ -21,6 +21,7 @@ export type {
 	Message,
 	RetrievalMode,
 	RyuClientOptions,
+	RyuFetch,
 	RyuResponseMode,
 	Space,
 	SpaceMatch,

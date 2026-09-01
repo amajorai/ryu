@@ -6,7 +6,7 @@
 // tool list to a single agent's allowlist, and test-calls a tool. Wire shapes
 // mirror `apps/core/src/sidecar/mcp/mod.rs` (snake_case fields, no serde rename).
 
-import { type ApiTarget, request } from "./client.ts";
+import { type ApiTarget, fetchForTarget, request } from "./client.ts";
 
 /** A registered MCP server as Core summarizes it for the listing endpoint. */
 export interface McpServer {
@@ -126,20 +126,23 @@ export async function createMcpServer(
 	target: ApiTarget,
 	input: CreateMcpServerInput
 ): Promise<CreateMcpServerResult> {
-	const resp = await fetch(`${target.url.replace(/\/$/, "")}/api/mcp/servers`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			...(target.token ? { Authorization: `Bearer ${target.token}` } : {}),
-		},
-		body: JSON.stringify({
-			name: input.name,
-			command: input.command,
-			args: input.args ?? [],
-			env: input.env ?? {},
-			description: input.description ?? null,
-		}),
-	});
+	const resp = await fetchForTarget(target)(
+		`${target.url.replace(/\/$/, "")}/api/mcp/servers`,
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...(target.token ? { Authorization: `Bearer ${target.token}` } : {}),
+			},
+			body: JSON.stringify({
+				name: input.name,
+				command: input.command,
+				args: input.args ?? [],
+				env: input.env ?? {},
+				description: input.description ?? null,
+			}),
+		}
+	);
 	const text = await resp.text();
 	const parsed = (text ? JSON.parse(text) : {}) as {
 		ok?: boolean;
@@ -529,7 +532,7 @@ export async function callMcpTool(
 	// Core returns 400/403 with a JSON `{ ok: false, error }` body on a denied or
 	// failed call; surface that as a result rather than throwing so the test
 	// panel can show the error inline.
-	const resp = await fetch(
+	const resp = await fetchForTarget(target)(
 		`${target.url.replace(/\/$/, "")}/api/mcp/tools/call`,
 		{
 			method: "POST",

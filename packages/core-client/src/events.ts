@@ -6,7 +6,12 @@
 // Uses a fetch-based SSE reader (not EventSource) so the node's bearer token can
 // be sent as a header — mirrors `streamMonitorAlerts`.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "./client.ts";
 
 /** A desktop notification pushed by Core. */
 export interface DesktopNotification {
@@ -28,11 +33,14 @@ export async function streamDesktopNotifications(
 	onNotification: (n: DesktopNotification) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, "/api/events/notifications/stream"), {
-		method: "GET",
-		headers: makeHeaders(target.token, target.userJwt),
-		signal,
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/events/notifications/stream"),
+		{
+			method: "GET",
+			headers: makeHeaders(target.token, target.userJwt),
+			signal,
+		}
+	);
 	if (!(resp.ok && resp.body)) {
 		throw new Error(`notifications stream failed: ${resp.status}`);
 	}

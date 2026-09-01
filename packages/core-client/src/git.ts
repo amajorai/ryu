@@ -5,7 +5,12 @@
 //   - `GET /api/worktree/:run_id/diff` (consumed by DiffReviewPane)
 //   - `POST /api/worktree/:run_id/apply` (consumed by DiffReviewPane)
 
-import { type ApiTarget, apiUrl, makeHeaders } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "./client.ts";
 
 export interface GitStatus {
 	ahead: number;
@@ -37,7 +42,7 @@ export async function fetchGitStatus(
 ): Promise<GitStatus> {
 	const url = `${apiUrl(target, "/api/git/status")}?cwd=${encodeURIComponent(cwd)}`;
 	try {
-		const resp = await fetch(url, {
+		const resp = await fetchForTarget(target)(url, {
 			method: "GET",
 			headers: makeHeaders(target.token, target.userJwt),
 			signal,
@@ -85,7 +90,7 @@ export async function fetchGitBranches(
 ): Promise<GitBranches> {
 	const url = `${apiUrl(target, "/api/git/branches")}?cwd=${encodeURIComponent(cwd)}`;
 	try {
-		const resp = await fetch(url, {
+		const resp = await fetchForTarget(target)(url, {
 			method: "GET",
 			headers: makeHeaders(target.token, target.userJwt),
 			signal,
@@ -123,7 +128,7 @@ export async function checkoutBranch(
 ): Promise<CheckoutResult> {
 	const url = apiUrl(target, "/api/git/checkout");
 	try {
-		const resp = await fetch(url, {
+		const resp = await fetchForTarget(target)(url, {
 			method: "POST",
 			headers: {
 				...makeHeaders(target.token, target.userJwt),
@@ -210,7 +215,7 @@ export async function applyWorktree(
 		target,
 		`/api/worktree/${encodeURIComponent(runId)}/apply`
 	);
-	const resp = await fetch(url, {
+	const resp = await fetchForTarget(target)(url, {
 		method: "POST",
 		headers: {
 			...makeHeaders(target.token, target.userJwt),
@@ -256,7 +261,7 @@ export async function fetchWorktreeDiff(
 ): Promise<WorktreeDiff> {
 	const url = apiUrl(target, `/api/worktree/${encodeURIComponent(runId)}/diff`);
 	try {
-		const resp = await fetch(url, {
+		const resp = await fetchForTarget(target)(url, {
 			method: "GET",
 			headers: makeHeaders(target.token, target.userJwt),
 			signal,

@@ -7,6 +7,11 @@
 // the agent editor's pickers and drives the Marketplace → Connections tab
 // (list/initiate/poll a connection).
 
+import {
+	type ConnectionAccessLevel,
+	DEFAULT_CONNECTION_ACCESS_LEVEL,
+	normalizeConnectionAccessLevel,
+} from "../connection-permissions.ts";
 import { type ApiTarget, request } from "./client.ts";
 
 /** Whether a Composio key is configured + the active REST base. */
@@ -158,6 +163,8 @@ export async function fetchComposioTriggers(
 
 /** One of the user's Composio connected accounts. */
 export interface ComposioConnection {
+	/** Ryu's per-connection action ceiling; unknown values use the safe default. */
+	accessLevel: ConnectionAccessLevel;
 	/** Whether the connection is active (ready for tool execution). */
 	active: boolean;
 	/** The connected-account id (poll this after the OAuth redirect). */
@@ -170,12 +177,14 @@ export interface ComposioConnection {
 
 /** Result of initiating a connection: open `redirectUrl`, then poll `id`. */
 export interface ComposioConnectInitiate {
+	accessLevel: ConnectionAccessLevel;
 	connectionId: string;
 	redirectUrl: string;
 	status: string;
 }
 
 interface ConnectionWire {
+	access_level?: unknown;
 	active?: boolean;
 	id?: string;
 	status?: string;
@@ -192,6 +201,7 @@ export async function fetchComposioConnections(
 		: "/api/composio/connections";
 	const json = await request<{ data?: ConnectionWire[] }>(target, path);
 	return (json.data ?? []).map((c) => ({
+		accessLevel: normalizeConnectionAccessLevel(c.access_level),
 		id: c.id ?? "",
 		toolkit: c.toolkit ?? toolkit,
 		status: c.status ?? "",
@@ -202,17 +212,20 @@ export async function fetchComposioConnections(
 /** Start an OAuth connection for a toolkit; returns the redirect URL to open. */
 export async function initiateComposioConnection(
 	target: ApiTarget,
-	toolkit: string
+	toolkit: string,
+	accessLevel: ConnectionAccessLevel = DEFAULT_CONNECTION_ACCESS_LEVEL
 ): Promise<ComposioConnectInitiate> {
 	const json = await request<{
+		access_level?: unknown;
 		connection_id?: string;
 		redirect_url?: string;
 		status?: string;
 	}>(target, "/api/composio/connections/initiate", {
 		method: "POST",
-		body: { toolkit },
+		body: { access_level: accessLevel, toolkit },
 	});
 	return {
+		accessLevel: normalizeConnectionAccessLevel(json.access_level),
 		connectionId: json.connection_id ?? "",
 		redirectUrl: json.redirect_url ?? "",
 		status: json.status ?? "INITIATED",
@@ -229,6 +242,7 @@ export async function fetchComposioConnectionStatus(
 		`/api/composio/connections/${encodeURIComponent(id)}`
 	);
 	return {
+		accessLevel: normalizeConnectionAccessLevel(json.access_level),
 		id: json.id ?? id,
 		toolkit: json.toolkit ?? "",
 		status: json.status ?? "",

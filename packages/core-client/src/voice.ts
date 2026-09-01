@@ -10,7 +10,12 @@
 // voice engine transcribes), reached through the same node target as every other
 // Core client module.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "./client.ts";
 
 /** Transcribe a recorded audio blob via Core's whisper proxy. Returns the text. */
 export async function transcribeAudio(
@@ -29,11 +34,14 @@ export async function transcribeAudio(
 		headers.Authorization = auth;
 	}
 
-	const resp = await fetch(apiUrl(target, "/api/voice/transcribe"), {
-		method: "POST",
-		headers,
-		body: form,
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/voice/transcribe"),
+		{
+			method: "POST",
+			headers,
+			body: form,
+		}
+	);
 
 	if (!resp.ok) {
 		let detail = `transcribe failed: ${resp.status}`;
@@ -84,7 +92,7 @@ export interface SpeechProcessingOptions {
 export async function listSpeechProcessingEngines(
 	target: ApiTarget
 ): Promise<SpeechProcessingEngine[]> {
-	const resp = await fetch(
+	const resp = await fetchForTarget(target)(
 		apiUrl(target, "/api/voice/speech-processing-engines"),
 		{
 			headers: makeHeaders(target.token, target.userJwt),
@@ -104,7 +112,7 @@ export async function installSpeechProcessingModel(
 	target: ApiTarget,
 	engine = "s1-mini"
 ): Promise<void> {
-	const resp = await fetch(
+	const resp = await fetchForTarget(target)(
 		apiUrl(target, "/api/voice/speech-processing-model/install"),
 		{
 			method: "POST",
@@ -132,17 +140,20 @@ export async function processSpeechText(
 	text: string,
 	options: SpeechProcessingOptions = {}
 ): Promise<string> {
-	const resp = await fetch(apiUrl(target, "/api/voice/speech-processing"), {
-		method: "POST",
-		headers: makeHeaders(target.token, target.userJwt),
-		body: JSON.stringify({
-			text,
-			engine: options.engine,
-			styling: options.styling,
-			structure: options.structure,
-			context: options.context,
-		}),
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/voice/speech-processing"),
+		{
+			method: "POST",
+			headers: makeHeaders(target.token, target.userJwt),
+			body: JSON.stringify({
+				text,
+				engine: options.engine,
+				styling: options.styling,
+				structure: options.structure,
+				context: options.context,
+			}),
+		}
+	);
 	if (!resp.ok) {
 		let detail = `Speech Processing failed: ${resp.status}`;
 		try {
@@ -178,9 +189,12 @@ export interface TtsEngine {
 /** List the TTS engines available on this node (nothing hardcoded — Core mirrors
  * the sidecar registry). Always includes the built-in `outetts`. */
 export async function listTtsEngines(target: ApiTarget): Promise<TtsEngine[]> {
-	const resp = await fetch(apiUrl(target, "/api/voice/tts-engines"), {
-		headers: makeHeaders(target.token, target.userJwt),
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/voice/tts-engines"),
+		{
+			headers: makeHeaders(target.token, target.userJwt),
+		}
+	);
 	if (!resp.ok) {
 		throw new Error(`tts-engines failed: ${resp.status}`);
 	}
@@ -204,9 +218,12 @@ export interface TtsModel {
 /** List the curated, installable TTS models (the known-good set Core can install
  * + run), distinct from the raw HF text-to-speech browse in the Models tab. */
 export async function listTtsModels(target: ApiTarget): Promise<TtsModel[]> {
-	const resp = await fetch(apiUrl(target, "/api/voice/tts-models"), {
-		headers: makeHeaders(target.token, target.userJwt),
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/voice/tts-models"),
+		{
+			headers: makeHeaders(target.token, target.userJwt),
+		}
+	);
 	if (!resp.ok) {
 		throw new Error(`tts-models failed: ${resp.status}`);
 	}
@@ -221,11 +238,14 @@ export async function installTtsModel(
 	engine: string,
 	modelName: string
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, "/api/voice/tts-models/install"), {
-		method: "POST",
-		headers: makeHeaders(target.token, target.userJwt),
-		body: JSON.stringify({ engine, model_name: modelName }),
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/voice/tts-models/install"),
+		{
+			method: "POST",
+			headers: makeHeaders(target.token, target.userJwt),
+			body: JSON.stringify({ engine, model_name: modelName }),
+		}
+	);
 	if (!resp.ok) {
 		let detail = `install failed: ${resp.status}`;
 		try {
@@ -262,18 +282,21 @@ export async function speakText(
 	text: string,
 	options: SpeakOptions = {}
 ): Promise<Blob> {
-	const resp = await fetch(apiUrl(target, "/api/voice/speak"), {
-		method: "POST",
-		headers: makeHeaders(target.token, target.userJwt),
-		body: JSON.stringify({
-			text,
-			engine: options.engine,
-			voice: options.voice,
-			speed: options.speed,
-			language: options.language,
-			reference_audio: options.referenceAudio,
-		}),
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/voice/speak"),
+		{
+			method: "POST",
+			headers: makeHeaders(target.token, target.userJwt),
+			body: JSON.stringify({
+				text,
+				engine: options.engine,
+				voice: options.voice,
+				speed: options.speed,
+				language: options.language,
+				reference_audio: options.referenceAudio,
+			}),
+		}
+	);
 
 	if (!resp.ok) {
 		let detail = `speak failed: ${resp.status}`;

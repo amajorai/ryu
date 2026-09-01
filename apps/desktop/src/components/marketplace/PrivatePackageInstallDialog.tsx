@@ -23,6 +23,7 @@ import { Spinner } from "@ryu/ui/components/spinner";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { sileo } from "sileo";
 import { openExternal } from "@/lib/tauri-bridge.ts";
+import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	fetchComposioConnectionStatus,
@@ -39,6 +40,7 @@ import {
 	previewPrivatePackageShareCode,
 	redeemPrivatePackageShareCode,
 } from "@/src/lib/api/marketplace.ts";
+import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import { useGatewayDialog } from "@/src/store/useGatewayDialog.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
@@ -128,6 +130,8 @@ export default function PrivatePackageInstallDialog({
 	>(() => new Map());
 	const [stage, setStage] = useState<InstallStage>("entry");
 	const [connectingId, setConnectingId] = useState<string | null>(null);
+	const [permissionRequirement, setPermissionRequirement] =
+		useState<PackageConnectionRequirement | null>(null);
 	const openGateway = useGatewayDialog((state) => state.openGateway);
 
 	const reset = useCallback(() => {
@@ -139,6 +143,7 @@ export default function PrivatePackageInstallDialog({
 		setSetupStatuses(new Map());
 		setStage("entry");
 		setConnectingId(null);
+		setPermissionRequirement(null);
 	}, []);
 
 	useEffect(() => {
@@ -292,12 +297,24 @@ export default function PrivatePackageInstallDialog({
 		}
 	};
 
-	const handleConnect = async (requirement: PackageConnectionRequirement) => {
+	const requestConnection = (requirement: PackageConnectionRequirement) => {
 		if (setupStatuses.get(requirement.id)?.state === "unavailable") {
 			openGateway("integrations");
 			return;
 		}
 		if (!requirement.toolkit) {
+			openGateway("integrations");
+			return;
+		}
+		setPermissionRequirement(requirement);
+	};
+
+	const handleConnect = async (
+		requirement: PackageConnectionRequirement,
+		accessLevel: ConnectionAccessLevel
+	) => {
+		const toolkit = requirement.toolkit;
+		if (!toolkit) {
 			openGateway("integrations");
 			return;
 		}
@@ -307,7 +324,8 @@ export default function PrivatePackageInstallDialog({
 			const target = toTarget(useNodeStore.getState().getActiveNode());
 			const connection = await initiateComposioConnection(
 				target,
-				requirement.toolkit
+				toolkit,
+				accessLevel
 			);
 			if (!(connection.redirectUrl && connection.connectionId)) {
 				throw new Error("Composio did not return an authorization link.");
@@ -344,6 +362,7 @@ export default function PrivatePackageInstallDialog({
 					? cause.message
 					: "Could not start the connection."
 			);
+			throw cause;
 		} finally {
 			setConnectingId(null);
 		}
@@ -359,240 +378,267 @@ export default function PrivatePackageInstallDialog({
 	const canPreview = normalizedCode.length === 12 && !loading;
 
 	return (
-		<Dialog
-			onOpenChange={(nextOpen) => {
-				if (!nextOpen) {
-					onClose();
-				}
-			}}
-			open={open}
-		>
-			<DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
-				<DialogHeader className="border-border/60 border-b px-6 py-5 text-left">
-					<div className="flex items-start gap-3">
-						<div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-							<HugeiconsIcon className="size-5" icon={Package01Icon} />
-						</div>
-						<div className="min-w-0">
-							<DialogTitle>Install a private package</DialogTitle>
-							<DialogDescription className="mt-1">
-								Enter the code from your publisher. You’ll see exactly what it
-								needs before anything is installed.
-							</DialogDescription>
-						</div>
-					</div>
-				</DialogHeader>
-
-				<div className="scroll-fade max-h-[calc(88vh-10rem)] overflow-y-auto px-6 py-5">
-					{stage === "entry" ? (
-						<form
-							className="space-y-5"
-							onSubmit={(event) => {
-								event.preventDefault();
-								if (canPreview) {
-									void handlePreview();
-								}
-							}}
-						>
-							<div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-								<div className="mb-3 flex items-center gap-2 font-medium text-sm">
-									<HugeiconsIcon
-										className="size-4 text-muted-foreground"
-										icon={Shield01Icon}
-									/>
-									Private by default
-								</div>
-								<p className="text-muted-foreground text-sm leading-6">
-									The code grants access to one package release. It does not
-									contain credentials, and it can be revoked by the publisher.
-								</p>
+		<>
+			<Dialog
+				onOpenChange={(nextOpen) => {
+					if (!nextOpen) {
+						onClose();
+					}
+				}}
+				open={open}
+			>
+				<DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
+					<DialogHeader className="border-border/60 border-b px-6 py-5 text-left">
+						<div className="flex items-start gap-3">
+							<div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+								<HugeiconsIcon className="size-5" icon={Package01Icon} />
 							</div>
-							<label className="block space-y-2" htmlFor="private-package-code">
-								<span className="font-medium text-sm">Package code</span>
-								<Input
-									id="private-package-code"
-									inputMode="text"
-									maxLength={14}
-									onBlur={() => setCode(formatPrivatePackageShareCode(code))}
-									onChange={(event) =>
-										setCode(event.target.value.toUpperCase())
+							<div className="min-w-0">
+								<DialogTitle>Install a private package</DialogTitle>
+								<DialogDescription className="mt-1">
+									Enter the code from your publisher. You’ll see exactly what it
+									needs before anything is installed.
+								</DialogDescription>
+							</div>
+						</div>
+					</DialogHeader>
+
+					<div className="scroll-fade max-h-[calc(88vh-10rem)] overflow-y-auto px-6 py-5">
+						{stage === "entry" ? (
+							<form
+								className="space-y-5"
+								onSubmit={(event) => {
+									event.preventDefault();
+									if (canPreview) {
+										void handlePreview();
 									}
-									placeholder="7K4M-X2QP-9F6D"
-									spellCheck={false}
-									value={code}
-								/>
-								<span className="text-muted-foreground text-xs">
-									12 characters · letters and numbers · hyphens are optional
-								</span>
-							</label>
-							{error ? <ErrorNotice message={error} /> : null}
-							<DialogFooter className="px-0 pt-1">
-								<Button disabled={!canPreview} type="submit">
-									{loading ? <Spinner className="size-4" /> : null}
-									Preview package
-									{loading ? null : (
-										<HugeiconsIcon className="size-4" icon={ArrowRight01Icon} />
-									)}
-								</Button>
-							</DialogFooter>
-						</form>
-					) : preview ? (
-						<div className="space-y-5">
-							<div className="flex items-start justify-between gap-3">
-								<div className="min-w-0">
-									<div className="mb-1 flex flex-wrap items-center gap-2">
-										<h3 className="font-semibold text-lg">{preview.name}</h3>
-										<Badge variant="secondary">
-											{preview.kind.replaceAll("_", " ")}
-										</Badge>
+								}}
+							>
+								<div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+									<div className="mb-3 flex items-center gap-2 font-medium text-sm">
+										<HugeiconsIcon
+											className="size-4 text-muted-foreground"
+											icon={Shield01Icon}
+										/>
+										Private by default
 									</div>
-									<p className="text-muted-foreground text-sm">
-										{preview.description ?? "Private package shared with you"}
+									<p className="text-muted-foreground text-sm leading-6">
+										The code grants access to one package release. It does not
+										contain credentials, and it can be revoked by the publisher.
 									</p>
 								</div>
-								<Badge
-									className="shrink-0 gap-1.5"
-									variant={
-										preview.verification === "invalid"
-											? "destructive"
-											: "outline"
-									}
+								<label
+									className="block space-y-2"
+									htmlFor="private-package-code"
 								>
-									<HugeiconsIcon className="size-3.5" icon={Shield01Icon} />
-									{preview.verification === "verified"
-										? "Verified"
-										: preview.verification === "unsigned"
-											? "Unsigned release"
-											: preview.verification === "invalid"
-												? "Signature invalid"
-												: "Verification unavailable"}
-								</Badge>
-							</div>
-							<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
-								<Badge variant="secondary">
-									{preview.audience === "organization"
-										? "Organization-bound"
-										: "Shareable code"}
-								</Badge>
-								{preview.version ? (
-									<span>Version {preview.version}</span>
-								) : null}
-								{preview.expiresAt ? (
-									<span>
-										Expires {new Date(preview.expiresAt).toLocaleDateString()}
+									<span className="font-medium text-sm">Package code</span>
+									<Input
+										id="private-package-code"
+										inputMode="text"
+										maxLength={14}
+										onBlur={() => setCode(formatPrivatePackageShareCode(code))}
+										onChange={(event) =>
+											setCode(event.target.value.toUpperCase())
+										}
+										placeholder="7K4M-X2QP-9F6D"
+										spellCheck={false}
+										value={code}
+									/>
+									<span className="text-muted-foreground text-xs">
+										12 characters · letters and numbers · hyphens are optional
 									</span>
-								) : null}
-							</div>
-							{preview.capabilities.length > 0 ? (
-								<div className="rounded-xl border border-border/70 p-4">
-									<p className="mb-2 font-medium text-sm">
-										Included capabilities
-									</p>
-									<div className="flex flex-wrap gap-1.5">
-										{preview.capabilities.map((capability) => (
-											<Badge key={capability} variant="outline">
-												{capability}
+								</label>
+								{error ? <ErrorNotice message={error} /> : null}
+								<DialogFooter className="px-0 pt-1">
+									<Button disabled={!canPreview} type="submit">
+										{loading ? <Spinner className="size-4" /> : null}
+										Preview package
+										{loading ? null : (
+											<HugeiconsIcon
+												className="size-4"
+												icon={ArrowRight01Icon}
+											/>
+										)}
+									</Button>
+								</DialogFooter>
+							</form>
+						) : preview ? (
+							<div className="space-y-5">
+								<div className="flex items-start justify-between gap-3">
+									<div className="min-w-0">
+										<div className="mb-1 flex flex-wrap items-center gap-2">
+											<h3 className="font-semibold text-lg">{preview.name}</h3>
+											<Badge variant="secondary">
+												{preview.kind.replaceAll("_", " ")}
 											</Badge>
-										))}
-									</div>
-								</div>
-							) : null}
-
-							<div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-								<div className="mb-3 flex items-center justify-between gap-3">
-									<div>
-										<p className="font-medium text-sm">Connection setup</p>
-										<p className="mt-1 text-muted-foreground text-xs">
-											{summary.required === 0
-												? "No external accounts are required."
-												: ready
-													? "Everything required is connected."
-													: `${summary.missing} required connection${summary.missing === 1 ? "" : "s"} still needed`}
+										</div>
+										<p className="text-muted-foreground text-sm">
+											{preview.description ?? "Private package shared with you"}
 										</p>
 									</div>
-									{stage === "complete" ? (
-										<Badge variant={ready ? "default" : "secondary"}>
-											{ready ? "Ready to run" : "Finish setup"}
-										</Badge>
+									<Badge
+										className="shrink-0 gap-1.5"
+										variant={
+											preview.verification === "invalid"
+												? "destructive"
+												: "outline"
+										}
+									>
+										<HugeiconsIcon className="size-3.5" icon={Shield01Icon} />
+										{preview.verification === "verified"
+											? "Verified"
+											: preview.verification === "unsigned"
+												? "Unsigned release"
+												: preview.verification === "invalid"
+													? "Signature invalid"
+													: "Verification unavailable"}
+									</Badge>
+								</div>
+								<div className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
+									<Badge variant="secondary">
+										{preview.audience === "organization"
+											? "Organization-bound"
+											: "Shareable code"}
+									</Badge>
+									{preview.version ? (
+										<span>Version {preview.version}</span>
+									) : null}
+									{preview.expiresAt ? (
+										<span>
+											Expires {new Date(preview.expiresAt).toLocaleDateString()}
+										</span>
 									) : null}
 								</div>
-								{preview.connections.length > 0 ? (
-									<div className="space-y-2">
-										{preview.connections.map((requirement) => (
-											<ConnectionRow
-												connecting={connectingId === requirement.id}
-												key={requirement.id}
-												onConnect={() => void handleConnect(requirement)}
-												requirement={requirement}
-												status={setupStatuses.get(requirement.id)}
-											/>
-										))}
+								{preview.capabilities.length > 0 ? (
+									<div className="rounded-xl border border-border/70 p-4">
+										<p className="mb-2 font-medium text-sm">
+											Included capabilities
+										</p>
+										<div className="flex flex-wrap gap-1.5">
+											{preview.capabilities.map((capability) => (
+												<Badge key={capability} variant="outline">
+													{capability}
+												</Badge>
+											))}
+										</div>
 									</div>
 								) : null}
-							</div>
 
-							<div className="flex items-start gap-2 text-muted-foreground text-xs leading-5">
-								<HugeiconsIcon
-									className="mt-0.5 size-4 shrink-0"
-									icon={InformationCircleIcon}
-								/>
-								<span>
-									Installing adds the package definition to this node. Account
-									authorization stays with you and is never included in the
-									shared package.
-								</span>
-							</div>
-							{canInstall ? null : (
-								<div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-destructive text-sm">
-									{preview.verification === "unsigned"
-										? "This release is not signed. Ask the publisher for a signed release before installing."
-										: "Ryu could not verify this release, so installation is unavailable."}
-								</div>
-							)}
-
-							{error ? <ErrorNotice message={error} /> : null}
-							<DialogFooter className="gap-2 px-0">
-								{stage === "complete" ? (
-									<Button onClick={onClose} type="button">
-										Done
-									</Button>
-								) : (
-									<>
-										<Button
-											disabled={loading}
-											onClick={() => {
-												setStage("entry");
-												setPreview(null);
-												setInstallSession(null);
-												setError(null);
-											}}
-											type="button"
-											variant="ghost"
-										>
-											Use another code
-										</Button>
-										<Button
-											disabled={loading || !canInstall}
-											onClick={() => void handleInstall()}
-											type="button"
-										>
-											{loading ? <Spinner className="size-4" /> : null}
-											{loading ? "Installing…" : "Install package"}
-											{loading ? null : (
-												<HugeiconsIcon
-													className="size-4"
-													icon={ArrowRight01Icon}
+								<div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+									<div className="mb-3 flex items-center justify-between gap-3">
+										<div>
+											<p className="font-medium text-sm">Connection setup</p>
+											<p className="mt-1 text-muted-foreground text-xs">
+												{summary.required === 0
+													? "No external accounts are required."
+													: ready
+														? "Everything required is connected."
+														: `${summary.missing} required connection${summary.missing === 1 ? "" : "s"} still needed`}
+											</p>
+										</div>
+										{stage === "complete" ? (
+											<Badge variant={ready ? "default" : "secondary"}>
+												{ready ? "Ready to run" : "Finish setup"}
+											</Badge>
+										) : null}
+									</div>
+									{preview.connections.length > 0 ? (
+										<div className="space-y-2">
+											{preview.connections.map((requirement) => (
+												<ConnectionRow
+													connecting={connectingId === requirement.id}
+													key={requirement.id}
+													onConnect={() => requestConnection(requirement)}
+													requirement={requirement}
+													status={setupStatuses.get(requirement.id)}
 												/>
-											)}
-										</Button>
-									</>
+											))}
+										</div>
+									) : null}
+								</div>
+
+								<div className="flex items-start gap-2 text-muted-foreground text-xs leading-5">
+									<HugeiconsIcon
+										className="mt-0.5 size-4 shrink-0"
+										icon={InformationCircleIcon}
+									/>
+									<span>
+										Installing adds the package definition to this node. Account
+										authorization stays with you and is never included in the
+										shared package.
+									</span>
+								</div>
+								{canInstall ? null : (
+									<div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-destructive text-sm">
+										{preview.verification === "unsigned"
+											? "This release is not signed. Ask the publisher for a signed release before installing."
+											: "Ryu could not verify this release, so installation is unavailable."}
+									</div>
 								)}
-							</DialogFooter>
-						</div>
-					) : null}
-				</div>
-			</DialogContent>
-		</Dialog>
+
+								{error ? <ErrorNotice message={error} /> : null}
+								<DialogFooter className="gap-2 px-0">
+									{stage === "complete" ? (
+										<Button onClick={onClose} type="button">
+											Done
+										</Button>
+									) : (
+										<>
+											<Button
+												disabled={loading}
+												onClick={() => {
+													setStage("entry");
+													setPreview(null);
+													setInstallSession(null);
+													setError(null);
+												}}
+												type="button"
+												variant="ghost"
+											>
+												Use another code
+											</Button>
+											<Button
+												disabled={loading || !canInstall}
+												onClick={() => void handleInstall()}
+												type="button"
+											>
+												{loading ? <Spinner className="size-4" /> : null}
+												{loading ? "Installing…" : "Install package"}
+												{loading ? null : (
+													<HugeiconsIcon
+														className="size-4"
+														icon={ArrowRight01Icon}
+													/>
+												)}
+											</Button>
+										</>
+									)}
+								</DialogFooter>
+							</div>
+						) : null}
+					</div>
+				</DialogContent>
+			</Dialog>
+			<ConnectionPermissionDialog
+				connectionName={
+					permissionRequirement?.displayName ?? "this integration"
+				}
+				connectionType="Composio"
+				onConfirm={async (accessLevel) => {
+					if (!permissionRequirement) {
+						return;
+					}
+					await handleConnect(permissionRequirement, accessLevel);
+					setPermissionRequirement(null);
+				}}
+				onOpenChange={(open) => {
+					if (!open) {
+						setPermissionRequirement(null);
+					}
+				}}
+				open={permissionRequirement !== null}
+			/>
+		</>
 	);
 }
 

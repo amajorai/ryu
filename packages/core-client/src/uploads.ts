@@ -4,7 +4,12 @@
 // by native/mobile; desktop has a twin in `apps/desktop/src/lib/api/uploads.ts`
 // that also carries desktop identity headers.
 
-import { type ApiTarget, apiUrl, makeHeaders } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+} from "./client.ts";
 
 /** A stored upload. `url` is relative (`/api/uploads/<id>`). */
 export interface UploadObject {
@@ -40,7 +45,7 @@ export async function uploadUserFile(
 	headers["Content-Type"] = opts.contentType || "application/octet-stream";
 	headers["x-filename"] = opts.fileName;
 
-	const res = await fetch(apiUrl(target, "/api/uploads"), {
+	const res = await fetchForTarget(target)(apiUrl(target, "/api/uploads"), {
 		method: "POST",
 		headers,
 		body: bytes,

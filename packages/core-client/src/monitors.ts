@@ -4,7 +4,13 @@
 // use no rename). The alert SSE stream uses fetch + ReadableStream rather than
 // EventSource so the bearer token can be attached.
 
-import { type ApiTarget, apiUrl, makeHeaders, request } from "./client.ts";
+import {
+	type ApiTarget,
+	apiUrl,
+	fetchForTarget,
+	makeHeaders,
+	request,
+} from "./client.ts";
 
 export type FetchBackend = "http" | "spider" | "agentbrowser";
 
@@ -221,11 +227,14 @@ export async function streamMonitorAlerts(
 	onAlert: (alert: Alert) => void,
 	signal?: AbortSignal
 ): Promise<void> {
-	const resp = await fetch(apiUrl(target, "/api/monitors/alerts/stream"), {
-		method: "GET",
-		headers: makeHeaders(target.token, target.userJwt),
-		signal,
-	});
+	const resp = await fetchForTarget(target)(
+		apiUrl(target, "/api/monitors/alerts/stream"),
+		{
+			method: "GET",
+			headers: makeHeaders(target.token, target.userJwt),
+			signal,
+		}
+	);
 	if (!(resp.ok && resp.body)) {
 		throw new Error(`alert stream failed: ${resp.status}`);
 	}

@@ -50,7 +50,8 @@ export async function request<T>(
 		options,
 		init?.headers as Record<string, string> | undefined
 	);
-	const resp = await fetch(url, { ...init, headers });
+	const fetchImpl = options.fetch ?? globalThis.fetch;
+	const resp = await fetchImpl(url, { ...init, headers });
 	if (!resp.ok) {
 		const text = await resp.text().catch(() => resp.statusText);
 		throw new Error(`RyuClient: ${path} failed (${resp.status}): ${text}`);

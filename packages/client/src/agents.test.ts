@@ -109,6 +109,21 @@ async function collectStream(api: AgentsAPI) {
 }
 
 describe("AgentsAPI.stream request options", () => {
+	test("uses an injected fetch implementation for streaming", async () => {
+		let called = false;
+		const fetchImpl: NonNullable<RyuClientOptions["fetch"]> = async () => {
+			called = true;
+			return new Response("data: [DONE]\n", { status: 200 });
+		};
+		const stream = new AgentsAPI({
+			...OPTIONS,
+			fetch: fetchImpl,
+		}).stream("pi", [{ role: "user", content: "hi" }]);
+
+		await stream.next();
+		expect(called).toBe(true);
+	});
+
 	test("sends the developer response mode when requested", async () => {
 		let capturedBody: string | undefined;
 		installFetch((_input, init) => {

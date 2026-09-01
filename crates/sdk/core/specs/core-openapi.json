@@ -13338,7 +13338,7 @@
           "Core"
         ],
         "summary": "Run a scheduled job now",
-        "description": "The \"does this actually work\" affordance every automation surface wants, and\nthe only honest one: it runs the *saved* job through the same\n[`crate::scheduler::run_target`] the tick loop uses, so what it proves is what\nwill happen when the schedule fires \u2014 not an approximation assembled by the\ncaller. The outcome is recorded in the job's history exactly as a scheduled\nrun is, which is why a manual run shows up alongside the automatic ones.\n\nDeliberately ignores `enabled` and `require_approval`: this IS the human\nacting, so gating it on a schedule flag or on an approval the same human\nwould immediately grant would only be ceremony. It respects nothing about\n*when* the job would have run, only *what* it runs.",
+        "description": "The \"does this actually work\" affordance every automation surface wants, and\nthe only honest one: it runs the *saved* job through the same\n[`crate::scheduler::run_target_for_job`] the tick loop uses, so what it proves is what\nwill happen when the schedule fires \u2014 not an approximation assembled by the\ncaller. The outcome is recorded in the job's history exactly as a scheduled\nrun is, which is why a manual run shows up alongside the automatic ones.\n\nDeliberately ignores `enabled` and `require_approval`: this IS the human\nacting, so gating it on a schedule flag or on an approval the same human\nwould immediately grant would only be ceremony. It respects nothing about\n*when* the job would have run, only *what* it runs.",
         "operationId": "run_job_now",
         "parameters": [
           {
@@ -14017,6 +14017,9 @@
       "ConnectBody": {
         "type": "object",
         "properties": {
+          "access_level": {
+            "type": "string"
+          },
           "callback_mode": {
             "oneOf": [
               {
@@ -14035,6 +14038,7 @@
       "ConnectStarted": {
         "type": "object",
         "required": [
+          "access_level",
           "flow_id",
           "authorization_url",
           "callback_mode",
@@ -14043,6 +14047,9 @@
           "expires_at"
         ],
         "properties": {
+          "access_level": {
+            "type": "string"
+          },
           "authorization_url": {
             "type": "string"
           },
@@ -14078,6 +14085,7 @@
       "FlowView": {
         "type": "object",
         "required": [
+          "access_level",
           "flow_id",
           "plugin_id",
           "server_name",
@@ -14088,6 +14096,9 @@
           "expires_at"
         ],
         "properties": {
+          "access_level": {
+            "type": "string"
+          },
           "callback_mode": {
             "$ref": "#/components/schemas/CallbackMode"
           },

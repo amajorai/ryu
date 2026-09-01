@@ -206,6 +206,87 @@ impl std::fmt::Debug for SecretState {
     }
 }
 
+/// The maximum action level a connected account may exercise through Ryu.
+///
+/// This is deliberately separate from OAuth scopes and from the Gateway's
+/// `permission_grants`: those describe what a provider or app can offer, while
+/// this is the owner's per-connection ceiling. The `RiskBased` default keeps
+/// the existing smart approval policy in charge of risky actions; the other
+/// levels narrow or widen that ceiling explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionAccessLevel {
+    /// Reads flow normally; Ryu's smart approval policy gates risky writes and
+    /// deletes before the connected account is used.
+    RiskBased,
+    /// Read and preview operations only.
+    ReadOnly,
+    /// Read/write operations, but no destructive delete operation.
+    Write,
+    /// Read, write, and known destructive operations.
+    Full,
+}
+
+impl Default for ConnectionAccessLevel {
+    fn default() -> Self {
+        Self::RiskBased
+    }
+}
+
+impl ConnectionAccessLevel {
+    /// Stable wire/storage spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RiskBased => "risk_based",
+            Self::ReadOnly => "read_only",
+            Self::Write => "write",
+            Self::Full => "full",
+        }
+    }
+
+    /// Unknown or blank persisted values fail closed to the safe default.
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "read_only" => Self::ReadOnly,
+            "write" => Self::Write,
+            "full" => Self::Full,
+            _ => Self::RiskBased,
+        }
+    }
+
+    /// Whether this ceiling admits a classified connected-account action.
+    /// Unknown actions are never admitted, including under `Full`.
+    pub const fn allows(self, action: ConnectionAction) -> bool {
+        self.allows_with_approval(action, false)
+    }
+
+    /// Whether this ceiling admits an action after the existing Ryu approval
+    /// path has decided whether a risky call may proceed. `RiskBased` admits
+    /// writes/deletes only when that path has already approved them.
+    pub const fn allows_with_approval(self, action: ConnectionAction, risk_approved: bool) -> bool {
+        match self {
+            Self::RiskBased => {
+                matches!(action, ConnectionAction::Read)
+                    || (risk_approved && !matches!(action, ConnectionAction::Unknown))
+            }
+            Self::ReadOnly => matches!(action, ConnectionAction::Read),
+            Self::Write => matches!(action, ConnectionAction::Read | ConnectionAction::Write),
+            Self::Full => !matches!(action, ConnectionAction::Unknown),
+        }
+    }
+}
+
+/// Coarse action classes used by the connection ceiling. Core derives these
+/// from trusted MCP metadata, declared HTTP methods, and conservative tool-name
+/// fallbacks; the vault stays independent of Core's tool registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionAction {
+    Read,
+    Write,
+    Delete,
+    Unknown,
+}
+
 /// A single per-domain login belonging to a [`Profile`].
 ///
 /// `encrypted_state` holds the sealed credential envelope ([`SealedState`], whose

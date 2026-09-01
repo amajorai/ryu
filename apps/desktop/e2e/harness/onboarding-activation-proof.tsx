@@ -51,6 +51,7 @@ const toolkits: ComposioToolkit[] = [
 
 const initialConnections: ComposioConnection[] = [
 	{
+		accessLevel: "risk_based",
 		active: true,
 		id: "gmail-1",
 		status: "ACTIVE",
@@ -122,6 +123,7 @@ function ProofApp() {
 			? [
 					...initialConnections,
 					{
+						accessLevel: "risk_based",
 						active: true,
 						id: "notion-1",
 						status: "ACTIVE",
@@ -169,13 +171,14 @@ function ProofApp() {
 				{stage === "apps" ? (
 					<ActivationRecommendationsStep
 						busySlug={null}
-						onConnect={(recommendation: ActivationRecommendation) => {
+						onConnect={async (recommendation: ActivationRecommendation) => {
 							if (!recommendation.appSlug) {
 								return;
 							}
 							setConnections((previous) => [
 								...previous,
 								{
+									accessLevel: "risk_based",
 									active: true,
 									id: `${recommendation.appSlug}-1`,
 									status: "ACTIVE",

@@ -254,7 +254,7 @@ describe("skill targets", () => {
 				unavailableReason: null,
 			},
 		],
-		preferences: { version: 1, configured: true, targetIds: [] },
+		preferences: { version: 1 as const, configured: true, targetIds: [] },
 		droppedTargetIds: [],
 		warning: null,
 	};

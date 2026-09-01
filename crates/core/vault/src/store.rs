@@ -25,8 +25,8 @@ use ryu_crypto::global_cipher;
 
 use super::source::{is_known_source, known_source_ids};
 use super::{
-    ConnectionRecord, ConnectionStatus, FlowStatus, McpOAuthConnectionRecord,
-    McpOAuthConnectionStatus, Profile, SealedState, SecretState,
+    ConnectionAccessLevel, ConnectionRecord, ConnectionStatus, FlowStatus,
+    McpOAuthConnectionRecord, McpOAuthConnectionStatus, Profile, SealedState, SecretState,
 };
 
 /// Default backend id used when a connection's `source` is unspecified.
@@ -140,7 +140,18 @@ impl IdentityStore {
                 UNIQUE(owner_user_id, profile_id, plugin_id, server_name)
             );
             CREATE INDEX IF NOT EXISTS idx_mcp_oauth_owner_plugin
-                ON mcp_oauth_connections(owner_user_id, plugin_id);",
+                ON mcp_oauth_connections(owner_user_id, plugin_id);
+
+            CREATE TABLE IF NOT EXISTS connection_access_policies (
+                owner_user_id   TEXT NOT NULL,
+                provider        TEXT NOT NULL,
+                connection_key  TEXT NOT NULL,
+                access_level    TEXT NOT NULL DEFAULT 'risk_based',
+                updated_at      INTEGER NOT NULL,
+                PRIMARY KEY(owner_user_id, provider, connection_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_connection_access_owner
+                ON connection_access_policies(owner_user_id, provider);",
         )
         .context("running identities schema migration")?;
 
@@ -408,6 +419,70 @@ impl IdentityStore {
         Ok(removed > 0)
     }
 
+    // ── Connected-account access policy ─────────────────────────────────────
+
+    /// Read the owner's per-connection action ceiling. Missing or unknown
+    /// values deliberately resolve to `RiskBased`, so older data folders and
+    /// forward-written values never widen access by accident.
+    pub async fn get_connection_access_level(
+        &self,
+        owner_user_id: &str,
+        provider: &str,
+        connection_key: &str,
+    ) -> Result<ConnectionAccessLevel> {
+        let conn = self.conn.lock().await;
+        let stored = conn
+            .query_row(
+                "SELECT access_level
+                 FROM connection_access_policies
+                 WHERE owner_user_id = ?1 AND provider = ?2 AND connection_key = ?3",
+                params![owner_user_id, provider, connection_key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(stored
+            .as_deref()
+            .map(ConnectionAccessLevel::from_str)
+            .unwrap_or_default())
+    }
+
+    /// Persist the owner's selected per-connection action ceiling. The policy
+    /// contains no credential material and is safe to keep when a provider
+    /// connection is temporarily disconnected, so a later reconnect retains
+    /// the user's choice.
+    pub async fn set_connection_access_level(
+        &self,
+        owner_user_id: &str,
+        provider: &str,
+        connection_key: &str,
+        access_level: ConnectionAccessLevel,
+    ) -> Result<()> {
+        if !valid_policy_component(owner_user_id)
+            || !valid_policy_component(provider)
+            || !valid_policy_component(connection_key)
+        {
+            bail!("connection access policy requires owner, provider, and connection key");
+        }
+        let now = now_unix();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO connection_access_policies
+                (owner_user_id, provider, connection_key, access_level, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(owner_user_id, provider, connection_key) DO UPDATE SET
+                access_level = excluded.access_level,
+                updated_at = excluded.updated_at",
+            params![
+                owner_user_id,
+                provider,
+                connection_key,
+                access_level.as_str(),
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
     // ── Remote MCP OAuth ───────────────────────────────────────────────────
 
     /// Insert or replace the single active OAuth account for a
@@ -596,6 +671,11 @@ impl IdentityStore {
         )?;
         Ok(removed > 0)
     }
+}
+
+fn valid_policy_component(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && trimmed.len() <= 512 && !trimmed.chars().any(char::is_control)
 }
 
 #[cfg(test)]
@@ -811,6 +891,65 @@ mod tests {
         assert!(sealed.starts_with("enc:v1:"));
         assert!(!sealed.contains("rotated-secret"));
         assert_eq!(first.owner_user_id, "user_a");
+    }
+
+    #[tokio::test]
+    async fn connection_access_policy_defaults_and_round_trips_per_owner() {
+        let store = IdentityStore::open_in_memory().unwrap();
+
+        assert_eq!(
+            store
+                .get_connection_access_level("user_a", "composio", "gmail")
+                .await
+                .unwrap(),
+            ConnectionAccessLevel::RiskBased
+        );
+
+        store
+            .set_connection_access_level(
+                "user_a",
+                "composio",
+                "gmail",
+                ConnectionAccessLevel::ReadOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .get_connection_access_level("user_a", "composio", "gmail")
+                .await
+                .unwrap(),
+            ConnectionAccessLevel::ReadOnly
+        );
+        assert_eq!(
+            store
+                .get_connection_access_level("user_b", "composio", "gmail")
+                .await
+                .unwrap(),
+            ConnectionAccessLevel::RiskBased
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_connection_access_policy_fails_safe_to_risk_based() {
+        let store = IdentityStore::open_in_memory().unwrap();
+        {
+            let conn = store.conn.lock().await;
+            conn.execute(
+                "INSERT INTO connection_access_policies
+                    (owner_user_id, provider, connection_key, access_level, updated_at)
+                 VALUES ('user_a', 'mcp', 'plugin:server', 'future_level', 0)",
+                [],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            store
+                .get_connection_access_level("user_a", "mcp", "plugin:server")
+                .await
+                .unwrap(),
+            ConnectionAccessLevel::RiskBased
+        );
     }
 }
 

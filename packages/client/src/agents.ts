@@ -215,7 +215,8 @@ export class AgentsAPI {
 	): AsyncGenerator<StreamChunk> {
 		const url = buildUrl(this.options, "/api/chat/stream");
 		const headers = buildHeaders(this.options);
-		const resp = await fetch(url, {
+		const fetchImpl = this.options.fetch ?? globalThis.fetch;
+		const resp = await fetchImpl(url, {
 			method: "POST",
 			headers,
 			body: JSON.stringify({

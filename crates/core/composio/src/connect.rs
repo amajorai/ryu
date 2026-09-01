@@ -41,11 +41,17 @@ use serde_json::{json, Value};
 /// path's `COMPOSIO_ENTITY_ID` so browse-connect and execute share one entity.
 const ENTITY_ENV: &str = "COMPOSIO_ENTITY_ID";
 
-/// Resolve the Composio entity (end-user id) for connect/list. Single-principal
-/// Core uses the env override or `"default"`; matches
-/// [`crate::sidecar::mcp::composio`]'s `resolve_entity` fallback so a connection
-/// made here is the same one execution later reuses.
+/// Resolve the Composio entity (end-user id) for connect/list. A verified caller
+/// is preferred on a shared node; the env override or `"default"` remains the
+/// fallback for a local single-principal Core.
 pub fn entity() -> String {
+    resolve_entity(None)
+}
+
+fn resolve_entity(user_id: Option<&str>) -> String {
+    if let Some(user_id) = user_id.map(str::trim).filter(|value| !value.is_empty()) {
+        return user_id.to_owned();
+    }
     std::env::var(ENTITY_ENV)
         .ok()
         .map(|s| s.trim().to_string())
@@ -211,8 +217,12 @@ fn normalize_connection(item: &Value) -> Value {
 
 /// List the user's connected accounts, optionally filtered to one toolkit.
 /// Returns `{ object: "list", data: [{ id, toolkit, status, active }] }`.
-pub async fn list_connections(client: &Client, toolkit: &str) -> Result<Value> {
-    let entity = entity();
+pub async fn list_connections(
+    client: &Client,
+    toolkit: &str,
+    user_id: Option<&str>,
+) -> Result<Value> {
+    let entity = resolve_entity(user_id);
     let raw = get_json(
         client,
         "/connected_accounts",
@@ -274,14 +284,14 @@ async fn ensure_auth_config(client: &Client, toolkit: &str) -> Result<String> {
 /// the recommended Composio-managed `link` endpoint. Returns
 /// `{ connection_id, redirect_url, status }` — the caller opens `redirect_url`
 /// in the browser and polls [`connection_status`] until `active`.
-pub async fn initiate(client: &Client, toolkit: &str) -> Result<Value> {
+pub async fn initiate(client: &Client, toolkit: &str, user_id: Option<&str>) -> Result<Value> {
     if toolkit.trim().is_empty() {
         return Err(anyhow!("toolkit is required to connect"));
     }
     let auth_config_id = ensure_auth_config(client, toolkit).await?;
     let body = json!({
         "auth_config_id": auth_config_id,
-        "user_id": entity(),
+        "user_id": resolve_entity(user_id),
     });
     let resp = post_json(client, "/connected_accounts/link", &body).await?;
     // The redirect URL and connection id can appear at the top level or nested
@@ -482,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn initiate_rejects_empty_toolkit() {
         let http = Client::new();
-        let err = initiate(&http, "   ")
+        let err = initiate(&http, "   ", None)
             .await
             .expect_err("empty toolkit must error before any HTTP");
         assert!(err.to_string().contains("toolkit is required"));

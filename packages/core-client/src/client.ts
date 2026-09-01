@@ -14,11 +14,26 @@
 // top by each app, not here.
 
 /** The subset of a node the api layer needs: base URL + scoped credentials. */
+export type RyuFetch = (
+	input: RequestInfo | URL,
+	init?: RequestInit
+) => Promise<Response>;
+
 export interface ApiTarget {
+	/**
+	 * HTTP implementation for this target. Expo apps can pass `expo/fetch` when
+	 * they need streaming response bodies; global fetch is used by default.
+	 */
+	fetch?: RyuFetch;
 	token: string | null;
 	url: string;
 	/** Verified end-user JWT for per-user/team tenancy on an org-bound Core. */
 	userJwt?: string | null;
+}
+
+/** Resolve the HTTP implementation for a target without adding a platform dependency. */
+export function fetchForTarget(target: Pick<ApiTarget, "fetch">): RyuFetch {
+	return target.fetch ?? globalThis.fetch;
 }
 
 export const USER_JWT_HEADER = "x-ryu-user-jwt";
@@ -200,7 +215,8 @@ export async function request<T>(
 	path: string,
 	options: RequestOptions = {}
 ): Promise<T> {
-	const resp = await fetch(apiUrl(target, path), {
+	const fetchImpl = fetchForTarget(target);
+	const resp = await fetchImpl(apiUrl(target, path), {
 		method: options.method ?? "GET",
 		headers: {
 			...makeHeaders(target.token, target.userJwt),

@@ -15,12 +15,20 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.ryuhq.com">Docs</a> ·
-  <a href="https://ryuhq.com/download">Download</a> ·
-  <a href="https://ryuhq.com/discord">Discord</a>
+  <a href="https://github.com/amajorai/ryu/stargazers"><img src="https://shieldcn.dev/github/stars/amajorai/ryu.svg" alt="GitHub stars" /></a>&nbsp;
+  <a href="https://github.com/amajorai/ryu/releases"><img src="https://shieldcn.dev/github/release/amajorai/ryu.svg" alt="Latest release" /></a>&nbsp;
+  <a href="https://github.com/amajorai/ryu/actions/workflows/ci.yml"><img src="https://shieldcn.dev/github/ci/amajorai/ryu.svg?workflow=ci.yml&branch=main" alt="CI" /></a>
 </p>
 
-## What it is
+<p align="center">
+  <a href="https://docs.ryuhq.com"><img src="https://shieldcn.dev/badge/Docs-docs.ryuhq.com-73DC8C.svg?logo=readthedocs&logoColor=white" alt="Docs" /></a>&nbsp;
+  <a href="https://ryuhq.com/download"><img src="https://shieldcn.dev/badge/Ryu-Desktop-4B78E6.svg?logo=tauri&logoColor=white" alt="Ryu Desktop" /></a>&nbsp;
+  <a href="https://ryuhq.com/discord"><img src="https://shieldcn.dev/discord/1439211418724597800.svg?logo=discord&logoColor=white&color=4B78E6" alt="Discord" /></a>&nbsp;
+  <a href="https://x.com/ryuhq"><img src="https://shieldcn.dev/badge/Follow-@ryuhq-FA9BFA.svg?logo=x&logoColor=white" alt="Follow @ryuhq" /></a>&nbsp;
+  <a href="./LICENSING.md"><img src="https://shieldcn.dev/badge/License-Open--core-73DC8C.svg?logo=opensourceinitiative&logoColor=white" alt="Open core" /></a>
+</p>
+
+## What is Ryu?
 
 Ryu is a platform for building, running, and governing AI agents. It provides the layer
 around an agent: tools, memory, workflows, model access, permissions, and delivery through
@@ -29,91 +37,79 @@ apps, plugins, APIs, and clients.
 Most teams rebuild these parts for every agent. Ryu gives them one shared layer. Keep the
 agent or model you already use, then add the capabilities you need.
 
-## Why it is different
+## Why Ryu?
 
-- **One layer above agents and models.** Connect Claude Code, Codex, Pi, OpenClaw, or
-  another ACP or OpenAI-compatible agent. Use local models, hosted models, or both.
-- **Clear control points.** Core runs agents, workflows, tools, and plugins. Gateway
-  controls model calls, routing, firewall rules, budgets, approvals, and audit history.
-- **Swappable parts.** Replace models, engines, memory, retrieval, sandboxes, and
+Ryu is for teams that want to move from an agent demo to repeatable work without rebuilding the
+stack for every job.
+
+- **Start with what you have.** Connect Claude Code, Codex, Pi, OpenClaw, or another ACP or
+  OpenAI-compatible agent. Use local models, hosted models, or both.
+- **Add the missing layer.** Use agents, workflows, teams, plugins, MCP servers, skills, apps,
+  and a marketplace to package repeatable work.
+- **Keep control.** Route model calls and enforce permissions, budgets, approvals, firewall rules,
+  durable state, and audit history.
+- **Swap parts as you grow.** Replace models, engines, memory, retrieval, sandboxes, and
   integrations without rebuilding the product around them.
-- **One system across surfaces.** Run the same work through the CLI, Desktop, Web, bots,
-  SDKs, or an API.
+- **Run it where work happens.** Use the same system through the CLI, Desktop, Web, bots, SDKs,
+  or an API, with self-hosted Core and Gateway or managed options.
+
+This public repository includes the open-core runtime, Gateway, CLI/TUI clients, SDKs, capability
+crates, source-available Desktop, Island, shared UI packages, and build/deploy files for the
+self-hosted stack. The Web, server, mobile, browser-extension, identity, and billing surfaces live
+outside this repository; the full product documentation is at [docs.ryuhq.com](https://docs.ryuhq.com).
 
 ## How Ryu compares
 
 Ryu sits at the control-plane and runtime layer around an agent. The matrices separate agent
-frameworks and local runtimes from managed agent products. They describe documented product
-surfaces, not model quality, latency, price, or security certification.
+frameworks and local runtimes from managed agent products and cloud platforms. They describe
+documented product surfaces, not model quality, latency, or security certification.
 
 Legend: ✅ first-class documented capability · 🟡 available through composition, configuration, or
 a limited/preview surface · ❌ not the product's primary documented surface.
 
+The hosted `eve`/Vercel path is usage-metered: Vercel charges for Function active CPU,
+provisioned memory time, and invocations. Ryu's self-hosted path runs on infrastructure you
+control. See [Vercel Functions pricing](https://vercel.com/docs/functions/usage-and-pricing).
+
 ### Agent frameworks and local runtimes
 
-| Capability | [Ryu](https://github.com/amajorai/ryu) | [Mastra](https://mastra.ai/ai-agents) | [LangChain / LangGraph](https://www.langchain.com/) | [OpenClaw](https://github.com/openclaw/openclaw) | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | [Omnigent](https://github.com/omnigent-ai/omnigent) |
-| --- | --- | --- | --- | --- | --- | --- |
-| Use an existing agent or harness | ✅ | ❌ | ❌ | ❌ | 🟡 | ✅ |
-| BYO models and providers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Local or self-hosted runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Managed hosting | ✅ | 🟡 | ✅ | ❌ | 🟡 | 🟡 |
-| Multi-agent coordination | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Durable workflows and triggers | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
-| Tools and MCP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Memory and retrieval | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
-| Routing, budgets, approvals, and audit | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | ✅ |
-| Sandboxed execution | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | ✅ |
-| Background schedules | ✅ | ✅ | 🟡 | ✅ | ✅ | 🟡 |
-| CLI, app, and channel delivery | ✅ | 🟡 | 🟡 | ✅ | ✅ | ✅ |
-| Skills, plugins, and integrations | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 |
+| Capability | [Ryu](https://github.com/amajorai/ryu) | [Mastra](https://mastra.ai/ai-agents) | [LangChain / LangGraph](https://www.langchain.com/) | [eve](https://eve.dev/) | [OpenClaw](https://github.com/openclaw/openclaw) | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | [Omnigent](https://github.com/omnigent-ai/omnigent) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Use an existing agent or harness | ✅ | ❌ | ❌ | ❌ | ❌ | 🟡 | ✅ |
+| BYO models and providers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Local or self-hosted runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Managed hosting | ✅ | 🟡 | ✅ | 🟡 | ❌ | 🟡 | 🟡 |
+| Multi-agent coordination | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Durable workflows and triggers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
+| Tools and MCP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Memory and retrieval | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | 🟡 |
+| Routing, budgets, approvals, and audit | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 | ✅ |
+| Sandboxed execution | ✅ | 🟡 | 🟡 | ✅ | 🟡 | 🟡 | ✅ |
+| Background schedules | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 |
+| CLI, app, and channel delivery | ✅ | 🟡 | 🟡 | ✅ | ✅ | ✅ | ✅ |
+| Skills, plugins, and integrations | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | 🟡 |
 
 ### Managed agent products and cloud platforms
 
-| Capability | [Ryu](https://github.com/amajorai/ryu) | [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) | [Notion Custom Agents](https://www.notion.com/help/custom-agents) | [Grok Bot](https://x.ai/bot) | [Hyperagent](https://www.hyperagent.com/docs/get-started) | [ChatGPT Workspace Agents](https://help.openai.com/en/articles/20001143-chatgpt-workspace-agents-for-enterprise-and-business) | [Microsoft Foundry](https://learn.microsoft.com/en-us/azure/foundry/agents/overview) | [Vertex AI Agent Engine](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Use an existing agent or harness | ✅ | 🟡 | ❌ | ❌ | 🟡 | ❌ | ✅ | ✅ |
-| BYO models and providers | ✅ | ❌ | 🟡 | ❌ | 🟡 | 🟡 | 🟡 | 🟡 |
-| Local or self-hosted runtime | ✅ | 🟡 | ❌ | ❌ | ❌ | ❌ | 🟡 | 🟡 |
-| Managed hosting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Multi-agent coordination | ✅ | ✅ | 🟡 | 🟡 | ✅ | 🟡 | ✅ | ✅ |
-| Tools and MCP | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 |
-| Memory and retrieval | ✅ | ✅ | ✅ | ❌ | ✅ | 🟡 | 🟡 | ✅ |
-| Routing, budgets, approvals, and audit | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 |
-| Sandboxed execution | ✅ | ✅ | ❌ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 |
-| Background schedules and triggers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 | 🟡 |
-| CLI, app, and channel delivery | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | 🟡 | 🟡 |
-| Skills, plugins, and integrations | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 |
+| Capability | [Ryu](https://github.com/amajorai/ryu) | [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) | [Notion Custom Agents](https://www.notion.com/help/custom-agents) | [Grok Bot](https://x.ai/bot) | [Hyperagent](https://www.hyperagent.com/docs/get-started) | [Vercel AI Cloud](https://vercel.com/agents) | [ChatGPT Workspace Agents](https://help.openai.com/en/articles/20001143-chatgpt-workspace-agents-for-enterprise-and-business) | [Microsoft Foundry](https://learn.microsoft.com/en-us/azure/foundry/agents/overview) | [Vertex AI Agent Engine](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Use an existing agent or harness | ✅ | 🟡 | ❌ | ❌ | 🟡 | 🟡 | ❌ | ✅ | ✅ |
+| BYO models and providers | ✅ | ❌ | 🟡 | ❌ | 🟡 | ✅ | 🟡 | 🟡 | 🟡 |
+| Local or self-hosted runtime | ✅ | 🟡 | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 | 🟡 |
+| Managed hosting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Multi-agent coordination | ✅ | ✅ | 🟡 | 🟡 | ✅ | 🟡 | 🟡 | ✅ | ✅ |
+| Tools and MCP | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | 🟡 |
+| Memory and retrieval | ✅ | ✅ | ✅ | ❌ | ✅ | 🟡 | 🟡 | 🟡 | ✅ |
+| Routing, budgets, approvals, and audit | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | 🟡 | ✅ | 🟡 |
+| Sandboxed execution | ✅ | ✅ | ❌ | 🟡 | 🟡 | ✅ | 🟡 | 🟡 | 🟡 |
+| Background schedules and triggers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 | 🟡 |
+| CLI, app, and channel delivery | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 | ✅ | 🟡 | 🟡 |
+| Skills, plugins, and integrations | ✅ | ✅ | ✅ | 🟡 | ✅ | 🟡 | ✅ | ✅ | 🟡 |
 
-## What it offers
+## Quick Start
 
-- Agents, workflows, and teams for repeatable work.
-- Plugins, MCP servers, and skills for tools and knowledge.
-- Apps and a marketplace for packaging workflows for other people.
-- Routing and governance for model choice, permissions, spend, and audit.
-- Local-first operation with self-hosted Core and Gateway, plus cloud options.
-
-## What you get
-
-Ryu helps you move from an agent demo to repeatable work without rebuilding the stack for
-each job. Start with a working agent instead of a blank project. Keep the model subscriptions
-and tools you already use. Add capabilities without custom glue. Turn a useful workflow into
-an app. Give each run the controls and history needed for real work.
-
-## What's here
-
-This public repository contains Ryu's open-core stack and source-available desktop layer:
-
-- Open-source Core, Gateway, CLI/TUI clients, SDKs, and capability crates.
-- Source-available Desktop, Island, and shared UI packages.
-- Build, deploy, and GitHub Action files for the self-hosted stack.
-
-The Web, server, mobile, browser-extension, identity, and billing surfaces are not in this
-repository. The full product and feature documentation lives at
-[docs.ryuhq.com](https://docs.ryuhq.com).
-
-## Quick start
-
-### Install a self-hosted node
+The self-hosted path runs Core and Gateway on infrastructure you control. It does not need a Ryu
+account or control-plane service.
 
 **macOS and Linux**:
 

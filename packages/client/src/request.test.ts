@@ -113,4 +113,18 @@ describe("request", () => {
 		expect(capturedInit?.method).toBe("POST");
 		expect(capturedInit?.body).toBe('{"a":1}');
 	});
+
+	test("uses an injected fetch implementation", async () => {
+		let called = false;
+		const fetchImpl: NonNullable<RyuClientOptions["fetch"]> = async () => {
+			called = true;
+			return new Response('{"ok":true}', { status: 200 });
+		};
+		const data = await request<{ ok: boolean }>(
+			opts({ fetch: fetchImpl }),
+			"/api/x"
+		);
+		expect(called).toBe(true);
+		expect(data).toEqual({ ok: true });
+	});
 });
