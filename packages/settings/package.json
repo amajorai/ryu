@@ -21,7 +21,7 @@
     "lucide-react": "catalog:",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "sileo": "latest",
+    "sileo": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {

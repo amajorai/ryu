@@ -75,7 +75,7 @@
     "@ryu/ui": "workspace:*",
     "@ryuhq/protocol": "workspace:*",
     "lucide-react": "catalog:",
-    "sileo": "latest"
+    "sileo": "catalog:"
   },
   "peerDependencies": {
     "react": "^19",

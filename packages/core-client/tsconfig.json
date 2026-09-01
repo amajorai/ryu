@@ -3,6 +3,7 @@
   "compilerOptions": {
     "strictNullChecks": true,
     "allowImportingTsExtensions": true,
+    "lib": ["ESNext", "DOM"],
     "noEmit": true
   }
 }

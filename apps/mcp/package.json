@@ -10,12 +10,13 @@
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "test": "bun test",
-    "check": "bun run --silent src/index.ts < /dev/null || true"
+    "check": "bun run check-types",
+    "check-types": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@ryuhq/core-client": "workspace:*",
-    "zod": "^4.4.3"
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@ryu/config": "workspace:*",

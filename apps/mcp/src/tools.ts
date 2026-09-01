@@ -6,6 +6,7 @@
 // All logging MUST go to stderr — stdout is the JSON-RPC channel.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { fetchAgents } from "@ryuhq/core-client/agents";
 import { askBtw } from "@ryuhq/core-client/btw";
 import type { ApiTarget } from "@ryuhq/core-client/client";
@@ -30,13 +31,10 @@ import {
 } from "@ryuhq/core-client/system";
 import { fetchTeams } from "@ryuhq/core-client/teams";
 import { fetchWorkflows, runWorkflow } from "@ryuhq/core-client/workflows";
-import { z } from "zod";
+import * as z from "zod/v4";
 import { fetchSession, loadToken } from "./auth.ts";
 
-interface ToolText {
-	content: { type: "text"; text: string }[];
-	isError?: boolean;
-}
+type ToolText = CallToolResult;
 
 const ok = (value: unknown): ToolText => ({
 	content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
