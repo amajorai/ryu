@@ -46,6 +46,10 @@ window.fetch = async (input, init) => {
 
 function profileProps(onContinue: () => void) {
 	return {
+		agentSuggestions: [],
+		agentSuggestionsError: null,
+		agentSuggestionsSelected: new Set<string>(),
+		agentSuggestionsSubmitting: false,
 		allowedAgentIds: ["ryu"],
 		alreadyBuilt: true,
 		autoImport: true,
@@ -53,6 +57,7 @@ function profileProps(onContinue: () => void) {
 		connectingToolkit: null,
 		connectionQuery: "",
 		connections: [],
+		connectionsCheckFailed: false,
 		defaultProviderIds: [],
 		freeCloud: false,
 		importing: false,
@@ -65,10 +70,13 @@ function profileProps(onContinue: () => void) {
 		onConfigureProvider: () => undefined,
 		onConnectToolkit: () => undefined,
 		onContinue,
+		onContinueBackgroundProfile: onContinue,
+		onCreateAgentSuggestions: () => undefined,
 		onImportThreads: () => undefined,
 		onLocalSelectionChange: () => undefined,
 		onSearchConnections: () => undefined,
 		onSkip: onContinue,
+		onToggleAgentSuggestion: () => undefined,
 		onToggleAutoImport: () => undefined,
 		organizations: [],
 		piProviders: [],

@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
 import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
+import { AgentSuggestionsStep } from "@/src/components/onboarding/AgentSuggestionsStep.tsx";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { NativeThread } from "@/src/lib/api/agent-threads.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -18,7 +19,10 @@ import type {
 	ComposioConnection,
 	ComposioToolkit,
 } from "@/src/lib/api/composio.ts";
-import type { ProfileJobStatus } from "@/src/lib/api/onboarding-profile.ts";
+import type {
+	OnboardingAgentSuggestion,
+	ProfileJobStatus,
+} from "@/src/lib/api/onboarding-profile.ts";
 import type { PiProvider } from "@/src/lib/api/pi-config.ts";
 import type { AgentSelection } from "@/src/lib/api/preferences.ts";
 import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
@@ -34,7 +38,8 @@ export type OnboardingSetupKind =
 	| "connections"
 	| "cloud-default"
 	| "imports"
-	| "profile";
+	| "profile"
+	| "agent-suggestions";
 
 export interface OnboardingOrganization {
 	id: string;
@@ -52,6 +57,10 @@ export interface OnboardingThreadGroup {
 }
 
 interface OnboardingSetupStepProps {
+	agentSuggestions: OnboardingAgentSuggestion[];
+	agentSuggestionsError: string | null;
+	agentSuggestionsSelected: ReadonlySet<string>;
+	agentSuggestionsSubmitting: boolean;
 	allowedAgentIds: readonly string[];
 	allowedProviderIds?: readonly string[];
 	alreadyBuilt: boolean | null;
@@ -76,10 +85,13 @@ interface OnboardingSetupStepProps {
 		accessLevel: ConnectionAccessLevel
 	) => Promise<void>;
 	onContinue: () => void;
+	onContinueBackgroundProfile: () => void;
+	onCreateAgentSuggestions: () => void;
 	onImportThreads: () => void;
 	onLocalSelectionChange: (selection: AgentSelection) => void;
 	onSearchConnections: (query: string) => void;
 	onSkip: () => void;
+	onToggleAgentSuggestion: (id: string) => void;
 	onToggleAutoImport: (enabled: boolean) => void;
 	organizations: OnboardingOrganization[];
 	piProviders: PiProvider[];
@@ -670,11 +682,13 @@ function ProfileSetup({
 	onSkip,
 	onBackground,
 	onCancel,
+	onContinueAfterBackground,
 }: {
 	alreadyBuilt: boolean | null;
 	job: ProfileJobStatus | null;
 	onBackground: () => void;
 	onCancel: () => void;
+	onContinueAfterBackground: () => void;
 	onSkip: () => void;
 	onStart: () => void;
 	startedAt: number | null;
@@ -749,12 +763,20 @@ function ProfileSetup({
 		);
 	}
 	if (job.state === "completed") {
+		const suggestionCount = job.agentSuggestions.length;
 		return (
 			<SettingsCard className="flex flex-col gap-4">
-				<p className="font-medium text-sm">Your starting profile is ready</p>
+				<p className="font-medium text-sm">
+					{suggestionCount > 0
+						? `Your profile and ${suggestionCount} agent draft${suggestionCount === 1 ? "" : "s"} are ready`
+						: "Your starting profile is ready"}
+				</p>
 				<p className="text-muted-foreground text-xs">
 					Ryu wrote a user profile and a shared organization profile. You can
-					review the source-backed draft in the new chat.
+					review the source-backed draft in the new chat
+					{suggestionCount > 0
+						? " and choose which suggested agents to add."
+						: "."}
 				</p>
 				<ContinueRow continueLabel="Continue" onContinue={onSkip} />
 			</SettingsCard>
@@ -779,13 +801,13 @@ function ProfileSetup({
 				</AnimatePresence>
 			</div>
 			<p className="text-muted-foreground text-xs">
-				The connected content is read-only and treated as untrusted data.
-				Recommendations never change your agents or external accounts
-				automatically.
+				{job.materialized
+					? "Your profile chat is running in the background. Wait here to review agent drafts when it finishes, or continue setup now."
+					: "The connected content is read-only and treated as untrusted data. Recommendations never change your agents or external accounts automatically."}
 			</p>
 			<div className="flex items-center justify-between text-muted-foreground text-xs">
 				<span>{Math.floor(elapsed / 1000)}s elapsed</span>
-				{elapsed >= 20_000 ? (
+				{elapsed >= 20_000 && !job.materialized ? (
 					<Button onClick={onBackground} size="sm" variant="outline">
 						Run in background
 					</Button>
@@ -796,8 +818,8 @@ function ProfileSetup({
 					Skip and cancel
 				</Button>
 				{job.materialized ? (
-					<Button onClick={onBackground} size="sm" variant="mono">
-						Open profile chat later
+					<Button onClick={onContinueAfterBackground} size="sm" variant="mono">
+						Continue setup
 					</Button>
 				) : null}
 			</div>
@@ -915,6 +937,24 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 			</Shell>
 		);
 	}
+	if (kind === "agent-suggestions") {
+		return (
+			<Shell
+				subtitle="Ryu found repeated workflows in your approved sources. Choose which focused agents to add."
+				title="Suggested agents for your work"
+			>
+				<AgentSuggestionsStep
+					busy={props.agentSuggestionsSubmitting}
+					error={props.agentSuggestionsError}
+					onCreate={props.onCreateAgentSuggestions}
+					onSkip={props.onSkip}
+					onToggle={props.onToggleAgentSuggestion}
+					selected={props.agentSuggestionsSelected}
+					suggestions={props.agentSuggestions}
+				/>
+			</Shell>
+		);
+	}
 	return (
 		<Shell
 			subtitle="Give Ryu a useful starting point without changing your accounts or agents."
@@ -925,6 +965,7 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 				job={props.profileJob}
 				onBackground={props.onBackgroundProfile}
 				onCancel={props.onCancelProfile}
+				onContinueAfterBackground={props.onContinueBackgroundProfile}
 				onSkip={props.onSkip}
 				onStart={props.onContinue}
 				startedAt={props.profileStartedAt}

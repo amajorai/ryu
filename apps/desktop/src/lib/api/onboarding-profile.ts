@@ -31,7 +31,19 @@ export type ProfileJobState =
 	| "failed"
 	| "cancelled";
 
+/** A reviewable agent recipe returned by Core after profile bootstrap. */
+export interface OnboardingAgentSuggestion {
+	description: string;
+	id: string;
+	name: string;
+	reason: string;
+	systemPrompt: string;
+	title: string;
+	tools: string[];
+}
+
 export interface ProfileJobStatus {
+	agentSuggestions: OnboardingAgentSuggestion[];
 	conversationId: string | null;
 	error: string | null;
 	id: string;
@@ -41,6 +53,7 @@ export interface ProfileJobStatus {
 }
 
 interface ProfileJobWire {
+	agentSuggestions?: OnboardingAgentSuggestion[];
 	conversationId?: string | null;
 	error?: string | null;
 	id: string;
@@ -51,6 +64,7 @@ interface ProfileJobWire {
 
 function normalize(job: ProfileJobWire): ProfileJobStatus {
 	return {
+		agentSuggestions: job.agentSuggestions ?? [],
 		conversationId: job.conversationId ?? null,
 		error: job.error ?? null,
 		id: job.id,

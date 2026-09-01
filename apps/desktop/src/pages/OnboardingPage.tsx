@@ -33,6 +33,7 @@ import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
 import { useAutoImportThreads } from "@/src/hooks/useAutoImportThreads.ts";
 import { useCreditsWallet } from "@/src/hooks/useCreditsWallet.ts";
 import { AgentCatalogLogo } from "@/src/lib/agent-catalog-logo.tsx";
+import { buildSuggestedAgentInput } from "@/src/lib/agent-suggestion.ts";
 import { track } from "@/src/lib/analytics.ts";
 import {
 	importAgentThread,
@@ -40,7 +41,9 @@ import {
 } from "@/src/lib/api/agent-threads.ts";
 import {
 	type AgentCatalogEntry,
+	createAgent,
 	fetchAgentCatalog,
+	fetchAgents,
 	installAgent,
 } from "@/src/lib/api/agents.ts";
 import {
@@ -69,6 +72,7 @@ import {
 	fetchGatewayOnboardingAccess,
 	fetchProfileAvailability,
 	getProfileJobStatus,
+	type OnboardingAgentSuggestion,
 	type ProfileJobStatus,
 	startProfileJob,
 } from "@/src/lib/api/onboarding-profile.ts";
@@ -99,6 +103,7 @@ import { ensureMicPermission } from "@/src/lib/audio/devices.ts";
 import type { ConnectionAccessLevel } from "@/src/lib/connection-permissions.ts";
 import { triggerAgentsRefresh } from "@/src/lib/core-refresh.ts";
 import { setFeatureEnabled, TOGGLEABLE_FEATURES } from "@/src/lib/features.ts";
+import { useEntityCap } from "@/src/lib/gating/useEntityCap.ts";
 import {
 	type InstallerProgress,
 	installerComponentLabel,
@@ -168,6 +173,7 @@ type Phase =
 	| "cloud-default"
 	| "imports"
 	| "profile"
+	| "agent-suggestions"
 	| "telegram"
 	| "features"
 	| "mic"
@@ -196,6 +202,7 @@ const PHASE_TITLES: Partial<Record<Phase, string>> = {
 	"cloud-default": "Choose your cloud starting point",
 	imports: "Bring your work with you",
 	profile: "Give Ryu a starting point",
+	"agent-suggestions": "Suggested agents for your work",
 	telegram: "Take the work to Telegram",
 	features: "Choose what Ryu can do",
 	mic: "Choose how you talk to Ryu",
@@ -224,6 +231,8 @@ const PHASE_SUBTITLES: Partial<Record<Phase, string>> = {
 	imports: "Bring existing conversations into the workspace",
 	profile:
 		"Give Ryu a starting point; approve the result before it becomes your profile",
+	"agent-suggestions":
+		"Review focused agent drafts from the workflows Ryu found in your approved sources",
 	telegram: "Use the same default agent from Telegram",
 	features: "Turn capabilities on or off; change them later",
 	mic: "Talk to Ryu when typing is not the fastest way",
@@ -797,6 +806,7 @@ export default function OnboardingPage() {
 		loading: entitlementLoading,
 		refresh: refreshCredits,
 	} = useCreditsWallet();
+	const { guard: guardAgentCreation } = useEntityCap();
 	// The browser builds reuse this page, but a browser deployment is not a
 	// desktop bundle and must not present a native-app update verdict. In Tauri,
 	// the update check is the first screen after device auth succeeds.
@@ -1005,6 +1015,17 @@ export default function OnboardingPage() {
 		boolean | null
 	>(null);
 	const [profileStartedAt, setProfileStartedAt] = useState<number | null>(null);
+	const [agentSuggestions, setAgentSuggestions] = useState<
+		OnboardingAgentSuggestion[]
+	>([]);
+	const [selectedAgentSuggestions, setSelectedAgentSuggestions] = useState<
+		Set<string>
+	>(new Set());
+	const [agentSuggestionsSubmitting, setAgentSuggestionsSubmitting] =
+		useState(false);
+	const [agentSuggestionsError, setAgentSuggestionsError] = useState<
+		string | null
+	>(null);
 	const [autoImport, setAutoImport] = useAutoImportThreads();
 	const [activationSourceError, setActivationSourceError] = useState<
 		string | null
@@ -1426,6 +1447,111 @@ export default function OnboardingPage() {
 		goToTelegram();
 	}, [eligibleForProfile, gatewaySetupAllowed, goToTelegram]);
 
+	const continueAfterProfile = useCallback(() => {
+		const suggestions = profileJob?.agentSuggestions ?? [];
+		if (suggestions.length > 0) {
+			setAgentSuggestions(suggestions);
+			setSelectedAgentSuggestions(new Set());
+			setAgentSuggestionsError(null);
+			setPhase("agent-suggestions");
+			return;
+		}
+		goToTelegram();
+	}, [goToTelegram, profileJob]);
+
+	const toggleAgentSuggestion = useCallback((id: string) => {
+		setSelectedAgentSuggestions((current) => {
+			const next = new Set(current);
+			if (next.has(id)) {
+				next.delete(id);
+			} else {
+				next.add(id);
+			}
+			return next;
+		});
+	}, []);
+
+	const createOnboardingAgents = useCallback(async () => {
+		if (agentSuggestionsSubmitting || selectedAgentSuggestions.size === 0) {
+			return;
+		}
+		setAgentSuggestionsSubmitting(true);
+		setAgentSuggestionsError(null);
+		const target = toTarget(getActiveNode());
+		const chosen = agentSuggestions.filter((suggestion) =>
+			selectedAgentSuggestions.has(suggestion.id)
+		);
+		const existingAgents = await fetchAgents(target).catch(() => null);
+		if (!existingAgents) {
+			setAgentSuggestionsError(
+				"Ryu couldn't verify your current agents. Try again or skip for now."
+			);
+			setAgentSuggestionsSubmitting(false);
+			return;
+		}
+		const failed: OnboardingAgentSuggestion[] = [];
+		let blockedByLimit = false;
+		let createdCount = 0;
+
+		for (const [index, suggestion] of chosen.entries()) {
+			if (
+				!guardAgentCreation("maxAgents", existingAgents.length + createdCount)
+			) {
+				blockedByLimit = true;
+				failed.push(...chosen.slice(index));
+				break;
+			}
+			try {
+				await createAgent(
+					target,
+					buildSuggestedAgentInput(suggestion, cloudSelection)
+				);
+				createdCount++;
+			} catch {
+				failed.push(suggestion);
+			}
+		}
+
+		if (createdCount > 0) {
+			triggerAgentsRefresh();
+			sileo.success({
+				title: `${createdCount} suggested agent${createdCount === 1 ? "" : "s"} added`,
+				description:
+					"They start in Trial mode so you can review them before promoting them.",
+			});
+		}
+
+		if (failed.length > 0) {
+			setAgentSuggestions((current) =>
+				current.filter((suggestion) =>
+					failed.some((item) => item.id === suggestion.id)
+				)
+			);
+			setSelectedAgentSuggestions(
+				new Set(failed.map((suggestion) => suggestion.id))
+			);
+			setAgentSuggestionsError(
+				blockedByLimit
+					? "Your plan's agent limit prevented the remaining drafts from being added."
+					: createdCount > 0
+						? `Added ${createdCount}. Couldn't add ${failed.map((suggestion) => suggestion.name).join(", ")}. Try again or skip.`
+						: "Ryu couldn't add those agents yet. Try again or skip for now."
+			);
+		} else {
+			setSelectedAgentSuggestions(new Set());
+			goToTelegram();
+		}
+		setAgentSuggestionsSubmitting(false);
+	}, [
+		agentSuggestions,
+		agentSuggestionsSubmitting,
+		cloudSelection,
+		guardAgentCreation,
+		getActiveNode,
+		goToTelegram,
+		selectedAgentSuggestions,
+	]);
+
 	const importOnboardingThreads = useCallback(async () => {
 		if (importing) {
 			return;
@@ -1489,7 +1615,7 @@ export default function OnboardingPage() {
 			setProfileJob(null);
 			goToTelegram();
 		});
-	}, [getActiveNode, goToTelegram, profileJob]);
+	}, [getActiveNode, profileJob]);
 
 	const backgroundOnboardingProfile = useCallback(() => {
 		if (!profileJob) {
@@ -1498,9 +1624,7 @@ export default function OnboardingPage() {
 		void continueProfileJobInBackground(
 			toTarget(getActiveNode()),
 			profileJob.id
-		)
-			.then(setProfileJob)
-			.finally(() => goToTelegram());
+		).then(setProfileJob);
 	}, [getActiveNode, goToTelegram, profileJob]);
 
 	const skipCloudDefault = useCallback(async () => {
@@ -2380,6 +2504,10 @@ export default function OnboardingPage() {
 		: configuredProviderIds;
 	const setupProps = {
 		allowedAgentIds,
+		agentSuggestions,
+		agentSuggestionsError,
+		agentSuggestionsSelected: selectedAgentSuggestions,
+		agentSuggestionsSubmitting,
 		allowedProviderIds:
 			phase === "local-default" ? ["local"] : setupProviderIds,
 		autoImport,
@@ -2405,6 +2533,9 @@ export default function OnboardingPage() {
 		toolkits,
 		onBackgroundProfile: backgroundOnboardingProfile,
 		onCancelProfile: cancelOnboardingProfile,
+		onCreateAgentSuggestions: () => {
+			void createOnboardingAgents();
+		},
 		onChooseOrganization: setSelectedOrganizationId,
 		onConfigureProvider: configureOnboardingProvider,
 		onConnectToolkit: connectOnboardingToolkit,
@@ -2423,6 +2554,7 @@ export default function OnboardingPage() {
 									? importOnboardingThreads
 									: startOnboardingProfile,
 		onImportThreads: importOnboardingThreads,
+		onContinueBackgroundProfile: goToTelegram,
 		onLocalSelectionChange: setLocalSelection,
 		onCloudSelectionChange: setCloudSelection,
 		onSearchConnections: setConnectionQuery,
@@ -2431,8 +2563,11 @@ export default function OnboardingPage() {
 				? skipCloudDefault
 				: phase === "imports"
 					? continueAfterImports
-					: goToTelegram,
+					: phase === "profile"
+						? continueAfterProfile
+						: goToTelegram,
 		onToggleAutoImport: setAutoImport,
+		onToggleAgentSuggestion: toggleAgentSuggestion,
 	};
 
 	if (phase === "updates") {
@@ -2450,7 +2585,8 @@ export default function OnboardingPage() {
 		phase === "connections" ||
 		phase === "cloud-default" ||
 		phase === "imports" ||
-		phase === "profile"
+		phase === "profile" ||
+		phase === "agent-suggestions"
 	) {
 		return (
 			<div className="size-full" data-tauri-drag-region="true">
