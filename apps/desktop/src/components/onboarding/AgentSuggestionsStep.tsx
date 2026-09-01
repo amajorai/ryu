@@ -64,20 +64,37 @@ function RyuExpressiveAvatar({
 	return (
 		<span
 			aria-hidden="true"
-			className="flex size-12 shrink-0 items-center justify-center"
+			className="relative flex size-12 shrink-0 items-center justify-center"
 			data-avatar-colors={`${palette.c1}|${palette.c2}|${palette.c3}`}
 			data-testid={`agent-suggestion-avatar-${suggestionId}`}
-			style={{ color: palette.c2 }}
 		>
-			<RyuLogo
-				animated
-				animation="random"
-				className="size-full"
-				colors={palette}
-				expression="random"
-				size="42px"
-				variant="expressive"
-			/>
+			<span
+				className="pointer-events-none absolute inset-0 flex items-center justify-center"
+				data-siri-orb="fill"
+			>
+				<RyuLogo
+					animated
+					className="size-full"
+					colors={palette}
+					size="42px"
+					variant="default"
+				/>
+			</span>
+			<span
+				className="pointer-events-none absolute inset-0 flex items-center justify-center text-white"
+				data-expressive-face="true"
+			>
+				<RyuLogo
+					animated
+					animation="random"
+					className="size-full"
+					colors={palette}
+					expression="random"
+					eyeScale={1.55}
+					size="42px"
+					variant="expressive"
+				/>
+			</span>
 		</span>
 	);
 }
@@ -117,7 +134,9 @@ function SuggestionCard({
 						className="min-w-0 flex-1"
 						stagger={false}
 						subtitle={suggestion.description}
+						subtitleClassName="text-sm leading-relaxed"
 						title={suggestion.name}
+						titleClassName="text-base"
 					/>
 					<span
 						className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40"}`}

@@ -35,7 +35,17 @@ test.describe("onboarding agent suggestions proof", () => {
 		await expect(
 			page
 				.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
-				.locator("[data-siri-orb]")
+				.locator('[data-expressive-eye-scale="1.55"]')
+		).toBeVisible();
+		await expect(
+			page
+				.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
+				.locator('[data-siri-orb="fill"]')
+		).toBeVisible();
+		await expect(
+			page
+				.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
+				.locator('[data-siri-orb="surface"]')
 		).toHaveCount(0);
 		const gmailLogos = page.getByTestId("connected-app-gmail").locator("img");
 		await expect(gmailLogos).toHaveCount(2);

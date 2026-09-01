@@ -31,6 +31,8 @@ interface LogoProps {
 		c3?: string;
 	};
 	expression?: ExpressiveExpressionSelection;
+	/** Scale the expressive ghost's eyes without changing its body size. */
+	eyeScale?: number;
 	size?: string;
 	variant?:
 		| "default"
@@ -359,6 +361,7 @@ interface ExpressiveVariantProps {
 	className?: string;
 	expression: ExpressiveExpressionSelection;
 	eyePosition: { x: number; y: number };
+	eyeScale: number;
 	ghostPathD: string;
 	isBlinking: boolean;
 	orbRef: React.RefObject<HTMLDivElement | null>;
@@ -375,6 +378,7 @@ const ExpressiveVariant: React.FC<ExpressiveVariantProps> = ({
 	animated,
 	animation,
 	className,
+	eyeScale,
 	expression,
 	eyePosition,
 	isBlinking,
@@ -468,6 +472,7 @@ const ExpressiveVariant: React.FC<ExpressiveVariantProps> = ({
 	);
 	const frame = sampled.eyes;
 	const scaleFactor = sizeValue / 24;
+	const expressiveEyeScale = Math.max(0.1, eyeScale);
 	const centerX = 17 * scaleFactor + frame.gaze.x * scaleFactor;
 	const eyeGap = frame.gap * scaleFactor;
 	const gazePosition = sampled.followGaze ? eyePosition : { x: 0, y: 0 };
@@ -486,6 +491,7 @@ const ExpressiveVariant: React.FC<ExpressiveVariantProps> = ({
 			data-expressive-animation={sampled.animation}
 			data-expressive-animation-progress={sampled.progress.toFixed(3)}
 			data-expressive-expression={frame.id}
+			data-expressive-eye-scale={expressiveEyeScale}
 			ref={orbRef}
 			style={{
 				height: size,
@@ -517,9 +523,16 @@ const ExpressiveVariant: React.FC<ExpressiveVariantProps> = ({
 					/>
 					<g opacity={sampled.eyeAlpha}>
 						{frame.eyes.map((eye, index) => {
-							const width = Math.max(eye.width * scaleFactor, 0.1);
+							const width = Math.max(
+								eye.width * scaleFactor * expressiveEyeScale,
+								0.1
+							);
 							const height = Math.max(
-								eye.height * scaleFactor * eye.open * openMultiplier,
+								eye.height *
+									scaleFactor *
+									expressiveEyeScale *
+									eye.open *
+									openMultiplier,
 								0.1
 							);
 							const cx = eyeCenters[index] ?? centerX;
@@ -548,6 +561,7 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 	size = "192px",
 	className,
 	colors,
+	eyeScale = 1,
 	animationDuration = 20,
 	animation,
 	animated = true,
@@ -803,6 +817,7 @@ const AnimatedLogo: React.FC<LogoProps> = ({
 				className={className}
 				expression={activeExpression}
 				eyePosition={eyePosition}
+				eyeScale={eyeScale}
 				ghostPathD={ghostPathD}
 				isBlinking={isBlinking}
 				orbRef={orbRef}

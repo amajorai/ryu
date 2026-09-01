@@ -23,6 +23,7 @@ interface PageHeaderProps {
 	stagger?: boolean;
 	style?: CSSProperties;
 	subtitle?: ReactNode;
+	subtitleClassName?: string;
 	title: ReactNode;
 	titleClassName?: string;
 }
@@ -49,6 +50,7 @@ export function PageHeader({
 	titleClassName,
 	stagger = true,
 	style,
+	subtitleClassName,
 }: PageHeaderProps) {
 	const ref = useRef<HTMLDivElement>(null);
 	const inView = useInView(ref, { once: true });
@@ -78,7 +80,8 @@ export function PageHeader({
 				<p
 					className={cn(
 						"font-medium text-muted-foreground text-xl",
-						stagger && "t-stagger-line t-stagger-line--2"
+						stagger && "t-stagger-line t-stagger-line--2",
+						subtitleClassName
 					)}
 				>
 					{subtitle}
