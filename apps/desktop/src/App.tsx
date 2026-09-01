@@ -83,15 +83,10 @@ import {
 import CompanionPage from "./pages/CompanionPage.tsx";
 import LoginPage from "./pages/LoginPage.tsx";
 import OnboardingPage from "./pages/OnboardingPage.tsx";
-import { PreflightPage } from "./pages/PreflightPage.tsx";
 import StandaloneAppEntry from "./pages/StandaloneAppEntry.tsx";
 import WaitlistPage from "./pages/WaitlistPage.tsx";
 import { useAppStore } from "./store/useAppStore.ts";
-import {
-	isLocalNode,
-	LOCAL_FALLBACK,
-	useNodeStore,
-} from "./store/useNodeStore.ts";
+import { useNodeStore } from "./store/useNodeStore.ts";
 
 // Detect the Tauri window label synchronously via the internals object that
 // Tauri injects before any JS runs. Falls back to "main" in a plain browser.
@@ -309,7 +304,6 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 	const standaloneApp = isRyuStandaloneApp();
 	useAcpKeepAwake();
 	const setCoreStatus = useAppStore((state) => state.setCoreStatus);
-	const coreStatus = useAppStore((state) => state.coreStatus);
 	const initNodes = useNodeStore((s) => s.init);
 	const startupNodes = useNodeStore((s) => s.nodes);
 	const { data: session, isPending } = useSession();
@@ -908,29 +902,6 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 		};
 	}, []);
 
-	// Preflight ("Ryu Core isn't running") used to gate the ENTIRE tree, ahead of
-	// even the login screen — so a machine with no local Core could never reach
-	// sign-in, let alone the screen that offers running in the cloud or on an
-	// existing node. Core is optional now, so this is scoped to the only users for
-	// whom a dead local Core is actually a fault:
-	//
-	//   * onboarding must already be finished — before that, the choose step is
-	//     exactly where a user without Core is supposed to land; and
-	//   * the active node must be the local one. A user pointed at their team's
-	//     server or a cloud node has no local Core by design, and the node
-	//     selector's unreachable banner is the right (non-blocking) signal there.
-	const defaultNodeName = useNodeStore((s) => s.defaultNode);
-	const nodes = useNodeStore((s) => s.nodes);
-	const activeNodeIsLocal = isLocalNode(
-		nodes.find((n) => n.name === defaultNodeName) ?? LOCAL_FALLBACK
-	);
-	const showPreflight =
-		!(botProduct || standaloneApp) &&
-		hostSurface === "desktop" &&
-		coreStatus === "stopped" &&
-		activeNodeIsLocal &&
-		localStorage.getItem("ryu_onboarding_complete") === "true";
-
 	const showApp = standaloneApp || authed;
 	// Hold the app behind the waitlist check while it resolves, so we never flash
 	// the app and then bounce a pending user to the queue screen.
@@ -969,10 +940,6 @@ function MainApp({ hostSurface }: { hostSurface: AppSurface }) {
 					) : startupChooserVisible ? (
 						<PageWrapper>
 							<DesktopStartupChooser />
-						</PageWrapper>
-					) : showPreflight ? (
-						<PageWrapper>
-							<PreflightPage />
 						</PageWrapper>
 					) : (!standaloneApp && isPending && !sessionSettledOnce) ||
 						waitlistResolving ? (

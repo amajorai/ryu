@@ -134,6 +134,8 @@ interface NodeState {
 	 */
 	refreshCloudTokens: () => Promise<void>;
 	removeNode: (name: string) => Promise<void>;
+	/** Publish the shared status spine's latest active-node reachability result. */
+	setActiveNodeOnline: (online: boolean | null) => void;
 	setAutoSelect: (enabled: boolean) => void;
 	setDefault: (name: string) => Promise<void>;
 	/** Adopt a local node token returned by a native standalone bootstrap. */
@@ -440,6 +442,8 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		return online;
 	},
 
+	setActiveNodeOnline: (online) => set({ activeNodeOnline: online }),
+
 	getActiveNode: (tabId) => {
 		const { nodes, defaultNode, tabOverrides, autoSelect, autoSelectedNode } =
 			get();
@@ -453,7 +457,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 
 	setDefault: async (name) => {
 		await invokeWhenReady("set_default_node", { name });
-		set({ defaultNode: name });
+		set({ activeNodeOnline: null, defaultNode: name });
 	},
 
 	addNode: async (name, url, token) => {
@@ -523,7 +527,7 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		} catch {
 			// Persistence is best-effort; the in-memory flag still applies.
 		}
-		set({ autoSelect: enabled });
+		set({ activeNodeOnline: null, autoSelect: enabled });
 		if (enabled) {
 			// Probe immediately so the choice takes effect without waiting for a
 			// later trigger. Fire-and-forget: probeAutoSelect never throws.

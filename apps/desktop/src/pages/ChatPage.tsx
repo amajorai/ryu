@@ -1183,6 +1183,7 @@ export default function ChatPage({
 	// the shell banner always agree on the same poll tick.
 	const {
 		coreReachable,
+		connectionPhase,
 		gatewayReachable,
 		loading: statusLoading,
 	} = useSystemStatusContext();
@@ -3651,6 +3652,24 @@ export default function ChatPage({
 		setHasOlderMessages(false);
 		setHistoryReloadKey((n) => n + 1);
 	}, []);
+
+	// A history request can lose the race with the shared status probe: the chat
+	// marks itself unavailable first, then the node comes back. Retry that one
+	// restored conversation automatically so the tab does not leave a manual
+	// error card behind after the shell has already reconnected.
+	const previousConnectionPhaseRef = useRef(connectionPhase);
+	useEffect(() => {
+		const previousPhase = previousConnectionPhaseRef.current;
+		previousConnectionPhaseRef.current = connectionPhase;
+		if (
+			connectionPhase === "online" &&
+			previousPhase !== "online" &&
+			historyFailed &&
+			convId
+		) {
+			retryHistoryLoad();
+		}
+	}, [connectionPhase, convId, historyFailed, retryHistoryLoad]);
 
 	// Hydrate the visible thread from Core's server-side store when switching
 	// conversations, so history survives restarts and is shared across clients.
@@ -7486,6 +7505,25 @@ export default function ChatPage({
 		pinnedSummaryOpen,
 	]);
 
+	const historyErrorCopy =
+		connectionPhase === "online"
+			? {
+					description:
+						"This node didn't answer. Your messages are still on it — nothing has been lost.",
+					title: "Couldn't load this conversation",
+				}
+			: connectionPhase === "offline"
+				? {
+						description:
+							"Ryu will retry automatically when your connection returns.",
+						title: "Waiting for connectivity",
+					}
+				: {
+						description:
+							"Ryu will retry automatically when this node reconnects.",
+						title: "Waiting for node",
+					};
+
 	useTitleBar(hasThread ? conversationTitle : null, titlebarActions);
 
 	return (
@@ -7671,9 +7709,7 @@ export default function ChatPage({
 								historyError={
 									historyFailed
 										? {
-												title: "Couldn't load this conversation",
-												description:
-													"This node didn't answer. Your messages are still on it — nothing has been lost.",
+												...historyErrorCopy,
 												onRetry: retryHistoryLoad,
 											}
 										: undefined

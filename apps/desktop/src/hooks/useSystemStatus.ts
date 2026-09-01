@@ -12,9 +12,16 @@
 // reported the same on every OS and stays per-node correct for remote nodes.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ApiTarget } from "@/src/lib/api/client.ts";
+import { ApiError, type ApiTarget } from "@/src/lib/api/client.ts";
 import type { MeshStatus } from "@/src/lib/api/mesh.ts";
-import { fetchSystemStatus } from "@/src/lib/api/system.ts";
+import {
+	fetchSystemStatus,
+	type SystemStatusSnapshot,
+} from "@/src/lib/api/system.ts";
+import {
+	type ConnectionPhase,
+	resolveConnectionPhase,
+} from "@/src/lib/connectivity.ts";
 import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
 import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
 
@@ -32,9 +39,18 @@ async function probeIsland(): Promise<boolean> {
 	}
 }
 
+/** Read the browser's network hint without assuming a browser during tests. */
+function browserIsOnline(): boolean {
+	return typeof navigator === "undefined" || navigator.onLine;
+}
+
 export interface SystemStatus {
 	/** Active engine id reported by Core, or null when none / unreachable. */
 	activeEngine: string | null;
+	/** Whether the browser currently reports an available network connection. */
+	browserOnline: boolean;
+	/** User-facing connection phase for the shell status toast. */
+	connectionPhase: ConnectionPhase;
 	/** Whether Core responded to the last health probe. */
 	coreReachable: boolean;
 	/** Whether the active engine's process is running. */
@@ -70,6 +86,8 @@ export interface SystemStatus {
 	 * MagicDNS + peers to the node selector.
 	 */
 	meshStatus: MeshStatus | null;
+	/** Whether the active node answered the latest status request. */
+	nodeReachable: boolean | null;
 	refresh: () => Promise<void>;
 	/**
 	 * Whether Shadow is running, as reported by the active node's Core. `null`
@@ -82,10 +100,28 @@ export interface SystemStatus {
 }
 
 const POLL_INTERVAL_MS = 5000;
+const STATUS_PROBE_TIMEOUT_MS = 3000;
+
+/** Bound a black-holed node so the shell can say "offline" promptly. */
+async function fetchSystemStatusWithTimeout(
+	target: ApiTarget
+): Promise<SystemStatusSnapshot> {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), STATUS_PROBE_TIMEOUT_MS);
+	try {
+		return await fetchSystemStatus(target, controller.signal);
+	} finally {
+		clearTimeout(timeout);
+	}
+}
 
 export function useSystemStatus(): SystemStatus {
 	const getActiveNode = useNodeStore((s) => s.getActiveNode);
+	const setActiveNodeOnline = useNodeStore((s) => s.setActiveNodeOnline);
+	const activeNodeUrl = useNodeStore((s) => s.getActiveNode().url);
 	const [coreReachable, setCoreReachable] = useState(false);
+	const [browserOnline, setBrowserOnline] = useState(browserIsOnline);
+	const [nodeReachable, setNodeReachable] = useState<boolean | null>(null);
 	const [activeEngine, setActiveEngine] = useState<string | null>(null);
 	const [engineRunning, setEngineRunning] = useState(false);
 	const [sidecars, setSidecars] = useState<Record<string, boolean>>({});
@@ -106,9 +142,13 @@ export function useSystemStatus(): SystemStatus {
 	// Tracks the previous reachability so we can fire ONE global refresh the moment
 	// Core comes back — not on the first successful poll. `null` = never probed yet.
 	const wasReachableRef = useRef<boolean | null>(null);
+	const activeNodeUrlRef = useRef(activeNodeUrl);
+	const latestPollRef = useRef(0);
 
 	const poll = useCallback(async () => {
 		const node = getActiveNode();
+		const pollId = latestPollRef.current + 1;
+		latestPollRef.current = pollId;
 		const target: ApiTarget = {
 			url: node.url,
 			token: node.token,
@@ -126,16 +166,28 @@ export function useSystemStatus(): SystemStatus {
 		// but only for a local node — a device-local process is meaningless for a
 		// remote machine (→ null, "not relevant"). The probe is independent of the
 		// Core snapshot, so it is set even when Core itself is down.
-		const [snapshot, islandUp] = await Promise.all([
-			fetchSystemStatus(target).catch(() => null),
+		const [statusResult, islandUp] = await Promise.all([
+			fetchSystemStatusWithTimeout(target)
+				.then((snapshot) => ({ error: null as unknown, snapshot }))
+				.catch((error: unknown) => ({ error, snapshot: null })),
 			local ? probeIsland() : Promise.resolve(false),
 		]);
+		if (pollId !== latestPollRef.current || getActiveNode().url !== node.url) {
+			return;
+		}
 		setIslandReachable(local ? islandUp : null);
+		const { error: statusError, snapshot } = statusResult;
 
 		// A failed status call is the single "Core down" signal: clear every derived
 		// slice rather than surfacing stale "up" data. Shadow + mesh → null (unknown,
 		// not down) so the tone stays driven by coreReachable.
 		if (!snapshot) {
+			// A typed ApiError means the node answered and rejected the status route;
+			// that is a live node with an unavailable status endpoint, not a network
+			// outage. Transport errors are the only failures that mark the node down.
+			const nodeAnswered = statusError instanceof ApiError;
+			setNodeReachable(nodeAnswered);
+			setActiveNodeOnline(nodeAnswered);
 			setCoreReachable(false);
 			setActiveEngine(null);
 			setEngineRunning(false);
@@ -158,6 +210,8 @@ export function useSystemStatus(): SystemStatus {
 		wasReachableRef.current = true;
 
 		setCoreReachable(true);
+		setNodeReachable(true);
+		setActiveNodeOnline(true);
 		setError(null);
 		setActiveEngine(snapshot.activeEngine);
 		setEngineRunning(snapshot.engineRunning);
@@ -170,7 +224,7 @@ export function useSystemStatus(): SystemStatus {
 		setMeshStatus(snapshot.mesh);
 		setMeshReachable(snapshot.mesh === null ? null : snapshot.mesh.reachable);
 		setLoading(false);
-	}, [getActiveNode]);
+	}, [getActiveNode, setActiveNodeOnline]);
 
 	useEffect(() => {
 		poll().catch(() => undefined);
@@ -184,8 +238,51 @@ export function useSystemStatus(): SystemStatus {
 		};
 	}, [poll]);
 
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+		const onOffline = () => {
+			setBrowserOnline(false);
+			setNodeReachable(false);
+			setActiveNodeOnline(false);
+			wasReachableRef.current = false;
+		};
+		const onOnline = () => {
+			setBrowserOnline(true);
+			setNodeReachable(null);
+			setActiveNodeOnline(null);
+			setLoading(true);
+			poll().catch(() => undefined);
+		};
+		window.addEventListener("offline", onOffline);
+		window.addEventListener("online", onOnline);
+		return () => {
+			window.removeEventListener("offline", onOffline);
+			window.removeEventListener("online", onOnline);
+		};
+	}, [poll, setActiveNodeOnline]);
+
+	useEffect(() => {
+		if (activeNodeUrlRef.current === activeNodeUrl) {
+			return;
+		}
+		activeNodeUrlRef.current = activeNodeUrl;
+		wasReachableRef.current = false;
+		setNodeReachable(null);
+		setActiveNodeOnline(null);
+		setLoading(true);
+		poll().catch(() => undefined);
+	}, [activeNodeUrl, poll, setActiveNodeOnline]);
+
 	return {
 		coreReachable,
+		browserOnline,
+		connectionPhase: resolveConnectionPhase({
+			browserOnline,
+			loading,
+			nodeReachable,
+		}),
 		activeEngine,
 		engineRunning,
 		sidecars,
@@ -195,6 +292,7 @@ export function useSystemStatus(): SystemStatus {
 		meshReachable,
 		meshStatus,
 		loading,
+		nodeReachable,
 		error,
 		refresh: poll,
 	};

@@ -28,7 +28,7 @@ import { MediaPipDock } from "@/src/components/media/MediaPip.tsx";
 import { ProjectDockHost } from "@/src/components/panels/ProjectDockHost.tsx";
 import { PrivacyDisclosure } from "@/src/components/settings/privacy-disclosure.tsx";
 import { SupportAccessBanner } from "@/src/components/settings/support-access-banner.tsx";
-import { NodeUnreachableBanner } from "@/src/components/shell/NodeUnreachableBanner.tsx";
+import { ConnectionStatusToast } from "@/src/components/shell/ConnectionStatusToast.tsx";
 import { ReconnectRetryBanner } from "@/src/components/shell/ReconnectRetryBanner.tsx";
 import { SafeModeBanner } from "@/src/components/shell/SafeModeBanner.tsx";
 import { SkillDistributionProvider } from "@/src/components/skills/SkillDistributionProvider.tsx";
@@ -793,7 +793,7 @@ function LayoutContent({
 			<MediaPipDock />
 			<PrivacyDisclosure />
 			{!(botProduct || osProduct) && <SupportAccessBanner />}
-			{!(botProduct || osProduct) && <NodeUnreachableBanner />}
+			{!(botProduct || osProduct) && <ConnectionStatusToast />}
 			{!osProduct && <ReconnectRetryBanner state={reconnectRetryState} />}
 			{/* Mounted app-wide, not per-page: Safe Mode changes what the whole node
 			    loads, and a missing app must be explained wherever the user notices
