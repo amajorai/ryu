@@ -1447,6 +1447,7 @@ use std::sync::Arc;
 /// safe under concurrency. See [`WalletState::try_reserve`].
 #[derive(Default)]
 pub struct WalletState {
+    accounting_unavailable: DashMap<String, bool>,
     empty: DashMap<String, bool>,
     balance_micro_usd: DashMap<String, i64>,
     in_flight_micro_usd: DashMap<String, i64>,
@@ -1504,6 +1505,25 @@ impl std::fmt::Debug for CreditReservation {
 }
 
 impl WalletState {
+    /// Mark the control-plane accounting path unavailable for an org. This is
+    /// separate from `empty`: a transport failure must reject provider spend
+    /// with a retryable 503, not strand a funded org behind wallet-empty rules.
+    pub fn set_org_accounting_unavailable(&self, org_id: &str, unavailable: bool) {
+        if unavailable {
+            self.accounting_unavailable.insert(org_id.to_string(), true);
+        } else {
+            self.accounting_unavailable.remove(org_id);
+        }
+    }
+
+    /// Whether a managed org's latest debit could not be accounted for.
+    pub fn is_org_accounting_unavailable(&self, org_id: &str) -> bool {
+        self.accounting_unavailable
+            .get(org_id)
+            .map(|value| *value)
+            .unwrap_or(false)
+    }
+
     /// Record the post-debit balance verdict for an org. `empty` should be
     /// `balance_micro_usd <= 0` so a top-up self-heals the flag.
     pub fn set_org_empty(&self, org_id: &str, empty: bool) {
@@ -1525,6 +1545,7 @@ impl WalletState {
     pub fn set_org_balance(&self, org_id: &str, balance_micro_usd: i64) {
         self.balance_micro_usd
             .insert(org_id.to_string(), balance_micro_usd);
+        self.set_org_accounting_unavailable(org_id, false);
         self.set_org_empty(org_id, balance_micro_usd <= 0);
     }
 
@@ -1613,7 +1634,7 @@ impl WalletState {
             // path: going negative here would silently hand an org unlimited
             // headroom, which is the failure this whole mechanism exists to
             // prevent, so it is clamped rather than trusted.
-            *entry = (*entry - amount_micro_usd).max(0);
+            *entry = (*entry).saturating_sub(amount_micro_usd);
             remove = *entry == 0;
         }
         if remove {
@@ -1675,6 +1696,18 @@ mod wallet_state_tests {
         w.set_org_balance("org_1", 10_000_000);
         assert!(!w.is_org_empty("org_1"));
         assert_eq!(w.org_balance_micro_usd("org_1"), Some(10_000_000));
+    }
+
+    #[test]
+    fn accounting_outage_is_distinct_and_clears_on_authoritative_balance() {
+        let w = WalletState::default();
+        w.set_org_accounting_unavailable("org_1", true);
+        assert!(w.is_org_accounting_unavailable("org_1"));
+        assert!(!w.is_org_empty("org_1"));
+
+        w.set_org_balance("org_1", 10_000_000);
+        assert!(!w.is_org_accounting_unavailable("org_1"));
+        assert!(!w.is_org_empty("org_1"));
     }
 
     #[test]

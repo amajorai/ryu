@@ -254,9 +254,10 @@ pub async fn exec_in_sandbox(
 /// Destroy a persistent sandbox: deregister metering, issue the final tail debit,
 /// and tear down the remote workspace.
 ///
-/// Idempotent — an unknown `run_id` (already destroyed, or a budget-kill already
-/// tore it down) returns `Ok(())`. Metering is fully fail-open: a billing error
-/// never fails the destroy.
+/// Idempotent — an unknown `run_id` (already destroyed, or a budget/balance/
+/// accounting kill already tore it down) returns `Ok(())`. The remote workspace
+/// is always destroyed, but a billable final-debit failure is returned after the
+/// destroy so callers cannot mistake an unaccounted execution for success.
 pub async fn destroy_sandbox(run_id: &str) -> anyhow::Result<()> {
     // Remove from the live registry first (idempotent).
     let live = lock_live().remove(run_id);
@@ -275,11 +276,13 @@ pub async fn destroy_sandbox(run_id: &str) -> anyhow::Result<()> {
     };
 
     // Final debit only when there is a residual AND an owning org (never bill a
-    // wrong/empty org). `debit_final` is fully fail-open.
+    // wrong/empty org). A failure is retained until after the remote workspace
+    // is destroyed, then returned to the caller.
+    let mut metering_error = None;
     if let (Some(r), Some(org)) = (residual, live.org_id.clone()) {
         let measured = live.created_at.elapsed().as_secs().max(1);
         let remainder = measured.saturating_sub(r.ticked_seconds);
-        heartbeat::debit_final(
+        if let Err(error) = heartbeat::debit_final(
             live.run_id.clone(),
             Some(org),
             live.spec.clone(),
@@ -287,13 +290,19 @@ pub async fn destroy_sandbox(run_id: &str) -> anyhow::Result<()> {
             live.budget_micro_usd,
             r.next_tick_index,
         )
-        .await;
+        .await
+        {
+            metering_error = Some(error);
+        }
     }
 
     // Idempotent (remote provider 404s are treated as success by the backend).
     build_command_backend(&live.backend)?
         .destroy_workspace(&live.workspace)
         .await?;
+    if let Some(error) = metering_error {
+        anyhow::bail!("sandbox destroyed but final billing failed: {error}");
+    }
     Ok(())
 }
 

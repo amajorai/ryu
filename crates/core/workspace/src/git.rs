@@ -1631,6 +1631,8 @@ mod tests {
 
         let local = root.path().join("local");
         let local_path = local.to_str().unwrap();
+        test_git(&local, &["config", "user.name", "Ryu Test"]);
+        test_git(&local, &["config", "user.email", "ryu-test@example.com"]);
         let pulled = run_git_remote_action(local_path, "pull").unwrap();
         assert!(pulled.success);
         assert!(pulled.pulled);

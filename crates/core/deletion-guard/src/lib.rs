@@ -11,42 +11,6 @@ use std::sync::OnceLock;
 
 const MAX_NESTED_SHELL_DEPTH: usize = 4;
 
-/// Parse the explicit operator opt-out used for permanent deletion.
-///
-/// An absent, empty, or unrecognized value is safe-by-default (`false`). The
-/// caller still decides where this policy is appropriate; this helper only
-/// parses the explicit opt-out vocabulary.
-pub fn permanent_delete_allowed(value: Option<&str>) -> bool {
-    matches!(
-        value.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
-        Some("1" | "true" | "yes" | "on")
-    )
-}
-
-/// Whether a backend represents a command or code execution surface rather
-/// than text that merely happens to mention a deletion command.
-///
-/// `check_exec_scan` is also used for prompt/DLP-style text checks on app and
-/// widget messages. Applying a hard deletion verdict to those strings would
-/// make a sentence such as "please explain rm" look like an execution request.
-pub fn is_execution_backend(backend: &str) -> bool {
-    let backend = backend.trim().to_ascii_lowercase();
-    matches!(
-        backend.as_str(),
-        "acp"
-            | "bash"
-            | "command"
-            | "deno"
-            | "local"
-            | "shell"
-            | "terminal"
-            | "tool_command"
-            | "tool_exec"
-            | "wasmtime"
-    ) || backend.contains("exec")
-        || backend.contains("command")
-}
-
 /// Detect a command that would permanently remove a file or directory.
 ///
 /// The return value is a stable rule id suitable for audit messages. This is a
@@ -63,7 +27,7 @@ pub fn detect_command(command: &str) -> Option<&'static str> {
     // If quoting or shell syntax was too complex to tokenize, still inspect the
     // raw script for the language APIs and PowerShell deletion verbs. This is the
     // safe direction for malformed or unusual tool-call strings.
-    detect_deletion_api(command)
+    detect_deletion_api(command).or_else(|| detect_catastrophic_operation(command))
 }
 
 /// Detect an explicit file deletion in an `apply_patch` payload.
@@ -227,7 +191,9 @@ fn detect_segment(segment: &str, depth: usize) -> Option<&'static str> {
         }
     }
 
-    detect_deletion_api(segment).or_else(|| detect_unparsed_command(segment))
+    detect_catastrophic_operation(segment)
+        .or_else(|| detect_deletion_api(segment))
+        .or_else(|| detect_unparsed_command(segment))
 }
 
 fn executable_basename(word: &str) -> String {
@@ -334,6 +300,52 @@ fn detect_deletion_api(text: &str) -> Option<&'static str> {
         .map(|(rule, _)| *rule)
 }
 
+/// Detect operations that can destroy a host even when they do not use a file
+/// deletion verb. These are execution-only hard stops: a normal message that
+/// discusses `dd` or `reboot` is not passed to this classifier by the callers.
+fn detect_catastrophic_operation(text: &str) -> Option<&'static str> {
+    static PATTERNS: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
+    PATTERNS
+        .get_or_init(|| {
+            [
+                (
+                    "raw_disk_write",
+                    r"(?i)\bdd\b[^\n;&|]*\bof\s*(?:=\s*)?/dev/",
+                ),
+                (
+                    "filesystem_format",
+                    r"(?i)\bmkfs(?:\.[a-z0-9_-]+)?\b[^\n;&|]*/dev/",
+                ),
+                (
+                    "partition_table_write",
+                    r"(?i)\b(?:wipefs|blkdiscard|fdisk|sfdisk|parted|partprobe|gpart)\b[^\n;&|]*/dev/",
+                ),
+                (
+                    "diskutil_erase",
+                    r"(?i)\bdiskutil\s+(?:eraseDisk|partitionDisk)\b",
+                ),
+                (
+                    "windows_disk_format",
+                    r"(?i)\bformat\s+[a-z]:",
+                ),
+                (
+                    "powershell_disk_destructive",
+                    r"(?i)\b(?:clear-disk|initialize-disk|remove-partition|format-volume)\b",
+                ),
+                (
+                    "host_power_control",
+                    r"(?i)(?:^|[\s;|&])(?:shutdown|reboot|halt|poweroff)\b|\bsystemctl\s+(?:reboot|poweroff|halt)\b",
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(rule, pattern)| Regex::new(pattern).ok().map(|compiled| (rule, compiled)))
+            .collect()
+        })
+        .iter()
+        .find(|(_, pattern)| pattern.is_match(text))
+        .map(|(rule, _)| *rule)
+}
+
 fn detect_unparsed_command(text: &str) -> Option<&'static str> {
     static PATTERNS: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
     PATTERNS
@@ -401,26 +413,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_delete_policy_is_opt_in_only() {
-        for value in [Some("1"), Some("true"), Some("YES"), Some(" on ")] {
-            assert!(permanent_delete_allowed(value));
-        }
-        for value in [None, Some(""), Some("0"), Some("false"), Some("maybe")] {
-            assert!(!permanent_delete_allowed(value));
-        }
-    }
-
-    #[test]
-    fn execution_backend_filter_excludes_text_scans() {
-        assert!(is_execution_backend("acp"));
-        assert!(is_execution_backend("tool_command"));
-        assert!(is_execution_backend("deno"));
-        assert!(!is_execution_backend("app-send"));
-        assert!(!is_execution_backend("widget-followup"));
-        assert!(!is_execution_backend("tool_http"));
-    }
-
-    #[test]
     fn direct_deletion_commands_are_detected() {
         for command in [
             "rm",
@@ -438,6 +430,24 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn catastrophic_host_operations_are_detected() {
+        for command in [
+            "dd if=/dev/zero of=/dev/nvme0n1",
+            "mkfs.ext4 /dev/sda1",
+            "wipefs --all /dev/disk0",
+            "blkdiscard /dev/vda",
+            "fdisk /dev/mmcblk0",
+            "diskutil eraseDisk APFS RYU disk0",
+            "format C:",
+            "Clear-Disk -Number 0",
+            "systemctl reboot",
+        ] {
+            assert!(detect_command(command).is_some(), "{command}");
+        }
+        assert_eq!(detect_command("dd if=/dev/zero of=./image"), None);
     }
 
     #[test]

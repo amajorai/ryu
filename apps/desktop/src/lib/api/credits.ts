@@ -418,7 +418,10 @@ export async function createTopup(input: TopupInput): Promise<TopupResult> {
 	}
 	const resp = await fetch(`${BASE}/topup`, {
 		method: "POST",
-		headers: authHeaders(),
+		headers: {
+			...authHeaders(),
+			"Idempotency-Key": crypto.randomUUID(),
+		},
 		body: JSON.stringify(body),
 	});
 	if (!resp.ok) {

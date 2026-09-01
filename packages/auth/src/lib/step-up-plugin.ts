@@ -8,6 +8,7 @@ import {
 	hasStepUp,
 	STEP_UP_REQUIRED,
 	stepUpAppliesToUser,
+	stepUpRequiresEnrolled2fa,
 	stepUpScopeForAuthPath,
 } from "./step-up.ts";
 
@@ -133,6 +134,13 @@ export function stepUpGate(): BetterAuthPlugin {
 							})
 						) {
 							return;
+						}
+						if (stepUpRequiresEnrolled2fa(scope) && !session.twoFactorEnabled) {
+							throw new APIError("FORBIDDEN", {
+								code: STEP_UP_REQUIRED,
+								message: "Turn on two-factor authentication to continue",
+								scope,
+							});
 						}
 						if (await hasStepUp(session.id, scope)) {
 							return;

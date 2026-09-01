@@ -2173,11 +2173,6 @@ pub async fn is_healthy() -> bool {
 /// execution instead of failing closed. Default: fail-closed.
 const ENV_ALLOW_GATEWAY_FALLBACK: &str = "RYU_ALLOW_GATEWAY_FALLBACK";
 
-/// Explicit operator opt-out for the permanent-deletion guard. The absence of
-/// this value is the safe default; it is carried to the authenticated Gateway
-/// scan so Core and its sidecar make the same decision.
-const ENV_ALLOW_PERMANENT_DELETE: &str = "RYU_ALLOW_PERMANENT_DELETE";
-
 /// Env var that controls gateway base-URL injection into ACP subprocess spawns.
 ///
 /// Default: injection enabled (`"1"`). Set to `"0"` / `"false"` / `"no"` to
@@ -2378,7 +2373,7 @@ async fn check_exec_budget_request(payload: serde_json::Value) -> ExecBudgetOutc
 // fail-closed on the same terms as the budget gate: unreachable / non-2xx /
 // parse error => Deny unless `RYU_ALLOW_GATEWAY_FALLBACK=1`. Permanent file and
 // directory deletion is a stronger local hard stop and never follows that
-// fallback unless the operator explicitly changes `RYU_ALLOW_PERMANENT_DELETE`.
+// fallback.
 
 /// Env var selecting the command-approval mode. An explicit `off`
 /// (case-insensitive) disables the scan entirely (Core does not call the gateway
@@ -2444,17 +2439,12 @@ pub async fn check_exec_scan(
     session_id: Option<&str>,
     agent: Option<&str>,
 ) -> ExecScanOutcome {
-    let allow_permanent_delete = ryu_deletion_guard::permanent_delete_allowed(
-        std::env::var(ENV_ALLOW_PERMANENT_DELETE).ok().as_deref(),
-    );
     // Do this before the network call. A gateway outage plus the documented
     // fallback must not turn a permanent deletion into an allowed command.
-    if ryu_deletion_guard::is_execution_backend(backend) && !allow_permanent_delete {
-        if let Some(rule) = ryu_deletion_guard::detect_command(command) {
-            return ExecScanOutcome::Deny(format!(
-                "permanent file deletion blocked by local Ryu guard: {rule}; move the target to the host Trash or Recycle Bin"
-            ));
-        }
+    if let Some(rule) = ryu_deletion_guard::detect_command(command) {
+        return ExecScanOutcome::Deny(format!(
+            "permanent file deletion blocked by local Ryu guard: {rule}; move the target to the host Trash or Recycle Bin"
+        ));
     }
 
     let (organization_id, project_id, managed_rules) = crate::fleet::command_scan_context();
@@ -2481,7 +2471,6 @@ pub async fn check_exec_scan(
             "project_id": project_id,
             "session_id": session_id,
             "agent": agent,
-            "allow_permanent_delete": allow_permanent_delete,
         }));
     if let Some(tok) = token {
         req = req.bearer_auth(tok);
@@ -3750,7 +3739,7 @@ mod tests {
         ENV_EXEC_APPROVAL_MODE,
         ENV_GATEWAY_URL,
         ENV_ALLOW_GATEWAY_FALLBACK,
-        ENV_ALLOW_PERMANENT_DELETE,
+        "RYU_ALLOW_PERMANENT_DELETE",
     ];
 
     #[test]
@@ -3826,15 +3815,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_permanent_deletion_policy_change_reaches_gateway() {
+    async fn legacy_permanent_deletion_policy_change_is_ignored() {
         let _lock = lock_scan_env();
         let _g = EnvGuard::capture(SCAN_ENV);
         std::env::set_var(ENV_EXEC_APPROVAL_MODE, "off");
-        std::env::set_var(ENV_ALLOW_PERMANENT_DELETE, "1");
+        // A legacy deployment may still carry this variable. It must never
+        // weaken the deletion block after an upgrade.
+        std::env::set_var("RYU_ALLOW_PERMANENT_DELETE", "1");
         std::env::set_var(ENV_GATEWAY_URL, "http://127.0.0.1:1");
         std::env::set_var(ENV_ALLOW_GATEWAY_FALLBACK, "1");
         let out = check_exec_scan("acp", "rm -rf ./disposable", None, Some("ryu")).await;
-        assert_eq!(out, ExecScanOutcome::Allow);
+        assert!(matches!(
+            out,
+            ExecScanOutcome::Deny(reason) if reason.contains("permanent file deletion")
+        ));
     }
 
     #[tokio::test]

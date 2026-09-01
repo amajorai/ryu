@@ -2501,6 +2501,7 @@ pub async fn run(
         GatewayError::ProviderPaymentRequired { .. } => "provider_payment_required",
         GatewayError::RateLimited => "rate_limit_exceeded",
         GatewayError::InsufficientCredits => "insufficient_credits",
+        GatewayError::AccountingUnavailable => "credit_accounting_unavailable",
         GatewayError::BudgetExceeded(_) => "budget_exceeded",
         GatewayError::FirewallBlocked(_, _) | GatewayError::PolicyViolation(_) => {
             "policy_violation"
@@ -4236,6 +4237,14 @@ fn enforce_budget(
     if ctx.is_master_key {
         return Ok(BudgetOutcome::default());
     }
+    if let Some(err) = accounting_unavailable_gate(state, ctx) {
+        state.metrics.inc_errors();
+        warn!(
+            org_id = ?ctx.org_id,
+            "credits: control-plane accounting unavailable, rejecting managed request (503)"
+        );
+        return Err(err);
+    }
     // Pre-flight credit gate (multi-tenant data plane): a managed-inference tenant
     // whose control-plane-resolved wallet is already exhausted is rejected BEFORE
     // dispatch with a hard 402. This closes the "fresh replica serves one request
@@ -4764,6 +4773,21 @@ fn preflight_credit_gate(ctx: &RequestContext, pool: Option<&str>) -> Option<Gat
     (unrestricted.saturating_add(pooled) <= 0).then_some(GatewayError::InsufficientCredits)
 }
 
+/// Stop new managed provider spend after a debit could not be accounted for.
+/// This is intentionally separate from `wallet_empty_decision`: an outage is
+/// not evidence that the wallet is empty, and mapping it to the wallet-empty
+/// budget action would strand a funded tenant until the process restarts.
+fn accounting_unavailable_gate(state: &AppState, ctx: &RequestContext) -> Option<GatewayError> {
+    if !(ctx.managed_inference && state.config.credits.is_active()) {
+        return None;
+    }
+    let org_id = ctx.org_id.as_deref().filter(|value| !value.is_empty())?;
+    state
+        .wallet
+        .is_org_accounting_unavailable(org_id)
+        .then_some(GatewayError::AccountingUnavailable)
+}
+
 fn wallet_empty_decision(state: &AppState, ctx: &RequestContext) -> Option<BudgetDecision> {
     let credits = &state.config.credits;
     if !credits.is_active() {
@@ -5103,18 +5127,17 @@ fn debit_request_body(
     body
 }
 
-/// Best-effort post-call wallet debit (#486). Computes the marked-up debit for a
-/// metered call's `costMicroUsd` and POSTs it to the control-plane
-/// `/credits/debit` for the request's org, then updates the cached empty flag
-/// from the authoritative balance so the NEXT request is gated.
+/// Post-call wallet debit (#486). Computes the marked-up debit for a metered
+/// call's `costMicroUsd` and POSTs it to the control-plane `/credits/debit` for
+/// the request's org, then updates the cached balance from the authoritative
+/// response so the NEXT request is gated when necessary.
 ///
-/// Never blocks the (already-served) request: a transport error, a non-2xx, or a
-/// missing org is logged (audit-grade observability via `warn!`). By default it
-/// fails OPEN (the empty flag is left untouched). When `fail_closed_sticky` is
-/// true (managed tenant + `credits.fail_closed`, §5), a transport error or non-2xx
-/// instead flips the org's wallet-empty flag so the NEXT request is refused — the
-/// current response still completes. A zero debit (cache hits, 0-token modalities)
-/// is skipped (the endpoint rejects `amountMicroUsd <= 0`).
+/// The already-served response cannot be unsent, but a managed debit failure is
+/// never allowed to authorize more provider spend: when `fail_closed_sticky` is
+/// true, transport errors, non-2xx responses, and malformed success bodies mark
+/// accounting unavailable and the next managed request receives a retryable 503.
+/// A zero debit (cache hits, 0-token modalities) is skipped because the endpoint
+/// rejects `amountMicroUsd <= 0`.
 ///
 /// `ref_id` makes the debit idempotent: a retried hook is a no-op. Token usage
 /// passes `ref_id = request_id`; the per-request tool-call (Composio) debit passes
@@ -5162,14 +5185,11 @@ async fn debit_wallet_for_request(
     // and `credits.base_url` defaults to `control_plane.base_url` — the bare origin,
     // because the sibling resolve call spells its own prefix out in full
     // (`{}/api/control-plane/gateway/resolve` in `policy/mod.rs`). This join did
-    // not, so in production every debit POSTed to `https://api.ryuhq.com/credits/debit`
-    // and got a plain **404**. The debit hook fails OPEN, and
-    // `GATEWAY_CREDITS_FAIL_CLOSED` is unset by design, so the gateway served the
-    // request anyway and never decremented a wallet: managed inference was
-    // metered, marked-up, audited — and completely unbilled. Verified against
-    // prod (2026-08-06): `/credits/debit` ⇒ 404, `/api/credits/debit` ⇒ 200
-    // `{"applied":true}` with the SAME secret, which is why the secret looked
-    // guilty for so long.
+    // not, so in production every debit POSTed to the wrong path and got a
+    // plain 404. Before the hardening change, the hook failed open and managed
+    // inference could run unbilled. The current default is fail-closed: the
+    // next request receives `credit_accounting_unavailable` after any failed or
+    // malformed debit response.
     let url = format!(
         "{}/api/credits/debit",
         credits.base_url.trim_end_matches('/')
@@ -5199,7 +5219,23 @@ async fn debit_wallet_for_request(
             // flag after a top-up. `wentNonPositive` is the edge event (log only).
             match r.json::<Value>().await {
                 Ok(v) => {
-                    let balance = v["balanceMicroUsd"].as_i64().unwrap_or(0);
+                    let Some(balance) = v["balanceMicroUsd"].as_i64() else {
+                        warn!(
+                            org_id = %org_id,
+                            ref_id = %ref_id,
+                            "credits: debit returned success without an integer balance"
+                        );
+                        audit_debit_failure(
+                            &state,
+                            &org_id,
+                            &ref_id,
+                            "credits debit response missing integer balance",
+                        );
+                        if fail_closed_sticky {
+                            state.wallet.set_org_accounting_unavailable(&org_id, true);
+                        }
+                        return;
+                    };
                     // Records the figure AND derives the empty flag from it, so
                     // Core's dollar-threshold fallback rules read the same number
                     // this gate does (`WalletState::set_org_balance`).
@@ -5213,7 +5249,7 @@ async fn debit_wallet_for_request(
                     }
                 }
                 Err(e) => {
-                    warn!(org_id = %org_id, error = %e, "credits: debit succeeded but response unparseable (failing open)");
+                    warn!(org_id = %org_id, error = %e, "credits: debit succeeded but response unparseable");
                     audit_debit_failure(
                         &state,
                         &org_id,
@@ -5244,7 +5280,7 @@ async fn debit_wallet_for_request(
                 &format!("credits debit failed: control plane returned {status}"),
             );
             if fail_closed_sticky {
-                state.wallet.set_org_empty(&org_id, true);
+                state.wallet.set_org_accounting_unavailable(&org_id, true);
             }
         }
         Err(e) => {
@@ -5261,7 +5297,7 @@ async fn debit_wallet_for_request(
                 &format!("credits debit failed (transport): {e}"),
             );
             if fail_closed_sticky {
-                state.wallet.set_org_empty(&org_id, true);
+                state.wallet.set_org_accounting_unavailable(&org_id, true);
             }
         }
     }

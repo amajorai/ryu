@@ -4224,12 +4224,10 @@ fn patch_deletes_file_in_value(value: &serde_json::Value) -> bool {
 /// synthesizer recognizes. `Allow` means no scannable mutation was recovered;
 /// the permanent-deletion guard remains active even when pattern approval is off.
 async fn acp_exec_scan_verdict(tool_call: &serde_json::Value, agent: &str) -> ExecScanOutcome {
-    if !ryu_deletion_guard::permanent_delete_allowed(
-        std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok().as_deref(),
-    ) && (patch_deletes_file_in_value(tool_call)
+    if patch_deletes_file_in_value(tool_call)
         || extract_exec_command(tool_call)
             .as_deref()
-            .is_some_and(ryu_deletion_guard::patch_deletes_file))
+            .is_some_and(ryu_deletion_guard::patch_deletes_file)
     {
         return ExecScanOutcome::Deny(
             "permanent file deletion through apply_patch is blocked by Ryu; use the host Trash or Recycle Bin command instead".to_owned(),
@@ -7227,17 +7225,11 @@ mod tests {
     #[tokio::test]
     async fn acp_patch_deletion_is_denied_before_gateway_scan() {
         let _lock = crate::sidecar::gateway::lock_gateway_env();
-        let previous = std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok();
-        std::env::remove_var("RYU_ALLOW_PERMANENT_DELETE");
         let tool_call = serde_json::json!({
             "kind": "edit",
             "rawInput": { "command": "*** Delete File: src/old.ts\n" }
         });
         let outcome = acp_exec_scan_verdict(&tool_call, "acp:codex").await;
-        match previous {
-            Some(value) => std::env::set_var("RYU_ALLOW_PERMANENT_DELETE", value),
-            None => std::env::remove_var("RYU_ALLOW_PERMANENT_DELETE"),
-        }
         assert!(
             matches!(&outcome, ExecScanOutcome::Deny(reason) if reason.contains("apply_patch")),
             "ACP file deletion must be denied before any gateway fallback: {outcome:?}"

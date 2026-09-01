@@ -425,6 +425,7 @@ use crate::firewall::cmdscan::{
 
 /// Request body for `POST /v1/exec/scan` (COMMAND-SCAN CONTRACT, verbatim shape).
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecScanBody {
     pub backend: String,
     pub command: String,
@@ -446,11 +447,6 @@ pub struct ExecScanBody {
     pub team_id: Option<String>,
     #[serde(default)]
     pub managed_rules: Vec<ManagedCommandRule>,
-    /// Set only by an authenticated Core forwarder after the operator has
-    /// explicitly changed Ryu's permanent-deletion policy. The field defaults
-    /// to false so a direct or legacy caller cannot widen the safety posture.
-    #[serde(default)]
-    pub allow_permanent_delete: bool,
 }
 
 /// `POST /v1/exec/scan` — pre-exec command governance. Returns the verbatim
@@ -458,8 +454,7 @@ pub struct ExecScanBody {
 /// (same governance gate as the exec-budget endpoints; NO mesh check, matching
 /// its sibling `check_exec_budget`). Mode is read from `RYU_EXEC_APPROVAL_MODE`
 /// at this boundary; the scanner itself is pure. Permanent deletion and the
-/// legacy HARDLINE blocklist always deny unless the authenticated caller has
-/// explicitly changed the permanent-deletion policy. Approval mode alone cannot
+/// legacy HARDLINE blocklist always deny. Approval mode and managed rules cannot
 /// disable either safety block.
 pub async fn exec_scan(
     State(state): State<SharedState>,
@@ -484,7 +479,6 @@ pub async fn exec_scan(
         mode,
         &body.managed_rules,
         body.project_id.as_deref(),
-        body.allow_permanent_delete,
     );
     Ok(Json(verdict))
 }
@@ -497,6 +491,19 @@ mod tests {
     fn exec_kind_defaults_to_tool() {
         let body: ExecToolBody = serde_json::from_value(json!({ "tool_id": "x" })).unwrap();
         assert_eq!(body.kind, "tool");
+    }
+
+    #[test]
+    fn exec_scan_body_rejects_the_removed_delete_override() {
+        let parsed = serde_json::from_value::<ExecScanBody>(json!({
+            "backend": "bash",
+            "command": "rm -rf ./tmp",
+            "allow_permanent_delete": true,
+        }));
+        assert!(
+            parsed.is_err(),
+            "legacy deletion override must not be accepted"
+        );
     }
 
     /// Gateway body passthrough (task C2, deliverable #2): the additive

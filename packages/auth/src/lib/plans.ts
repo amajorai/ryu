@@ -774,15 +774,16 @@ export const monthlyPriceMicroUsdForSeats = (input: {
 };
 
 /**
- * The free "base" managed cloud node (the BASE cloud tier: cx23 → 2 vCPU · 4 GB
- * · 40 GB SSD) is included with every RECURRING plan in a supported/default
- * region — Pro, Max, Teams and Business. Pro and Max do not promise a free
- * regional node in Singapore because those shapes exceed their safe annual
- * cost envelope; the server-side location resolver owns that exception. Its
+ * The free plan-specific managed cloud node is included with every recurring
+ * managed plan in a supported/default region: Pro `cx23`, Max `cx33`, Teams
+ * `cx43`, and Business `cx53` in the EU default region. Pro and Max do not
+ * promise a free regional node in Singapore because those shapes exceed their
+ * safe annual cost envelope; Teams and Business use their available regional
+ * fallbacks. The server-side location resolver owns that exception. The node's
  * compute cost is absorbed into the plan price; there is no separate Polar
- * product for BASE, so holding a qualifying subscription is what grants it. Any
- * larger instance is a dynamically-priced, ad-hoc paid cloud-instance
- * subscription on top, gated by `hasActiveCloudInstanceSub` in
+ * product for an included node, so holding a qualifying subscription is what
+ * grants it. Any other instance is a dynamically-priced, ad-hoc paid
+ * cloud-instance subscription on top, gated by `hasActiveCloudInstanceSub` in
  * `plan-entitlement.ts`.
  *
  * The set + predicate live in the client-safe sibling `./base-node.ts`

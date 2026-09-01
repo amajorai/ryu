@@ -147,6 +147,9 @@ describe("isMarketplaceMembershipListingEligible", () => {
 		marketplaceVisibility: "public",
 		origin: "first_party",
 		pricing: {
+			amountMinor: 1200,
+			currency: "usd",
+			interval: "month",
 			membershipOptIn: true,
 			model: "subscription",
 			sellerOrgId: "publisher-org",
@@ -177,5 +180,22 @@ describe("isMarketplaceMembershipListingEligible", () => {
 		expect(
 			isMarketplaceMembershipListingEligible(app, { payoutsEnabled: false })
 		).toBe(false);
+	});
+
+	it("rejects malformed or non-USD paid pricing before it can fund a publisher", () => {
+		for (const pricing of [
+			{ ...app.pricing, amountMinor: 0 },
+			{ ...app.pricing, amountMinor: Number.POSITIVE_INFINITY },
+			{ ...app.pricing, amountMinor: 100_000_000 },
+			{ ...app.pricing, currency: "eur" },
+			{ ...app.pricing, interval: "week" },
+		]) {
+			expect(
+				isMarketplaceMembershipListingEligible(
+					{ ...app, pricing },
+					{ payoutsEnabled: true }
+				)
+			).toBe(false);
+		}
 	});
 });

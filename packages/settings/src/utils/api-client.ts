@@ -461,7 +461,10 @@ export const settingsApi = {
 		createLifetimeCheckout(organizationId?: string): Promise<{ url: string }> {
 			return fetchApi("/api/billing/checkout/lifetime", {
 				body: JSON.stringify(organizationId ? { organizationId } : {}),
-				headers: { "content-type": "application/json" },
+				headers: {
+					"content-type": "application/json",
+					"Idempotency-Key": crypto.randomUUID(),
+				},
 				method: "POST",
 			});
 		},

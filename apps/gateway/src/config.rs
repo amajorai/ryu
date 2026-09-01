@@ -634,13 +634,15 @@ pub struct CreditsConfig {
     #[serde(default = "default_credits_timeout_ms")]
     pub timeout_ms: u64,
     /// Fail CLOSED on debit errors for managed tenants (env
-    /// `GATEWAY_CREDITS_FAIL_CLOSED`). Default: false (preserves today's
-    /// fail-open behavior). When true and the request is a managed-inference
-    /// tenant, a debit transport error or non-2xx response flips that org's
-    /// wallet-empty flag so the NEXT request is refused, instead of the failure
-    /// being silently swallowed. The current in-flight response is never blocked
-    /// on the (async) debit — the failure is just made sticky.
-    #[serde(default)]
+    /// `GATEWAY_CREDITS_FAIL_CLOSED`). Default: true. When true and the request
+    /// is a managed-inference tenant, a debit transport error, non-2xx response,
+    /// or malformed success response marks accounting unavailable so the NEXT
+    /// request is refused with a retryable 503. This is separate from an empty
+    /// wallet, so a transient control-plane outage cannot strand a funded org.
+    /// The current in-flight response is never blocked on the async debit; its
+    /// cost is retried/reconciled by the control plane, and new provider spend
+    /// stops until accounting recovers.
+    #[serde(default = "default_true")]
     pub fail_closed: bool,
 
     // ─── Sandbox per-resource rates (Daytona), nano-USD per unit-second ───────
@@ -830,7 +832,7 @@ impl Default for CreditsConfig {
             reserve_enabled: default_true(),
             min_reserve_micro_usd: default_min_reserve_micro_usd(),
             timeout_ms: default_credits_timeout_ms(),
-            fail_closed: false,
+            fail_closed: true,
             // Delegated, not repeated: these must equal the serde `default = "…"`
             // fns on the same fields or an absent `[credits]` table and a present
             // one that omits the rates would bill differently.
@@ -1116,11 +1118,17 @@ GATEWAY_CREDITS_ALLOW_FREE_MODALITIES=1 to give videos away on purpose."
         }
     }
 
-    /// Whether the hook is active: enabled with both a control-plane URL and an
-    /// internal secret. Without the secret the control plane rejects the debit,
-    /// so treat it as disabled rather than emitting doomed calls.
+    /// Whether the hook is active: enabled with both a non-empty control-plane
+    /// URL and a non-empty internal secret. Without the secret the control plane
+    /// rejects the debit, so startup validation must not allow a silently
+    /// unmetered enabled configuration.
     pub fn is_active(&self) -> bool {
-        self.enabled && self.internal_secret.is_some() && !self.base_url.trim().is_empty()
+        self.enabled
+            && self
+                .internal_secret
+                .as_deref()
+                .is_some_and(|secret| !secret.trim().is_empty())
+            && !self.base_url.trim().is_empty()
     }
 
     /// Per-GPU-second rate in nano-USD for a GPU tier. `None` costs nothing.
@@ -4742,6 +4750,17 @@ impl GatewayConfig {
             }
         }
 
+        if config.credits.enabled && !config.credits.is_active() {
+            anyhow::bail!(
+                "credit billing is enabled but requires a non-empty control-plane URL and RYU_CREDITS_INTERNAL_SECRET"
+            );
+        }
+        if config.fleet && config.credits.enabled && !config.credits.fail_closed {
+            anyhow::bail!(
+                "refusing to start a managed gateway fleet with credit debit fail-open; +set GATEWAY_CREDITS_FAIL_CLOSED=true"
+            );
+        }
+
         // Money config is validated at BOOT, not at first debit: a gateway that
         // starts and silently gives away metered surfaces is the failure mode
         // this whole check exists to prevent.
@@ -6313,6 +6332,12 @@ mod credits_config_tests {
         };
         assert!(!no_secret.is_active());
 
+        let blank_secret = CreditsConfig {
+            internal_secret: Some("  ".to_string()),
+            ..base.clone()
+        };
+        assert!(!blank_secret.is_active());
+
         let disabled = CreditsConfig {
             enabled: false,
             ..base.clone()
@@ -6357,6 +6382,14 @@ enabled = true
         assert_eq!(
             partial.credits.reserve_enabled,
             CreditsConfig::default().reserve_enabled
+        );
+        assert!(
+            partial.credits.fail_closed,
+            "omitting fail_closed must not silently re-enable unbilled managed spend"
+        );
+        assert_eq!(
+            partial.credits.fail_closed,
+            CreditsConfig::default().fail_closed
         );
         assert_eq!(
             partial.credits.min_reserve_micro_usd,

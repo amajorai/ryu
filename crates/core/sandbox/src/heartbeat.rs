@@ -11,7 +11,7 @@
 //!      Gateway's sub-1-micro rounding guard) and, for each live run, POSTs
 //!      `{gateway_url}/sandbox/tick` with the elapsed second-delta, the billed
 //!      [`SandboxSpec`], the per-run budget, and a monotonic `tick_index`.
-//!   3. On a `kill_budget` / `kill_balance` verdict Core stops the sandbox
+//!   3. On a `kill_budget` / `kill_balance` / `kill_accounting` verdict Core stops the sandbox
 //!      (`destroy_workspace` — the SIGKILL/stop hook) and marks the run killed;
 //!      on `warn` it logs and continues.
 //!   4. A run deregisters via [`unregister`] on normal completion.
@@ -81,9 +81,11 @@ pub enum KillReason {
     Budget,
     /// The org wallet balance went non-positive (`kill_balance`).
     Balance,
+    /// The billing path could not be confirmed (`kill_accounting`).
+    Accounting,
 }
 
-/// A record of a budget-killed run, retained so callers can mark the run.
+/// A record of a run stopped by a budget, balance, or accounting verdict.
 #[derive(Debug, Clone)]
 pub struct KillRecord {
     pub run_id: String,
@@ -174,7 +176,7 @@ pub fn unregister(run_id: &str) {
     lock_runs().remove(run_id);
 }
 
-/// Whether a run was stopped by a budget/balance verdict (and why).
+/// Whether a run was stopped by a budget/balance/accounting verdict (and why).
 pub fn kill_record(run_id: &str) -> Option<KillRecord> {
     lock_kills().get(run_id).cloned()
 }
@@ -241,7 +243,8 @@ pub struct RunResidual {
 /// Deregister a run and return its residual metering state for a final debit.
 ///
 /// Returns `None` when the run is not live (already deregistered, or stopped by
-/// a budget/balance kill verdict — the Gateway already charged/killed it, so
+/// a budget/balance/accounting kill verdict — the Gateway already handled or
+/// stopped it, so
 /// there is no residual tail to bill). Removing the entry also stops any further
 /// periodic ticks for the run, so the caller may safely debit afterward without
 /// racing the ticker.
@@ -258,11 +261,10 @@ pub fn deregister_for_final_debit(run_id: &str) -> Option<RunResidual> {
 /// remainder the ticker missed (typically a sub-[`TICK_INTERVAL`] run the ticker
 /// never saw).
 ///
-/// Fully fail-open: a gateway/auth/transport error is logged and swallowed so it
-/// can never fail the user's sandbox exec. `seconds == 0` is a no-op. This is a
-/// standalone POST (not routed through the ticker's `send_tick`) because the run
-/// has already completed — there is nothing left to kill, so no verdict is
-/// enforced, only logged.
+/// A completed run has nothing left to kill, so a failed tail is retried and
+/// returned as an error to the caller. The caller must still destroy the remote
+/// workspace, but it must not silently report a successful billable execution
+/// when the final charge could not be confirmed.
 pub async fn debit_final(
     run_id: String,
     org_id: Option<String>,
@@ -270,60 +272,82 @@ pub async fn debit_final(
     seconds: u64,
     per_run_budget_micro_usd: u64,
     tick_index: u64,
-) {
+) -> Result<(), String> {
     if seconds == 0 {
-        return;
+        return Ok(());
+    }
+    if org_id.is_none() {
+        return Ok(());
     }
     let bearer = match gateway_bearer() {
         Ok(b) => b,
         Err(e) => {
-            tracing::warn!(run_id = %run_id, error = %e, "sandbox final debit: no gateway bearer, tail not billed (fail-open)");
-            return;
+            return Err(format!("no gateway bearer: {e}"));
         }
     };
     let endpoint = format!("{}/sandbox/tick", gateway_url().trim_end_matches('/'));
-    let body = json!({
-        "run_id": run_id,
-        "org_id": org_id,
-        "spec": spec,
-        "elapsed_seconds_delta": seconds,
-        "tick_index": tick_index,
-        "per_run_budget_micro_usd": per_run_budget_micro_usd,
-    });
-
-    let resp = reqwest::Client::new()
-        .post(&endpoint)
-        .timeout(Duration::from_secs(5))
-        .bearer_auth(bearer)
-        .json(&body)
-        .send()
-        .await;
-
-    match resp {
-        Ok(r) if r.status().is_success() => {
-            let accrued = r
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|v| {
-                    v.get("accrued_micro_usd")
+    let mut last_error = String::from("final debit failed");
+    for attempt in 0..3 {
+        let body = json!({
+            "run_id": run_id.clone(),
+            "org_id": org_id.clone(),
+            "spec": spec.clone(),
+            "elapsed_seconds_delta": seconds,
+            "tick_index": tick_index,
+            "per_run_budget_micro_usd": per_run_budget_micro_usd,
+        });
+        match reqwest::Client::new()
+            .post(&endpoint)
+            .timeout(Duration::from_secs(5))
+            .bearer_auth(&bearer)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+                Ok(value) => {
+                    let verdict = value
+                        .get("verdict")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    let Some(accrued) = value
+                        .get("accrued_micro_usd")
                         .and_then(serde_json::Value::as_u64)
-                })
-                .unwrap_or(0);
-            tracing::info!(
-                run_id = %run_id,
-                seconds,
-                accrued_micro_usd = accrued,
-                "sandbox final debit: un-ticked tail reported to gateway"
-            );
+                    else {
+                        last_error = "gateway response omitted accrued amount".to_owned();
+                        continue;
+                    };
+                    if !matches!(
+                        verdict,
+                        "continue" | "warn" | "kill_budget" | "kill_balance"
+                    ) {
+                        last_error = format!("gateway returned accounting verdict {verdict:?}");
+                        continue;
+                    }
+                    tracing::info!(
+                        run_id = %run_id,
+                        seconds,
+                        accrued_micro_usd = accrued,
+                        "sandbox final debit: un-ticked tail reported to gateway"
+                    );
+                    return Ok(());
+                }
+                Err(error) => {
+                    last_error = format!("gateway response was not valid JSON: {error}");
+                }
+            },
+            Ok(response) => {
+                last_error = format!("gateway returned HTTP {}", response.status());
+            }
+            Err(error) => {
+                last_error = format!("gateway request failed: {error}");
+            }
         }
-        Ok(r) => {
-            tracing::warn!(run_id = %run_id, status = %r.status(), "sandbox final debit: gateway non-2xx, tail not billed (fail-open)");
-        }
-        Err(e) => {
-            tracing::warn!(run_id = %run_id, error = %e, "sandbox final debit: gateway unreachable, tail not billed (fail-open)");
+        if attempt < 2 {
+            tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))).await;
         }
     }
+    Err(last_error)
 }
 
 /// Snapshot of the fields needed to send one tick, taken under the registry lock
@@ -346,15 +370,19 @@ enum Verdict {
     Warn,
     KillBudget,
     KillBalance,
+    KillAccounting,
 }
 
 fn parse_verdict(raw: &str) -> Verdict {
     match raw {
+        "continue" => Verdict::Continue,
         "warn" => Verdict::Warn,
         "kill_budget" => Verdict::KillBudget,
         "kill_balance" => Verdict::KillBalance,
-        // `continue` and anything unknown → keep running (fail-open on metering).
-        _ => Verdict::Continue,
+        "kill_accounting" => Verdict::KillAccounting,
+        // A missing or unknown verdict is a protocol failure. Org-bound runs
+        // must not continue when the billing decision cannot be parsed.
+        _ => Verdict::KillAccounting,
     }
 }
 
@@ -424,10 +452,13 @@ async fn run_tick_cycle() {
 async fn send_tick(job: TickJob) {
     let bearer = match gateway_bearer() {
         Ok(b) => b,
-        Err(e) => {
-            // No governed endpoint to reach (remote plane w/o token). Metering is
-            // fail-open: log and keep the sandbox running.
+        Err(e) if job.org_id.is_none() => {
             tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: no gateway bearer, skipping");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: no gateway bearer for org-bound run, stopping for accounting");
+            enforce_kill(&job, KillReason::Accounting, 0).await;
             return;
         }
     };
@@ -452,32 +483,47 @@ async fn send_tick(job: TickJob) {
     let value = match resp {
         Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
             Ok(v) => v,
+            Err(e) if job.org_id.is_none() => {
+                tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: unparseable verdict for unattributed run, stopping metering");
+                return;
+            }
             Err(e) => {
-                tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: unparseable verdict, continuing");
+                tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: unparseable verdict, stopping for accounting");
+                enforce_kill(&job, KillReason::Accounting, 0).await;
                 return;
             }
         },
+        Ok(r) if job.org_id.is_none() => {
+            tracing::warn!(run_id = %job.run_id, status = %r.status(), "sandbox tick: gateway non-2xx for unattributed run, stopping metering");
+            return;
+        }
         Ok(r) => {
-            tracing::warn!(run_id = %job.run_id, status = %r.status(), "sandbox tick: gateway non-2xx, continuing");
+            tracing::warn!(run_id = %job.run_id, status = %r.status(), "sandbox tick: gateway non-2xx, stopping for accounting");
+            enforce_kill(&job, KillReason::Accounting, 0).await;
+            return;
+        }
+        Err(e) if job.org_id.is_none() => {
+            tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: gateway unreachable for unattributed run, skipping");
             return;
         }
         Err(e) => {
-            // Fail-open: a transient gateway blink must not kill a running job.
-            tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: gateway unreachable, continuing");
+            tracing::warn!(run_id = %job.run_id, error = %e, "sandbox tick: gateway unreachable, stopping for accounting");
+            enforce_kill(&job, KillReason::Accounting, 0).await;
             return;
         }
     };
 
-    let verdict = parse_verdict(
-        value
-            .get("verdict")
-            .and_then(|v| v.as_str())
-            .unwrap_or("continue"),
-    );
-    let accrued = value
+    let verdict = parse_verdict(value.get("verdict").and_then(|v| v.as_str()).unwrap_or(""));
+    let Some(accrued) = value
         .get("accrued_micro_usd")
         .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
+    else {
+        if job.org_id.is_some() {
+            tracing::warn!(run_id = %job.run_id, "sandbox tick: response omitted accrued amount, stopping for accounting");
+            enforce_kill(&job, KillReason::Accounting, 0).await;
+        }
+        return;
+    };
 
     // Record the latest accrued figure for the billing-visibility snapshot. Only
     // if the run is still live (a kill verdict removes it just below).
@@ -494,11 +540,16 @@ async fn send_tick(job: TickJob) {
                 "sandbox tick: budget/balance warning"
             );
         }
-        Verdict::KillBudget | Verdict::KillBalance => {
+        Verdict::KillAccounting if job.org_id.is_none() => {
+            tracing::warn!(run_id = %job.run_id, "sandbox tick: accounting verdict for unattributed run, stopping metering");
+        }
+        Verdict::KillBudget | Verdict::KillBalance | Verdict::KillAccounting => {
             let reason = if verdict == Verdict::KillBudget {
                 KillReason::Budget
-            } else {
+            } else if verdict == Verdict::KillBalance {
                 KillReason::Balance
+            } else {
+                KillReason::Accounting
             };
             tracing::warn!(
                 run_id = %job.run_id,
@@ -576,8 +627,9 @@ mod tests {
         assert_eq!(parse_verdict("warn"), Verdict::Warn);
         assert_eq!(parse_verdict("kill_budget"), Verdict::KillBudget);
         assert_eq!(parse_verdict("kill_balance"), Verdict::KillBalance);
-        // Unknown verdicts fail open to Continue.
-        assert_eq!(parse_verdict("explode"), Verdict::Continue);
+        assert_eq!(parse_verdict("kill_accounting"), Verdict::KillAccounting);
+        // Unknown verdicts fail closed to an accounting kill.
+        assert_eq!(parse_verdict("explode"), Verdict::KillAccounting);
     }
 
     #[test]

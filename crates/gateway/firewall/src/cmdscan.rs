@@ -112,8 +112,7 @@ pub struct ManagedRuleFinding {
 }
 
 /// Scan a command for governance. Pure over `(backend, command, mode)` and
-/// always applies the permanent-deletion guard. Callers that have an explicit
-/// operator policy change may use [`scan_command_with_policy`].
+/// always applies the permanent-deletion guard.
 ///
 /// Decision order:
 /// 1. HARDLINE set first — any match ⇒ `Deny` (always, regardless of mode or a
@@ -125,19 +124,11 @@ pub struct ManagedRuleFinding {
 /// 5. `Smart`: max severity — `Critical` ⇒ `Deny`; `High`/`Medium` ⇒
 ///    `ApprovalRequired`; only `Low` ⇒ `Allow`.
 pub fn scan_command(backend: &str, command: &str, mode: ApprovalMode) -> ScanVerdict {
-    scan_command_with_policy(backend, command, mode, false)
+    scan_command_with_policy(backend, command, mode)
 }
 
-/// Scan a command with the explicit permanent-deletion policy supplied by the
-/// authenticated caller. The default is `false`; this argument is intentionally
-/// not inferred from the approval mode because `off` must not silently disable
-/// the machine-safety block.
-pub fn scan_command_with_policy(
-    backend: &str,
-    command: &str,
-    mode: ApprovalMode,
-    allow_permanent_delete: bool,
-) -> ScanVerdict {
+/// Scan a command with the permanent-deletion guard enabled unconditionally.
+pub fn scan_command_with_policy(backend: &str, command: &str, mode: ApprovalMode) -> ScanVerdict {
     // 1. Hardline blocklist — always denies.
     for (name, re) in build_hardline() {
         if re.is_match(command) {
@@ -178,10 +169,8 @@ pub fn scan_command_with_policy(
     // runs after the legacy catastrophic hardlines so existing audit reasons for
     // `rm -rf /` remain stable, but before mode/rule processing so neither
     // `off` nor a managed allow rule can turn it back on accidentally.
-    if ryu_deletion_guard::is_execution_backend(backend) && !allow_permanent_delete {
-        if let Some(rule) = ryu_deletion_guard::detect_command(command) {
-            return permanent_delete_verdict(rule);
-        }
+    if let Some(rule) = ryu_deletion_guard::detect_command(command) {
+        return permanent_delete_verdict(rule);
     }
 
     // 2. Off mode: nothing beyond the hardline/permanent-deletion blocks is
@@ -320,7 +309,7 @@ fn rule_matches(
 
 /// Apply authenticated organization rules between the immutable hardline scan
 /// and the built-in risk-pattern scanner. Permanent deletion remains denied
-/// unless the caller uses the explicit policy-aware variant.
+/// regardless of managed rules or approval mode.
 pub fn scan_command_with_rules(
     backend: &str,
     command: &str,
@@ -328,27 +317,24 @@ pub fn scan_command_with_rules(
     rules: &[ManagedCommandRule],
     project_id: Option<&str>,
 ) -> ScanVerdict {
-    scan_command_with_rules_policy(backend, command, mode, rules, project_id, false)
+    scan_command_with_rules_policy(backend, command, mode, rules, project_id)
 }
 
-/// [`scan_command_with_rules`] with an explicit operator policy change for
-/// permanent deletion. The surrounding Core/Gateway auth boundary is
-/// responsible for ensuring that `allow_permanent_delete` is not agent input.
+/// [`scan_command_with_rules`] with the permanent-deletion guard enabled
+/// unconditionally.
 pub fn scan_command_with_rules_policy(
     backend: &str,
     command: &str,
     mode: ApprovalMode,
     rules: &[ManagedCommandRule],
     project_id: Option<&str>,
-    allow_permanent_delete: bool,
 ) -> ScanVerdict {
-    let hardline =
-        scan_command_with_policy(backend, command, ApprovalMode::Off, allow_permanent_delete);
+    let hardline = scan_command_with_policy(backend, command, ApprovalMode::Off);
     if hardline.decision == Decision::Deny {
         return hardline;
     }
     if rules.is_empty() {
-        return scan_command_with_policy(backend, command, mode, allow_permanent_delete);
+        return scan_command_with_policy(backend, command, mode);
     }
     let Some(segments) = split_shell_segments(command) else {
         return ScanVerdict {
@@ -400,7 +386,7 @@ pub fn scan_command_with_rules_policy(
                 continue;
             }
             let segment = shell_words::join(argv);
-            let verdict = scan_command_with_policy(backend, &segment, mode, allow_permanent_delete);
+            let verdict = scan_command_with_policy(backend, &segment, mode);
             if verdict.decision != Decision::Allow {
                 return verdict;
             }
@@ -418,7 +404,7 @@ pub fn scan_command_with_rules_policy(
             }),
         };
     }
-    scan_command_with_policy(backend, command, mode, allow_permanent_delete)
+    scan_command_with_policy(backend, command, mode)
 }
 
 fn severity_rank(s: Severity) -> u8 {
@@ -985,7 +971,7 @@ mod tests {
     fn benign_recursive_force_rm_is_not_hardline() {
         // Recursive + force but NOT targeting bare root is no longer a legacy
         // hardline match, but it remains blocked by the permanent-deletion
-        // policy. An explicit policy change reaches the old mode behavior.
+        // policy in every approval mode.
         for cmd in ["rm -rf ./build", "rm -rf /home/user/tmp/x"] {
             let denied = scan_command("bash", cmd, ApprovalMode::Off);
             assert_eq!(
@@ -993,9 +979,24 @@ mod tests {
                 Decision::Deny,
                 "cmd {cmd:?} got {denied:?}"
             );
-            let v = scan_command_with_policy("bash", cmd, ApprovalMode::Off, true);
-            assert_eq!(v.decision, Decision::Allow, "cmd {cmd:?} got {v:?}");
-            assert!(v.findings.is_empty(), "cmd {cmd:?} got {v:?}");
+            let v = scan_command_with_policy("bash", cmd, ApprovalMode::Off);
+            assert_eq!(v.decision, Decision::Deny, "cmd {cmd:?} got {v:?}");
+            assert_eq!(v.findings[0].category, "permanent_deletion");
+        }
+    }
+
+    #[test]
+    fn catastrophic_storage_and_power_operations_are_always_denied() {
+        for command in [
+            "dd if=/dev/zero of=/dev/nvme0n1",
+            "mkfs.ext4 /dev/sda1",
+            "wipefs --all /dev/disk0",
+            "diskutil eraseDisk APFS RYU disk0",
+            "format C:",
+            "systemctl reboot",
+        ] {
+            let verdict = scan_command("bash", command, ApprovalMode::Off);
+            assert_eq!(verdict.decision, Decision::Deny, "{command}: {verdict:?}");
         }
     }
 
@@ -1226,19 +1227,10 @@ mod tests {
         assert_eq!(verdict.decision, Decision::Deny);
         assert!(verdict.managed_rule.is_none());
 
-        let opted_in = scan_command_with_rules_policy(
-            "bash",
-            "rm -rf ./tmp",
-            ApprovalMode::Off,
-            &rules,
-            None,
-            true,
-        );
-        assert_eq!(opted_in.decision, Decision::Allow);
-        assert_eq!(
-            opted_in.managed_rule.as_ref().map(|rule| rule.id.as_str()),
-            Some("allow-rm")
-        );
+        let still_denied =
+            scan_command_with_rules_policy("bash", "rm -rf ./tmp", ApprovalMode::Off, &rules, None);
+        assert_eq!(still_denied.decision, Decision::Deny);
+        assert!(still_denied.managed_rule.is_none());
     }
 
     #[test]

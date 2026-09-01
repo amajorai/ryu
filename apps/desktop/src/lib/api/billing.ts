@@ -184,7 +184,10 @@ export async function createCheckout(slug: string): Promise<string> {
 	try {
 		resp = await fetch(`${BASE}/checkout`, {
 			method: "POST",
-			headers: authHeaders(),
+			headers: {
+				...authHeaders(),
+				"Idempotency-Key": crypto.randomUUID(),
+			},
 			body: JSON.stringify({ slug }),
 		});
 	} catch {

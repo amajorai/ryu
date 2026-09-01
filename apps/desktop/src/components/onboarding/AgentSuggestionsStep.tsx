@@ -3,7 +3,6 @@ import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import { PageHeader } from "@ryu/ui/components/page-header";
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
-import { ISLAND_CHROME, ISLAND_FILL } from "@/src/components/assistant/skin.ts";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { OnboardingAgentSuggestion } from "@/src/lib/api/onboarding-profile.ts";
 
@@ -55,7 +54,7 @@ function paletteForSuggestion(seed: string) {
 	return EXPRESSIVE_PALETTES[index] ?? EXPRESSIVE_PALETTES[0];
 }
 
-function SiriOrbAvatar({
+function RyuExpressiveAvatar({
 	palette,
 	suggestionId,
 }: {
@@ -65,32 +64,20 @@ function SiriOrbAvatar({
 	return (
 		<span
 			aria-hidden="true"
-			className="relative flex size-12 shrink-0 items-center justify-center"
+			className="flex size-12 shrink-0 items-center justify-center"
 			data-avatar-colors={`${palette.c1}|${palette.c2}|${palette.c3}`}
 			data-testid={`agent-suggestion-avatar-${suggestionId}`}
+			style={{ color: palette.c2 }}
 		>
-			<span
-				className="absolute inset-0 rounded-full opacity-80 blur-[7px] motion-safe:animate-[spin_10s_linear_infinite]"
-				data-siri-orb="aura"
-				style={{
-					background: `conic-gradient(from 200deg, ${palette.c1}, ${palette.c3}, ${palette.c2}, ${palette.c1})`,
-				}}
+			<RyuLogo
+				animated
+				animation="random"
+				className="size-full"
+				colors={palette}
+				expression="random"
+				size="42px"
+				variant="expressive"
 			/>
-			<span
-				className={`${ISLAND_FILL} ${ISLAND_CHROME} relative flex size-11 items-center justify-center rounded-full bg-black/10 dark:bg-black/20`}
-				data-siri-orb="surface"
-				style={{ color: palette.c2 }}
-			>
-				<RyuLogo
-					animated
-					animation="random"
-					className="size-full"
-					colors={palette}
-					expression="random"
-					size="38px"
-					variant="expressive"
-				/>
-			</span>
 		</span>
 	);
 }
@@ -124,7 +111,7 @@ function SuggestionCard({
 					onClick={onToggle}
 					type="button"
 				>
-					<SiriOrbAvatar palette={palette} suggestionId={suggestion.id} />
+					<RyuExpressiveAvatar palette={palette} suggestionId={suggestion.id} />
 					<PageHeader
 						as="h2"
 						className="min-w-0 flex-1"

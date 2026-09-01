@@ -76,6 +76,13 @@ pub enum GatewayError {
     #[error("Insufficient credits")]
     InsufficientCredits,
 
+    /// The control plane cannot currently prove a managed request can be
+    /// accounted for. This is distinct from an empty wallet: a transient
+    /// accounting outage must stop provider spend without permanently marking
+    /// the customer as out of funds.
+    #[error("Credit accounting unavailable")]
+    AccountingUnavailable,
+
     /// All providers in the fallback chain are unavailable (circuits open or
     /// provider calls failed). Stable code: `all_providers_unavailable`.
     #[error("All providers unavailable: {0}")]
@@ -169,6 +176,11 @@ impl IntoResponse for GatewayError {
                 StatusCode::PAYMENT_REQUIRED,
                 "insufficient_credits",
                 "organization credit balance exhausted",
+            ),
+            GatewayError::AccountingUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "credit_accounting_unavailable",
+                "credit accounting is temporarily unavailable",
             ),
             GatewayError::AllProvidersUnavailable(msg) => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -304,6 +316,11 @@ mod tests {
                 GatewayError::InsufficientCredits,
                 StatusCode::PAYMENT_REQUIRED,
                 "insufficient_credits",
+            ),
+            (
+                GatewayError::AccountingUnavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "credit_accounting_unavailable",
             ),
             (
                 GatewayError::AllProvidersUnavailable("all down".into()),

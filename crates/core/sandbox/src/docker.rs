@@ -7,14 +7,13 @@
 //!
 //! ## Detection
 //!
-//! Core detects an existing Docker installation by probing `docker version`
-//! (with a short timeout) on first use. When the daemon is absent the backend
-//! reports [`DetectResult::Unavailable`] and the caller silently falls back
-//! to the wasmtime default — **no error, no install, no bundle**.
+//! Core detects an existing **rootless** Docker installation by probing
+//! `docker info` (with a short timeout) on first use. A rootful daemon is a
+//! host-root capability when the CLI/socket is reachable, so it is treated as
+//! unavailable and the caller falls back to the wasmtime default.
 //!
-//! On Windows, Docker Desktop uses a WSL2 backend; `docker version` succeeds
-//! when the Desktop is running, so WSL2 presence is implicit in daemon
-//! reachability.  We do not probe WSL2 separately.
+//! On Windows, Docker Desktop uses a WSL2 backend; a non-rootless daemon is
+//! intentionally not accepted by this security boundary.
 //!
 //! ## Capability model
 //!
@@ -116,9 +115,9 @@ pub enum DetectResult {
     Unavailable(String),
 }
 
-/// Probe whether a Docker daemon is reachable on this host.
+/// Probe whether a rootless Docker daemon is reachable on this host.
 ///
-/// Runs `docker version` with a configurable short timeout.  This function
+/// Runs `docker info` with a configurable short timeout. This function
 /// NEVER installs Docker; it is detection-only.
 ///
 /// # Detection-only invariant
@@ -133,9 +132,9 @@ pub async fn detect() -> DetectResult {
     let probe = timeout(
         deadline,
         Command::new(&binary)
-            .arg("version")
+            .arg("info")
             .arg("--format")
-            .arg("{{.Server.Version}}")
+            .arg("{{json .SecurityOptions}}")
             .no_window()
             .output(),
     )
@@ -150,13 +149,32 @@ pub async fn detect() -> DetectResult {
             "docker binary not found or not executable: {io_err}"
         )),
         Ok(Ok(output)) => {
-            if output.status.success() {
+            if output.status.success()
+                && has_rootless_security_option(&String::from_utf8_lossy(&output.stdout))
+            {
                 DetectResult::Available
+            } else if output.status.success() {
+                DetectResult::Unavailable(
+                    "docker daemon is reachable but is not rootless; refusing host-root access"
+                        .to_owned(),
+                )
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 DetectResult::Unavailable(format!("docker daemon not reachable: {}", stderr.trim()))
             }
         }
+    }
+}
+
+/// Whether `docker info --format '{{json .SecurityOptions}}'` reports rootless.
+pub fn has_rootless_security_option(output: &str) -> bool {
+    output.to_ascii_lowercase().contains("rootless")
+}
+
+async fn ensure_rootless_daemon() -> Result<()> {
+    match detect().await {
+        DetectResult::Available => Ok(()),
+        DetectResult::Unavailable(reason) => Err(anyhow!("Docker sandbox unavailable: {reason}")),
     }
 }
 
@@ -166,7 +184,20 @@ pub async fn detect() -> DetectResult {
 ///
 /// Returned as a `Vec<String>` to append after `docker run` or similar.
 fn caps_to_flags(caps: &SandboxCapabilities) -> Vec<String> {
-    let mut flags: Vec<String> = Vec::new();
+    let mut flags: Vec<String> = vec![
+        "--cap-drop".to_owned(),
+        "ALL".to_owned(),
+        "--security-opt".to_owned(),
+        "no-new-privileges:true".to_owned(),
+        "--pids-limit".to_owned(),
+        "512".to_owned(),
+        "--tmpfs".to_owned(),
+        "/tmp:rw,noexec,nosuid,nodev".to_owned(),
+        // Do not give a workload root inside the container. Rootless Docker
+        // contains the daemon boundary; this additionally narrows the guest.
+        "--user".to_owned(),
+        "1000:1000".to_owned(),
+    ];
 
     // Network: default-deny maps to --network none.
     if !caps.network {
@@ -219,6 +250,7 @@ impl Sandbox for DockerSandbox {
 
     fn exec(&self, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         Box::pin(async move {
+            ensure_rootless_daemon().await?;
             let binary = docker_binary();
             let image = docker_image();
             let cap_flags = caps_to_flags(&spec.capabilities);
@@ -303,6 +335,7 @@ impl Sandbox for DockerSandbox {
         capabilities: SandboxCapabilities,
     ) -> BoxFuture<Result<WorkspaceId>> {
         Box::pin(async move {
+            ensure_rootless_daemon().await?;
             let binary = docker_binary();
             let image = docker_image();
             let cap_flags = caps_to_flags(&capabilities);
@@ -346,6 +379,7 @@ impl Sandbox for DockerSandbox {
     fn exec_in_workspace(&self, id: &WorkspaceId, spec: ExecSpec) -> BoxFuture<Result<ExecOutput>> {
         let container_id = id.0.clone();
         Box::pin(async move {
+            ensure_rootless_daemon().await?;
             let binary = docker_binary();
 
             let mut cmd = Command::new(&binary);
@@ -416,6 +450,7 @@ impl Sandbox for DockerSandbox {
     fn destroy_workspace(&self, id: &WorkspaceId) -> BoxFuture<Result<()>> {
         let container_id = id.0.clone();
         Box::pin(async move {
+            ensure_rootless_daemon().await?;
             let binary = docker_binary();
             let output = Command::new(&binary)
                 .arg("rm")
@@ -512,6 +547,21 @@ mod tests {
             !flags.contains(&"-v".to_owned()),
             "deny-all must not include any -v mounts"
         );
+        assert!(flags
+            .windows(2)
+            .any(|w| w[0] == "--cap-drop" && w[1] == "ALL"));
+        assert!(flags
+            .windows(2)
+            .any(|w| w[0] == "--security-opt" && w[1] == "no-new-privileges:true"));
+        assert!(flags
+            .windows(2)
+            .any(|w| w[0] == "--user" && w[1] == "1000:1000"));
+    }
+
+    #[test]
+    fn rootful_docker_is_not_an_available_sandbox() {
+        assert!(!has_rootless_security_option("[\"name=seccomp\"]"));
+        assert!(has_rootless_security_option("[\"name=rootless\"]"));
     }
 
     /// Verify capability flags: enabling network drops `--network none`.

@@ -7,7 +7,7 @@ import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import { scim } from "@better-auth/scim";
 import { sso } from "@better-auth/sso";
-import { checkout, polar, portal } from "@polar-sh/better-auth";
+import { polar } from "@polar-sh/better-auth";
 import { client, mongoClient } from "@ryu/db";
 import { User } from "@ryu/db/models/auth.model";
 import {
@@ -65,7 +65,6 @@ import {
 } from "better-auth/plugins";
 import { admin } from "better-auth/plugins/admin";
 import { jwt } from "better-auth/plugins/jwt";
-import { POLAR_PRODUCTS } from "./lib/constants.ts";
 import { resolveRyuCorsOrigins } from "./lib/cors-origins.ts";
 import {
 	GUEST_MODE_DISABLED_MESSAGE,
@@ -2104,18 +2103,16 @@ export const auth = betterAuth({
 		}),
 		polar({
 			client: polarClient,
+			// Keep the Polar integration for customer/subscription webhooks, but do
+			// not register its generic checkout/portal routes. All money creation is
+			// owned by the org-aware billing routers below.
+			// The SDK types `use` as a non-empty tuple even when no optional Polar
+			// endpoint should be registered. Keep the runtime list empty; the cast is
+			// only to satisfy that type-level tuple requirement.
+			use: [] as unknown as [never],
 			// Customer provisioning is handled by databaseHooks.user.create.after via
 			// ensurePolarCustomer so a Polar/API error never makes sign-up fail.
 			createCustomerOnSignUp: false,
-			enableCustomerPortal: true,
-			use: [
-				checkout({
-					products: POLAR_PRODUCTS,
-					successUrl: env.POLAR_SUCCESS_URL,
-					authenticatedUsersOnly: true,
-				}),
-				portal(),
-			],
 		}),
 		deviceAuthorization({
 			verificationUri: `${process.env.FRONTEND_URL || "http://localhost:3001"}/device`,

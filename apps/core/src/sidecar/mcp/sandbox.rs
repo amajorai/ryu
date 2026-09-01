@@ -600,8 +600,9 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
 
     // ── Metering (Daytona only): register the run for the heartbeat ticker ────
     // Only Daytona is the remote, billed backend; the local backends (docker /
-    // microsandbox / opensandbox) are free, so they never register. Fully
-    // fail-open — a metering hiccup must never fail the user's exec.
+    // microsandbox / opensandbox) are free, so they never register. An org-bound
+    // Daytona execution must not report success when its final debit cannot be
+    // confirmed.
     let daytona_run = register_daytona_metering(&backend_label).await;
 
     // ── Step 2: run the backend ──────────────────────────────────────────────
@@ -611,8 +612,8 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
 
     // ── Metering (Daytona only): deregister + final residual debit ────────────
     // One-shot runs usually finish inside a single tick, so the periodic ticker
-    // may have billed nothing; charge the un-ticked tail here (fail-open).
-    finalize_daytona_metering(daytona_run, duration_ms).await;
+    // may have billed nothing; charge the un-ticked tail here.
+    let metering_result = finalize_daytona_metering(daytona_run, duration_ms).await;
 
     // ── Step 3: post-run audit report (best-effort) ──────────────────────────
     match &result {
@@ -638,6 +639,12 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
             )
             .await;
         }
+    }
+
+    if let Err(error) = metering_result {
+        return Err(anyhow::anyhow!(
+            "billable sandbox execution completed but final billing could not be confirmed: {error}"
+        ));
     }
 
     match result {
@@ -715,11 +722,14 @@ async fn register_daytona_metering(backend_label: &str) -> Option<DaytonaMeterin
 }
 
 /// Deregister a Daytona run and debit its un-ticked tail. A no-op when `metering`
-/// is `None` (non-Daytona backend). Fully fail-open — every failure is swallowed
-/// inside [`heartbeat::debit_final`], so it can never fail the user's exec.
-async fn finalize_daytona_metering(metering: Option<DaytonaMetering>, duration_ms: u64) {
+/// is `None` (non-Daytona backend). Billable failures are returned to the caller
+/// after the remote workspace has been removed.
+async fn finalize_daytona_metering(
+    metering: Option<DaytonaMetering>,
+    duration_ms: u64,
+) -> Result<(), String> {
     let Some(m) = metering else {
-        return;
+        return Ok(());
     };
     use crate::sidecar::sandbox::heartbeat;
 
@@ -727,7 +737,7 @@ async fn finalize_daytona_metering(metering: Option<DaytonaMetering>, duration_m
     // the ticker. `None` ⇒ the run was already removed (e.g. a budget-kill
     // verdict already charged it) — nothing left to debit.
     let Some(residual) = heartbeat::deregister_for_final_debit(&m.run_id) else {
-        return;
+        return Ok(());
     };
 
     // No owning org ⇒ registered for visibility only; never bill a wrong org.
@@ -736,7 +746,7 @@ async fn finalize_daytona_metering(metering: Option<DaytonaMetering>, duration_m
             run_id = %m.run_id,
             "daytona sandbox metering: no owning org, skipping final debit (visibility only)"
         );
-        return;
+        return Ok(());
     }
 
     // Charge the measured duration (rounded up, min 1s) minus whatever the
@@ -751,7 +761,7 @@ async fn finalize_daytona_metering(metering: Option<DaytonaMetering>, duration_m
         m.budget_micro_usd,
         residual.next_tick_index,
     )
-    .await;
+    .await
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

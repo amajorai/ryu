@@ -659,15 +659,24 @@ function paintPlanStatus(ctx: ExtensionContext | undefined): void {
  * not yet see Pi's bash at all (see the preamble).
  */
 const DENY_BASH_PATTERNS: readonly RegExp[] = [
-	// `rm -rf /` and friends — a recursive delete rooted at the filesystem root.
-	/\brm\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*[rR][a-zA-Z]*\s+(?:-[a-zA-Z-]+\s+)*\/\s*(?:\*\s*)?$/,
+	// Any rm invocation rooted at `/`, including split flags, `--`, and a
+	// `sudo` option. A root-targeted recursive delete is never a confirmation
+	// prompt: the process runner and the gateway scanner are defense in depth,
+	// but this local floor must also catch their outage/fallback path.
+	/(?:^|[|;&\n]\s*|\bsudo\s+(?:-[a-zA-Z-]+\s+)*)rm\s+(?:(?:-[a-zA-Z-]+)\s+)*\/+\.?\/*\s*(?:\*\s*)?(?:--[a-zA-Z-]+\s*)*$/,
 	// Formatting a filesystem destroys every file on it. Anchored to the head of
 	// a command segment, like the `sudo` rule below: a bare `\b` word match also
 	// fires on `grep mkfs .`, and a HARD deny (no prompt, no override) that
 	// refuses a read-only search is worse than the risk it is guarding.
 	/(?:^|[|;&\n]\s*|\bsudo\s+)mkfs(?:\.[a-z0-9]+)?\b/,
 	// `dd` onto a raw block device destroys the disk, partition table included.
-	/\bdd\b[^\n]*\bof=\/dev\/(?:disk|[hsv]d|nvme)/,
+	/\bdd\b[^\n]*\bof\s*=\s*\/dev\/(?:disk|[hsv]d|nvme|mmcblk|xvd|vd)/,
+	// Other raw-disk tools are equally destructive even though they do not use
+	// `rm`. Keep them in the unconditional floor so approval mode/fallback cannot
+	// turn a storage wipe or partition rewrite into an executable plan.
+	/(?:^|[|;&\n]\s*|\bsudo\s+)(?:wipefs|blkdiscard|fdisk|sfdisk|parted|partprobe|gpart)\b[^\n]*\/dev\//,
+	/(?:^|[|;&\n]\s*|\bsudo\s+)diskutil\s+(?:eraseDisk|partitionDisk)\b/,
+	/\b(?:format\s+[a-z]:|(?:Clear-Disk|Initialize-Disk|Remove-Partition|Format-Volume)\b)/i,
 	// The classic fork bomb, which takes the machine down with it.
 	/:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,
 	// Powering the machine down would kill this session, Core, and the desktop.

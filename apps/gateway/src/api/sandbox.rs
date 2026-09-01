@@ -67,6 +67,9 @@ pub enum SandboxVerdict {
     KillBudget,
     /// Wallet balance non-positive; Core must destroy the workspace.
     KillBalance,
+    /// Billing could not be confirmed; Core must destroy the workspace rather
+    /// than continue an org-bound sandbox without accounting.
+    KillAccounting,
 }
 
 /// Response from `POST /sandbox/tick`.
@@ -74,8 +77,8 @@ pub enum SandboxVerdict {
 pub struct SandboxTickResponse {
     /// Cumulative billed (marked-up) micro-USD accrued for this run.
     pub accrued_micro_usd: u64,
-    /// Authoritative wallet balance after the debit, or `null` when unknown
-    /// (credits inactive / no org / debit unreachable).
+    /// Authoritative wallet balance after the debit, or `null` when the path is
+    /// intentionally unmetered or an accounting kill is being returned.
     pub balance_micro_usd: Option<i64>,
     /// Continue / warn / kill decision for this tick.
     pub verdict: SandboxVerdict,
@@ -164,29 +167,37 @@ pub async fn sandbox_tick(
         entry.accrued_micro
     };
 
-    // Step 5 — synchronous (awaited) debit; balance is the authoritative wallet
-    // reading, or `None` when unknown (fail-open).
-    let balance = debit_sandbox_sync(
+    // Step 5 — synchronous (awaited) debit; an active org-bound billing path
+    // must return an authoritative balance or stop the sandbox.
+    let (balance, accounting_unavailable) = match debit_sandbox_sync(
         &state,
         body.org_id.as_deref(),
         &body.run_id,
         body.tick_index,
         billed_micro,
     )
-    .await;
+    .await
+    {
+        Ok(balance) => (balance, false),
+        Err(()) => (None, true),
+    };
 
     // Step 6 — verdict, in the frozen priority order.
-    let verdict = compute_verdict(
-        accrued,
-        body.per_run_budget_micro_usd,
-        balance,
-        billed_micro,
-    );
+    let verdict = if accounting_unavailable {
+        SandboxVerdict::KillAccounting
+    } else {
+        compute_verdict(
+            accrued,
+            body.per_run_budget_micro_usd,
+            balance,
+            billed_micro,
+        )
+    };
 
     // Step 7 — a kill verdict ends the run; evict its accrual state.
     if matches!(
         verdict,
-        SandboxVerdict::KillBudget | SandboxVerdict::KillBalance
+        SandboxVerdict::KillBudget | SandboxVerdict::KillBalance | SandboxVerdict::KillAccounting
     ) {
         map.remove(&body.run_id);
     }
@@ -198,9 +209,11 @@ pub async fn sandbox_tick(
     }))
 }
 
-/// Verdict priority (frozen): `kill_balance` > `kill_budget` > `warn` > `continue`.
+/// Verdict priority (frozen): `kill_accounting` > `kill_balance` > `kill_budget`
+/// > `warn` > `continue`.
 /// - `kill_balance`: balance known and non-positive.
 /// - `kill_budget`: per-run cap set and reached.
+/// - `kill_accounting`: the active org-bound debit could not be confirmed.
 /// - `warn`: within 80% of the per-run cap, OR balance positive but under 3×
 ///   this tick's billed amount (about to run dry).
 fn compute_verdict(
@@ -230,21 +243,31 @@ fn compute_verdict(
 /// Synchronous control-plane debit for one sandbox tick. Posts the ALREADY
 /// marked-up `billed_micro` as-is under `reason = "sandbox"` and the idempotent
 /// `ref_id = "{run_id}:sandbox:{tick_index}"`. Returns the authoritative balance,
-/// or `None` when credits are inactive, no org is present, the amount rounds to
-/// zero, or the control plane is unreachable (fail-open).
+/// or `None` when credits are inactive, no org is present, or the amount rounds
+/// to zero. An active org-bound control-plane failure returns `Err(())` so the
+/// caller can stop the sandbox rather than continue unbilled.
 async fn debit_sandbox_sync(
     state: &SharedState,
     org_id: Option<&str>,
     run_id: &str,
     tick_index: u64,
     billed_micro: u64,
-) -> Option<i64> {
-    let org_id = org_id.filter(|s| !s.is_empty())?;
+) -> Result<Option<i64>, ()> {
+    let Some(org_id) = org_id.filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
     let credits = &state.config.credits;
-    if !credits.is_active() || billed_micro == 0 {
-        return None;
+    if !credits.enabled || billed_micro == 0 {
+        return Ok(None);
     }
-    let secret = credits.internal_secret.as_deref()?;
+    if !credits.is_active() {
+        state.wallet.set_org_accounting_unavailable(org_id, true);
+        return Err(());
+    }
+    let Some(secret) = credits.internal_secret.as_deref() else {
+        state.wallet.set_org_accounting_unavailable(org_id, true);
+        return Err(());
+    };
 
     // `/api` is part of the route — see the long note on the same join in
     // `pipeline/mod.rs`. Without it every sandbox debit 404s and fails open, so
@@ -274,24 +297,40 @@ async fn debit_sandbox_sync(
         .json(&body)
         .send()
         .await
-        .ok()?;
+        .map_err(|_| {
+            state.wallet.set_org_accounting_unavailable(org_id, true);
+        })?;
     if !resp.status().is_success() {
-        return None;
+        state.wallet.set_org_accounting_unavailable(org_id, true);
+        return Err(());
     }
 
-    let v = resp.json::<Value>().await.ok()?;
-    let balance = v["balanceMicroUsd"].as_i64()?;
+    let v = resp.json::<Value>().await.map_err(|_| {
+        state.wallet.set_org_accounting_unavailable(org_id, true);
+    })?;
+    let Some(balance) = v["balanceMicroUsd"].as_i64() else {
+        state.wallet.set_org_accounting_unavailable(org_id, true);
+        return Err(());
+    };
     // Steady-state truth: keep the cached balance (and the empty flag derived
     // from it) in sync so the chat path is gated after a sandbox drains the
     // wallet (self-heals after a top-up), and so Core's dollar-threshold
     // fallback rules see a sandbox's spend too.
     state.wallet.set_org_balance(org_id, balance);
-    Some(balance)
+    Ok(Some(balance))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{compute_verdict, SandboxVerdict};
+
+    #[test]
+    fn accounting_verdict_wire_name_is_frozen() {
+        assert_eq!(
+            serde_json::to_string(&SandboxVerdict::KillAccounting).expect("serialize verdict"),
+            "\"kill_accounting\""
+        );
+    }
 
     #[test]
     fn kill_balance_beats_everything() {

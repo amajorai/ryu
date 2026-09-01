@@ -285,12 +285,17 @@ pub async fn get_wallet(
         "org_id": q.org_id,
         "balance_micro_usd": balance,
         // The gate's own verdict, so a caller never has to re-derive it from the
-        // balance (and cannot disagree with the gate when the balance is null
-        // because a debit failed fail-closed).
+        // balance. An accounting outage is separate from an empty wallet, so
+        // clients can present a retryable service condition instead of telling
+        // a funded tenant it has no money.
         "empty": q
             .org_id
             .as_deref()
             .map(|org_id| state.wallet.is_org_empty(org_id)),
+        "accounting_unavailable": q
+            .org_id
+            .as_deref()
+            .map(|org_id| state.wallet.is_org_accounting_unavailable(org_id)),
     })))
 }
 

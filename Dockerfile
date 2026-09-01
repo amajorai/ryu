@@ -70,8 +70,8 @@ COPY . .
 # inference and NO Silero VAD — each of which degrades silently at runtime. Mirrors
 # apps/core/package.json (`build`), release.yml and release-local.sh; keep all four
 # in sync. (Docker cannot reuse the package.json script: bun is not in this image.)
-RUN cargo build --release --manifest-path apps/gateway/Cargo.toml \
- && cargo build --release --manifest-path apps/core/Cargo.toml \
+RUN cargo build --locked --release --manifest-path apps/gateway/Cargo.toml \
+ && cargo build --locked --release --manifest-path apps/core/Cargo.toml \
       --features sandbox-wasmtime,voice-parakeet,voice-vad \
  && cp target/release/ryu-gateway /usr/local/bin/ryu-gateway \
  && cp target/release/ryu-core /usr/local/bin/ryu-core
@@ -95,6 +95,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
+# The application is never a host administrator. Keep the runtime UID
+# rootless even when the image is started without an orchestrator security
+# profile; persistent state is the only writable application-owned path.
+RUN groupadd --gid 10001 ryu \
+    && useradd --uid 10001 --gid 10001 --home-dir /data \
+      --no-create-home --shell /usr/sbin/nologin ryu \
+    && install -d -o 10001 -g 10001 -m 0750 /data
+
 COPY --from=builder /usr/local/bin/ryu-core /usr/local/bin/ryu-core
 COPY --from=builder /usr/local/bin/ryu-gateway /usr/local/bin/ryu-gateway
 COPY config/node-config.example.json /usr/share/ryu/node-config.example.json
@@ -106,6 +114,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV RYU_DIR=/data
 # Keep the structured node config on the same persistent volume as Core state.
 ENV XDG_CONFIG_HOME=/data/.config
+ENV HOME=/data
 # Default listen port. Render/Railway/DigitalOcean/Fly inject their own $PORT;
 # the entrypoint maps it onto RYU_BIND. Gateway stays on loopback (Core-managed).
 ENV PORT=7980
@@ -120,3 +129,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=5 \
   CMD ["/bin/sh", "-c", "curl -fsS \"http://127.0.0.1:${PORT:-7980}/api/health\" || exit 1"]
 
 ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Do not run Core as root. Docker Compose additionally drops all Linux
+# capabilities and enables a read-only root filesystem.
+USER 10001:10001

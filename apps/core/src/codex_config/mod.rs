@@ -143,20 +143,6 @@ pub fn run_safe_delete_hook_if_requested() -> bool {
 /// `None` means the hook allows the call to continue with the normal Codex
 /// permission flow.
 fn safe_delete_hook_reason(payload: &serde_json::Value) -> Option<String> {
-    let allow_permanent_delete = ryu_deletion_guard::permanent_delete_allowed(
-        std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok().as_deref(),
-    );
-    safe_delete_hook_reason_with_policy(payload, allow_permanent_delete)
-}
-
-fn safe_delete_hook_reason_with_policy(
-    payload: &serde_json::Value,
-    allow_permanent_delete: bool,
-) -> Option<String> {
-    if allow_permanent_delete {
-        return None;
-    }
-
     let Some(tool_name) = payload
         .get("tool_name")
         .and_then(serde_json::Value::as_str)
@@ -489,7 +475,7 @@ fn ensure_instruction(home: &Path, trash: &str) -> Result<()> {
     };
     let existing = read_optional_text(&path)?;
     let block = format!(
-        "{SAFETY_BLOCK_START}\n## Ryu safe deletion policy\n\n- Never permanently delete a file or directory. Move removals to recoverable host Trash or the Recycle Bin.\n- The verified recoverable command for this node is `{trash}`. On macOS use `/usr/bin/trash <absolute-path>` without `--`; if the agent is confined, ask the host/user to run that command outside the confined process.\n- Do not use `rm`, `unlink`, `rmdir`, `shred`, Windows `del`/`erase`/`rd`, PowerShell `Remove-Item`, `find -delete`, `rsync --delete`, destructive Git cleanup/reset/checkout/restore, deletion APIs, or delete-like filesystem tools.\n- Permanent deletion requires the operator to explicitly change Ryu's safety policy first. If the target cannot be moved to recoverable storage, stop and explain.\n{SAFETY_BLOCK_END}"
+        "{SAFETY_BLOCK_START}\n## Ryu safe deletion policy\n\n- Never permanently delete a file or directory. Move removals to recoverable host Trash or the Recycle Bin.\n- The verified recoverable command for this node is `{trash}`. On macOS use `/usr/bin/trash <absolute-path>` without `--`; if the agent is confined, ask the host/user to run that command outside the confined process.\n- Do not use `rm`, `unlink`, `rmdir`, `shred`, Windows `del`/`erase`/`rd`, PowerShell `Remove-Item`, `find -delete`, `rsync --delete`, destructive Git cleanup/reset/checkout/restore, deletion APIs, or delete-like filesystem tools.\n- Permanent deletion is never authorized by Ryu. If the target cannot be moved to recoverable storage, stop and explain.\n{SAFETY_BLOCK_END}"
     );
     write_if_changed(
         &path,
@@ -847,7 +833,7 @@ mod tests {
             "tool_name": "Bash",
             "tool_input": { "command": "rm" }
         });
-        assert!(safe_delete_hook_reason_with_policy(&rm, false)
+        assert!(safe_delete_hook_reason(&rm)
             .expect("rm must be denied")
             .contains("before shell execution"));
 
@@ -855,7 +841,7 @@ mod tests {
             "tool_name": "apply_patch",
             "tool_input": { "patch": "*** Delete File: notes.txt\n" }
         });
-        assert!(safe_delete_hook_reason_with_policy(&patch, false)
+        assert!(safe_delete_hook_reason(&patch)
             .expect("file deletion patch must be denied")
             .contains("apply_patch"));
 
@@ -863,7 +849,7 @@ mod tests {
             "tool_name": "mcp__filesystem__delete_file",
             "tool_input": { "path": "/tmp/notes.txt" }
         });
-        assert!(safe_delete_hook_reason_with_policy(&mcp, false)
+        assert!(safe_delete_hook_reason(&mcp)
             .expect("filesystem delete tool must be denied")
             .contains("filesystem tool"));
 
@@ -871,14 +857,14 @@ mod tests {
             "tool_name": "Bash",
             "tool_input": { "command": "/usr/bin/trash /tmp/notes.txt" }
         });
-        assert_eq!(safe_delete_hook_reason_with_policy(&trash, false), None);
+        assert_eq!(safe_delete_hook_reason(&trash), None);
 
         let ordinary = serde_json::json!({
             "tool_name": "Bash",
             "tool_input": { "command": "printf 'hello\\n'" }
         });
-        assert_eq!(safe_delete_hook_reason_with_policy(&ordinary, false), None);
-        assert_eq!(safe_delete_hook_reason_with_policy(&rm, true), None);
+        assert_eq!(safe_delete_hook_reason(&ordinary), None);
+        assert!(safe_delete_hook_reason(&rm).is_some());
     }
 
     #[cfg(target_os = "macos")]
@@ -892,7 +878,7 @@ mod tests {
     #[test]
     fn missing_hook_tool_name_fails_closed() {
         let payload = serde_json::json!({ "tool_input": { "command": "echo hi" } });
-        assert!(safe_delete_hook_reason_with_policy(&payload, false)
+        assert!(safe_delete_hook_reason(&payload)
             .expect("missing tool name must be denied")
             .contains("identify"));
     }

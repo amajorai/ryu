@@ -1060,7 +1060,10 @@ export async function startPurchase(input: {
 }): Promise<PurchaseResult> {
 	const resp = await fetch(`${BASE}/purchase`, {
 		method: "POST",
-		headers: authHeaders(),
+		headers: {
+			...authHeaders(),
+			"Idempotency-Key": crypto.randomUUID(),
+		},
 		body: JSON.stringify(input),
 	});
 	if (!resp.ok) {

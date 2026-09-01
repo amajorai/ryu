@@ -123,9 +123,13 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
+	const headers = authHeaders();
+	if (path.startsWith("/billing/checkout")) {
+		headers["Idempotency-Key"] = crypto.randomUUID();
+	}
 	const resp = await fetch(`${BASE}${path}`, {
 		method: "POST",
-		headers: authHeaders(),
+		headers,
 		body: JSON.stringify(body),
 	});
 	if (!resp.ok) {

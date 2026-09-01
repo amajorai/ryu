@@ -257,7 +257,10 @@ export async function transferCredits(input: {
 }): Promise<TransferResult> {
 	const response = await fetch(`${BASE}/api/credits/transfer`, {
 		body: JSON.stringify(input),
-		headers: authHeaders(),
+		headers: {
+			...authHeaders(),
+			"Idempotency-Key": crypto.randomUUID(),
+		},
 		method: "POST",
 	});
 	if (!response.ok) {

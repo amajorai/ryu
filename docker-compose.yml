@@ -14,6 +14,10 @@
 # embeddings, whisper) into the /data volume, so it works with no API key. To
 # skip that download on a small host, set a provider key (e.g. OPENAI_API_KEY)
 # in the environment and Core routes there instead.
+#
+# The compose stack requires GATEWAY_MASTER_KEY. It is used only as the local
+# service-to-service bearer here; the gateway is never published to the host,
+# runs rootless, drops all Linux capabilities, and has a read-only root FS.
 
 services:
   gateway:
@@ -30,7 +34,20 @@ services:
       # or leave unset to use Core's first-run local model stack.
       # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
+      GATEWAY_ADMIN_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
+      RYU_GATEWAY_FLEET: "1"
       RYU_GATEWAY_PORT: "7981"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    volumes:
+      - ryu-gateway-data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7981/health"]
@@ -48,6 +65,8 @@ services:
       gateway:
         condition: service_healthy
     environment:
+      RYU_GATEWAY_TOKEN: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
+      GATEWAY_ADMIN_KEY: ${GATEWAY_MASTER_KEY:?set GATEWAY_MASTER_KEY before starting the stack}
       RYU_BIND: "0.0.0.0:7980"
       RYU_DIR: "/data"
       # Core reads /data/.config/ryu/node-config.json. The example is mounted
@@ -57,6 +76,14 @@ services:
       # Use the gateway service instead of spawning a local one.
       RYU_GATEWAY_MANAGED: "0"
       RYU_GATEWAY_URL: "http://gateway:7981"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
     ports:
       - "7980:7980"
     volumes:
@@ -72,3 +99,4 @@ services:
 
 volumes:
   ryu-data:
+  ryu-gateway-data:

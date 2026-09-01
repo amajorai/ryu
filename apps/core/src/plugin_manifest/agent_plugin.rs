@@ -54,7 +54,7 @@
 //! [`McpServerDecl`]: crate::plugin_manifest::McpServerDecl
 //! [`PluginManifestLoader::parse_and_validate`]: crate::plugin_manifest::PluginManifestLoader
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -174,6 +174,22 @@ fn expand_placeholders(raw: &str, plugin_root: &Path, plugin_data: &Path) -> Str
         .replace("${PLUGIN_DATA}", &plugin_data.to_string_lossy())
 }
 
+fn lexically_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
+
 /// Resolve a spec `command` (§7.2.1) to something we can spawn, or explain why not.
 ///
 /// Two legal forms: a bare executable name (resolved by the platform's search
@@ -196,10 +212,12 @@ fn resolve_command(command: &str, plugin_root: &Path) -> Result<String, String> 
         // pointing out of the package is caught (§4.1); fall back to the lexical
         // path when the file does not exist yet, which `starts_with` still rejects
         // for a `../` escape.
-        let resolved = joined.canonicalize().unwrap_or(joined);
+        let resolved = joined
+            .canonicalize()
+            .unwrap_or_else(|_| lexically_normalize(&joined));
         let root = plugin_root
             .canonicalize()
-            .unwrap_or_else(|_| plugin_root.to_path_buf());
+            .unwrap_or_else(|_| lexically_normalize(plugin_root));
         if !resolved.starts_with(&root) {
             return Err(format!(
                 "command '{command}' resolves outside the plugin root"

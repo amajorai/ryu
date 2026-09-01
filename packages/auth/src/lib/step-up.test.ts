@@ -29,21 +29,22 @@ describe("step-up scopes", () => {
 		}
 	});
 
-	it("takes no emailed fallback for staff powers, and does elsewhere", () => {
+	it("takes no emailed fallback for staff powers or billing", () => {
 		expect(stepUpRequiresEnrolled2fa("platform.admin")).toBe(true);
+		expect(stepUpRequiresEnrolled2fa("billing")).toBe(true);
 		for (const scope of STEP_UP_SCOPES) {
-			if (scope !== "platform.admin") {
+			if (scope !== "platform.admin" && scope !== "billing") {
 				expect(stepUpRequiresEnrolled2fa(scope)).toBe(false);
 			}
 		}
 	});
 
-	it("applies billing step-up only to accounts with 2FA", () => {
+	it("requires billing step-up and an enrolled authenticator", () => {
 		expect(stepUpAppliesToUser("billing", { twoFactorEnabled: true })).toBe(
 			true
 		);
 		expect(stepUpAppliesToUser("billing", { twoFactorEnabled: false })).toBe(
-			false
+			true
 		);
 		expect(
 			stepUpMethodsForScope({ twoFactorEnabled: true }, "billing")
@@ -51,6 +52,7 @@ describe("step-up scopes", () => {
 		expect(
 			stepUpMethodsForScope({ twoFactorEnabled: false }, "billing")
 		).toEqual([]);
+		expect(stepUpRequiresEnrolled2fa("billing")).toBe(true);
 	});
 });
 
@@ -104,7 +106,6 @@ describe("STEP_UP_AUTH_PATHS", () => {
 		expect(stepUpScopeForAuthPath("/organization/remove-member")).toBe(
 			"org.members"
 		);
-		expect(stepUpScopeForAuthPath("/checkout")).toBe("billing");
-		expect(stepUpScopeForAuthPath("/customer/portal")).toBe("billing");
+		expect(stepUpScopeForAuthPath("/customer/portal")).toBeNull();
 	});
 });

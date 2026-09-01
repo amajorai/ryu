@@ -4347,12 +4347,9 @@ impl McpRegistry {
         // remove a path without producing a shell command. Keep this check in
         // the no-gate dispatch core so an approved re-dispatch, an app alias,
         // and an agent-less internal caller cannot bypass the default-deny
-        // safety policy. The explicit operator opt-out is the only escape hatch;
-        // a normal approval or `approval-mode=off` is not enough.
-        if !ryu_deletion_guard::permanent_delete_allowed(
-            std::env::var("RYU_ALLOW_PERMANENT_DELETE").ok().as_deref(),
-        ) && ryu_deletion_guard::is_filesystem_delete_tool(tool_id)
-        {
+        // safety policy. A normal approval or `approval-mode=off` is not enough
+        // to authorize permanent filesystem deletion; this policy has no opt-out.
+        if ryu_deletion_guard::is_filesystem_delete_tool(tool_id) {
             return Err(anyhow!(
                 "permanent filesystem deletion blocked by Ryu; use the host Trash or Recycle Bin command instead"
             ));

@@ -63,12 +63,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
+# A gateway process can spend provider credentials and tenant credits, but it
+# must never be a host administrator. Keep its runtime UID rootless even when a
+# deployment omits the orchestrator security profile.
+RUN groupadd --gid 10001 ryu \
+    && useradd --uid 10001 --gid 10001 --home-dir /data \
+      --no-create-home --shell /usr/sbin/nologin ryu \
+    && install -d -o 10001 -g 10001 -m 0750 /data
+
 COPY --from=builder /usr/local/bin/ryu-gateway /usr/local/bin/ryu-gateway
 
 # Optional persistence for the audit SQLite store and a mounted gateway.toml.
 # Not required to boot; mount a volume here and set GATEWAY_CONFIG=/data/gateway.toml
 # if you want per-tenant static api_keys to survive redeploys.
 ENV RYU_DIR=/data
+ENV HOME=/data
 VOLUME ["/data"]
 
 EXPOSE 7981
@@ -80,3 +89,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
 # This image IS the gateway. `--bind=` (with the equals sign) is how ryu-gateway
 # takes its listen address. Bind all interfaces so Dokploy's proxy can reach it.
 ENTRYPOINT ["ryu-gateway", "--bind=0.0.0.0:7981"]
+USER 10001:10001
