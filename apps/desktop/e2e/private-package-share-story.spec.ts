@@ -1,11 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-const PROOF_DIR = "/Users/jiawei/Documents/Code/ryu-closed/docs/proof";
+const PROOF_DIR = path.resolve(
+	process.env.RYU_PROOF_DIR ?? "test-results/private-package-share"
+);
 const PROOF_SCREENSHOT = `${PROOF_DIR}/private-package-share.png`;
 const PROOF_LOG = `${PROOF_DIR}/private-package-share.log.json`;
 const STORY_URL = process.env.RYU_PRIVATE_PACKAGE_STATIC
-	? "file:///Users/jiawei/Documents/Code/ryu-closed/apps/desktop/e2e/harness/dist-private-package-share-story/private-package-share-story.html"
+	? `file://${path.resolve("e2e/harness/dist-private-package-share-story/private-package-share-story.html")}`
 	: "/private-package-share-story.html";
 
 test("previews a private workflow, shows missing auth, and installs with setup still actionable", async ({

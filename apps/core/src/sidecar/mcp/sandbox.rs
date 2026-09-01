@@ -230,8 +230,20 @@ pub fn tools() -> Vec<RegistryTool> {
 /// Dispatch a sandbox tool call. `tool` is the bare name (stripped of the
 /// `sandbox.` prefix by the registry).
 pub async fn dispatch(tool: &str, arguments: Value) -> Result<Value> {
+    dispatch_with_context(tool, arguments, None, None).await
+}
+
+/// Dispatch a sandbox call while preserving the calling agent and Core session
+/// for the Gateway audit row. The original two-argument helper remains for
+/// agent-less callers and tests.
+pub async fn dispatch_with_context(
+    tool: &str,
+    arguments: Value,
+    agent_id: Option<&str>,
+    session_id: Option<String>,
+) -> Result<Value> {
     match tool {
-        "sandbox_exec" => run_sandbox_exec(arguments).await,
+        "sandbox_exec" => run_sandbox_exec(arguments, agent_id, session_id).await,
         "sandbox_create" => run_sandbox_create(arguments).await,
         "sandbox_run" => run_sandbox_run(arguments).await,
         "sandbox_destroy" => run_sandbox_destroy(arguments).await,
@@ -310,7 +322,11 @@ async fn run_sandbox_destroy(arguments: Value) -> Result<Value> {
 /// 1. Pre-run: ask the gateway whether this exec is permitted (fail-closed).
 /// 2. Run the backend (wasmtime or stub when feature is off).
 /// 3. Post-run: report the completed event to the gateway audit store (best-effort).
-async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
+async fn run_sandbox_exec(
+    arguments: Value,
+    agent_id: Option<&str>,
+    session_id: Option<String>,
+) -> Result<Value> {
     if !is_enabled() {
         return Ok(unavailable(
             "The sandbox is disabled. \
@@ -322,7 +338,7 @@ async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
     // node default (RYU_SANDBOX_BACKEND, falling back to wasmtime).
     let backend = resolve_backend(&arguments)?;
     if !matches!(backend, SandboxBackend::Wasmtime) {
-        return run_process_exec(backend, arguments).await;
+        return run_process_exec(backend, arguments, agent_id, session_id).await;
     }
 
     // ── wasmtime path (default): a base-64 WASM module ───────────────────────
@@ -381,7 +397,7 @@ async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
 
     #[cfg(feature = "sandbox-wasmtime")]
     {
-        use crate::sidecar::gateway::report_exec_audit;
+        use crate::sidecar::gateway::{report_exec_audit_with_attribution, ExecAuditAttribution};
         use crate::sidecar::sandbox::wasmtime::WasmtimeSandbox;
         use crate::sidecar::sandbox::{ExecSpec, SandboxCapabilities};
 
@@ -412,39 +428,47 @@ async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
         .map_err(|e| anyhow::anyhow!("sandbox task panicked: {e}"));
 
         let duration_ms = start.elapsed().as_millis() as u64;
+        let attribution = ExecAuditAttribution {
+            agent_id: agent_id.map(str::to_owned),
+            feature: Some("agent".to_owned()),
+            ..Default::default()
+        };
 
         // ── Step 3: post-run audit report (best-effort) ──────────────────────
         match &exec_result {
             Ok(Ok(output)) => {
-                report_exec_audit(
+                report_exec_audit_with_attribution(
                     backend_name,
                     command_name,
                     duration_ms,
                     output.exit_code,
-                    None, // session_id — not threaded through sandbox tool yet
+                    session_id.clone(),
                     None,
+                    attribution.clone(),
                 )
                 .await;
             }
             Ok(Err(e)) => {
-                report_exec_audit(
+                report_exec_audit_with_attribution(
                     backend_name,
                     command_name,
                     duration_ms,
                     -1,
-                    None,
+                    session_id.clone(),
                     Some(e.to_string()),
+                    attribution.clone(),
                 )
                 .await;
             }
             Err(e) => {
-                report_exec_audit(
+                report_exec_audit_with_attribution(
                     backend_name,
                     command_name,
                     duration_ms,
                     -1,
-                    None,
+                    session_id.clone(),
                     Some(format!("task join error: {e}")),
+                    attribution,
                 )
                 .await;
             }
@@ -463,16 +487,21 @@ async fn run_sandbox_exec(arguments: Value) -> Result<Value> {
 
     #[cfg(not(feature = "sandbox-wasmtime"))]
     {
-        use crate::sidecar::gateway::report_exec_audit;
+        use crate::sidecar::gateway::{report_exec_audit_with_attribution, ExecAuditAttribution};
 
         // Feature off: report a zero-duration stub event and return unavailable.
-        report_exec_audit(
+        report_exec_audit_with_attribution(
             backend_name,
             command_name,
             0,
             0,
-            None,
+            session_id,
             Some("sandbox-wasmtime feature not compiled in".to_owned()),
+            ExecAuditAttribution {
+                agent_id: agent_id.map(str::to_owned),
+                feature: Some("agent".to_owned()),
+                ..Default::default()
+            },
         )
         .await;
 
@@ -543,10 +572,23 @@ fn parse_capabilities(arguments: &Value) -> SandboxCapabilities {
 /// A malformed call (missing `command`) is a hard `Err`; an environment that
 /// is simply not ready (backend not installed/reachable) returns a graceful
 /// `unavailable` so the agent gets a clean signal instead of a tool error.
-async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<Value> {
-    use crate::sidecar::gateway::{check_exec_budget, report_exec_audit, ExecBudgetOutcome};
+async fn run_process_exec(
+    backend: SandboxBackend,
+    arguments: Value,
+    agent_id: Option<&str>,
+    session_id: Option<String>,
+) -> Result<Value> {
+    use crate::sidecar::gateway::{
+        check_exec_budget, report_exec_audit_with_attribution, ExecAuditAttribution,
+        ExecBudgetOutcome,
+    };
 
     let backend_label = backend.as_str().to_owned();
+    let attribution = ExecAuditAttribution {
+        agent_id: agent_id.map(str::to_owned),
+        feature: Some("agent".to_owned()),
+        ..Default::default()
+    };
 
     let command = arguments
         .get("command")
@@ -618,24 +660,26 @@ async fn run_process_exec(backend: SandboxBackend, arguments: Value) -> Result<V
     // ── Step 3: post-run audit report (best-effort) ──────────────────────────
     match &result {
         Ok(output) => {
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 &backend_label,
                 &command,
                 duration_ms,
                 output.exit_code,
+                session_id.clone(),
                 None,
-                None,
+                attribution.clone(),
             )
             .await;
         }
         Err(e) => {
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 &backend_label,
                 &command,
                 duration_ms,
                 -1,
-                None,
+                session_id,
                 Some(e.to_string()),
+                attribution,
             )
             .await;
         }

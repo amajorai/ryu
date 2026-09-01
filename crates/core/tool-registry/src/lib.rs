@@ -3,8 +3,8 @@
 //! One searchable catalog across **MCP servers + built-ins + Composio + plugin
 //! tools + Agent Skills** — no parallel registry. [`run_search`] ranks descriptors
 //! with a
-//! **swappable [`ToolRanker`]** (BM25 default, semantic rerank as a second impl
-//! seam, selectable via a pref key mirroring `catalog.active_source.{kind}`).
+//! **swappable [`ToolRanker`]** (Needle 2 default, BM25 and semantic fallbacks,
+//! selectable via a pref key mirroring `catalog.active_source.{kind}`).
 //! [`describe_from_parts`] / [`describe_composio`] return a tool's argument
 //! schema.
 //!
@@ -47,6 +47,18 @@ use serde_json::Value;
 pub trait ToolEmbedder: Send + Sync {
     /// Embed one text into a vector, or `None` when the embedder is unreachable.
     async fn embed(&self, text: &str) -> Option<Vec<f32>>;
+}
+
+/// A model-backed selector used by [`ToolRanker::Needle2`].
+///
+/// The selector returns canonical descriptor ids in preference order. An empty
+/// `Some` result is an explicit "nothing matches" response; `None` means the
+/// selector was unavailable or failed and the ranker must use its safe lexical
+/// fallback. Keeping that distinction prevents an offline default from turning
+/// an unrelated query into arbitrary tool suggestions.
+#[async_trait]
+pub trait ToolSelector: Send + Sync {
+    async fn select(&self, query: &str, candidates: &[ToolDescriptor]) -> Option<Vec<String>>;
 }
 
 /// Source plane of a catalog entry. Serializes lowercase: `mcp|builtin|composio|app`,
@@ -356,11 +368,14 @@ pub fn described_args(schema: Option<&Value>) -> Vec<DescribedArg> {
 /// Pref key selecting the active ranker, mirroring `catalog.active_source.{kind}`.
 pub const RANKER_PREF_KEY: &str = "tools.active_ranker";
 
-/// A swappable tool ranking strategy. BM25 is the default; `Semantic` is a real
-/// embedder-backed second strategy (enum-dispatch in [`ToolRanker::rank`]), not a
-/// placeholder — it embeds the query + candidates and ranks by cosine similarity.
+/// A swappable tool ranking strategy. Needle 2 is the default model-assisted
+/// selector; BM25 and `Semantic` remain explicit, deterministic fallback/opt-out
+/// strategies. Needle 2 only reorders candidates and never authorizes or executes
+/// a tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRanker {
+    /// Cactus Needle 2 selects relevant tools/skills from the candidate catalog.
+    Needle2,
     /// Classic BM25 lexical ranking over name + description + arg names.
     Bm25,
     /// Embedding-based semantic ranking via the registry [`Embedder`]
@@ -370,11 +385,13 @@ pub enum ToolRanker {
 }
 
 impl ToolRanker {
-    /// Resolve the ranker from a pref string; defaults to BM25.
+    /// Resolve the ranker from a pref string; defaults to Needle 2.
     pub fn from_pref(s: Option<&str>) -> ToolRanker {
         match s.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
             Some("semantic") => ToolRanker::Semantic,
-            _ => ToolRanker::Bm25,
+            Some("bm25") => ToolRanker::Bm25,
+            Some("needle") | Some("needle2") | Some("cactus") | None => ToolRanker::Needle2,
+            _ => ToolRanker::Needle2,
         }
     }
 
@@ -389,10 +406,40 @@ impl ToolRanker {
     pub async fn rank(
         self,
         query: &str,
-        mut items: Vec<ToolDescriptor>,
+        items: Vec<ToolDescriptor>,
         limit: usize,
         embedder: Option<&dyn ToolEmbedder>,
     ) -> Vec<ToolDescriptor> {
+        self.rank_with_selector(query, items, limit, embedder, None)
+            .await
+    }
+
+    /// Rank descriptors with an optional model-backed selector.
+    ///
+    /// Needle 2 is intentionally a hybrid: its selected ids lead the result,
+    /// while BM25 fills the remaining slots. That preserves recall when the
+    /// tiny selector emits only one call for a multi-tool request. If the model
+    /// explicitly returns no call, the result is empty; if the runtime fails or
+    /// returns an unknown id, the whole ranking falls back to BM25.
+    pub async fn rank_with_selector(
+        self,
+        query: &str,
+        items: Vec<ToolDescriptor>,
+        limit: usize,
+        embedder: Option<&dyn ToolEmbedder>,
+        selector: Option<&dyn ToolSelector>,
+    ) -> Vec<ToolDescriptor> {
+        if self == ToolRanker::Needle2 {
+            if let Some(selector) = selector {
+                if let Some(selected_ids) = selector.select(query, &items).await {
+                    if let Some(ordered) = needle_order(query, &items, limit, &selected_ids) {
+                        return ordered;
+                    }
+                }
+            }
+        }
+
+        let mut items = items;
         let scored = match (self, embedder) {
             (ToolRanker::Semantic, Some(embedder)) => {
                 semantic_score(query, &mut items, embedder).await
@@ -412,6 +459,59 @@ impl ToolRanker {
         items.truncate(limit);
         items
     }
+}
+
+/// Reorder candidates according to canonical ids returned by Needle 2.
+///
+/// `None` means the selector returned only ids that were not present in the
+/// candidate set, which is treated as a runtime/schema failure and causes the
+/// caller to use BM25. `Some(empty)` is a valid model refusal/no-match.
+fn needle_order(
+    query: &str,
+    items: &[ToolDescriptor],
+    limit: usize,
+    selected_ids: &[String],
+) -> Option<Vec<ToolDescriptor>> {
+    if limit == 0 || selected_ids.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let positions: std::collections::HashMap<String, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(index, descriptor)| (descriptor.id.clone(), index))
+        .collect();
+    let mut ordered = Vec::with_capacity(limit);
+    let mut seen = std::collections::HashSet::new();
+
+    for id in selected_ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(index) = positions.get(id).copied() else {
+            continue;
+        };
+        let mut descriptor = items[index].clone();
+        descriptor.score = Some(selected_ids.len().saturating_sub(ordered.len()).max(1) as f32);
+        ordered.push(descriptor);
+        if ordered.len() == limit {
+            return Some(ordered);
+        }
+    }
+
+    if ordered.is_empty() {
+        return None;
+    }
+
+    let mut remainder: Vec<ToolDescriptor> = items
+        .iter()
+        .filter(|descriptor| !seen.contains(&descriptor.id))
+        .cloned()
+        .collect();
+    bm25_score(query, &mut remainder);
+    ordered.extend(remainder);
+    ordered.truncate(limit);
+    Some(ordered)
 }
 
 /// Cosine similarity of two equal-length vectors; `0.0` on length mismatch.
@@ -531,7 +631,8 @@ fn bm25_score(query: &str, items: &mut [ToolDescriptor]) {
 /// already fetched (empty when Composio is not wanted/configured); they are
 /// **searchable-not-listed** and bypass the `kind` filter (Core only fetches
 /// them when `kind` includes Composio), matching the pre-extraction ordering.
-/// The merged set is ranked by `ranker` (BM25 default; Semantic uses `embedder`).
+/// The merged set is ranked by `ranker` (Needle 2 default; Semantic uses
+/// `embedder`).
 pub async fn run_search(
     query: &str,
     builtin_candidates: Vec<ToolDescriptor>,
@@ -541,12 +642,38 @@ pub async fn run_search(
     ranker: ToolRanker,
     embedder: Option<&dyn ToolEmbedder>,
 ) -> Vec<ToolDescriptor> {
+    run_search_with_selector(
+        query,
+        builtin_candidates,
+        composio_candidates,
+        kind,
+        limit,
+        ranker,
+        embedder,
+        None,
+    )
+    .await
+}
+
+/// [`run_search`] with the Core-provided Needle 2 selector.
+pub async fn run_search_with_selector(
+    query: &str,
+    builtin_candidates: Vec<ToolDescriptor>,
+    composio_candidates: Vec<ToolDescriptor>,
+    kind: Option<ToolKind>,
+    limit: usize,
+    ranker: ToolRanker,
+    embedder: Option<&dyn ToolEmbedder>,
+    selector: Option<&dyn ToolSelector>,
+) -> Vec<ToolDescriptor> {
     let mut candidates: Vec<ToolDescriptor> = builtin_candidates
         .into_iter()
         .filter(|d| kind.is_none() || kind == Some(d.kind))
         .collect();
     candidates.extend(composio_candidates);
-    ranker.rank(query, candidates, limit, embedder).await
+    ranker
+        .rank_with_selector(query, candidates, limit, embedder, selector)
+        .await
 }
 
 /// Describe a `composio.<slug>` id shallowly: a single freeform `arguments`
@@ -594,6 +721,8 @@ pub fn describe_from_parts(
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
+
     use super::*;
 
     fn desc(id: &str, name: &str, description: &str, kind: ToolKind) -> ToolDescriptor {
@@ -795,6 +924,66 @@ mod tests {
         assert_eq!(out[0].id, "skills.web-research");
     }
 
+    struct MockSelector {
+        selected: Option<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl ToolSelector for MockSelector {
+        async fn select(
+            &self,
+            _query: &str,
+            _candidates: &[ToolDescriptor],
+        ) -> Option<Vec<String>> {
+            self.selected.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn needle2_selector_leads_and_bm25_fills_results() {
+        let items = vec![
+            desc("foo.search", "search", "find things", ToolKind::Mcp),
+            desc("foo.send", "send", "send a message", ToolKind::Mcp),
+            desc("foo.noise", "noise", "unrelated", ToolKind::Mcp),
+        ];
+        let selector = MockSelector {
+            selected: Some(vec!["foo.send".to_owned()]),
+        };
+        let ranked = ToolRanker::Needle2
+            .rank_with_selector("search", items, 3, None, Some(&selector))
+            .await;
+        assert_eq!(
+            ranked.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            vec!["foo.send", "foo.search", "foo.noise"]
+        );
+    }
+
+    #[tokio::test]
+    async fn needle2_explicit_no_match_returns_no_candidates() {
+        let items = vec![desc("foo.search", "search", "find things", ToolKind::Mcp)];
+        let selector = MockSelector {
+            selected: Some(Vec::new()),
+        };
+        let ranked = ToolRanker::Needle2
+            .rank_with_selector("quantum physics", items, 8, None, Some(&selector))
+            .await;
+        assert!(ranked.is_empty());
+    }
+
+    #[tokio::test]
+    async fn needle2_selector_failure_falls_back_to_bm25() {
+        let items = vec![
+            desc("foo.search", "search", "find things", ToolKind::Mcp),
+            desc("foo.noise", "noise", "unrelated", ToolKind::Mcp),
+        ];
+        let selector = MockSelector { selected: None };
+        let ranked = ToolRanker::Needle2
+            .rank_with_selector("search", items, 2, None, Some(&selector))
+            .await;
+        assert_eq!(ranked.first().map(|d| d.id.as_str()), Some("foo.search"));
+        assert!(ranked.iter().all(|d| d.score.is_some()));
+    }
+
     #[test]
     fn matches_allowlist_matches_id_name_or_server() {
         let d = desc("spider.crawl", "crawl", "crawl a site", ToolKind::Mcp);
@@ -829,12 +1018,13 @@ mod tests {
 
     #[tokio::test]
     async fn ranker_selectable_from_pref() {
-        assert_eq!(ToolRanker::from_pref(None), ToolRanker::Bm25);
+        assert_eq!(ToolRanker::from_pref(None), ToolRanker::Needle2);
         assert_eq!(ToolRanker::from_pref(Some("bm25")), ToolRanker::Bm25);
         assert_eq!(
             ToolRanker::from_pref(Some("semantic")),
             ToolRanker::Semantic
         );
+        assert_eq!(ToolRanker::from_pref(Some("needle2")), ToolRanker::Needle2);
         // BM25 path produces a deterministic exact-match-first ordering. (The
         // Semantic path needs a reachable embedder, which is not asserted here.)
         let items = vec![

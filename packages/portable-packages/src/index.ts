@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 import {
 	access,
+	lstat,
 	mkdir,
 	readdir,
 	readFile,
@@ -171,6 +172,8 @@ const ZIP_EPOCH = new Date("1980-01-01T00:00:00.000Z");
 const MAX_PACKAGE_FILES = 2048;
 const MAX_PACKAGE_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_PACKAGE_TOTAL_BYTES = 64 * 1024 * 1024;
+const MAX_PACKAGE_ARCHIVE_BYTES = 64 * 1024 * 1024;
+const MAX_GITHUB_JSON_BYTES = 4 * 1024 * 1024;
 const MAX_GITHUB_TREE_REQUESTS = MAX_PACKAGE_FILES * 2;
 
 const SENSITIVE_FILE_RE =
@@ -179,6 +182,53 @@ const PRIVATE_CONTENT_RE = /^(?:content|documents|private)(?:\/|$)/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function readBoundedResponseBytes(
+	response: Response,
+	maxBytes: number,
+	errorMessage: string
+): Promise<Uint8Array> {
+	const contentLength = Number(response.headers.get("content-length") ?? "");
+	if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+		throw new Error(errorMessage);
+	}
+	if (!response.body) {
+		const data = new Uint8Array(await response.arrayBuffer());
+		if (data.byteLength > maxBytes) {
+			throw new Error(errorMessage);
+		}
+		return data;
+	}
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			if (!value) {
+				continue;
+			}
+			total += value.byteLength;
+			if (total > maxBytes) {
+				await reader.cancel().catch(() => undefined);
+				throw new Error(errorMessage);
+			}
+			chunks.push(value);
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	const data = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		data.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return data;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -859,10 +909,68 @@ function assertInside(root: string, path: string): void {
 	}
 }
 
+interface PackageReadBudget {
+	fileCount: number;
+	totalBytes: number;
+}
+
+async function ensureSafeDirectory(
+	root: string,
+	directory: string
+): Promise<void> {
+	const relativeDirectory = relative(root, directory);
+	let current = resolve(root);
+	try {
+		const metadata = await lstat(current);
+		if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+			throw new Error(`Package output root is not a directory: ${current}`);
+		}
+	} catch (error) {
+		if (isRecord(error) && error.code === "ENOENT") {
+			await mkdir(current, { recursive: true });
+		} else {
+			throw error;
+		}
+	}
+	const segments = relativeDirectory
+		.split(sep)
+		.filter((segment) => segment.length > 0);
+	for (const segment of segments) {
+		current = join(current, segment);
+		try {
+			const metadata = await lstat(current);
+			if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+				throw new Error(`Package output path is not a directory: ${current}`);
+			}
+		} catch (error) {
+			if (isRecord(error) && error.code === "ENOENT") {
+				await mkdir(current);
+				continue;
+			}
+			throw error;
+		}
+	}
+}
+
+async function assertSafeOutputFile(path: string): Promise<void> {
+	try {
+		const metadata = await lstat(path);
+		if (metadata.isSymbolicLink()) {
+			throw new Error(`Package output cannot be a symbolic link: ${path}`);
+		}
+	} catch (error) {
+		if (isRecord(error) && error.code === "ENOENT") {
+			return;
+		}
+		throw error;
+	}
+}
+
 async function collectFiles(
 	root: string,
 	directory: string,
-	files: Record<string, Uint8Array>
+	files: Record<string, Uint8Array>,
+	budget: PackageReadBudget
 ): Promise<void> {
 	for (const entry of await readdir(directory, { withFileTypes: true })) {
 		const absolute = join(directory, entry.name);
@@ -873,7 +981,7 @@ async function collectFiles(
 			);
 		}
 		if (entry.isDirectory()) {
-			await collectFiles(root, absolute, files);
+			await collectFiles(root, absolute, files, budget);
 			continue;
 		}
 		if (!entry.isFile()) {
@@ -883,18 +991,52 @@ async function collectFiles(
 		if (path === PACKAGE_MANIFEST_FILE) {
 			continue;
 		}
+		const metadata = await stat(absolute);
+		if (!Number.isSafeInteger(metadata.size) || metadata.size < 0) {
+			throw new Error(`Package file size is invalid: ${path}`);
+		}
+		if (metadata.size > MAX_PACKAGE_FILE_BYTES) {
+			throw new Error(`Package file exceeds the 32 MiB limit: ${path}`);
+		}
+		budget.fileCount += 1;
+		if (budget.fileCount > MAX_PACKAGE_FILES) {
+			throw new Error("Package folder contains too many files");
+		}
+		budget.totalBytes += metadata.size;
+		if (budget.totalBytes > MAX_PACKAGE_TOTAL_BYTES) {
+			throw new Error("Package folder exceeds the 64 MiB file limit");
+		}
 		files[path] = new Uint8Array(await readFile(absolute));
 	}
 }
 
 export async function readPackageFolder(root: string): Promise<PackageTree> {
 	const absoluteRoot = resolve(root);
+	const rootMetadata = await lstat(absoluteRoot);
+	if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
+		throw new Error(`Package folder root is not a directory: ${absoluteRoot}`);
+	}
 	const manifestPath = join(absoluteRoot, PACKAGE_MANIFEST_FILE);
+	const manifestMetadata = await lstat(manifestPath);
+	if (
+		manifestMetadata.isSymbolicLink() ||
+		!manifestMetadata.isFile() ||
+		!Number.isSafeInteger(manifestMetadata.size) ||
+		manifestMetadata.size < 0 ||
+		manifestMetadata.size > MAX_PACKAGE_FILE_BYTES
+	) {
+		throw new Error(
+			`${PACKAGE_MANIFEST_FILE} exceeds the 32 MiB package file limit`
+		);
+	}
 	const manifest = validatePackageManifest(
 		JSON.parse(await readFile(manifestPath, "utf8")) as unknown
 	);
 	const files: Record<string, Uint8Array> = {};
-	await collectFiles(absoluteRoot, absoluteRoot, files);
+	await collectFiles(absoluteRoot, absoluteRoot, files, {
+		fileCount: 0,
+		totalBytes: manifestMetadata.size,
+	});
 	return validatePackageTree({ files, manifest });
 }
 
@@ -904,7 +1046,8 @@ export async function writePackageFolder(
 ): Promise<void> {
 	validatePackageTree(tree);
 	const absoluteRoot = resolve(root);
-	await mkdir(absoluteRoot, { recursive: true });
+	await ensureSafeDirectory(absoluteRoot, absoluteRoot);
+	await assertSafeOutputFile(join(absoluteRoot, PACKAGE_MANIFEST_FILE));
 	await writeFile(
 		join(absoluteRoot, PACKAGE_MANIFEST_FILE),
 		`${canonicalJson(tree.manifest)}\n`,
@@ -914,7 +1057,8 @@ export async function writePackageFolder(
 		const path = normalizePath(rawPath);
 		const absolute = join(absoluteRoot, ...path.split("/"));
 		assertInside(absoluteRoot, absolute);
-		await mkdir(dirname(absolute), { recursive: true });
+		await ensureSafeDirectory(absoluteRoot, dirname(absolute));
+		await assertSafeOutputFile(absolute);
 		await writeFile(absolute, data);
 	}
 }
@@ -941,6 +1085,14 @@ export function packPackage(tree: PackageTree): Uint8Array {
 }
 
 export function unpackPackage(data: Uint8Array): PackageTree {
+	if (data.byteLength > MAX_PACKAGE_ARCHIVE_BYTES) {
+		throw new PackageValidationError([
+			{
+				path: "archive",
+				message: "archive exceeds the 64 MiB compressed limit",
+			},
+		]);
+	}
 	let fileCount = 0;
 	let totalBytes = 0;
 	const entries = unzipSync(data, {
@@ -1104,7 +1256,15 @@ async function githubJson(
 	if (!response.ok) {
 		throw new Error(`GitHub package request failed (${response.status})`);
 	}
-	const value: unknown = await response.json();
+	const value: unknown = JSON.parse(
+		new TextDecoder().decode(
+			await readBoundedResponseBytes(
+				response,
+				MAX_GITHUB_JSON_BYTES,
+				"GitHub metadata response exceeds the 4 MiB limit"
+			)
+		)
+	);
 	if (!isRecord(value)) {
 		throw new Error("GitHub package response was not an object");
 	}
@@ -1317,12 +1477,11 @@ export async function readGithubPackage(
 			);
 		}
 		const relativePath = blob.path;
-		const data = new Uint8Array(await response.arrayBuffer());
-		if (data.byteLength > MAX_PACKAGE_FILE_BYTES) {
-			throw new Error(
-				`GitHub package file exceeds the 32 MiB limit: ${relativePath}`
-			);
-		}
+		const data = await readBoundedResponseBytes(
+			response,
+			MAX_PACKAGE_FILE_BYTES,
+			`GitHub package file exceeds the 32 MiB limit: ${relativePath}`
+		);
 		downloadedBytes += data.byteLength;
 		if (downloadedBytes > MAX_PACKAGE_TOTAL_BYTES) {
 			throw new Error("GitHub package exceeds the 64 MiB download limit");
@@ -1343,10 +1502,11 @@ export async function readGithubPackage(
 			`GitHub package manifest request failed (${manifestResponse.status})`
 		);
 	}
-	const manifestBytes = new Uint8Array(await manifestResponse.arrayBuffer());
-	if (manifestBytes.byteLength > MAX_PACKAGE_FILE_BYTES) {
-		throw new Error("GitHub package manifest exceeds the 32 MiB limit");
-	}
+	const manifestBytes = await readBoundedResponseBytes(
+		manifestResponse,
+		MAX_PACKAGE_FILE_BYTES,
+		"GitHub package manifest exceeds the 32 MiB limit"
+	);
 	if (downloadedBytes + manifestBytes.byteLength > MAX_PACKAGE_TOTAL_BYTES) {
 		throw new Error("GitHub package exceeds the 64 MiB download limit");
 	}
@@ -1374,6 +1534,12 @@ export async function readPackageInput(input: string): Promise<PackageTree> {
 			return readPackageFolder(input);
 		}
 		if (metadata.isFile()) {
+			if (
+				!Number.isSafeInteger(metadata.size) ||
+				metadata.size > MAX_PACKAGE_ARCHIVE_BYTES
+			) {
+				throw new Error("package archive exceeds the 64 MiB compressed limit");
+			}
 			return unpackPackage(new Uint8Array(await readFile(input)));
 		}
 	} catch (error) {
@@ -1396,8 +1562,11 @@ export async function writePackageArchive(
 	path: string,
 	tree: PackageTree
 ): Promise<void> {
-	await mkdir(dirname(resolve(path)), { recursive: true });
-	await writeFile(path, packPackage(tree));
+	const absolutePath = resolve(path);
+	const parent = dirname(absolutePath);
+	await ensureSafeDirectory(parent, parent);
+	await assertSafeOutputFile(absolutePath);
+	await writeFile(absolutePath, packPackage(tree));
 }
 
 export async function packagePathExists(path: string): Promise<boolean> {
@@ -1441,6 +1610,14 @@ export function packageArtifactPaths(tree: PackageTree): string[] {
 export function validatePackageTree(tree: PackageTree): PackageTree {
 	const manifest = validatePackageManifest(tree.manifest);
 	const issues: PackageValidationIssue[] = [];
+	const paths = Object.keys(tree.files);
+	if (paths.length > MAX_PACKAGE_FILES) {
+		issues.push({
+			path: "files",
+			message: `contains more than ${MAX_PACKAGE_FILES} files`,
+		});
+	}
+	let totalBytes = manifestBytes(manifest).byteLength;
 	for (const artifact of manifest.artifacts) {
 		if (!(artifact in tree.files)) {
 			issues.push({
@@ -1449,11 +1626,28 @@ export function validatePackageTree(tree: PackageTree): PackageTree {
 			});
 		}
 	}
-	for (const path of Object.keys(tree.files)) {
+	for (const path of paths) {
 		try {
 			normalizePath(path);
 		} catch {
 			issues.push({ path, message: "contains an unsafe file path" });
+			continue;
+		}
+		const data = tree.files[path];
+		if (!(data instanceof Uint8Array)) {
+			issues.push({ path, message: "must contain bytes" });
+			continue;
+		}
+		if (data.byteLength > MAX_PACKAGE_FILE_BYTES) {
+			issues.push({ path, message: "exceeds the 32 MiB file limit" });
+		}
+		totalBytes += data.byteLength;
+		if (totalBytes > MAX_PACKAGE_TOTAL_BYTES) {
+			issues.push({
+				path: "files",
+				message: "exceeds the 64 MiB total file limit",
+			});
+			break;
 		}
 	}
 	if (issues.length > 0) {

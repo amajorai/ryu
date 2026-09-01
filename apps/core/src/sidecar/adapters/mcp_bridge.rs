@@ -3,7 +3,9 @@
 //! The ACP SDK's `with_mcp_server` mechanism injects an MCP server into the
 //! session handshake so the agent discovers and calls Ryu's registered tools
 //! (Ghost, Shadow, and any user-configured servers) during its own tool loop,
-//! rather than only seeing its built-in tools.
+//! rather than only seeing its built-in tools. `tool_search` uses the same
+//! unified catalog as the OpenAI-compatible plane, whose default selector is
+//! Core's Needle 2-backed ranker.
 //!
 //! Every call is routed through `McpRegistry::call_tool`, which enforces the
 //! per-agent allowlist before dispatching. There is no direct-egress path that

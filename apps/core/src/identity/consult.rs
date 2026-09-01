@@ -57,7 +57,9 @@
 
 use serde_json::Value;
 
-use super::{read_credential, ConnectionStatus, IdentityStore, SecretState};
+use super::{
+    read_credential, read_credential_with_agent, ConnectionStatus, IdentityStore, SecretState,
+};
 
 /// Tools that know how to *consume* a vault credential (splice it into their
 /// outbound request). For these — and only these — the consult returns the
@@ -153,6 +155,19 @@ pub async fn consult_for_tool_call(
     args: &Value,
     session_id: Option<String>,
 ) -> ConsultOutcome {
+    consult_for_tool_call_with_agent(profile_ids, tool_id, args, session_id, None).await
+}
+
+/// Agent-aware variant used by the governed MCP registry so credential reads
+/// in the Agent passport retain the same stable agent identity as model/tool
+/// rows.
+pub async fn consult_for_tool_call_with_agent(
+    profile_ids: &[String],
+    tool_id: &str,
+    args: &Value,
+    session_id: Option<String>,
+    agent_id: Option<&str>,
+) -> ConsultOutcome {
     // Binding is opt-in: an agent with no bound profiles sees no vault at all.
     if profile_ids.is_empty() {
         return ConsultOutcome::Proceed;
@@ -167,14 +182,79 @@ pub async fn consult_for_tool_call(
     let Some(domain) = extract_domain(args) else {
         return ConsultOutcome::Proceed;
     };
-    consult_with(
+    consult_with_agent(
         store,
         profile_ids,
         &domain,
         session_id,
         is_injection_capable(tool_id),
+        agent_id,
     )
     .await
+}
+
+/// Agent-aware testable consultation core.
+pub(crate) async fn consult_with_agent(
+    store: &IdentityStore,
+    profile_ids: &[String],
+    domain: &str,
+    session_id: Option<String>,
+    inject: bool,
+    agent_id: Option<&str>,
+) -> ConsultOutcome {
+    // Find the first bound connection for this domain across the agent's profiles.
+    let mut matched = None;
+    for profile_id in profile_ids {
+        match store.find(profile_id, domain).await {
+            Ok(Some(conn)) => {
+                matched = Some(conn);
+                break;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(
+					"identity consult: lookup failed for profile '{profile_id}' domain '{domain}': {e:#}"
+				);
+            }
+        }
+    }
+    let Some(conn) = matched else {
+        return ConsultOutcome::Proceed;
+    };
+
+    match conn.status {
+        ConnectionStatus::NeedsAuth => {
+            let registry = super::CredentialSourceRegistry::from_env();
+            match super::elicitation::needs_connection_with(store, &registry, domain).await {
+                Some(elicit) => ConsultOutcome::Elicit(super::to_envelope(&elicit)),
+                None => ConsultOutcome::Proceed,
+            }
+        }
+        ConnectionStatus::Authenticated => {
+            match read_credential_with_agent(store, &conn.id, session_id, agent_id).await {
+                Ok(Some(state)) => {
+                    if inject {
+                        tracing::debug!(
+							"identity consult: injecting authenticated credential into a consuming tool for domain '{domain}'"
+						);
+                        ConsultOutcome::ProceedWithCredential(state)
+                    } else {
+                        tracing::debug!(
+							"identity consult: authenticated credential available for domain '{domain}' (read governed, not consumed)"
+						);
+                        ConsultOutcome::Proceed
+                    }
+                }
+                Ok(None) => ConsultOutcome::Proceed,
+                Err(e) => {
+                    tracing::warn!(
+                        "identity consult: governed read failed for domain '{domain}': {e:#}"
+                    );
+                    ConsultOutcome::Proceed
+                }
+            }
+        }
+    }
 }
 
 /// Testable core of [`consult_for_tool_call`] with the store injected and the

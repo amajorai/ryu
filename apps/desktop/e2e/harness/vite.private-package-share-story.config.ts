@@ -7,6 +7,9 @@ const harnessDir = path.resolve(import.meta.dirname);
 const desktopRoot = path.resolve(harnessDir, "../..");
 
 export default defineConfig({
+	define: {
+		"process.env": {},
+	},
 	css: {
 		postcss: {
 			plugins: [tailwindcss()],

@@ -71,6 +71,8 @@ export interface ModelCallOptions {
 	messages: LoopMessage[];
 	/** Model id routed by the gateway (provider is derived from the id). */
 	model: string;
+	/** Optional OpenAI-compatible response format for structured output. */
+	responseFormat?: Record<string, unknown>;
 	/** Abort signal for cancellation. */
 	signal?: AbortSignal;
 	/** Bearer token forwarded to the gateway (never a provider key). */
@@ -87,6 +89,11 @@ export interface ModelCallResult {
 	message: AssistantMessage;
 	usage?: ModelUsage;
 }
+
+/** A chunk from a streaming OpenAI-compatible completion. */
+export type ModelStreamEvent =
+	| { delta: string; type: "text_delta" }
+	| { result: ModelCallResult; type: "done" };
 
 // ── Internal response shape (minimal subset we read) ──────────────────────────
 
@@ -112,23 +119,14 @@ function normalizeBaseUrl(baseUrl: string): string {
 	return baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 }
 
-/**
- * Call the node's gateway with the caller's own tools and return the first
- * choice, including any `tool_calls`.
- *
- * Throws when the base URL is a direct provider (egress enforcement) or when
- * the gateway returns a non-2xx status.
- */
-export async function callModelWithTools(
-	options: ModelCallOptions
-): Promise<ModelCallResult> {
-	const base = normalizeBaseUrl(options.baseUrl);
-	// Preserve the BYOK-at-the-gateway rule — same blocklist as ModelClient.
-	assertAllowedEgressUrl(base);
-
+function requestBody(
+	options: ModelCallOptions,
+	stream: boolean
+): Record<string, unknown> {
 	const body: Record<string, unknown> = {
 		model: options.model,
 		messages: options.messages,
+		stream,
 	};
 	if (options.tools && options.tools.length > 0) {
 		body.tools = options.tools;
@@ -136,7 +134,13 @@ export async function callModelWithTools(
 			body.tool_choice = options.toolChoice;
 		}
 	}
+	if (options.responseFormat) {
+		body.response_format = options.responseFormat;
+	}
+	return body;
+}
 
+function requestHeaders(options: ModelCallOptions): Record<string, string> {
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 		// Force the gateway's plain-completion branch so our own tool_calls are
@@ -146,24 +150,10 @@ export async function callModelWithTools(
 	if (options.token) {
 		headers.authorization = `Bearer ${options.token}`;
 	}
+	return headers;
+}
 
-	const res = await fetch(`${base}${CHAT_COMPLETIONS_PATH}`, {
-		method: "POST",
-		headers,
-		body: JSON.stringify(body),
-		signal: options.signal,
-	});
-
-	if (!res.ok) {
-		const text = await res.text().catch(() => "");
-		throw new Error(
-			`[ryu-sdk] gateway ${res.status} ${res.statusText} at ${base}${CHAT_COMPLETIONS_PATH}${
-				text ? `: ${text}` : ""
-			}`
-		);
-	}
-
-	const json = (await res.json()) as ChatCompletionResponse;
+function parseModelCallResponse(json: ChatCompletionResponse): ModelCallResult {
 	const choice = json.choices?.[0];
 	const rawMessage = choice?.message;
 	const message: AssistantMessage = {
@@ -186,5 +176,200 @@ export async function callModelWithTools(
 		message,
 		finishReason: choice?.finish_reason ?? null,
 		usage,
+	};
+}
+
+/**
+ * Call the node's gateway with the caller's own tools and return the first
+ * choice, including any `tool_calls`.
+ *
+ * Throws when the base URL is a direct provider (egress enforcement) or when
+ * the gateway returns a non-2xx status.
+ */
+export async function callModelWithTools(
+	options: ModelCallOptions
+): Promise<ModelCallResult> {
+	const base = normalizeBaseUrl(options.baseUrl);
+	// Preserve the BYOK-at-the-gateway rule — same blocklist as ModelClient.
+	assertAllowedEgressUrl(base);
+
+	const body = requestBody(options, false);
+	const headers = requestHeaders(options);
+
+	const res = await fetch(`${base}${CHAT_COMPLETIONS_PATH}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify(body),
+		signal: options.signal,
+	});
+
+	if (!res.ok) {
+		const text = await res.text().catch(() => "");
+		throw new Error(
+			`[ryu-sdk] gateway ${res.status} ${res.statusText} at ${base}${CHAT_COMPLETIONS_PATH}${
+				text ? `: ${text}` : ""
+			}`
+		);
+	}
+
+	return parseModelCallResponse((await res.json()) as ChatCompletionResponse);
+}
+
+interface ChatCompletionStreamChunk {
+	choices?: Array<{
+		delta?: {
+			content?: string | null;
+			tool_calls?: Array<{
+				index?: number;
+				id?: string;
+				function?: { arguments?: string; name?: string };
+			}>;
+		};
+		finish_reason?: string | null;
+	}>;
+	usage?: ChatCompletionResponse["usage"];
+}
+
+function streamDataFrames(buffer: string): { frames: string[]; rest: string } {
+	const frames: string[] = [];
+	let rest = buffer;
+	while (true) {
+		const match = /\r?\n\r?\n/.exec(rest);
+		if (!match || match.index === undefined) {
+			break;
+		}
+		const raw = rest.slice(0, match.index);
+		rest = rest.slice(match.index + match[0].length);
+		const data = raw
+			.split(/\r?\n/)
+			.filter((line) => line.startsWith("data:"))
+			.map((line) => line.slice(5).trimStart())
+			.join("\n");
+		if (data) {
+			frames.push(data);
+		}
+	}
+	return { frames, rest };
+}
+
+/**
+ * Stream a gateway completion and assemble tool-call deltas into one final
+ * assistant message. Providers that do not expose SSE are accepted through a
+ * JSON fallback, which keeps older gateways and deterministic test doubles
+ * compatible while preserving real deltas whenever the gateway supports them.
+ */
+export async function* streamModelWithTools(
+	options: ModelCallOptions
+): AsyncGenerator<ModelStreamEvent> {
+	const base = normalizeBaseUrl(options.baseUrl);
+	assertAllowedEgressUrl(base);
+	const res = await fetch(`${base}${CHAT_COMPLETIONS_PATH}`, {
+		method: "POST",
+		headers: requestHeaders(options),
+		body: JSON.stringify(requestBody(options, true)),
+		signal: options.signal,
+	});
+	if (!res.ok) {
+		const text = await res.text().catch(() => "");
+		throw new Error(
+			`[ryu-sdk] gateway ${res.status} ${res.statusText} at ${base}${CHAT_COMPLETIONS_PATH}${
+				text ? `: ${text}` : ""
+			}`
+		);
+	}
+
+	const contentType = res.headers.get("content-type") ?? "";
+	if (!(contentType.includes("text/event-stream") && res.body)) {
+		const fallback = parseModelCallResponse(
+			(await res.json()) as ChatCompletionResponse
+		);
+		yield { type: "done", result: fallback };
+		return;
+	}
+
+	const reader = res.body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = "";
+	let content = "";
+	let finishReason: string | null = null;
+	let usage: ModelUsage | undefined;
+	const toolCalls = new Map<
+		number,
+		{ arguments: string; id: string; name: string }
+	>();
+
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			buffer += decoder.decode(value, { stream: true });
+			const parsed = streamDataFrames(buffer);
+			buffer = parsed.rest;
+			for (const frame of parsed.frames) {
+				if (frame === "[DONE]") {
+					continue;
+				}
+				const chunk = JSON.parse(frame) as ChatCompletionStreamChunk;
+				const choice = chunk.choices?.[0];
+				finishReason = choice?.finish_reason ?? finishReason;
+				if (chunk.usage) {
+					usage = {
+						promptTokens: chunk.usage.prompt_tokens ?? 0,
+						completionTokens: chunk.usage.completion_tokens ?? 0,
+						totalTokens: chunk.usage.total_tokens ?? 0,
+					};
+				}
+				const delta = choice?.delta;
+				if (delta?.content) {
+					content += delta.content;
+					yield { type: "text_delta", delta: delta.content };
+				}
+				for (const [fallbackIndex, tool] of (
+					delta?.tool_calls ?? []
+				).entries()) {
+					const index = tool.index ?? fallbackIndex;
+					const current = toolCalls.get(index) ?? {
+						arguments: "",
+						id: tool.id ?? `call_${index}`,
+						name: tool.function?.name ?? "",
+					};
+					if (tool.id) {
+						current.id = tool.id;
+					}
+					if (tool.function?.name) {
+						current.name = tool.function.name;
+					}
+					current.arguments += tool.function?.arguments ?? "";
+					toolCalls.set(index, current);
+				}
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: content || null,
+		...(toolCalls.size > 0
+			? {
+					tool_calls: [...toolCalls.entries()]
+						.sort(([a], [b]) => a - b)
+						.map(([, call]) => ({
+							id: call.id,
+							type: "function" as const,
+							function: {
+								arguments: call.arguments,
+								name: call.name,
+							},
+						})),
+				}
+			: {}),
+	};
+	yield {
+		result: { finishReason, message, usage },
+		type: "done",
 	};
 }

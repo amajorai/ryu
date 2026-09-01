@@ -2535,6 +2535,30 @@ fn ryu_marketplace_base() -> String {
         .unwrap_or_else(|| RYU_MARKETPLACE_DEFAULT_BASE.to_owned())
 }
 
+const MAX_RYU_PACKAGE_DETAIL_BYTES: usize = 16 * 1024 * 1024;
+const MAX_RYU_PACKAGE_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
+
+async fn read_bounded_reqwest_body(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        bail!("{label} exceeds the configured size limit");
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if chunk.len() > max_bytes.saturating_sub(bytes.len()) {
+            bail!("{label} exceeds the configured size limit");
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 /// Fetch the detail envelope for a portable GitHub-backed package. Portable
 /// package kinds intentionally do not expand `CatalogKind`: they are a package
 /// transport, not one of Core's legacy catalog adapters. The returned detail is
@@ -2575,9 +2599,10 @@ pub async fn fetch_ryu_package_detail(
             response.status()
         );
     }
-    let detail = response
-        .json::<Value>()
-        .await
+    let detail_bytes =
+        read_bounded_reqwest_body(response, MAX_RYU_PACKAGE_DETAIL_BYTES, "Ryu package detail")
+            .await?;
+    let detail = serde_json::from_slice::<Value>(&detail_bytes)
         .context("Ryu package detail was not valid JSON")?;
     let descriptor = detail
         .get("descriptor")
@@ -2626,10 +2651,12 @@ pub async fn fetch_ryu_package_archive(
     if !response.status().is_success() {
         bail!("Ryu package archive returned {}", response.status());
     }
-    let bytes = response.bytes().await?.to_vec();
-    if bytes.len() > 64 * 1024 * 1024 {
-        bail!("Ryu package archive exceeds the 64 MiB limit");
-    }
+    let bytes = read_bounded_reqwest_body(
+        response,
+        MAX_RYU_PACKAGE_ARCHIVE_BYTES,
+        "Ryu package archive",
+    )
+    .await?;
     Ok(bytes)
 }
 

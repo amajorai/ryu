@@ -128,7 +128,13 @@ pub async fn execute_code(
 
     // Pre-run gateway budget gate (fail-closed).
     use crate::sidecar::gateway::{
-        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+        check_exec_budget, check_exec_scan, report_exec_audit_with_attribution,
+        ExecAuditAttribution, ExecBudgetOutcome, ExecScanOutcome,
+    };
+    let audit_attribution = ExecAuditAttribution {
+        agent_id: Some(agent_id.to_owned()),
+        feature: Some("agent".to_owned()),
+        ..Default::default()
     };
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_exec").await {
         return ExecOutcome::error(format!("gateway denied execution: {reason}"));
@@ -142,13 +148,14 @@ pub async fn execute_code(
         ExecScanOutcome::Deny(reason) => {
             // Block + audit the denied exec via the same reporter the budget path
             // uses, then surface the error the way a budget deny is surfaced.
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_exec",
                 0,
                 1,
                 None,
                 Some(format!("scan denied: {reason}")),
+                audit_attribution.clone(),
             )
             .await;
             return ExecOutcome::error(format!("gateway denied execution: {reason}"));
@@ -163,13 +170,14 @@ pub async fn execute_code(
                 %reason,
                 "exec scan requires approval but no in-process approval-await path exists; denying"
             );
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_exec",
                 0,
                 1,
                 None,
                 Some(format!("scan approval_required (denied): {reason}")),
+                audit_attribution.clone(),
             )
             .await;
             return ExecOutcome::error(format!("execution requires approval: {reason}"));
@@ -188,13 +196,14 @@ pub async fn execute_code(
         // A pause is not a failure — it is a successful partial run awaiting input.
         ExecOutcome::Paused { .. } => (0, None),
     };
-    report_exec_audit(
+    report_exec_audit_with_attribution(
         backend,
         "tool_exec",
         started.elapsed().as_millis() as u64,
         exit_code,
         None,
         err,
+        audit_attribution,
     )
     .await;
 
@@ -947,6 +956,42 @@ pub async fn run_http_tool(
     agent_id: &str,
     session_id: Option<&str>,
 ) -> Result<Value, String> {
+    run_http_tool_with_agent(
+        url,
+        method,
+        args,
+        header_params,
+        secret_headers,
+        fail_open,
+        unwrap_body,
+        body_defaults,
+        grants,
+        profile_ids,
+        agent_id,
+        session_id,
+        None,
+    )
+    .await
+}
+
+/// Variant of [`run_http_tool`] that receives the actual calling agent id in
+/// addition to the owning plugin id used for grants and secret resolution.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_http_tool_with_agent(
+    url: &str,
+    method: &str,
+    args: Value,
+    header_params: &[String],
+    secret_headers: &std::collections::BTreeMap<String, String>,
+    fail_open: bool,
+    unwrap_body: bool,
+    body_defaults: &Value,
+    grants: &std::collections::HashSet<String>,
+    profile_ids: &[String],
+    agent_id: &str,
+    session_id: Option<&str>,
+    audit_agent_id: Option<&str>,
+) -> Result<Value, String> {
     // 0. Resolve the server-side SECRET headers (async + governed) BEFORE building
     //    the request. Each source (`env:` / `vault:`) resolves to a concrete value
     //    or "absent" (header omitted). These are pre-resolved so `build_rest_request`
@@ -1016,7 +1061,13 @@ pub async fn run_http_tool(
 
     // 2. Gateway governance: fail-closed budget + opt-in firewall/DLP scan.
     use crate::sidecar::gateway::{
-        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+        check_exec_budget, check_exec_scan, report_exec_audit_with_attribution,
+        ExecAuditAttribution, ExecBudgetOutcome, ExecScanOutcome,
+    };
+    let audit_attribution = ExecAuditAttribution {
+        agent_id: audit_agent_id.map(str::to_owned),
+        feature: Some("agent".to_owned()),
+        ..Default::default()
     };
     let backend = "tool_http";
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_http").await {
@@ -1029,13 +1080,14 @@ pub async fn run_http_tool(
     match check_exec_scan(backend, &scan_content, session_id, Some(agent_id)).await {
         ExecScanOutcome::Allow => {}
         ExecScanOutcome::Deny(reason) | ExecScanOutcome::ApprovalRequired(reason) => {
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_http",
                 0,
                 1,
                 session_id.map(str::to_owned),
                 Some(format!("scan denied: {reason}")),
+                audit_attribution.clone(),
             )
             .await;
             return Err(format!("gateway denied http egress: {reason}"));
@@ -1124,13 +1176,14 @@ pub async fn run_http_tool(
             Some(e.to_string()),
         ),
     };
-    report_exec_audit(
+    report_exec_audit_with_attribution(
         backend,
         "tool_http",
         started.elapsed().as_millis() as u64,
         exit_code,
         session_id.map(str::to_owned),
         audit_err,
+        audit_attribution,
     )
     .await;
     result
@@ -1494,8 +1547,9 @@ fn expand_arg_specs(
 /// `grants` is the owning plugin's grant set; it must contain
 /// `tool:command:<bin>` (or the `*` wildcard). Env VALUES are deliberately
 /// excluded from the scan and audit content, mirroring how `http` excludes header
-/// values. `plugin_id` fills the audit principal (there is no separate agent id at
-/// the dispatch call site, mirroring `run_http_tool`).
+/// values. `plugin_id` remains the grant and secret namespace, while
+/// `audit_agent_id` preserves the actual agent that invoked the tool when the
+/// dispatcher has that context.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_command_tool(
     bin_key: &str,
@@ -1511,6 +1565,44 @@ pub async fn run_command_tool(
     grants: &std::collections::HashSet<String>,
     plugin_id: &str,
     session_id: Option<&str>,
+) -> Result<Value, String> {
+    run_command_tool_with_agent(
+        bin_key,
+        arg_templates,
+        arg_specs,
+        env_map,
+        cwd,
+        timeout_secs,
+        output,
+        egress_url_arg,
+        arg_bounds,
+        args,
+        grants,
+        plugin_id,
+        session_id,
+        None,
+    )
+    .await
+}
+
+/// Variant of [`run_command_tool`] that preserves the calling agent id while
+/// keeping the owning plugin id as the grant/secret boundary.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_command_tool_with_agent(
+    bin_key: &str,
+    arg_templates: &[String],
+    arg_specs: Option<&[crate::plugin_manifest::schema::ArgSpec]>,
+    env_map: &BTreeMap<String, String>,
+    cwd: Option<&str>,
+    timeout_secs: u64,
+    output: crate::plugin_manifest::schema::CommandOutput,
+    egress_url_arg: Option<&str>,
+    arg_bounds: &BTreeMap<String, crate::plugin_manifest::schema::ArgBounds>,
+    mut args: Value,
+    grants: &std::collections::HashSet<String>,
+    plugin_id: &str,
+    session_id: Option<&str>,
+    audit_agent_id: Option<&str>,
 ) -> Result<Value, String> {
     use crate::plugin_manifest::schema::CommandOutput;
     use tokio::io::AsyncReadExt;
@@ -1621,7 +1713,15 @@ pub async fn run_command_tool(
 
     // 5. GATEWAY governance: fail-closed budget + opt-in firewall/DLP scan.
     use crate::sidecar::gateway::{
-        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+        check_exec_budget, check_exec_scan, report_exec_audit_with_attribution,
+        ExecAuditAttribution, ExecBudgetOutcome, ExecScanOutcome,
+    };
+    let audit_attribution = ExecAuditAttribution {
+        agent_id: audit_agent_id
+            .map(str::to_owned)
+            .or_else(|| Some(plugin_id.to_owned())),
+        feature: Some("agent".to_owned()),
+        ..Default::default()
     };
     let backend = "tool_command";
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_command").await {
@@ -1635,13 +1735,14 @@ pub async fn run_command_tool(
         // ApprovalRequired is a fail-closed DENY on a synchronous exec: there is no
         // place to park an interactive sign-off in a blocking tool call.
         ExecScanOutcome::Deny(reason) | ExecScanOutcome::ApprovalRequired(reason) => {
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_command",
                 0,
                 1,
                 session_id.map(str::to_owned),
                 Some(format!("scan denied: {reason}")),
+                audit_attribution.clone(),
             )
             .await;
             return Err(format!("gateway denied command exec: {reason}"));
@@ -1666,13 +1767,14 @@ pub async fn run_command_tool(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_command",
                 started.elapsed().as_millis() as u64,
                 1,
                 session_id.map(str::to_owned),
                 Some(e.to_string()),
+                audit_attribution.clone(),
             )
             .await;
             // OPERATIONAL failure → graceful degradation (audit still records the
@@ -1744,13 +1846,14 @@ pub async fn run_command_tool(
             let _ = child.wait().await;
             out_task.abort();
             err_task.abort();
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_command",
                 started.elapsed().as_millis() as u64,
                 124,
                 session_id.map(str::to_owned),
                 Some(format!("timeout after {timeout_secs}s")),
+                audit_attribution.clone(),
             )
             .await;
             // OPERATIONAL failure → graceful degradation (audit records exit 124
@@ -1764,13 +1867,14 @@ pub async fn run_command_tool(
     let stderr_bytes = err_task.await.unwrap_or_default();
 
     let exit_code = status.code().unwrap_or(-1);
-    report_exec_audit(
+    report_exec_audit_with_attribution(
         backend,
         "tool_command",
         started.elapsed().as_millis() as u64,
         exit_code,
         session_id.map(str::to_owned),
         None,
+        audit_attribution,
     )
     .await;
 
@@ -1860,7 +1964,13 @@ pub async fn resume_execution_opt(
 ) -> Option<ExecOutcome> {
     // Pre-resume gateway budget gate (fail-closed), mirroring `execute_code`.
     use crate::sidecar::gateway::{
-        check_exec_budget, check_exec_scan, report_exec_audit, ExecBudgetOutcome, ExecScanOutcome,
+        check_exec_budget, check_exec_scan, report_exec_audit_with_attribution,
+        ExecAuditAttribution, ExecBudgetOutcome, ExecScanOutcome,
+    };
+    let audit_attribution = ExecAuditAttribution {
+        agent_id: Some(agent_id.to_owned()),
+        feature: Some("agent".to_owned()),
+        ..Default::default()
     };
     let backend = CodeExecutor::default_backend().backend();
     if let ExecBudgetOutcome::Deny(reason) = check_exec_budget(backend, "tool_exec").await {
@@ -1878,13 +1988,14 @@ pub async fn resume_execution_opt(
     match check_exec_scan(backend, "tool_exec", None, Some(agent_id)).await {
         ExecScanOutcome::Allow => {}
         ExecScanOutcome::Deny(reason) => {
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_exec",
                 0,
                 1,
                 None,
                 Some(format!("scan denied (resume): {reason}")),
+                audit_attribution.clone(),
             )
             .await;
             return Some(ExecOutcome::error(format!(
@@ -1896,13 +2007,14 @@ pub async fn resume_execution_opt(
                 %reason,
                 "exec scan requires approval on resume but no in-process approval-await path exists; denying"
             );
-            report_exec_audit(
+            report_exec_audit_with_attribution(
                 backend,
                 "tool_exec",
                 0,
                 1,
                 None,
                 Some(format!("scan approval_required (resume, denied): {reason}")),
+                audit_attribution.clone(),
             )
             .await;
             return Some(ExecOutcome::error(format!(
@@ -1927,13 +2039,14 @@ pub async fn resume_execution_opt(
             } => (if *is_error { 1 } else { 0 }, error.clone()),
             ExecOutcome::Paused { .. } => (0, None),
         };
-        report_exec_audit(
+        report_exec_audit_with_attribution(
             backend,
             "tool_exec",
             started.elapsed().as_millis() as u64,
             exit_code,
             None,
             err,
+            audit_attribution,
         )
         .await;
     }

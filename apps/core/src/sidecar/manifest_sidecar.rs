@@ -701,6 +701,9 @@ pub struct McpRegistration {
     /// The Gateway-**approved** grants from the plugin RECORD (never the manifest's own
     /// unvalidated `permission_grants`), for the registration gate.
     pub approved_grants: Vec<String>,
+    /// The activation generation that is allowed to publish the registration.
+    /// `None` keeps standalone tests and legacy construction sites ungated.
+    pub runtime: Option<crate::plugins::runtime::RuntimeGenerationBinding>,
 }
 
 /// Everything the **ext-API fetch hook** needs to lower this sidecar's own OpenAPI
@@ -769,6 +772,9 @@ pub struct OpenApiImport {
     /// Shared client for the one-shot spec fetch. Reused rather than built per call so
     /// the hook does not stand up a fresh connection pool on every sidecar.
     pub client: reqwest::Client,
+    /// The activation generation that is allowed to publish derived routes.
+    /// `None` keeps standalone tests and legacy construction sites ungated.
+    pub runtime: Option<crate::plugins::runtime::RuntimeGenerationBinding>,
 }
 
 impl OpenApiImport {
@@ -851,6 +857,9 @@ pub struct ManifestSidecar {
     ///
     /// [`McpRegistry::has_ext_api_routes`]: crate::sidecar::mcp::McpRegistry::has_ext_api_routes
     openapi_imported: Arc<AtomicBool>,
+    /// The plugin generation that owns this sidecar. Health callbacks and
+    /// asynchronous imports use it to reject stale completions after reload.
+    runtime: Option<crate::plugins::runtime::RuntimeGenerationBinding>,
 }
 
 impl ManifestSidecar {
@@ -873,6 +882,7 @@ impl ManifestSidecar {
             mcp: None,
             openapi: None,
             openapi_imported: Arc::new(AtomicBool::new(false)),
+            runtime: None,
         }
     }
 
@@ -882,6 +892,16 @@ impl ManifestSidecar {
     #[must_use]
     pub fn with_mcp_registration(mut self, registration: McpRegistration) -> Self {
         self.mcp = Some(registration);
+        self
+    }
+
+    /// Bind this sidecar to the plugin generation that created it.
+    #[must_use]
+    pub fn with_runtime_binding(
+        mut self,
+        binding: crate::plugins::runtime::RuntimeGenerationBinding,
+    ) -> Self {
+        self.runtime = Some(binding);
         self
     }
 
@@ -1360,7 +1380,7 @@ async fn ensure_local_sidecar_present(
     // had to skip. Unconditional — the re-probe is the authority, so a resolution that
     // changed nothing registers nothing.
     if let Some(registration) = mcp {
-        notify_managed_binary_ready(registration);
+        notify_managed_binary_ready(registration).await;
     }
     program
 }
@@ -1552,7 +1572,14 @@ async fn resolve_local_sidecar_program(
 ///
 /// Returns the names registered by this pass (empty on the common no-op), for logging
 /// and for the tests that assert the seam actually fires.
-fn notify_managed_binary_ready(registration: &McpRegistration) -> Vec<String> {
+async fn notify_managed_binary_ready(registration: &McpRegistration) -> Vec<String> {
+    let _runtime_lease = match &registration.runtime {
+        Some(binding) => match binding.acquire().await {
+            Some(lease) => Some(lease),
+            None => return Vec::new(),
+        },
+        None => None,
+    };
     let manifest = &registration.manifest;
     if manifest.mcp_servers.is_empty() {
         return Vec::new();
@@ -1763,6 +1790,13 @@ fn openapi_doc_urls(base: &str, mount: &str) -> Vec<String> {
 /// [`has_ext_api_routes_for_sidecar`]: crate::sidecar::mcp::McpRegistry::has_ext_api_routes_for_sidecar
 /// [`McpRegistry::clear_ext_api_routes`]: crate::sidecar::mcp::McpRegistry::clear_ext_api_routes
 async fn import_openapi_once(spec: OpenApiImport, port: u16, latch: Arc<AtomicBool>) {
+    let _runtime_lease = match &spec.runtime {
+        Some(binding) => match binding.acquire().await {
+            Some(lease) => Some(lease),
+            None => return,
+        },
+        None => None,
+    };
     // Asked per SIDECAR, not per plugin. The plugin-scoped `has_ext_api_routes` would
     // answer `true` as soon as the app's first HTTP sidecar had lowered, so a second
     // one would skip its own fetch for the life of the process — see
@@ -2374,6 +2408,7 @@ impl Sidecar for ManifestSidecar {
         // Same owned-clone treatment as `provider` above, for the ext-API fetch hook.
         let openapi = self.openapi.clone();
         let openapi_latch = Arc::clone(&self.openapi_imported);
+        let runtime_binding = self.runtime.clone();
         Box::pin(async move {
             if !running {
                 // Say WHICH kind of "not running" this is. `binary not installed:` is
@@ -2387,6 +2422,13 @@ impl Sidecar for ManifestSidecar {
                     None => HealthStatus::Unhealthy("process not running".to_owned()),
                 };
             }
+            let _runtime_lease = match runtime_binding {
+                Some(binding) => match binding.acquire().await {
+                    Some(lease) => Some(lease),
+                    None => return HealthStatus::Unhealthy("plugin runtime inactive".to_owned()),
+                },
+                None => None,
+            };
             let client = match reqwest::Client::builder().timeout(HEALTH_TIMEOUT).build() {
                 Ok(c) => c,
                 Err(e) => return HealthStatus::Degraded(format!("client build failed: {e}")),
@@ -3222,6 +3264,7 @@ mod tests {
             manifest: Arc::clone(&manifest),
             tier: PluginTier::Core,
             approved_grants: Vec::new(),
+            runtime: None,
         };
         let downloads = crate::downloads::DownloadCenter::with_default_client();
         let program = ensure_local_sidecar_present(
@@ -3258,7 +3301,7 @@ mod tests {
         //    rebuilds the server map + clears the tool cache. Once every declared name is
         //    registered the notifier must do nothing at all.
         assert!(
-            notify_managed_binary_ready(&registration).is_empty(),
+            notify_managed_binary_ready(&registration).await.is_empty(),
             "a wake with nothing left to register must not touch the registry"
         );
 
@@ -3304,6 +3347,7 @@ mod tests {
             )),
             tier: PluginTier::Core,
             approved_grants: Vec::new(),
+            runtime: None,
         };
         let downloads = crate::downloads::DownloadCenter::with_default_client();
         let _ = ensure_local_sidecar_present(
@@ -3323,7 +3367,7 @@ mod tests {
         );
         // And now that it IS owned, the guard does its job on the next wake.
         assert!(
-            notify_managed_binary_ready(&registration).is_empty(),
+            notify_managed_binary_ready(&registration).await.is_empty(),
             "once owned, a wake must not touch the registry"
         );
 
@@ -3357,6 +3401,7 @@ mod tests {
             )),
             tier: PluginTier::Community,
             approved_grants: Vec::new(),
+            runtime: None,
         };
 
         let downloads = crate::downloads::DownloadCenter::with_default_client();
@@ -3382,7 +3427,7 @@ mod tests {
             ..registration
         };
         assert_eq!(
-            notify_managed_binary_ready(&granted),
+            notify_managed_binary_ready(&granted).await,
             vec![server.clone()],
             "with the grant approved, the same landing registers the server"
         );
@@ -3554,6 +3599,7 @@ mod tests {
             upstream_mount: "/api".to_owned(),
             declared_routes: Vec::new(),
             client: reqwest::Client::new(),
+            runtime: None,
         }
     }
 

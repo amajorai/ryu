@@ -74,5 +74,9 @@ export type {
 	ToolSchema,
 } from "./tool.ts";
 export { defineTool } from "./tool.ts";
-export type { WorkflowOptions, WorkflowStep } from "./workflow.ts";
+export type {
+	WorkflowOptions,
+	WorkflowRunnable,
+	WorkflowStep,
+} from "./workflow.ts";
 export { defineWorkflow } from "./workflow.ts";

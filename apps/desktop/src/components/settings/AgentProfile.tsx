@@ -18,6 +18,11 @@ import { useQuery } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { useTheme } from "next-themes";
 import { useMemo } from "react";
+import { AgentPassportPanel } from "@/src/components/agents/AgentPassportPanel.tsx";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import type { AgentSummary } from "@/src/lib/api/agents.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
 import {
 	fetchAgentProfile,
 	fetchAgentUsageDaily,
@@ -29,18 +34,15 @@ const HEATMAP_DAYS = 364;
 const DATE_FORMAT = "yyyy-MM-dd";
 
 interface AgentProfileProps {
-	agentId: string;
-	description?: string | null;
-	name: string;
+	agent: AgentSummary;
 	onBack: () => void;
 }
 
-export function AgentProfile({
-	agentId,
-	description,
-	name,
-	onBack,
-}: AgentProfileProps) {
+export function AgentProfile({ agent, onBack }: AgentProfileProps) {
+	const activeNode = useActiveNode();
+	const activeOrgId = useActiveOrgId();
+	const target = useMemo(() => toTarget(activeNode), [activeNode]);
+	const organizationId = activeNode.orgId ?? activeOrgId;
 	const { resolvedTheme } = useTheme();
 	const { from, to } = useMemo(() => {
 		const now = new Date();
@@ -51,12 +53,12 @@ export function AgentProfile({
 	}, []);
 
 	const profileQuery = useQuery({
-		queryKey: ["profile", "agent", agentId],
-		queryFn: () => fetchAgentProfile(agentId),
+		queryKey: ["profile", "agent", agent.id],
+		queryFn: () => fetchAgentProfile(agent.id),
 	});
 	const usageQuery = useQuery({
-		queryKey: ["profile", "agent-usage", agentId, from, to],
-		queryFn: () => fetchAgentUsageDaily(agentId, from, to),
+		queryKey: ["profile", "agent-usage", agent.id, from, to],
+		queryFn: () => fetchAgentUsageDaily(agent.id, from, to),
 	});
 
 	const profile = profileQuery.data;
@@ -94,12 +96,12 @@ export function AgentProfile({
 
 			<div className="max-w-sm">
 				<EmployeeBadge
-					employeeId={agentId}
+					employeeId={agent.id}
 					hiredAt={profile?.hiredAt}
 					level={profile?.level ?? 0}
 					metalTheme={resolvedTheme === "light" ? "light" : "dark"}
-					name={name}
-					role={description ?? undefined}
+					name={agent.name}
+					role={agent.description ?? undefined}
 					stats={[
 						{ label: "Tokens", value: formatNumber(totalTokens) },
 						{
@@ -113,6 +115,12 @@ export function AgentProfile({
 					]}
 				/>
 			</div>
+
+			<AgentPassportPanel
+				agent={agent}
+				organizationId={organizationId}
+				target={target}
+			/>
 
 			<SettingsSection
 				caption="This employee's activity over the last year."

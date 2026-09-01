@@ -30,6 +30,7 @@ pub mod encryption;
 pub mod gifs;
 pub mod git;
 pub mod governance;
+pub mod harness;
 pub mod hooks;
 pub mod recommendations;
 // The device-registry + TRMNL display HTTP surface moved to the extracted
@@ -212,6 +213,10 @@ pub struct ServerState {
     /// `onStartup` re-run. Surfaced through `GET /api/engines` (engines) and
     /// `GET /api/plugins/contributions` (channels + companions).
     pub app_contrib: crate::plugins::app_contrib::AppContribRegistry,
+    /// Coordinates plugin runtime generations. Activation publishes only after
+    /// registration completes; deactivation drains in-flight hook work before
+    /// removing the plugin's contributions.
+    pub plugin_runtime: crate::plugins::runtime::PluginRuntime,
     /// Per-run observability trace store (M4 / issue #178). Persists ordered
     /// spans (tool-call, model-call) keyed by `conversation_id`.
     pub traces: TraceStore,
@@ -446,7 +451,7 @@ struct ResolvedAuthorization {
 }
 
 #[derive(Clone)]
-struct VerifiedUserJwt(Option<String>);
+pub(crate) struct VerifiedUserJwt(Option<String>);
 
 fn path_has_prefix(path: &str, prefix: &str) -> bool {
     path == prefix
@@ -3920,11 +3925,11 @@ pub fn create_router(
         )
         .route(
             "/api/marketplace/packages/install",
-            post(marketplace_package_install),
+            post(marketplace_package_install).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route(
             "/api/marketplace/packages/update",
-            post(marketplace_package_update),
+            post(marketplace_package_update).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route(
             "/api/marketplace/packages/:kind/:id/enable",
@@ -4010,7 +4015,7 @@ pub fn create_router(
         // boot), so it can never actually be disabled — the gate is transparent. The
         // ACP routing/execution substrate that serves a chat turn (`agent_routing/`,
         // `sidecar/adapters/acp.rs`, `/api/chat/stream`) is kernel and is NOT here.
-        .merge(agents_routes(&state.app_store))
+        .merge(agents_routes(&state))
         // Prompt Studio's Promptfoo-compatible suites, immutable snapshots,
         // persisted evaluation runs, and human review are Core-owned resources.
         // The handlers resolve the suite's agent before applying the agent ACL,
@@ -4441,6 +4446,10 @@ pub fn create_router(
             "/api/conversations/:id/sessions",
             get(list_sessions_for_conversation_handler),
         )
+        // Versioned durable agent-harness projection. The legacy conversation,
+        // session, approval, worktree, and chat routes remain available; this
+        // mount composes them behind one session/run/event contract.
+        .merge(harness::routes())
         // ── Document Spaces (the store Meetings/Whiteboard/Canvas depend on) ──
         // The ONE mount of `/api/spaces/*`. Same treatment as `/api/meetings/*`:
         // its own sub-router so a single `route_layer` can carry the App gate.
@@ -4861,7 +4870,10 @@ pub fn create_router(
         .route("/api/data-path/validate", post(validate_data_path))
         .route("/api/data-path/switch", post(switch_data_path))
         .route("/api/data-path/reset", post(reset_data_path))
-        .route("/api/data-path/export", post(export_data_path))
+        .route(
+            "/api/data-path/export",
+            post(export_data_path).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         // ── Shadow proxy (`/api/shadow/*`) ──────────────────────────────────
         // The desktop webview's companion/review/search surfaces reach the
         // device-local Shadow through Core: Shadow's own HTTP surface is
@@ -5342,7 +5354,173 @@ fn sync_plugin_output_styles(manifest: &crate::plugin_manifest::PluginManifest, 
 /// `sidecar/adapters/acp.rs`) is kernel and is deliberately NOT part of this router.
 /// `/api/pi-config/*` is a separate surface (not under `/api/agents`) and stays on
 /// the ungated protected chain.
-fn agents_routes(app_store: &PluginStore) -> Router<ServerState> {
+fn agent_control_audit_route(
+    method: &Method,
+    path: &str,
+) -> Option<(String, String, Option<String>)> {
+    if !matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        return None;
+    }
+
+    if *method == Method::POST && path == "/api/agents" {
+        return None;
+    }
+    if *method == Method::POST && path == "/api/agents/catalog/install" {
+        return Some((
+            "agent.catalog.install".to_owned(),
+            "agent-catalog".to_owned(),
+            None,
+        ));
+    }
+    if *method == Method::POST && path == "/api/agents/catalog/uninstall" {
+        return Some((
+            "agent.catalog.uninstall".to_owned(),
+            "agent-catalog".to_owned(),
+            None,
+        ));
+    }
+    if *method == Method::POST && path == "/api/agents/published/install" {
+        return Some((
+            "agent.published.install".to_owned(),
+            "agent-catalog".to_owned(),
+            None,
+        ));
+    }
+    if *method == Method::POST && path == "/api/agents/import" {
+        return Some(("agent.import".to_owned(), "agent-import".to_owned(), None));
+    }
+    if *method == Method::POST && path == "/api/import/run" {
+        return Some((
+            "agent.setup.import".to_owned(),
+            "agent-import".to_owned(),
+            None,
+        ));
+    }
+
+    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+    if segments.get(0) != Some(&"api") || segments.get(1) != Some(&"agents") {
+        return None;
+    }
+    let agent_id = segments.get(2)?.trim();
+    if agent_id.is_empty() || matches!(agent_id, "catalog" | "published") {
+        return None;
+    }
+
+    let action = match segments.as_slice() {
+        ["api", "agents", _] if *method == Method::PUT => "agent.update",
+        ["api", "agents", _] if *method == Method::DELETE => "agent.delete",
+        ["api", "agents", _, "prompt-versions"] if *method == Method::POST => {
+            "agent.prompt-version.create"
+        }
+        ["api", "agents", _, "prompt-versions", _, "restore"] if *method == Method::POST => {
+            "agent.prompt-version.restore"
+        }
+        ["api", "agents", _, "migrate-to-ryu"] if *method == Method::POST => "agent.migrate",
+        ["api", "agents", _, "threads", "import"] if *method == Method::POST => {
+            "agent.thread.import"
+        }
+        ["api", "agents", _, "authenticate"] if *method == Method::POST => "agent.auth.login",
+        ["api", "agents", _, "logout"] if *method == Method::POST => "agent.auth.logout",
+        ["api", "agents", _, "accounts", "switch"] if *method == Method::POST => {
+            "agent.auth.account-switch"
+        }
+        ["api", "agents", _, "accounts", "remove"] if *method == Method::POST => {
+            "agent.auth.account-remove"
+        }
+        ["api", "agents", _, "sessions", _] if *method == Method::DELETE => "agent.session.delete",
+        ["api", "agents", _, "sessions", _] if *method == Method::POST => "agent.session.load",
+        ["api", "agents", _, "sessions", _, "load"] if *method == Method::POST => {
+            "agent.session.load"
+        }
+        ["api", "agents", _, "update"] if *method == Method::POST => "agent.runtime.update",
+        ["api", "agents", _, "capabilities"] if *method == Method::PUT => {
+            "agent.capabilities.update"
+        }
+        _ => return None,
+    };
+
+    Some((
+        action.to_owned(),
+        format!("agent:{agent_id}"),
+        Some(agent_id.to_owned()),
+    ))
+}
+
+#[cfg(test)]
+mod agent_control_audit_route_tests {
+    use super::agent_control_audit_route;
+    use axum::http::Method;
+
+    #[test]
+    fn keeps_agent_identity_and_action_in_the_control_row() {
+        assert_eq!(
+            agent_control_audit_route(&Method::PUT, "/api/agents/support"),
+            Some((
+                "agent.update".to_owned(),
+                "agent:support".to_owned(),
+                Some("support".to_owned()),
+            ))
+        );
+        assert_eq!(
+            agent_control_audit_route(
+                &Method::POST,
+                "/api/agents/support/prompt-versions/3/restore"
+            ),
+            Some((
+                "agent.prompt-version.restore".to_owned(),
+                "agent:support".to_owned(),
+                Some("support".to_owned()),
+            ))
+        );
+    }
+
+    #[test]
+    fn leaves_reads_and_agent_creation_for_the_handler_with_the_new_id() {
+        assert_eq!(
+            agent_control_audit_route(&Method::GET, "/api/agents/support"),
+            None
+        );
+        assert_eq!(
+            agent_control_audit_route(&Method::POST, "/api/agents"),
+            None
+        );
+    }
+}
+
+/// Append a Gateway control row for every successful mutating agent-management
+/// route. The caller identity comes from Core's verified JWT extension; route
+/// parameters are used only as bounded correlation metadata.
+async fn audit_agent_control(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    req: Request<axum::body::Body>,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_owned();
+    let metadata = agent_control_audit_route(&method, &path);
+    let response = next.run(req).await;
+    if response.status().is_success() {
+        if let Some((action, target, agent_id)) = metadata {
+            record_gateway_control_attributed(
+                &state,
+                &action,
+                &target,
+                Some("successful Core agent-management mutation"),
+                &caller,
+                agent_id.as_deref(),
+            )
+            .await;
+        }
+    }
+    response
+}
+
+fn agents_routes(state: &ServerState) -> Router<ServerState> {
+    let app_store = &state.app_store;
     Router::new()
         .route("/api/agents", get(list_agents).post(create_agent))
         .route("/api/agents/catalog", get(list_agent_catalog))
@@ -5351,12 +5529,15 @@ fn agents_routes(app_store: &PluginStore) -> Router<ServerState> {
             "/api/agents/catalog/uninstall",
             post(uninstall_agent_handler),
         )
-        .route("/api/agents/import", post(import_agent))
+        .route(
+            "/api/agents/import",
+            post(import_agent).layer(DefaultBodyLimit::max(1024 * 1024)),
+        )
         // Install a PUBLISHED agent definition (CatalogKind::Agent). Sibling of
         // `/api/agents/catalog/install` above, which installs an ACP runtime.
         .route(
             "/api/agents/published/install",
-            post(published_agent_install),
+            post(published_agent_install).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route(
             "/api/agents/:id",
@@ -5438,6 +5619,10 @@ fn agents_routes(app_store: &PluginStore) -> Router<ServerState> {
             "/api/agents/:id/capabilities",
             get(agent_capabilities).put(set_agent_capabilities),
         )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            audit_agent_control,
+        ))
         .route_layer(middleware::from_fn_with_state(
             AppGate::new(
                 app_store,
@@ -8129,6 +8314,73 @@ async fn chat_stream(
         None => None,
     };
     req.user_jwt = user_jwt;
+    // A session-bound caller may omit `conversation_id` and the runnable target;
+    // resolve both from Core's durable session row. If the body tries to mix a
+    // different conversation or runnable into that session, reject it before
+    // history, memory, or provider routing can observe the mismatch.
+    if let Some(session_id) = req.session_id.clone() {
+        let session = match state.conversations.get_session(&session_id).await {
+            Ok(Some(session)) => session,
+            Ok(None) => return json_error(StatusCode::NOT_FOUND, "session not found".to_owned()),
+            Err(error) => {
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("session lookup failed: {error}"),
+                )
+            }
+        };
+        if let Some(conversation_id) = req.conversation_id.as_deref() {
+            if conversation_id != session.conversation_id {
+                return json_error(
+                    StatusCode::CONFLICT,
+                    "session and conversation_id do not match".to_owned(),
+                );
+            }
+        }
+        req.conversation_id = Some(session.conversation_id.clone());
+        match session.runnable_kind {
+            crate::runnable::RunnableKind::Agent => {
+                if let Some(agent_id) = req.agent_id.as_deref() {
+                    if agent_id != session.runnable_id {
+                        return json_error(
+                            StatusCode::CONFLICT,
+                            "session and agent_id do not match".to_owned(),
+                        );
+                    }
+                }
+                if req.workflow_id.is_some() || req.team_id.is_some() {
+                    return json_error(
+                        StatusCode::CONFLICT,
+                        "an agent session cannot target a workflow or team".to_owned(),
+                    );
+                }
+                req.agent_id = Some(session.runnable_id);
+            }
+            crate::runnable::RunnableKind::Workflow => {
+                if req.agent_id.is_some() || req.team_id.is_some() {
+                    return json_error(
+                        StatusCode::CONFLICT,
+                        "a workflow session cannot target an agent or team".to_owned(),
+                    );
+                }
+                if let Some(workflow_id) = req.workflow_id.as_deref() {
+                    if workflow_id != session.runnable_id {
+                        return json_error(
+                            StatusCode::CONFLICT,
+                            "session and workflow_id do not match".to_owned(),
+                        );
+                    }
+                }
+                req.workflow_id = Some(session.runnable_id);
+            }
+            _ => {
+                return json_error(
+                    StatusCode::NOT_IMPLEMENTED,
+                    "this session runnable kind has no chat adapter".to_owned(),
+                )
+            }
+        }
+    }
     // Widget follow-ups carry only an opaque ticket on the wire. Validate it
     // here, but defer consumption until the final pre-dispatch point below so
     // RBAC and conversation ACL rejection do not burn a valid ticket. Core is
@@ -18176,6 +18428,29 @@ async fn activate_plugin(
     manifest: &crate::plugin_manifest::PluginManifest,
     record: &crate::plugins::PluginRecord,
 ) -> (Vec<serde_json::Value>, PolicyApplyOutcome) {
+    let activation = state.plugin_runtime.begin_activation(&manifest.id).await;
+    let runtime_binding = crate::plugins::runtime::RuntimeGenerationBinding::new(
+        state.plugin_runtime.clone(),
+        activation.generation().clone(),
+    );
+    // The lifecycle bit can change while the Gateway validation response is in
+    // flight. Do not publish a stale activation after a concurrent disable.
+    let still_enabled = state
+        .app_store
+        .get(&manifest.id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|current| current.enabled);
+    if !still_enabled {
+        tracing::debug!(
+            plugin = %manifest.id,
+            generation = activation.generation().number(),
+            "plugin activation became stale before registration"
+        );
+        return (Vec::new(), PolicyApplyOutcome::default());
+    }
+
     // Build and run the RunnableRegistry to activate the manifest's Runnables.
     // Handlers capture cloned subsystem handles; the registry is built per-call
     // so ServerState stays Clone (no non-Clone field added).
@@ -18207,7 +18482,14 @@ async fn activate_plugin(
     // resource sampler + `/api/sidecar/status`) like a built-in. Gated on tier +
     // approved `sidecar:process` grant; spawned + best-effort so a slow binary
     // download never blocks the enable response.
-    apply_sidecars(state, manifest, &record.approved_grants, true).await;
+    apply_sidecars(
+        state,
+        manifest,
+        &record.approved_grants,
+        true,
+        Some(runtime_binding.clone()),
+    )
+    .await;
 
     // ONE plugin model: enabling a synth MCP-server record flips the mcp.json
     // `enabled` flag that actually gates spawn + tool listing, so the record's
@@ -18267,6 +18549,7 @@ async fn activate_plugin(
             Err(e) => json!({ "id": rid, "ok": false, "error": e }),
         })
         .collect();
+    activation.commit();
     (statuses, policy_outcome)
 }
 
@@ -18623,6 +18906,34 @@ pub async fn fire_activation_event(state: &ServerState, event: &str) {
         let Some(approved_grants) = enabled_ids.get(&manifest.id) else {
             continue;
         };
+        if !crate::runnable::manifest_should_activate(manifest, &snapshot) {
+            continue;
+        }
+        let Some(activation) = state
+            .plugin_runtime
+            .begin_activation_if_inactive(&manifest.id)
+            .await
+        else {
+            continue;
+        };
+        // The enabled snapshot was captured before the per-plugin write lease.
+        // Re-check the store so a disable that won the race cannot be followed
+        // by a stale registration.
+        let still_enabled = state
+            .app_store
+            .get(&manifest.id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|current| current.enabled);
+        if !still_enabled {
+            tracing::debug!(
+                plugin = %manifest.id,
+                generation = activation.generation().number(),
+                "activation event became stale before registration"
+            );
+            continue;
+        }
         let results = registry.register_active(manifest, &snapshot);
         for (rid, res) in results {
             if let Err(e) = res {
@@ -18666,6 +18977,7 @@ pub async fn fire_activation_event(state: &ServerState, event: &str) {
             // prose nothing evaluates (design §1, the `ThemeContribution` argument).
             sync_plugin_output_styles(manifest, true);
         }
+        activation.commit();
     }
 }
 
@@ -19952,16 +20264,17 @@ fn provision_external_runtime(
 /// On enable each spec is gated by
 /// [`crate::sidecar::manifest_sidecar::may_run_sidecar`] (Core-tier auto; Community
 /// needs the approved `sidecar:process` grant, read from `approved_grants` — never
-/// the manifest's unvalidated declarations). Work is **spawned** and best-effort so
-/// a slow binary download / venv build never blocks the enable (or disable)
-/// response — the same graceful-degrade contract as `provision_external_runtime`.
-/// Stop is ungated (disabling always tears down), so the disable path ignores
-/// `approved_grants`.
+/// the manifest's unvalidated declarations). Enable work is **spawned** and
+/// best-effort so a slow binary download / venv build never blocks the enable
+/// response. Each spawned start carries the activation generation and holds a
+/// work lease, so disable waits for it or rejects it as stale. Stop is ungated,
+/// awaited under the deactivation lease, and ignores `approved_grants`.
 async fn apply_sidecars(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
     approved_grants: &[String],
     enabled: bool,
+    runtime_binding: Option<crate::plugins::runtime::RuntimeGenerationBinding>,
 ) {
     if manifest.sidecars.is_empty() {
         return;
@@ -19979,6 +20292,7 @@ async fn apply_sidecars(
             manifest: std::sync::Arc::new(manifest.clone()),
             tier,
             approved_grants: approved_grants.to_vec(),
+            runtime: runtime_binding.clone(),
         }
     });
     for spec in &manifest.sidecars {
@@ -19999,6 +20313,9 @@ async fn apply_sidecars(
                 spec.clone(),
                 state.downloads.clone(),
             );
+            if let Some(binding) = runtime_binding.clone() {
+                built = built.with_runtime_binding(binding);
+            }
             if let Some(registration) = mcp_registration.clone() {
                 built = built.with_mcp_registration(registration);
             }
@@ -20049,6 +20366,7 @@ async fn apply_sidecars(
                                 .unwrap_or_default(),
                             declared_routes: http.routes.clone(),
                             client: state.client.clone(),
+                            runtime: runtime_binding.clone(),
                         },
                     );
                 }
@@ -20106,7 +20424,15 @@ async fn apply_sidecars(
             }
             let plugin_id = manifest.id.clone();
             let spec_name = spec.name.clone();
+            let runtime_binding = runtime_binding.clone();
             tokio::spawn(async move {
+                let _runtime_lease = match runtime_binding {
+                    Some(binding) => match binding.acquire().await {
+                        Some(lease) => Some(lease),
+                        None => return,
+                    },
+                    None => None,
+                };
                 if let Err(e) = manager.register_and_start(sidecar).await {
                     tracing::warn!(
                         "plugin '{plugin_id}': manifest sidecar '{spec_name}' failed to start \
@@ -20116,11 +20442,9 @@ async fn apply_sidecars(
             });
         } else {
             let name = crate::sidecar::manifest_sidecar::namespaced_name(&manifest.id, &spec.name);
-            tokio::spawn(async move {
-                if let Err(e) = manager.stop_and_deregister(&name).await {
-                    tracing::warn!("manifest sidecar '{name}' failed to stop: {e}");
-                }
-            });
+            if let Err(e) = manager.stop_and_deregister(&name).await {
+                tracing::warn!("manifest sidecar '{name}' failed to stop: {e}");
+            }
         }
     }
 }
@@ -20148,7 +20472,14 @@ pub async fn reconcile_plugin_sidecars(state: &ServerState) {
         if manifest.sidecars.is_empty() {
             continue;
         }
-        apply_sidecars(state, manifest, &rec.approved_grants, true).await;
+        let Some(binding) = state.plugin_runtime.active_binding(&rec.id).await else {
+            tracing::debug!(
+                plugin = %rec.id,
+                "skipping sidecar reconcile until the plugin runtime generation is active"
+            );
+            continue;
+        };
+        apply_sidecars(state, manifest, &rec.approved_grants, true, Some(binding)).await;
     }
 }
 
@@ -20951,6 +21282,13 @@ async fn deactivate_plugin(
     state: &ServerState,
     manifest: &crate::plugin_manifest::PluginManifest,
 ) -> PolicyApplyOutcome {
+    let deactivation = state.plugin_runtime.begin_deactivation(&manifest.id).await;
+    tracing::debug!(
+        plugin = %manifest.id,
+        generation = deactivation.generation().number(),
+        "deactivating plugin runtime generation"
+    );
+
     // Derived ext-API tools, dropped OUTSIDE the per-kind loop below because that loop
     // iterates `manifest.runnables` and a derived tool has no runnable entry — it was
     // lowered from the sidecar's OpenAPI document, not declared. Without this line a
@@ -21022,7 +21360,7 @@ async fn deactivate_plugin(
     // Symmetric to enable: stop + deregister the plugin's managed sidecars so a
     // disabled plugin's process stops instead of lingering (the app ⇄ sidecar
     // bridge teardown). Stop is ungated.
-    apply_sidecars(state, manifest, &[], false).await;
+    apply_sidecars(state, manifest, &[], false, None).await;
     // Symmetric to enable: disabling a synth MCP-server record clears the mcp.json
     // `enabled` flag so the server stops being spawned/listed — the toggle is no
     // longer a no-op against the running server. Best-effort + a no-op for every
@@ -22478,7 +22816,19 @@ async fn create_agent(
         );
     }
     match state.agent_store.create(input).await {
-        Ok(record) => (StatusCode::CREATED, Json(json!({ "agent": record }))),
+        Ok(record) => {
+            let agent_id = record.id.clone();
+            record_gateway_control_attributed(
+                &state,
+                "agent.create",
+                &format!("agent:{agent_id}"),
+                Some("initial agent configuration"),
+                &caller,
+                Some(&agent_id),
+            )
+            .await;
+            (StatusCode::CREATED, Json(json!({ "agent": record })))
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
@@ -23910,23 +24260,45 @@ async fn migrate_to_ryu(
 )]
 async fn export_agent(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     axum::extract::Path(id): axum::extract::Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match state.agent_store.get(&id).await {
+) -> axum::response::Response {
+    if enforce_permission_on(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::AGENT_VIEW,
+        crate::acl::KIND_AGENT,
+        &id,
+    )
+    .await
+    .is_err()
+    {
+        return no_store_response(
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "insufficient permissions: agent.view" })),
+            )
+                .into_response(),
+        );
+    }
+    let response = match state.agent_store.get(&id).await {
         Ok(Some(record)) => {
             let mut template = record.to_template();
             template.agent_config.schedules = agent_schedule_templates(&id);
-            (StatusCode::OK, Json(json!({ "template": template })))
+            (StatusCode::OK, Json(json!({ "template": template }))).into_response()
         }
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": format!("agent '{id}' not found") })),
-        ),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
-        ),
-    }
+        )
+            .into_response(),
+    };
+    no_store_response(response)
 }
 
 /// `POST /api/agents/import`
@@ -33170,24 +33542,26 @@ async fn export_space_package(
         Err(error) => return json_error(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()),
     };
     let filename = format!("{}.ryupack", space_package_filename(&space.name));
-    Json(json!({
-        "success": true,
-        "filename": filename,
-        "content_type": "application/zip",
-        "archive_base64": base64::engine::general_purpose::STANDARD.encode(&package.archive),
-        "package": {
-            "kind": "space",
-            "name": space.name,
-            "version": space_portable::SPACE_PACKAGE_VERSION,
-            "files": package.file_paths,
-            "pages": package.page_count,
-            "databases": package.database_count,
-            "rows": package.row_count,
-            "excluded": package.excluded_count,
-            "embeddings": false
-        }
-    }))
-    .into_response()
+    no_store_response(
+        Json(json!({
+            "success": true,
+            "filename": filename,
+            "content_type": "application/zip",
+            "archive_base64": base64::engine::general_purpose::STANDARD.encode(&package.archive),
+            "package": {
+                "kind": "space",
+                "name": space.name,
+                "version": space_portable::SPACE_PACKAGE_VERSION,
+                "files": package.file_paths,
+                "pages": package.page_count,
+                "databases": package.database_count,
+                "rows": package.row_count,
+                "excluded": package.excluded_count,
+                "embeddings": false
+            }
+        }))
+        .into_response(),
+    )
 }
 
 #[utoipa::path(
@@ -35511,6 +35885,14 @@ fn json_error(status: StatusCode, msg: String) -> axum::response::Response {
         .header("content-type", "application/json")
         .body(axum::body::Body::from(body))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response())
+}
+
+fn no_store_response(mut response: axum::response::Response) -> axum::response::Response {
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+    response
 }
 
 #[utoipa::path(
@@ -42522,6 +42904,20 @@ async fn record_gateway_control(
     summary: Option<&str>,
     caller: &Option<crate::identity_verify::VerifiedCaller>,
 ) {
+    record_gateway_control_attributed(state, action, target, summary, caller, None).await;
+}
+
+/// Same best-effort control sink with an optional stable agent correlation.
+/// Agent-management routes use this so the organization audit and the agent
+/// passport point to the same row.
+async fn record_gateway_control_attributed(
+    state: &ServerState,
+    action: &str,
+    target: &str,
+    summary: Option<&str>,
+    caller: &Option<crate::identity_verify::VerifiedCaller>,
+    agent_id: Option<&str>,
+) {
     use crate::sidecar::gateway::{gateway_admin_key, gateway_url};
 
     let base = gateway_url();
@@ -42537,6 +42933,7 @@ async fn record_gateway_control(
             "actor_name": caller
                 .as_ref()
                 .and_then(|value| value.email.as_deref()),
+            "agent_id": agent_id,
         }));
     if let Some(token) = gateway_admin_key() {
         request = request.bearer_auth(token);
@@ -43474,6 +43871,7 @@ async fn gateway_run_evals(
 #[derive(serde::Deserialize, Debug)]
 struct AuditQueryParams {
     session_id: Option<String>,
+    agent_id: Option<String>,
     #[serde(default)]
     errors_only: bool,
     limit: Option<u32>,
@@ -43504,6 +43902,9 @@ async fn gateway_audit(
     let mut query_parts: Vec<String> = Vec::new();
     if let Some(sid) = &params.session_id {
         query_parts.push(format!("session_id={}", urlencoding_simple(sid)));
+    }
+    if let Some(agent_id) = &params.agent_id {
+        query_parts.push(format!("agent_id={}", urlencoding_simple(agent_id)));
     }
     if params.errors_only {
         query_parts.push("errors_only=true".to_string());

@@ -530,6 +530,7 @@
         "ryu": "./dist/cli.js",
       },
       "dependencies": {
+        "@ryuhq/client": "workspace:*",
         "@ryuhq/sdk-native": "workspace:*",
         "zod": "^4.1.13",
       },

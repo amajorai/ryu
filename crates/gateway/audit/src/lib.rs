@@ -167,6 +167,9 @@ pub struct AuditQuery {
     /// Filter by Core session/conversation id (M4 / #176).
     /// When set, returns only the audit rows that belong to the given session.
     pub session_id: Option<String>,
+    /// Filter by the selected agent id. This is the stable agent identity
+    /// forwarded by Core, not a display name and not a client-auth claim.
+    pub agent_id: Option<String>,
     /// Filter by widget instance id (Ryu Apps, §4.4). When set, returns only the
     /// `callTool` / follow-up rows that belong to the given rendered widget.
     pub widget_instance_id: Option<String>,
@@ -832,6 +835,24 @@ impl AuditLogger {
         target: String,
         summary: Option<String>,
     ) -> AuditRecord {
+        Self::make_control_record_with_agent(
+            request_id, api_key, actor, actor_id, None, action, target, summary,
+        )
+    }
+
+    /// Convenience constructor for a control change that belongs to one agent.
+    /// The agent id is a stable correlation key; the action summary remains
+    /// bounded and payload-free just like the legacy constructor.
+    pub fn make_control_record_with_agent(
+        request_id: String,
+        api_key: String,
+        actor: String,
+        actor_id: Option<String>,
+        agent_id: Option<String>,
+        action: String,
+        target: String,
+        summary: Option<String>,
+    ) -> AuditRecord {
         let command = summary
             .filter(|value| !value.trim().is_empty())
             .map(|value| format!("{action}: {value}"))
@@ -859,7 +880,7 @@ impl AuditLogger {
             duration_ms: None,
             exit_code: None,
             user_id: actor_id,
-            agent_id: None,
+            agent_id,
             feature: Some("control".to_string()),
             managed_inference: false,
             provider_cost_micro_usd: None,
@@ -923,6 +944,7 @@ impl AuditLogger {
         push("model = ?", &query.model);
         push("request_id = ?", &query.request_id);
         push("session_id = ?", &query.session_id);
+        push("agent_id = ?", &query.agent_id);
         push("widget_instance_id = ?", &query.widget_instance_id);
         push("event_type = ?", &query.event_type);
         if query.errors_only {
@@ -1712,6 +1734,23 @@ mod tests {
         assert_eq!(record.output_tokens, 0);
     }
 
+    #[test]
+    fn agent_control_record_keeps_the_agent_passport_link() {
+        let record = AuditLogger::make_control_record_with_agent(
+            "control-agent-id".to_owned(),
+            "master".to_owned(),
+            "member@example.com".to_owned(),
+            Some("user-123".to_owned()),
+            Some("agent-support".to_owned()),
+            "agent.update".to_owned(),
+            "agent:agent-support".to_owned(),
+            Some("successful Core agent-management mutation".to_owned()),
+        );
+        assert_eq!(record.agent_id.as_deref(), Some("agent-support"));
+        assert_eq!(record.user_id.as_deref(), Some("user-123"));
+        assert_eq!(record.event_type, EventType::ControlChange);
+    }
+
     /// Log a record with an explicit session_id.
     fn sample_record_with_session(request_id: &str, session_id: &str) -> AuditRecord {
         AuditRecord {
@@ -1917,6 +1956,37 @@ mod tests {
         assert_eq!(wi_a[0].request_id, "req-w1");
         assert_eq!(wi_a[0].widget_instance_id.as_deref(), Some("wi-A"));
         assert_eq!(wi_a[0].feature.as_deref(), Some("widget"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agent_id_filter_returns_only_matching_rows() {
+        let dir = std::env::temp_dir().join(format!("ryu-audit-agent-{}", unique_suffix()));
+        let db_path = dir.join("audit.db");
+        let logger = AuditLogger::new(&AuditConfig {
+            enabled: true,
+            db_path: db_path.to_str().unwrap().to_owned(),
+        })
+        .expect("logger");
+
+        let mut agent_a = sample_record("req-agent-a", None);
+        agent_a.agent_id = Some("agent-a".to_owned());
+        let mut agent_b = sample_record("req-agent-b", None);
+        agent_b.agent_id = Some("agent-b".to_owned());
+        logger.log(agent_a);
+        logger.log(agent_b);
+
+        let rows = wait_for_rows(
+            &logger,
+            &AuditQuery {
+                agent_id: Some("agent-a".to_owned()),
+                ..Default::default()
+            },
+            1,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].agent_id.as_deref(), Some("agent-a"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

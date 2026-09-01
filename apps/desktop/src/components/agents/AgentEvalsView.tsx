@@ -179,7 +179,10 @@ export function AgentEvalsView({
 	const loadHistory = useCallback(async () => {
 		setHistoryLoading(true);
 		try {
-			const res = await fetchGatewayAudit(target, { limit: 50 });
+			const res = await fetchGatewayAudit(target, {
+				agentId: agentId ?? undefined,
+				limit: 50,
+			});
 			setEntries(res.entries);
 			setReachable(res.reachable);
 		} finally {

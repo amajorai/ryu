@@ -33,6 +33,7 @@ import { AgentEvalsView } from "@/src/components/agents/AgentEvalsView.tsx";
 import { AgentExecutionPolicyPanel } from "@/src/components/agents/AgentExecutionPolicyPanel.tsx";
 import { AgentImageField } from "@/src/components/agents/AgentImageField.tsx";
 import { AgentLanyardCard } from "@/src/components/agents/AgentLanyardCard.tsx";
+import { AgentPassportPanel } from "@/src/components/agents/AgentPassportPanel.tsx";
 import { AgentRoutinesPanel } from "@/src/components/agents/AgentRoutinesPanel.tsx";
 import { AgentRunHistoryView } from "@/src/components/agents/AgentRunHistoryView.tsx";
 import { AgentSetupComposer } from "@/src/components/agents/AgentSetupComposer.tsx";
@@ -1712,6 +1713,15 @@ export default function AgentEditPage({
 					onTriggerSlugChange={setTriggerSlug}
 					onWeeklyDayChange={setWeeklyDay}
 					onWeeklyTimeChange={setWeeklyTime}
+					passportPanel={
+						isNew || !effectiveAgentId || !existing ? null : (
+							<AgentPassportPanel
+								agent={existing}
+								organizationId={activeNode.orgId ?? null}
+								target={target}
+							/>
+						)
+					}
 					personaDisplayName={personaDisplayName}
 					personalityProfile={personalityProfileId}
 					personalityProfiles={personalityProfileOptions}

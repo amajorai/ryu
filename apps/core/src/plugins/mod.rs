@@ -24,6 +24,7 @@ pub mod catalog;
 pub mod graph;
 pub mod isolation;
 pub mod lifecycle;
+pub mod runtime;
 pub mod seed;
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -1025,6 +1025,13 @@ fn glob_match(pattern: &str, name: &str) -> bool {
 /// missing, hook threw, unparseable result, a Pause we don't support) degrades to
 /// [`HookDirective::None`].
 pub async fn run_hook(state: &ServerState, hook: &HookPlugin, ctx: &HookContext) -> HookDirective {
+    // Hold the plugin's read lease across the sandbox call. A concurrent disable
+    // waits for this work before unregistering the plugin's contributions; a
+    // hook collected before disable but not started yet is refused instead of
+    // running against a stale generation.
+    let Some(_runtime_lease) = state.plugin_runtime.acquire(&hook.plugin_id).await else {
+        return HookDirective::None;
+    };
     let program = build_hook_program(ctx, &hook.code);
     let bridge = Arc::new(PluginHookBridge::new_with_tenant(
         hook.plugin_id.clone(),

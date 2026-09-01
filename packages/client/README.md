@@ -46,8 +46,22 @@ bun run build   # tsup → dist/
 - **`createRyuClient` / `RyuClient`** (`client.ts`): entry point and typed options (`RyuClientOptions`).
 - **Agents API** (`agents.ts`, `AgentsAPI`): list and address agents, stream chat (`StreamChunk`).
 - **Sessions API** (`sessions.ts`, `SessionsAPI`): conversations and messages (`Conversation`, `Message`).
+- **Harness API** (`harness.ts`, `HarnessAPI`): durable sessions, idempotent runs, cursorable events, permissions, and cancellation.
 - **Spaces API** (`spaces.ts`, `SpacesAPI`): Spaces / RAG retrieval (`Space`, `SpaceMatch`).
 - **Transport** (`request.ts`, `types.ts`): the native-`fetch` request layer and shared types.
+
+```ts
+const session = await client.harness.createSession({
+  runnableId: "pi",
+  runnableKind: "agent",
+});
+const run = await client.harness.startRun(session.id, {
+  prompt: "Summarize the current project.",
+}, { idempotencyKey: "summary-1" });
+for await (const event of client.harness.events(run.run.id)) {
+  if (event.type === "text_delta") process.stdout.write(event.delta);
+}
+```
 
 ## License
 

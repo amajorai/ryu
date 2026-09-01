@@ -654,13 +654,18 @@ pub async fn widget_follow_up(
         };
         // A denied follow-up must remain visible in the Gateway audit trail,
         // including rate-limit, budget, and fail-closed Gateway errors.
-        crate::sidecar::gateway::report_exec_audit(
+        crate::sidecar::gateway::report_exec_audit_with_attribution(
             "widget-followup",
             "follow_up",
             0,
             1,
             Some(record.conversation_id.clone()),
             Some(reason.clone()),
+            crate::sidecar::gateway::ExecAuditAttribution {
+                agent_id: Some(record.agent_id.clone()),
+                feature: Some("widget".to_owned()),
+                ..Default::default()
+            },
         )
         .await;
         return err_reply(status, code, reason);
@@ -676,26 +681,36 @@ pub async fn widget_follow_up(
     .await;
     if let crate::sidecar::gateway::ExecScanOutcome::Deny(reason) = scan {
         // Best-effort audit of the denial.
-        crate::sidecar::gateway::report_exec_audit(
+        crate::sidecar::gateway::report_exec_audit_with_attribution(
             "widget-followup",
             "follow_up",
             0,
             1,
             Some(record.conversation_id.clone()),
             Some(reason.clone()),
+            crate::sidecar::gateway::ExecAuditAttribution {
+                agent_id: Some(record.agent_id.clone()),
+                feature: Some("widget".to_owned()),
+                ..Default::default()
+            },
         )
         .await;
         return err_reply(StatusCode::FORBIDDEN, "denied", reason);
     }
 
     // Audit the accepted follow-up (prompt length only, never the content).
-    crate::sidecar::gateway::report_exec_audit(
+    crate::sidecar::gateway::report_exec_audit_with_attribution(
         "widget-followup",
         "follow_up",
         0,
         0,
         Some(record.conversation_id.clone()),
         None,
+        crate::sidecar::gateway::ExecAuditAttribution {
+            agent_id: Some(record.agent_id.clone()),
+            feature: Some("widget".to_owned()),
+            ..Default::default()
+        },
     )
     .await;
 
@@ -1099,13 +1114,18 @@ async fn audit_asset(
     started: Instant,
     error: Option<String>,
 ) {
-    crate::sidecar::gateway::report_exec_audit(
+    crate::sidecar::gateway::report_exec_audit_with_attribution(
         "widget-asset",
         &format!("GET https://{host} ({bytes} bytes)"),
         started.elapsed().as_millis() as u64,
         i32::from(error.is_some()),
         Some(record.conversation_id.clone()),
         error,
+        crate::sidecar::gateway::ExecAuditAttribution {
+            agent_id: Some(record.agent_id.clone()),
+            feature: Some("widget".to_owned()),
+            ..Default::default()
+        },
     )
     .await;
 }

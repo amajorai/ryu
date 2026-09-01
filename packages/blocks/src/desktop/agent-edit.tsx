@@ -1894,6 +1894,9 @@ export interface AgentSettingsFormProps {
 	onTriggerSlugChange?: (v: string) => void;
 	onWeeklyDayChange?: (v: string) => void;
 	onWeeklyTimeChange?: (v: string) => void;
+	/** Injected: the traceable identity + activity ledger for this agent,
+	 *  rendered as its own tab beside run history. */
+	passportPanel?: ReactNode;
 
 	// Persona
 	personaDisplayName: string;
@@ -2245,6 +2248,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		evalsPanel,
 		calendarPanel,
 		historyPanel,
+		passportPanel,
 		routinesPanel,
 		systemPrompt,
 		onOpenPromptStudio,
@@ -3306,6 +3310,13 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	// already done, so they share one "Activity" tab with an inner strip instead
 	// of spending three pills of the top-level tab bar.
 	const activityViews: { content: ReactNode; id: string; label: string }[] = [];
+	if (passportPanel) {
+		activityViews.push({
+			content: passportPanel,
+			id: "passport",
+			label: "Agent passport",
+		});
+	}
 	if (evalsPanel) {
 		activityViews.push({
 			content: evalsPanel,

@@ -43,6 +43,8 @@ pub struct AuditQueryParams {
     pub request_id: Option<String>,
     /// Filter by Core session/conversation id (M4 / #176).
     pub session_id: Option<String>,
+    /// Filter by the stable agent id forwarded by Core.
+    pub agent_id: Option<String>,
     /// Filter by widget instance id (Ryu Apps, §4.4).
     pub widget_instance_id: Option<String>,
     /// Filter by event discriminator, including `control_change`.
@@ -76,6 +78,9 @@ pub struct ControlAuditBody {
     pub actor_id: Option<String>,
     #[serde(default)]
     pub actor_name: Option<String>,
+    /// Stable agent id for an agent-scoped control change.
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 fn bounded_control_value(value: String, max_len: usize) -> Result<String, GatewayError> {
@@ -125,6 +130,28 @@ fn bounded_control_actor(value: Option<String>) -> Result<Option<String>, Gatewa
     Ok(Some(value))
 }
 
+/// Bound metadata Core forwards for a tool/exec audit row. These values are
+/// labels and correlation keys only; the trusted-forwarder gate above remains
+/// the authorization boundary.
+fn bounded_audit_identity(
+    value: Option<String>,
+    field: &str,
+) -> Result<Option<String>, GatewayError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > 240 {
+        return Err(GatewayError::BadRequest(format!(
+            "audit {field} is too long"
+        )));
+    }
+    Ok(Some(value))
+}
+
 /// Local audit-log query endpoint. Restricted to the master key: audit data is
 /// sensitive and tenant-wide, so per-tenant API keys cannot read it.
 pub async fn query_audit(
@@ -169,6 +196,7 @@ pub async fn query_audit(
         timestamp_until: params.until,
         request_id: params.request_id,
         session_id: params.session_id,
+        agent_id: params.agent_id,
         widget_instance_id: params.widget_instance_id,
         event_type: params.event_type,
         id_after: None,
@@ -333,17 +361,19 @@ pub async fn record_control_change(
     let summary = bounded_control_summary(body.summary)?;
     let actor_id = bounded_control_actor(body.actor_id)?;
     let actor_name = bounded_control_actor(body.actor_name)?;
+    let agent_id = bounded_control_actor(body.agent_id)?;
     if state.audit.is_enabled() {
         let actor = if ctx.is_master_key {
             actor_name.as_deref().unwrap_or("master-key")
         } else {
             actor_name.as_deref().unwrap_or("loopback-admin")
         };
-        state.log_audit(AuditLogger::make_control_record(
+        state.log_audit(AuditLogger::make_control_record_with_agent(
             Uuid::new_v4().to_string(),
             ctx.api_key,
             actor.to_string(),
             actor_id,
+            agent_id,
             action,
             target,
             summary,
@@ -492,6 +522,16 @@ pub struct ExecAuditBody {
     /// NOT drain the exec budget. Unknown values fall back to `exec_call`.
     #[serde(default)]
     pub event_type: Option<String>,
+    /// Verified Core attribution. The endpoint only accepts trusted-forwarder or
+    /// master credentials, so these fields are metadata, never authorization.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub user_name: Option<String>,
+    #[serde(default)]
+    pub feature: Option<String>,
 }
 
 /// Body accepted by `POST /v1/exec/budget/check`.
@@ -563,12 +603,16 @@ pub async fn ingest_exec_audit(
         .event_type
         .as_deref()
         .is_some_and(|t| t == "credential_read");
+    let agent_id = bounded_audit_identity(body.agent_id, "agent_id")?;
+    let user_id = bounded_audit_identity(body.user_id, "user_id")?;
+    let user_name = bounded_audit_identity(body.user_name, "user_name")?;
+    let feature = bounded_audit_identity(body.feature, "feature")?;
 
     if is_credential_read {
         if state.audit.is_enabled() {
             // `backend` carries the CredentialSource id, `command` the domain —
             // never the secret itself (Core sends only the domain).
-            let record = AuditLogger::make_credential_read_record(
+            let mut record = AuditLogger::make_credential_read_record(
                 Uuid::new_v4().to_string(),
                 ctx.api_key.clone(),
                 body.backend,
@@ -576,6 +620,10 @@ pub async fn ingest_exec_audit(
                 body.session_id,
                 body.error,
             );
+            record.agent_id = agent_id;
+            record.user_id = user_id;
+            record.user_name = user_name;
+            record.feature = feature;
             state.log_audit(record);
         }
         return Ok(Json(json!({ "ok": true })));
@@ -585,7 +633,7 @@ pub async fn ingest_exec_audit(
     state.exec_budget.record(body.duration_ms);
 
     if state.audit.is_enabled() {
-        let record = AuditLogger::make_exec_record(
+        let mut record = AuditLogger::make_exec_record(
             Uuid::new_v4().to_string(),
             ctx.api_key.clone(),
             body.backend,
@@ -595,6 +643,10 @@ pub async fn ingest_exec_audit(
             body.session_id,
             body.error,
         );
+        record.agent_id = agent_id;
+        record.user_id = user_id;
+        record.user_name = user_name;
+        record.feature = feature;
         state.log_audit(record);
     }
 
@@ -836,6 +888,10 @@ mod tests {
             session_id: Some("s1".to_string()),
             error: None,
             event_type: None,
+            agent_id: None,
+            user_id: None,
+            user_name: None,
+            feature: None,
         }
     }
 
@@ -876,6 +932,33 @@ mod tests {
         assert_eq!(body["ok"], true);
         // A credential read is a distinct event and must NOT count against exec budget.
         assert_eq!(state.exec_budget.current_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn ingest_exec_preserves_agent_and_caller_attribution() {
+        let state = state_with(true);
+        let mut body = exec_body();
+        body.agent_id = Some("agent-support".to_owned());
+        body.user_id = Some("user-1".to_owned());
+        body.user_name = Some("Jia Wei".to_owned());
+        body.feature = Some("agent".to_owned());
+
+        ingest_exec_audit(State(Arc::clone(&state)), bearer("sk-core"), Json(body))
+            .await
+            .expect("trusted forwarder may ingest");
+        wait_for_audit_entries(&state, 1).await;
+
+        let entries = state
+            .audit
+            .query(&AuditQuery {
+                agent_id: Some("agent-support".to_owned()),
+                ..Default::default()
+            })
+            .expect("query by agent id");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].user_id.as_deref(), Some("user-1"));
+        assert_eq!(entries[0].user_name.as_deref(), Some("Jia Wei"));
+        assert_eq!(entries[0].feature.as_deref(), Some("agent"));
     }
 
     // ── check_exec_budget ─────────────────────────────────────────────────────

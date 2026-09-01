@@ -117,6 +117,61 @@ export interface OrgListEntry {
 	slug: string;
 }
 
+export type OrganizationAuditActorType = "gateway" | "system" | "user";
+
+/** One bounded, redacted event returned by the organization audit projections. */
+export interface OrganizationAuditEntry {
+	action: string;
+	actor: {
+		email: string | null;
+		id: string | null;
+		name: string | null;
+		type: OrganizationAuditActorType;
+	};
+	agentId: string | null;
+	details: Record<string, unknown>;
+	error: string | null;
+	eventType: string;
+	feature: string | null;
+	id: string;
+	requestId: string | null;
+	scope: "gateway" | "org";
+	sessionId: string | null;
+	target: string;
+	targetId: string | null;
+	timestamp: string;
+}
+
+/** Gateway request/tool event shape used by the Agent passport. */
+export interface OrganizationGatewayActivityEntry {
+	actorId: string | null;
+	agentId: string | null;
+	apiKey: string | null;
+	backend: string | null;
+	command: string | null;
+	costMicroUsd: number | null;
+	durationMs: number | null;
+	error: string | null;
+	evalScore: number | null;
+	eventType: string;
+	feature: string | null;
+	gatewayId: string;
+	id: string;
+	inputTokens: number;
+	latencyMs: number;
+	managedInference: boolean;
+	model: string;
+	outputTokens: number;
+	projectId: string | null;
+	provider: string;
+	providerCostMicroUsd: number | null;
+	requestId: string;
+	sessionId: string | null;
+	teamId: string | null;
+	timestamp: string;
+	userName: string | null;
+}
+
 /** The orgs the caller belongs to. Empty when signed out. */
 export async function listOrgs(): Promise<OrgListEntry[]> {
 	if (!authToken()) {
@@ -238,6 +293,56 @@ export async function fetchTransferable(
 		throw new Error(await readError(response));
 	}
 	return (await response.json()) as TransferableView;
+}
+
+/**
+ * Fetch the org's gateway activity for one agent. Request/model/tool rows are
+ * kept separate from control changes by the server, then joined in the Agent
+ * passport with the control projection below.
+ */
+export async function fetchOrganizationAgentActivity(
+	orgId: string,
+	agentId: string,
+	limit = 200
+): Promise<{ count: number; entries: OrganizationGatewayActivityEntry[] }> {
+	const params = new URLSearchParams({
+		agentId,
+		limit: String(Math.min(Math.max(limit, 1), 200)),
+	});
+	const response = await fetch(
+		`${BASE}/api/aggregation/orgs/${encodeURIComponent(orgId)}/audit?${params.toString()}`,
+		{ headers: authHeaders() }
+	);
+	if (!response.ok) {
+		throw new Error(await readError(response));
+	}
+	return (await response.json()) as {
+		count: number;
+		entries: OrganizationGatewayActivityEntry[];
+	};
+}
+
+/** Fetch organization and gateway control mutations scoped to one agent. */
+export async function fetchOrganizationAgentControls(
+	orgId: string,
+	agentId: string,
+	limit = 200
+): Promise<{ count: number; entries: OrganizationAuditEntry[] }> {
+	const params = new URLSearchParams({
+		agentId,
+		limit: String(Math.min(Math.max(limit, 1), 200)),
+	});
+	const response = await fetch(
+		`${BASE}/api/control-plane/orgs/${encodeURIComponent(orgId)}/audit?${params.toString()}`,
+		{ headers: authHeaders() }
+	);
+	if (!response.ok) {
+		throw new Error(await readError(response));
+	}
+	return (await response.json()) as {
+		count: number;
+		entries: OrganizationAuditEntry[];
+	};
 }
 
 export interface TransferResult {

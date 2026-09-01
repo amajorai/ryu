@@ -23,9 +23,7 @@
 
 use anyhow::{bail, Result};
 
-use crate::sidecar::gateway::{
-    check_identity_grant, report_credential_read_audit, IdentityGrantOutcome,
-};
+use crate::sidecar::gateway::{check_identity_grant, IdentityGrantOutcome};
 
 use super::{IdentityStore, SecretState};
 
@@ -53,6 +51,18 @@ pub async fn read_credential(
     connection_id: &str,
     session_id: Option<String>,
 ) -> Result<Option<SecretState>> {
+    read_credential_with_agent(store, connection_id, session_id, None).await
+}
+
+/// Read a credential while preserving the calling agent id for the Gateway
+/// audit row. The agent id is correlation metadata only; the vault grant still
+/// decides whether the read is allowed.
+pub async fn read_credential_with_agent(
+    store: &IdentityStore,
+    connection_id: &str,
+    session_id: Option<String>,
+    agent_id: Option<&str>,
+) -> Result<Option<SecretState>> {
     // Resolve the connection first: we need its domain + source for both the
     // grant-context and the audit attribution, and to fail clearly on a bad id.
     let Some(record) = store.get(connection_id).await? else {
@@ -73,7 +83,18 @@ pub async fn read_credential(
 
     // Best-effort audit: the read is already authorized, so a gateway blink here
     // only warns. Carries the source + domain, never the decrypted state.
-    report_credential_read_audit(&record.source, &record.domain, session_id, None).await;
+    crate::sidecar::gateway::report_credential_read_audit_with_attribution(
+        &record.source,
+        &record.domain,
+        session_id,
+        None,
+        crate::sidecar::gateway::ExecAuditAttribution {
+            agent_id: agent_id.map(str::to_owned),
+            feature: Some("agent".to_owned()),
+            ..Default::default()
+        },
+    )
+    .await;
 
     Ok(state)
 }

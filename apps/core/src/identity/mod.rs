@@ -20,9 +20,9 @@ mod consult;
 mod elicitation;
 mod governed;
 
-pub use consult::{consult_for_tool_call, ConsultOutcome};
+pub use consult::{consult_for_tool_call, consult_for_tool_call_with_agent, ConsultOutcome};
 pub use elicitation::{needs_connection, to_envelope};
-pub use governed::{read_credential, IDENTITY_READ_SCOPE};
+pub use governed::{read_credential, read_credential_with_agent, IDENTITY_READ_SCOPE};
 
 // The `crate::identity::{health,source}::…` module paths used across Core
 // (main, scheduler, elicitation), re-exported unchanged.

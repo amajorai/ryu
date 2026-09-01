@@ -19,6 +19,6 @@ export default defineConfig({
 	format: ["esm", "cjs"],
 	dts: true,
 	clean: true,
-	external: ["zod", "@ryuhq/sdk-native"],
+	external: ["zod", "@ryuhq/sdk-native", "@ryuhq/client"],
 	shims: true,
 });

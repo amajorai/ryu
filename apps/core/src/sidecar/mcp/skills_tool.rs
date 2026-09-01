@@ -34,7 +34,7 @@
 //! What is shared and what is not, exactly, because the halves fail differently:
 //!
 //! - **Shared: ranking.** `skills.search` ranks through
-//!   [`ryu_tool_registry::run_search`] — the same BM25 default, the same Semantic
+//!   [`ryu_tool_registry::run_search`] — the same Needle 2 default, the same Semantic
 //!   embedder seam, and the same `tools.active_ranker` pref that
 //!   `McpRegistry::search_scoped` (`tool_search`) obeys. Flip the pref and skill search
 //!   changes with tool search. Each [`ryu_skills::SkillRecord`] is mapped to a
@@ -492,7 +492,7 @@ pub async fn dispatch(
 /// [`SkillRegistry`] only — there is no `McpRegistry` handle to borrow it from.
 /// The pref key itself ([`RANKER_PREF_KEY`]) is the shared constant, so the two
 /// resolutions cannot drift on *which* pref they read. An unopenable store
-/// degrades to the BM25 default, exactly as it does for `tool_search`.
+/// degrades to the Needle 2 default, exactly as it does for `tool_search`.
 async fn resolve_ranker() -> ToolRanker {
     let pref = match crate::server::preferences::PreferencesStore::open_default() {
         Ok(p) => p.get(RANKER_PREF_KEY).await.ok().flatten(),
@@ -603,6 +603,7 @@ async fn rank_skills(
     skills: &[SkillRecord],
     ranker: ToolRanker,
     embedder: Option<&dyn ToolEmbedder>,
+    selector: Option<&dyn ryu_tool_registry::ToolSelector>,
 ) -> Vec<Value> {
     let candidates: Vec<ToolDescriptor> = skills.iter().map(descriptor_for).collect();
     // `kind = Some(Skill)`: this call is literally the kind-filtered view of the one
@@ -610,7 +611,7 @@ async fn rank_skills(
     // *this* input — it is passed anyway so the door cannot silently start returning
     // non-skills if the candidate set ever widens, and so the two doors run the same
     // `run_search` shape. No Composio descriptors participate.
-    let ranked = ryu_tool_registry::run_search(
+    let ranked = ryu_tool_registry::run_search_with_selector(
         query,
         candidates,
         Vec::new(),
@@ -618,6 +619,7 @@ async fn rank_skills(
         limit,
         ranker,
         embedder,
+        selector,
     )
     .await;
 
@@ -700,16 +702,21 @@ async fn do_search(
         .collect();
 
     let ranker = resolve_ranker().await;
-    // Built lazily and only for the Semantic ranker — `from_registry` loads the
-    // model registry off disk. Mirrors `McpRegistry::search_scoped`'s guard exactly.
+    // Built lazily for the selected model/embedding ranker. `from_registry` loads
+    // the model registry off disk, while the Needle 2 selector resolves its own
+    // pinned runtime on first use.
     let embedder = matches!(ranker, ToolRanker::Semantic)
         .then(crate::tool_registry_host::CoreToolEmbedder::from_registry);
+    let selector = matches!(ranker, ToolRanker::Needle2).then(crate::needle2::selector);
     let results = rank_skills(
         query,
         limit,
         &skills,
         ranker,
         embedder.as_ref().map(|e| e as &dyn ToolEmbedder),
+        selector
+            .as_deref()
+            .map(|s| s as &dyn ryu_tool_registry::ToolSelector),
     )
     .await;
 
@@ -1386,7 +1393,7 @@ mod tests {
             ),
         ];
 
-        let rows = rank_skills("merge conflicts", 10, &skills, ToolRanker::Bm25, None).await;
+        let rows = rank_skills("merge conflicts", 10, &skills, ToolRanker::Bm25, None, None).await;
         assert_eq!(
             rows[0]["id"],
             json!("merge-conflicts"),
@@ -1399,11 +1406,11 @@ mod tests {
 
         // An exact id match takes the crate's exact-match boost — the same behaviour
         // `tool_search` gets, which the old substring scorer could not express.
-        let rows = rank_skills("rebase-helper", 10, &skills, ToolRanker::Bm25, None).await;
+        let rows = rank_skills("rebase-helper", 10, &skills, ToolRanker::Bm25, None, None).await;
         assert_eq!(rows[0]["id"], json!("rebase-helper"));
 
         // No match at all → an empty result set, never a list of arbitrary skills.
-        let rows = rank_skills("photosynthesis", 10, &skills, ToolRanker::Bm25, None).await;
+        let rows = rank_skills("photosynthesis", 10, &skills, ToolRanker::Bm25, None, None).await;
         assert!(rows.is_empty(), "unrelated query returns nothing: {rows:?}");
     }
 
@@ -1459,7 +1466,15 @@ mod tests {
             fail_on: vec!["git-helper".to_owned()],
         };
 
-        let rows = rank_skills("web", 10, &skills, ToolRanker::Semantic, Some(&embedder)).await;
+        let rows = rank_skills(
+            "web",
+            10,
+            &skills,
+            ToolRanker::Semantic,
+            Some(&embedder),
+            None,
+        )
+        .await;
         let ids = ranked_ids(&rows);
         assert!(
             ids.contains(&"git-helper".to_owned()),
@@ -1474,7 +1489,8 @@ mod tests {
         // The contrast that makes the divergence deliberate rather than accidental:
         // under BM25 the same non-matching skill *is* dropped, because there `0.0`
         // means "no query term occurred at all".
-        let lexical = ranked_ids(&rank_skills("web", 10, &skills, ToolRanker::Bm25, None).await);
+        let lexical =
+            ranked_ids(&rank_skills("web", 10, &skills, ToolRanker::Bm25, None, None).await);
         assert_eq!(lexical, vec!["web-helper".to_owned()]);
     }
 
@@ -1491,7 +1507,15 @@ mod tests {
             "b",
             true,
         )];
-        let rows = rank_skills("photosynthesis", 10, &skills, ToolRanker::Semantic, None).await;
+        let rows = rank_skills(
+            "photosynthesis",
+            10,
+            &skills,
+            ToolRanker::Semantic,
+            None,
+            None,
+        )
+        .await;
         assert!(
             rows.is_empty(),
             "the BM25 fallback keeps the empty-on-no-match contract: {rows:?}"
@@ -1503,7 +1527,7 @@ mod tests {
         let skills: Vec<SkillRecord> = (0..5)
             .map(|i| skill(&format!("s{i}"), "Web thing", "about the web", "body", true))
             .collect();
-        let rows = rank_skills("web", 2, &skills, ToolRanker::Bm25, None).await;
+        let rows = rank_skills("web", 2, &skills, ToolRanker::Bm25, None, None).await;
         assert_eq!(rows.len(), 2, "limit is honoured");
         // The JSON shape the model sees is unchanged by the ranker swap: exactly
         // these three keys, `description` still nullable.

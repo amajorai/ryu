@@ -18,7 +18,7 @@ pub fn execute_tool_def() -> Value {
         "type": "function",
         "function": {
             "name": "execute",
-            "description": "Run JavaScript that calls tools via the global `tools` proxy (e.g. await tools.composio.GITHUB_CREATE_ISSUE({...})). Compose many tool calls in one program; only your final `return` value and console logs are returned — intermediate tool results are NOT shown to you. Use tool_search first to discover tool paths. No fetch, no filesystem.",
+            "description": "Run JavaScript that calls tools via the global `tools` proxy (e.g. await tools.composio.GITHUB_CREATE_ISSUE({...})). Compose many tool calls in one program; only your final `return` value and console logs are returned — intermediate tool results are NOT shown to you. Use the unified tool_search first to discover relevant tools or Agent Skills; its default discovery ranker is Needle 2. No fetch, no filesystem.",
             "parameters": {
                 "type": "object",
                 "required": ["code"],
@@ -76,6 +76,7 @@ mod tests {
         // that intermediate results are hidden — load-bearing for the PTC win.
         let desc = def["function"]["description"].as_str().unwrap();
         assert!(desc.contains("tool_search"));
+        assert!(desc.contains("Needle 2"));
         assert!(desc.contains("NOT shown"));
         assert!(desc.contains("No fetch"));
     }

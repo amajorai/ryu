@@ -10,6 +10,7 @@ import { sso } from "@better-auth/sso";
 import { polar } from "@polar-sh/better-auth";
 import { client, mongoClient } from "@ryu/db";
 import { User } from "@ryu/db/models/auth.model";
+import { ControlAuditEvent } from "@ryu/db/models/control-audit.model";
 import {
 	Member,
 	Organization,
@@ -1627,6 +1628,127 @@ export const auth = betterAuth({
 							);
 						}
 					}
+				}
+			}
+
+			// Better Auth owns the organization/member/team mutations themselves, so
+			// they do not pass through the Hono control-plane router middleware. Keep
+			// the audit append at this post-success hook: the session is authenticated,
+			// the mutation has completed, and only stable ids are persisted.
+			const organizationAuditActions: Record<
+				string,
+				{ action: string; target: string }
+			> = {
+				"/organization/accept-invitation": {
+					action: "invitation.accept",
+					target: "invitation",
+				},
+				"/organization/add-team-member": {
+					action: "team.member.add",
+					target: "team-member",
+				},
+				"/organization/create-team": {
+					action: "team.create",
+					target: "team",
+				},
+				"/organization/create": {
+					action: "organization.create",
+					target: "organization",
+				},
+				"/organization/delete": {
+					action: "organization.delete",
+					target: "organization",
+				},
+				"/organization/invite-member": {
+					action: "member.invite",
+					target: "member",
+				},
+				"/organization/leave": {
+					action: "organization.leave",
+					target: "organization",
+				},
+				"/organization/remove-member": {
+					action: "member.remove",
+					target: "member",
+				},
+				"/organization/remove-team": {
+					action: "team.remove",
+					target: "team",
+				},
+				"/organization/remove-team-member": {
+					action: "team.member.remove",
+					target: "team-member",
+				},
+				"/organization/reject-invitation": {
+					action: "invitation.reject",
+					target: "invitation",
+				},
+				"/organization/update": {
+					action: "organization.update",
+					target: "organization",
+				},
+				"/organization/update-member-role": {
+					action: "member.role.update",
+					target: "member",
+				},
+				"/organization/update-team": {
+					action: "team.update",
+					target: "team",
+				},
+			};
+			const auditAction = organizationAuditActions[ctx.path];
+			const session = ctx.context.session;
+			const body =
+				ctx.body && typeof ctx.body === "object"
+					? (ctx.body as Record<string, unknown>)
+					: {};
+			const returned =
+				ctx.context.returned && typeof ctx.context.returned === "object"
+					? (ctx.context.returned as Record<string, unknown>)
+					: {};
+			const returnedOrganization =
+				returned.organization && typeof returned.organization === "object"
+					? (returned.organization as Record<string, unknown>)
+					: {};
+			const returnedOrganizationId = [
+				returnedOrganization.id,
+				returned.organizationId,
+				returned.id,
+			].find(
+				(value): value is string =>
+					typeof value === "string" && value.trim().length > 0
+			);
+			const organizationId =
+				auditAction?.action === "organization.create"
+					? returnedOrganizationId
+					: typeof body.organizationId === "string"
+						? body.organizationId
+						: session?.session.activeOrganizationId;
+			if (auditAction && organizationId && session?.user?.id) {
+				const targetId =
+					["memberId", "userId", "teamId", "invitationId"].reduce<
+						string | null
+					>((found, key) => {
+						if (found) {
+							return found;
+						}
+						const value = body[key];
+						return typeof value === "string" && value.trim() ? value : null;
+					}, null) ?? organizationId;
+				try {
+					await ControlAuditEvent.create({
+						action: auditAction.action,
+						actorId: session.user.id,
+						actorType: "user",
+						details: { method: ctx.method, status: "success" },
+						organizationId,
+						target: auditAction.target,
+						targetId,
+					});
+				} catch (error) {
+					// Never turn a completed Better Auth mutation into a failed auth
+					// response because the optional audit projection is unavailable.
+					console.error("Failed to append organization control audit:", error);
 				}
 			}
 			const loginAssuranceResponse = await loginAssuranceAfterPassword(ctx);

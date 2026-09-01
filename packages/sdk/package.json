@@ -93,6 +93,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@ryuhq/client": "workspace:*",
     "@ryuhq/sdk-native": "workspace:*",
     "zod": "^4.1.13"
   },

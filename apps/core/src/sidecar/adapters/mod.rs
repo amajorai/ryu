@@ -493,6 +493,11 @@ pub struct ChatStreamRequest {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
+    /// Optional durable harness session binding. Core resolves this to the
+    /// session's conversation and runnable before loading history, so external
+    /// callers cannot accidentally run a different agent inside the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     /// Saved chats explicitly attached to this turn through an `@Chat` mention.
     /// Core loads their recent transcript as read-only labeled context; the ids
     /// are never treated as routing targets or merged into this conversation.
@@ -4755,6 +4760,7 @@ async fn run_text_turn_in_with_metadata(
         response_mode: RyuResponseMode::Everyday,
         model: None,
         conversation_id: Some(conversation_id),
+        session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
         enable_long_term: false,
@@ -4867,6 +4873,7 @@ pub async fn run_proactive_opening_text(
         response_mode: RyuResponseMode::Everyday,
         model: None,
         conversation_id: Some(conversation_id),
+        session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
         enable_long_term: false,
@@ -4967,6 +4974,7 @@ pub(crate) async fn run_text_turn_stream(
         response_mode: RyuResponseMode::Everyday,
         model: None,
         conversation_id: Some(conversation_id),
+        session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
         enable_long_term: false,
@@ -5239,6 +5247,7 @@ async fn run_member_text_with_flags(
         response_mode: RyuResponseMode::Everyday,
         model: None,
         conversation_id,
+        session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
         enable_long_term: false,
@@ -9985,6 +9994,7 @@ async fn route_acp_stream(
     // flag to decide whether to act this turn.
     let plugin_flags = req.plugin_flags.clone();
     let agent_control_applied = req.agent_control_applied.clone();
+    let harness_session_id = req.session_id.clone();
     tokio::spawn(async move {
         // After stream completes the guard is transferred into WorktreeRun
         // (so the worktree survives for apply). If abandoned before completion
@@ -10796,6 +10806,19 @@ async fn route_acp_stream(
                                     "agent sync: ACP binding ledger update skipped: {error:#}"
                                 );
                             }
+                        }
+                    }
+                    if let (Some(harness_id), Some(native_id)) = (
+                        harness_session_id.as_deref(),
+                        info.get("sessionId").and_then(Value::as_str),
+                    ) {
+                        if let Err(error) = persist_store
+                            .set_session_native_id(harness_id, native_id)
+                            .await
+                        {
+                            tracing::debug!(
+                                "harness: native session binding update skipped: {error:#}"
+                            );
                         }
                     }
                     emit!(ui_data("ryu-acp-session-info", &info));

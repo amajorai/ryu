@@ -38,9 +38,11 @@ ryu-egress = { path = "../../crates/core/egress" }
 # effects, so every execution transport can apply the same default-deny policy.
 ryu-deletion-guard = { path = "../../crates/core/deletion-guard" }
 ryu-safe-actions = { path = "../../crates/core/safe-actions" }
+ryu-agent-contracts = { path = "../../crates/core/agent-contracts" }
 dirs = "5"
 anyhow = "1"
 libc = "0.2"
+libloading = "0.8"
 notify = "6"
 url = "2"
 futures-util = "0.3"

@@ -37,7 +37,7 @@ token in `expo-secure-store`, not in source or bundled environment values.
 ## What it provides
 
 - **HTTP primitives** (`client.ts`, root export): `ApiTarget`, `request`, `apiUrl`, `makeHeaders`, plus the marketplace buyer-token seam (`BUYER_TOKEN_HEADER`, `setBuyerTokenProvider`, `buyerTokenHeader`). Bearer auth and base-URL handling live here in exactly one place.
-- **Typed domain modules** (subpath exports): one file per Core feature: `agents`, `chat`, `models`, `engines`, `spaces`, `skills`, `tools`, `workflows`, `teams`, `monitors`, `meetings`, `schedules`, `voice`, `mesh`, `mcp`, `plugins`, `recipes`, `delegation`, `goals`, `sessions`, `runs`, and more.
+- **Typed domain modules** (subpath exports): one file per Core feature: `agents`, `chat`, `harness`, `models`, `engines`, `spaces`, `skills`, `tools`, `workflows`, `teams`, `monitors`, `meetings`, `schedules`, `voice`, `mesh`, `mcp`, `plugins`, `recipes`, `delegation`, `goals`, `sessions`, `runs`, and more.
 - **Subpath imports**: pull a feature by path: `import { fetchAgents } from "@ryuhq/core-client/agents"`. The root re-exports only the HTTP primitives by design (no kitchen-sink barrel).
 
 ## Role

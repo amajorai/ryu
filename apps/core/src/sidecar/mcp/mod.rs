@@ -4392,11 +4392,12 @@ impl McpRegistry {
         // returns the decrypted credential here so the tool can act AS the user;
         // it is threaded out-of-band to the tool (never into `arguments`, never to
         // the model). For every other tool this is `None`.
-        let injected_credential = match crate::identity::consult_for_tool_call(
+        let injected_credential = match crate::identity::consult_for_tool_call_with_agent(
             profile_ids,
             tool_id,
             &arguments,
             session_id.clone(),
+            agent_id,
         )
         .await
         {
@@ -4617,7 +4618,7 @@ impl McpRegistry {
             // principal must be the OWNING PLUGIN and why the loopback egress grant
             // is unioned in rather than demanded from 40 manifests.
             let plan = crate::ext_api::call_plan(&route, &grants);
-            return crate::tool_exec::run_http_tool(
+            return crate::tool_exec::run_http_tool_with_agent(
                 &route.url,
                 &route.method,
                 arguments,
@@ -4640,6 +4641,7 @@ impl McpRegistry {
                 profile_ids,
                 &plan.principal,
                 session_id.as_deref(),
+                agent_id,
             )
             .await
             .map_err(|e| anyhow!(e));
@@ -4845,7 +4847,7 @@ impl McpRegistry {
                         // manifest knobs, not exa-specific code.
                         let url =
                             url_for_calling_agent(&url, caller_agent_query.as_deref(), agent_id)?;
-                        return crate::tool_exec::run_http_tool(
+                        return crate::tool_exec::run_http_tool_with_agent(
                             &url,
                             &method,
                             arguments,
@@ -4858,6 +4860,7 @@ impl McpRegistry {
                             profile_ids,
                             &resolved.plugin_id,
                             session_id.as_deref(),
+                            agent_id,
                         )
                         .await
                         .map_err(|e| anyhow!(e));
@@ -4878,7 +4881,7 @@ impl McpRegistry {
                         // inside `run_command_tool`. The approval gate (if any) has
                         // already classified under the outer `app.` id (gate_id's
                         // `_ => tool_id` arm), so no per-target re-gate is needed.
-                        return crate::tool_exec::run_command_tool(
+                        return crate::tool_exec::run_command_tool_with_agent(
                             &bin,
                             &args,
                             arg_specs.as_deref(),
@@ -4892,6 +4895,7 @@ impl McpRegistry {
                             &resolved.grants,
                             &resolved.plugin_id,
                             session_id.as_deref(),
+                            agent_id,
                         )
                         .await
                         .map_err(|e| anyhow!(e));
@@ -4938,7 +4942,7 @@ impl McpRegistry {
                     return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
                 }
             }
-            return sandbox::dispatch(tool, arguments).await;
+            return sandbox::dispatch_with_context(tool, arguments, agent_id, session_id).await;
         }
 
         // Built-in desktop-notification provider (#456): dispatched in-process,

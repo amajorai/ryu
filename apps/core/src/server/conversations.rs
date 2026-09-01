@@ -26,6 +26,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::runnable::RunnableKind;
+use ryu_agent_contracts::{
+    validate_start_request, ExecutionProfile, HarnessRun, HarnessSession, RunEvent,
+    RunEventEnvelope, RunStatus as HarnessRunStatus, StartRunRequest, PROTOCOL_VERSION,
+};
 use ryu_kernel_contracts::ResourceKey;
 
 /// The SQL twin of `resource_access` (`server/mod.rs`) — the ONE place a tenancy
@@ -685,6 +689,18 @@ pub struct Session {
     pub runnable_kind: RunnableKind,
     /// Current lifecycle status of the run.
     pub status: SessionStatus,
+    /// Portable execution profile requested for this session. The profile is
+    /// provenance/configuration; Gateway and the runner still enforce the
+    /// effective sandbox, network, and approval policy.
+    #[serde(default)]
+    pub execution_profile: ExecutionProfile,
+    /// Optional parent session for a delegated child run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    /// Native runtime session id (for example an ACP/Codex session), when the
+    /// selected adapter exposes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_session_id: Option<String>,
     /// Unix milliseconds.
     pub created_at: i64,
     /// Unix milliseconds.
@@ -786,6 +802,20 @@ pub fn subscribe_run_events() -> tokio::sync::broadcast::Receiver<RunStatusEvent
     run_events_sender().subscribe()
 }
 
+/// A replay notification for the versioned harness event journal. The SQLite
+/// row is the source of truth; this process-local bus only wakes live SSE
+/// subscribers so they can fetch the next durable cursor without polling.
+fn harness_events_sender() -> &'static tokio::sync::broadcast::Sender<RunEventEnvelope> {
+    static HARNESS_EVENTS: OnceLock<tokio::sync::broadcast::Sender<RunEventEnvelope>> =
+        OnceLock::new();
+    HARNESS_EVENTS.get_or_init(|| tokio::sync::broadcast::channel(256).0)
+}
+
+/// Subscribe to durable harness event notifications.
+pub fn subscribe_harness_events() -> tokio::sync::broadcast::Receiver<RunEventEnvelope> {
+    harness_events_sender().subscribe()
+}
+
 fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -828,9 +858,10 @@ impl ConversationStore {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating db dir {}", parent.display()))?;
         }
-        let conn = Connection::open(&path)
+        let mut conn = Connection::open(&path)
             .with_context(|| format!("opening conversation db {}", path.display()))?;
         Self::init_schema(&conn)?;
+        let cipher = ryu_crypto::global_cipher()?;
         // One-shot tenancy backfill for rows that pre-date the per-resource ACL.
         // Deliberately NOT in `init_schema` (which the in-memory test store also
         // runs — it must never read the real account vault) and best-effort: a
@@ -845,12 +876,12 @@ impl ConversationStore {
         // backfill above (out of `init_schema`, warn on failure, never blocks the
         // node opening its chat db), but deliberately NOT marker-gated: every crash
         // produces new stuck rows, so this has to run on every boot.
-        if let Err(e) = Self::reconcile_interrupted_runs(&conn) {
+        if let Err(e) = Self::reconcile_interrupted_runs(&mut conn, &cipher) {
             tracing::warn!("interrupted-run reconciliation skipped: {e:#}");
         }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
-            cipher: ryu_crypto::global_cipher()?,
+            cipher,
             chat_memory_enabled: Arc::new(AtomicBool::new(false)),
             message_index: None,
             message_fts: None,
@@ -950,10 +981,12 @@ impl ConversationStore {
     /// still knowable: a `running` row at startup means nobody is streaming it, so
     /// it is by definition interrupted.
     ///
-    /// Two statements, in this order:
+    /// Three statements, in this order:
     ///   1. flag the trailing assistant message of every `running` conversation
     ///      (it is the row that was being written when the node went down), and
     ///   2. move the conversation itself off `running`.
+    ///   3. close any durable harness run that was still live and append its
+    ///      terminal `run_interrupted` event in the same transaction.
     /// The message pass keys off `run_status = 'running'`, so flipping the status
     /// first would flag nothing.
     ///
@@ -964,7 +997,10 @@ impl ConversationStore {
     /// mutex. Do not "fix" this into a per-row call.
     ///
     /// Returns `(runs_reconciled, messages_flagged)` for the log line.
-    fn reconcile_interrupted_runs(conn: &Connection) -> Result<(usize, usize)> {
+    fn reconcile_interrupted_runs(
+        conn: &mut Connection,
+        cipher: &ryu_crypto::FieldCipher,
+    ) -> Result<(usize, usize)> {
         let flagged = conn
             .execute(
                 "UPDATE messages SET interrupted = 1
@@ -989,13 +1025,63 @@ impl ConversationStore {
                 [],
             )
             .context("reconciling interrupted run statuses")?;
-        if runs > 0 {
+
+        // A harness run has a separate lifecycle from the legacy conversation
+        // row. Reconcile both together so a restarted node cannot leave the
+        // cursorable event stream parked forever without a terminal event.
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .context("starting harness interruption transaction")?;
+        let stuck: Vec<(String, String, i64)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, session_id, event_seq FROM harness_runs
+                     WHERE status IN ('running', 'awaiting_approval')",
+                )
+                .context("listing interrupted harness runs")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let harness_runs = stuck.len();
+        let now = now_millis();
+        for (run_id, session_id, current_seq) in stuck {
+            let next_seq = u64::try_from(current_seq.max(0) + 1).unwrap_or(u64::MAX);
+            let event = build_harness_event(
+                &run_id,
+                &session_id,
+                next_seq,
+                now,
+                RunEvent::RunInterrupted,
+            );
+            insert_harness_event(&tx, cipher, &event)
+                .with_context(|| format!("appending interruption for harness run {run_id}"))?;
+            tx.execute(
+                "UPDATE harness_runs
+                 SET status = 'interrupted', event_seq = ?1, finished_at = ?2
+                 WHERE id = ?3 AND status IN ('running', 'awaiting_approval')",
+                params![i64::try_from(next_seq).unwrap_or(i64::MAX), now, run_id,],
+            )?;
+            tx.execute(
+                "UPDATE sessions SET status = 'failed', updated_at = ?1
+                 WHERE id = ?2 AND status = 'running'",
+                params![now, session_id],
+            )?;
+        }
+        tx.commit()
+            .context("committing harness interruption transaction")?;
+        if runs > 0 || harness_runs > 0 {
             tracing::info!(
-                "run reconciliation: {runs} conversation(s) were still 'running' at boot \
-                 ({flagged} truncated assistant message(s) marked interrupted)"
+                "run reconciliation: {runs} conversation(s) and {harness_runs} harness run(s) \
+                 were still live at boot ({flagged} truncated assistant message(s) marked interrupted)"
             );
         }
-        Ok((runs, flagged))
+        Ok((runs + harness_runs, flagged))
     }
 
     /// Preference key shared by Core's preference route and the Memory app.
@@ -1194,11 +1280,43 @@ impl ConversationStore {
                  runnable_id     TEXT NOT NULL,
                  runnable_kind   TEXT NOT NULL,
                  status          TEXT NOT NULL DEFAULT 'idle',
+                 execution_profile TEXT NOT NULL DEFAULT '{}',
+                 parent_session_id TEXT,
+                 native_session_id TEXT,
                  created_at      INTEGER NOT NULL,
                  updated_at      INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_sessions_conversation
                  ON sessions(conversation_id);
+             CREATE TABLE IF NOT EXISTS harness_runs (
+                 id                TEXT PRIMARY KEY,
+                 session_id        TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                 parent_run_id     TEXT,
+                 status            TEXT NOT NULL DEFAULT 'pending',
+                 attempt           INTEGER NOT NULL DEFAULT 1,
+                 idempotency_key   TEXT,
+                 execution_profile TEXT NOT NULL DEFAULT '{}',
+                 input_json        TEXT NOT NULL,
+                 output_json       TEXT,
+                 error             TEXT,
+                 event_seq         INTEGER NOT NULL DEFAULT 0,
+                 created_at        INTEGER NOT NULL,
+                 started_at        INTEGER,
+                 finished_at       INTEGER,
+                 UNIQUE(session_id, idempotency_key)
+             );
+             CREATE INDEX IF NOT EXISTS idx_harness_runs_session
+                 ON harness_runs(session_id, created_at DESC);
+             CREATE TABLE IF NOT EXISTS harness_run_events (
+                 id         TEXT PRIMARY KEY,
+                 run_id     TEXT NOT NULL REFERENCES harness_runs(id) ON DELETE CASCADE,
+                 seq        INTEGER NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 event_json TEXT NOT NULL,
+                 UNIQUE(run_id, seq)
+             );
+             CREATE INDEX IF NOT EXISTS idx_harness_run_events_run
+                 ON harness_run_events(run_id, seq);
              CREATE TABLE IF NOT EXISTS btw_entries (
                  id              TEXT PRIMARY KEY,
                  conversation_id TEXT NOT NULL,
@@ -1342,6 +1460,34 @@ impl ConversationStore {
             if !existing_conv_columns.contains(col) {
                 conn.execute_batch(ddl)
                     .with_context(|| format!("adding column {col}"))?;
+            }
+        }
+
+        // Additive migration for the versioned harness session projection. The
+        // legacy `/api/sessions` shape remains compatible, while new harness
+        // callers gain a durable execution profile and parent/native bindings.
+        let existing_session_columns: std::collections::HashSet<String> = {
+            let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            names.filter_map(|r| r.ok()).collect()
+        };
+        for (col, ddl) in [
+            (
+                "execution_profile",
+                "ALTER TABLE sessions ADD COLUMN execution_profile TEXT NOT NULL DEFAULT '{}'",
+            ),
+            (
+                "parent_session_id",
+                "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT",
+            ),
+            (
+                "native_session_id",
+                "ALTER TABLE sessions ADD COLUMN native_session_id TEXT",
+            ),
+        ] {
+            if !existing_session_columns.contains(col) {
+                conn.execute_batch(ddl)
+                    .with_context(|| format!("adding session column {col}"))?;
             }
         }
 
@@ -4991,6 +5137,26 @@ impl ConversationStore {
             "DELETE FROM proactive_openings WHERE conversation_id = ?1",
             params![conversation_id],
         )?;
+        // Legacy databases do not rely on SQLite foreign-key enforcement for
+        // manual deletes, so clear the durable harness children explicitly.
+        conn.execute(
+            "DELETE FROM harness_run_events WHERE run_id IN (
+                 SELECT id FROM harness_runs WHERE session_id IN (
+                     SELECT id FROM sessions WHERE conversation_id = ?1
+                 )
+             )",
+            params![conversation_id],
+        )?;
+        conn.execute(
+            "DELETE FROM harness_runs WHERE session_id IN (
+                 SELECT id FROM sessions WHERE conversation_id = ?1
+             )",
+            params![conversation_id],
+        )?;
+        conn.execute(
+            "DELETE FROM sessions WHERE conversation_id = ?1",
+            params![conversation_id],
+        )?;
         conn.execute(
             "DELETE FROM conversation_collaborators WHERE conversation_id = ?1",
             params![conversation_id],
@@ -5174,6 +5340,11 @@ impl ConversationStore {
     pub async fn clear_all_conversations(&self) -> Result<u64> {
         let conn = self.conn.lock().await;
         conn.execute("DELETE FROM messages", [])?;
+        conn.execute(
+            "DELETE FROM harness_run_events WHERE run_id IN (SELECT id FROM harness_runs)",
+            [],
+        )?;
+        conn.execute("DELETE FROM harness_runs", [])?;
         conn.execute("DELETE FROM sessions", [])?;
         conn.execute("DELETE FROM btw_entries", [])?;
         conn.execute("DELETE FROM proactive_openings", [])?;
@@ -5195,6 +5366,18 @@ impl ConversationStore {
         let owned = "SELECT id FROM conversations WHERE owner_user_id = ?1";
         conn.execute(
             &format!("DELETE FROM messages WHERE conversation_id IN ({owned})"),
+            params![owner_user_id],
+        )?;
+        conn.execute(
+            &format!(
+                "DELETE FROM harness_run_events WHERE run_id IN (
+                     SELECT id FROM harness_runs WHERE session_id IN ({owned})
+                 )"
+            ),
+            params![owner_user_id],
+        )?;
+        conn.execute(
+            &format!("DELETE FROM harness_runs WHERE session_id IN ({owned})"),
             params![owner_user_id],
         )?;
         conn.execute(
@@ -5256,14 +5439,16 @@ impl ConversationStore {
             .context("creating conversation for session")?;
 
             conn.execute(
-                "INSERT INTO sessions (id, conversation_id, runnable_id, runnable_kind, status, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                "INSERT INTO sessions (id, conversation_id, runnable_id, runnable_kind, status,
+                 execution_profile, parent_session_id, native_session_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?7)",
                 params![
                     session_id,
                     conversation_id,
                     runnable_id,
                     runnable_kind.as_str(),
                     SessionStatus::Idle.as_str(),
+                    serde_json::to_string(&ExecutionProfile::default())?,
                     now,
                 ],
             )
@@ -5276,6 +5461,9 @@ impl ConversationStore {
             runnable_id: runnable_id.to_string(),
             runnable_kind,
             status: SessionStatus::Idle,
+            execution_profile: ExecutionProfile::default(),
+            parent_session_id: None,
+            native_session_id: None,
             created_at: now,
             updated_at: now,
         })
@@ -5285,7 +5473,9 @@ impl ConversationStore {
     pub async fn get_session(&self, session_id: &str) -> Result<Option<Session>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, runnable_id, runnable_kind, status, created_at, updated_at
+            "SELECT id, conversation_id, runnable_id, runnable_kind, status,
+                    execution_profile, parent_session_id, native_session_id,
+                    created_at, updated_at
              FROM sessions WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([session_id], |row| {
@@ -5295,8 +5485,11 @@ impl ConversationStore {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
             ))
         })?;
         match rows.next() {
@@ -5308,6 +5501,9 @@ impl ConversationStore {
                     runnable_id,
                     runnable_kind_str,
                     status_str,
+                    execution_profile_json,
+                    parent_session_id,
+                    native_session_id,
                     created_at,
                     updated_at,
                 ) = row?;
@@ -5318,6 +5514,9 @@ impl ConversationStore {
                     runnable_id,
                     runnable_kind,
                     status: SessionStatus::from_str(&status_str),
+                    execution_profile: parse_execution_profile(&execution_profile_json),
+                    parent_session_id,
+                    native_session_id,
                     created_at,
                     updated_at,
                 }))
@@ -5347,7 +5546,9 @@ impl ConversationStore {
     ) -> Result<Vec<Session>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, runnable_id, runnable_kind, status, created_at, updated_at
+            "SELECT id, conversation_id, runnable_id, runnable_kind, status,
+                    execution_profile, parent_session_id, native_session_id,
+                    created_at, updated_at
              FROM sessions WHERE conversation_id = ?1
              ORDER BY updated_at DESC",
         )?;
@@ -5358,8 +5559,11 @@ impl ConversationStore {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
             ))
         })?;
         let mut out = Vec::new();
@@ -5370,6 +5574,9 @@ impl ConversationStore {
                 runnable_id,
                 runnable_kind_str,
                 status_str,
+                execution_profile_json,
+                parent_session_id,
+                native_session_id,
                 created_at,
                 updated_at,
             ) = row?;
@@ -5380,12 +5587,669 @@ impl ConversationStore {
                 runnable_id,
                 runnable_kind,
                 status: SessionStatus::from_str(&status_str),
+                execution_profile: parse_execution_profile(&execution_profile_json),
+                parent_session_id,
+                native_session_id,
                 created_at,
                 updated_at,
             });
         }
         Ok(out)
     }
+
+    // ── Versioned agent harness ─────────────────────────────────────────────
+
+    /// Store the portable execution profile attached to a session. The profile
+    /// is intentionally separate from the node's secrets and from Gateway's
+    /// effective policy; it records what the caller requested so every host can
+    /// render the same run provenance.
+    pub async fn set_session_execution_profile(
+        &self,
+        session_id: &str,
+        profile: &ExecutionProfile,
+        parent_session_id: Option<&str>,
+    ) -> Result<bool> {
+        let probe = StartRunRequest {
+            input: serde_json::json!({}),
+            idempotency_key: None,
+            execution_profile: Some(profile.clone()),
+            resume_run_id: None,
+        };
+        validate_start_request(&probe).map_err(anyhow::Error::msg)?;
+        let profile_json = serde_json::to_string(profile)?;
+        let now = now_millis();
+        let conn = self.conn.lock().await;
+        let updated = conn.execute(
+            "UPDATE sessions
+             SET execution_profile = ?1, parent_session_id = ?2, updated_at = ?3
+             WHERE id = ?4",
+            params![profile_json, parent_session_id, now, session_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// Record the native session id supplied by an external runtime such as
+    /// ACP/Codex. This is a projection binding only; the native runtime remains
+    /// responsible for the native transcript and its own resume semantics.
+    pub async fn set_session_native_id(
+        &self,
+        session_id: &str,
+        native_session_id: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        let updated = conn.execute(
+            "UPDATE sessions SET native_session_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![native_session_id, now_millis(), session_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// Convert the legacy session row into the versioned harness projection.
+    /// The newest harness run supplies the richer lifecycle when one exists;
+    /// otherwise the legacy idle/running/completed/failed state is preserved.
+    pub async fn get_harness_session(&self, session_id: &str) -> Result<Option<HarnessSession>> {
+        let Some(session) = self.get_session(session_id).await? else {
+            return Ok(None);
+        };
+        let status = self
+            .list_harness_runs(session_id)
+            .await?
+            .into_iter()
+            .next()
+            .map(|run| run.status)
+            .unwrap_or_else(|| harness_status_from_legacy(&session.status));
+        Ok(Some(HarnessSession {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            id: session.id,
+            conversation_id: session.conversation_id,
+            runnable_id: session.runnable_id,
+            runnable_kind: session.runnable_kind.as_str().to_owned(),
+            status,
+            parent_session_id: session.parent_session_id,
+            execution_profile: session.execution_profile,
+            native_session_id: session.native_session_id,
+            created_at: millis_to_rfc3339(session.created_at),
+            updated_at: millis_to_rfc3339(session.updated_at),
+        }))
+    }
+
+    /// List durable child sessions spawned from a parent session. Child rows
+    /// stay independently addressable so they can be resumed or inspected
+    /// without copying the parent's transcript.
+    pub async fn list_child_harness_sessions(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Vec<HarnessSession>> {
+        let ids = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT id FROM sessions WHERE parent_session_id = ?1
+                 ORDER BY updated_at DESC",
+            )?;
+            let rows = stmt.query_map(params![parent_session_id], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut children = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(session) = self.get_harness_session(&id).await? {
+                children.push(session);
+            }
+        }
+        Ok(children)
+    }
+
+    /// A newly-created idempotent harness run. `created = false` means the
+    /// caller must attach to the existing run and must not dispatch a duplicate.
+    pub async fn start_harness_run(
+        &self,
+        session_id: &str,
+        request: &StartRunRequest,
+    ) -> Result<HarnessRunStart> {
+        validate_start_request(request).map_err(anyhow::Error::msg)?;
+        let Some(session) = self.get_session(session_id).await? else {
+            anyhow::bail!("session '{session_id}' not found");
+        };
+        let profile = request
+            .execution_profile
+            .clone()
+            .unwrap_or_else(|| session.execution_profile.clone());
+        let input = serde_json::to_string(&request.input)?;
+        let sealed_input = self.cipher.seal(&input)?;
+        let idempotency_key = request
+            .idempotency_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned);
+        let input_hash = ryu_tracing::hash_args(&request.input);
+        let message_count = harness_message_count(&request.input);
+        let now = now_millis();
+        let run_id = format!("run_{}", uuid::Uuid::new_v4().simple());
+        let profile_json = serde_json::to_string(&profile)?;
+        let parent_run_id = request.resume_run_id.clone();
+        let started_at = millis_to_rfc3339(now);
+        let (new_run, existing_id) = {
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            let existing_id: Option<String> = if let Some(key) = idempotency_key.as_deref() {
+                let existing: Option<(String, String, String, Option<String>)> = tx
+                    .query_row(
+                        "SELECT id, input_json, execution_profile, parent_run_id
+                     FROM harness_runs
+                     WHERE session_id = ?1 AND idempotency_key = ?2",
+                        params![session_id, key],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .optional()?;
+                if let Some((existing_id, existing_input, existing_profile, existing_parent)) =
+                    existing
+                {
+                    let existing_input = self.cipher.open(&existing_input)?;
+                    if existing_input != input
+                        || existing_profile != profile_json
+                        || existing_parent != parent_run_id
+                    {
+                        anyhow::bail!(
+                            "idempotency_key '{key}' was already used with a different request"
+                        );
+                    }
+                    Some(existing_id)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(existing_id) = existing_id {
+                drop(tx);
+                drop(conn);
+                (None, Some(existing_id))
+            } else {
+                let active: Option<(String, String)> = tx
+                    .query_row(
+                        "SELECT id, status FROM harness_runs
+                         WHERE session_id = ?1
+                           AND status IN ('running', 'awaiting_approval')
+                         ORDER BY created_at DESC LIMIT 1",
+                        params![session_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                if let Some((active_id, active_status)) = active {
+                    anyhow::bail!("session already has active run '{active_id}' ({active_status})");
+                }
+                if let Some(parent_id) = parent_run_id.as_deref() {
+                    let parent_session: Option<String> = tx
+                        .query_row(
+                            "SELECT session_id FROM harness_runs WHERE id = ?1",
+                            params![parent_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    match parent_session {
+                        Some(parent_session) if parent_session == session_id => {}
+                        Some(_) => anyhow::bail!("resume_run_id belongs to another session"),
+                        None => anyhow::bail!("resume_run_id '{parent_id}' not found"),
+                    }
+                }
+
+                let attempt: i64 = tx.query_row(
+                    "SELECT COALESCE(MAX(attempt), 0) + 1 FROM harness_runs WHERE session_id = ?1",
+                    params![session_id],
+                    |row| row.get(0),
+                )?;
+                tx.execute(
+                    "INSERT INTO harness_runs (
+                         id, session_id, parent_run_id, status, attempt, idempotency_key,
+                         execution_profile, input_json, event_seq, created_at, started_at
+                     ) VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, 0, ?8, ?8)",
+                    params![
+                        run_id,
+                        session_id,
+                        parent_run_id,
+                        attempt,
+                        idempotency_key,
+                        profile_json,
+                        sealed_input,
+                        now,
+                    ],
+                )?;
+                tx.execute(
+                    "UPDATE sessions SET status = 'running', updated_at = ?1 WHERE id = ?2",
+                    params![now, session_id],
+                )?;
+
+                let started_event = build_harness_event(
+                    &run_id,
+                    session_id,
+                    1,
+                    now,
+                    RunEvent::RunStarted {
+                        execution_profile: profile.clone(),
+                    },
+                );
+                let input_event = build_harness_event(
+                    &run_id,
+                    session_id,
+                    2,
+                    now,
+                    RunEvent::InputAccepted {
+                        input_hash,
+                        message_count,
+                    },
+                );
+                insert_harness_event(&tx, &self.cipher, &started_event)?;
+                insert_harness_event(&tx, &self.cipher, &input_event)?;
+                tx.execute(
+                    "UPDATE harness_runs SET event_seq = 2 WHERE id = ?1",
+                    params![run_id],
+                )?;
+                tx.commit()?;
+                (Some((started_event, input_event, attempt)), None)
+            }
+        };
+        if let Some(existing_id) = existing_id {
+            let run = self
+                .get_harness_run(&existing_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("idempotent harness run disappeared"))?;
+            return Ok(HarnessRunStart {
+                run,
+                created: false,
+            });
+        }
+        let Some((started_event, input_event, attempt)) = new_run else {
+            anyhow::bail!("harness run creation produced no run");
+        };
+        let _ = harness_events_sender().send(started_event);
+        let _ = harness_events_sender().send(input_event);
+
+        Ok(HarnessRunStart {
+            run: HarnessRun {
+                protocol_version: PROTOCOL_VERSION.to_owned(),
+                id: run_id,
+                session_id: session_id.to_owned(),
+                status: HarnessRunStatus::Running,
+                attempt: u32::try_from(attempt.max(0)).unwrap_or(u32::MAX),
+                idempotency_key,
+                parent_run_id,
+                execution_profile: profile,
+                event_cursor: 2,
+                created_at: started_at.clone(),
+                started_at: Some(started_at),
+                finished_at: None,
+                error: None,
+                output: None,
+            },
+            created: true,
+        })
+    }
+
+    /// Fetch one durable harness run by id.
+    pub async fn get_harness_run(&self, run_id: &str) -> Result<Option<HarnessRun>> {
+        let raw = {
+            let conn = self.conn.lock().await;
+            conn.query_row(
+                "SELECT id, session_id, parent_run_id, status, attempt, idempotency_key,
+                        execution_profile, input_json, output_json, error, event_seq,
+                        created_at, started_at, finished_at
+                 FROM harness_runs WHERE id = ?1",
+                params![run_id],
+                read_harness_run_row,
+            )
+            .optional()?
+        };
+        raw.map(|row| decode_harness_run(&self.cipher, row))
+            .transpose()
+    }
+
+    /// List a session's runs newest-first.
+    pub async fn list_harness_runs(&self, session_id: &str) -> Result<Vec<HarnessRun>> {
+        let raw = {
+            let conn = self.conn.lock().await;
+            let mut stmt = conn.prepare(
+                "SELECT id, session_id, parent_run_id, status, attempt, idempotency_key,
+                        execution_profile, input_json, output_json, error, event_seq,
+                        created_at, started_at, finished_at
+                 FROM harness_runs WHERE session_id = ?1
+                 ORDER BY created_at DESC, rowid DESC",
+            )?;
+            let rows = stmt.query_map(params![session_id], read_harness_run_row)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        raw.into_iter()
+            .map(|row| decode_harness_run(&self.cipher, row))
+            .collect()
+    }
+
+    /// Append one ordered event to the durable run journal and wake live
+    /// subscribers. Event payloads are bounded and already redacted by the
+    /// caller; raw model/tool arguments are never required by this contract.
+    pub async fn append_harness_event(
+        &self,
+        run_id: &str,
+        event: RunEvent,
+    ) -> Result<RunEventEnvelope> {
+        let (envelope, _) = {
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let (session_id, current_seq): (String, i64) = tx
+                .query_row(
+                    "SELECT session_id, event_seq FROM harness_runs WHERE id = ?1",
+                    params![run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .context("loading harness run for event")?;
+            let seq = u64::try_from(current_seq.max(0) + 1).unwrap_or(u64::MAX);
+            let now = now_millis();
+            let envelope = build_harness_event(run_id, &session_id, seq, now, event);
+            insert_harness_event(&tx, &self.cipher, &envelope)?;
+            tx.execute(
+                "UPDATE harness_runs SET event_seq = ?1 WHERE id = ?2",
+                params![i64::try_from(seq).unwrap_or(i64::MAX), run_id],
+            )?;
+            tx.commit()?;
+            (envelope, seq)
+        };
+        let _ = harness_events_sender().send(envelope.clone());
+        Ok(envelope)
+    }
+
+    /// Read a bounded event page after an exclusive sequence cursor.
+    pub async fn list_harness_events(
+        &self,
+        run_id: &str,
+        after_seq: u64,
+        limit: usize,
+    ) -> Result<Vec<RunEventEnvelope>> {
+        let after = i64::try_from(after_seq).unwrap_or(i64::MAX);
+        let limit = i64::try_from(limit.clamp(1, 500)).unwrap_or(500);
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT event_json FROM harness_run_events
+             WHERE run_id = ?1 AND seq > ?2 ORDER BY seq ASC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![run_id, after, limit], |row| row.get::<_, String>(0))?;
+        rows.map(|row| {
+            let sealed = row?;
+            let json = self.cipher.open(&sealed).context("opening harness event")?;
+            serde_json::from_str(&json).context("decoding harness event")
+        })
+        .collect()
+    }
+
+    /// Move a non-terminal run between `running` and `awaiting_approval`
+    /// without creating an extra synthetic event. The approval event itself is
+    /// the durable explanation for the transition; this method only updates the
+    /// indexed state used by `GET /api/harness/runs/:id`.
+    pub async fn set_harness_run_status(
+        &self,
+        run_id: &str,
+        status: HarnessRunStatus,
+    ) -> Result<bool> {
+        if status.is_terminal() {
+            anyhow::bail!("set_harness_run_status accepts non-terminal states only");
+        }
+        let conn = self.conn.lock().await;
+        let updated = conn.execute(
+            "UPDATE harness_runs SET status = ?1 WHERE id = ?2
+             AND status NOT IN ('completed', 'failed', 'canceled', 'interrupted')",
+            params![status.as_str(), run_id],
+        )?;
+        Ok(updated > 0)
+    }
+
+    /// Complete, fail, cancel, or interrupt a run. Terminal calls are
+    /// idempotent: a late duplicate completion cannot append a second terminal
+    /// event or move a run back out of its terminal state.
+    pub async fn finish_harness_run(
+        &self,
+        run_id: &str,
+        status: HarnessRunStatus,
+        error: Option<&str>,
+        output: Option<&serde_json::Value>,
+    ) -> Result<Option<HarnessRun>> {
+        if !status.is_terminal() {
+            anyhow::bail!("harness finish status must be terminal");
+        }
+        let mut published = None;
+        let mut already_terminal = false;
+        {
+            let mut conn = self.conn.lock().await;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let row: Option<(String, i64, String)> = tx
+                .query_row(
+                    "SELECT session_id, event_seq, status FROM harness_runs WHERE id = ?1",
+                    params![run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
+            let Some((session_id, current_seq, current_status)) = row else {
+                drop(tx);
+                drop(conn);
+                // Keep the decision outside this transaction scope so a caller
+                // that is already in a Tokio task never holds a rusqlite
+                // transaction across the async reload below.
+                return Ok(None);
+            };
+            if HarnessRunStatus::from_str(&current_status).is_terminal() {
+                already_terminal = true;
+                drop(tx);
+                drop(conn);
+            } else {
+                let now = now_millis();
+                let output_json = output
+                    .map(serde_json::to_string)
+                    .transpose()?
+                    .map(|value| self.cipher.seal(&value))
+                    .transpose()?;
+                tx.execute(
+                    "UPDATE harness_runs
+                     SET status = ?1, error = ?2, output_json = ?3, finished_at = ?4
+                     WHERE id = ?5",
+                    params![status.as_str(), error, output_json, now, run_id],
+                )?;
+                let session_status = match status {
+                    HarnessRunStatus::Completed => "completed",
+                    HarnessRunStatus::Canceled
+                    | HarnessRunStatus::Failed
+                    | HarnessRunStatus::Interrupted => "failed",
+                    HarnessRunStatus::Pending
+                    | HarnessRunStatus::Running
+                    | HarnessRunStatus::AwaitingApproval => "running",
+                };
+                tx.execute(
+                    "UPDATE sessions SET status = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![session_status, now, session_id],
+                )?;
+                let next_seq = u64::try_from(current_seq.max(0) + 1).unwrap_or(u64::MAX);
+                let terminal_event = match status {
+                    HarnessRunStatus::Completed => RunEvent::RunCompleted {
+                        output: output.cloned(),
+                    },
+                    HarnessRunStatus::Canceled => RunEvent::RunCanceled,
+                    HarnessRunStatus::Interrupted => RunEvent::RunInterrupted,
+                    HarnessRunStatus::Failed => RunEvent::RunFailed {
+                        code: "run_failed".to_owned(),
+                        message: error.unwrap_or("run failed").to_owned(),
+                    },
+                    HarnessRunStatus::Pending
+                    | HarnessRunStatus::Running
+                    | HarnessRunStatus::AwaitingApproval => unreachable!(),
+                };
+                let envelope =
+                    build_harness_event(run_id, &session_id, next_seq, now, terminal_event);
+                insert_harness_event(&tx, &self.cipher, &envelope)?;
+                tx.execute(
+                    "UPDATE harness_runs SET event_seq = ?1 WHERE id = ?2",
+                    params![i64::try_from(next_seq).unwrap_or(i64::MAX), run_id],
+                )?;
+                tx.commit()?;
+                published = Some(envelope);
+            }
+        }
+        if already_terminal {
+            return self.get_harness_run(run_id).await;
+        }
+        if let Some(envelope) = published {
+            let _ = harness_events_sender().send(envelope);
+        }
+        self.get_harness_run(run_id).await
+    }
+}
+
+/// The result of starting a run, including whether dispatch is new or an
+/// idempotent replay.
+#[derive(Debug, Clone)]
+pub struct HarnessRunStart {
+    pub run: HarnessRun,
+    pub created: bool,
+}
+
+#[derive(Debug)]
+struct HarnessRunDbRow {
+    id: String,
+    session_id: String,
+    parent_run_id: Option<String>,
+    status: String,
+    attempt: i64,
+    idempotency_key: Option<String>,
+    execution_profile: String,
+    #[allow(dead_code)]
+    input_json: String,
+    output_json: Option<String>,
+    error: Option<String>,
+    event_seq: i64,
+    created_at: i64,
+    started_at: Option<i64>,
+    finished_at: Option<i64>,
+}
+
+fn read_harness_run_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HarnessRunDbRow> {
+    Ok(HarnessRunDbRow {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        parent_run_id: row.get(2)?,
+        status: row.get(3)?,
+        attempt: row.get(4)?,
+        idempotency_key: row.get(5)?,
+        execution_profile: row.get(6)?,
+        input_json: row.get(7)?,
+        output_json: row.get(8)?,
+        error: row.get(9)?,
+        event_seq: row.get(10)?,
+        created_at: row.get(11)?,
+        started_at: row.get(12)?,
+        finished_at: row.get(13)?,
+    })
+}
+
+fn decode_harness_run(
+    cipher: &ryu_crypto::FieldCipher,
+    row: HarnessRunDbRow,
+) -> Result<HarnessRun> {
+    let output = row
+        .output_json
+        .map(|value| cipher.open(&value))
+        .transpose()?
+        .map(|value| serde_json::from_str(&value))
+        .transpose()?;
+    Ok(HarnessRun {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        id: row.id,
+        session_id: row.session_id,
+        status: HarnessRunStatus::from_str(&row.status),
+        attempt: u32::try_from(row.attempt.max(0)).unwrap_or(u32::MAX),
+        idempotency_key: row.idempotency_key,
+        parent_run_id: row.parent_run_id,
+        execution_profile: parse_execution_profile(&row.execution_profile),
+        event_cursor: u64::try_from(row.event_seq.max(0)).unwrap_or(u64::MAX),
+        created_at: millis_to_rfc3339(row.created_at),
+        started_at: row.started_at.map(millis_to_rfc3339),
+        finished_at: row.finished_at.map(millis_to_rfc3339),
+        error: row.error,
+        output,
+    })
+}
+
+fn insert_harness_event(
+    tx: &rusqlite::Transaction<'_>,
+    cipher: &ryu_crypto::FieldCipher,
+    envelope: &RunEventEnvelope,
+) -> Result<()> {
+    tx.execute(
+        "INSERT INTO harness_run_events (id, run_id, seq, created_at, event_json)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            envelope.id,
+            envelope.run_id,
+            i64::try_from(envelope.seq).unwrap_or(i64::MAX),
+            rfc3339_to_millis(&envelope.created_at),
+            cipher.seal(&serde_json::to_string(envelope)?)?,
+        ],
+    )?;
+    Ok(())
+}
+
+fn build_harness_event(
+    run_id: &str,
+    session_id: &str,
+    seq: u64,
+    now: i64,
+    event: RunEvent,
+) -> RunEventEnvelope {
+    RunEventEnvelope {
+        protocol_version: PROTOCOL_VERSION.to_owned(),
+        id: format!("evt_{}", uuid::Uuid::new_v4().simple()),
+        run_id: run_id.to_owned(),
+        session_id: session_id.to_owned(),
+        seq,
+        created_at: millis_to_rfc3339(now),
+        event,
+    }
+}
+
+fn harness_message_count(input: &serde_json::Value) -> u32 {
+    let count = if let Some(messages) = input.get("messages").and_then(serde_json::Value::as_array)
+    {
+        messages.len()
+    } else if let Some(messages) = input.as_array() {
+        messages.len()
+    } else if input.get("prompt").is_some() {
+        1
+    } else {
+        0
+    };
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+fn parse_execution_profile(raw: &str) -> ExecutionProfile {
+    serde_json::from_str(raw).unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "invalid stored harness execution profile; using safe defaults");
+        ExecutionProfile::default()
+    })
+}
+
+fn harness_status_from_legacy(status: &SessionStatus) -> HarnessRunStatus {
+    match status {
+        SessionStatus::Idle => HarnessRunStatus::Pending,
+        SessionStatus::Running => HarnessRunStatus::Running,
+        SessionStatus::Completed => HarnessRunStatus::Completed,
+        SessionStatus::Failed => HarnessRunStatus::Failed,
+    }
+}
+
+fn millis_to_rfc3339(millis: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339()
+}
+
+fn rfc3339_to_millis(value: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|date| date.timestamp_millis())
+        .unwrap_or_else(|_| now_millis())
 }
 
 /// Parse a stored `runnable_kind` string back to a [`RunnableKind`].
@@ -7094,6 +7958,118 @@ mod tests {
         assert_eq!(reloaded.runnable_kind, RunnableKind::Workflow);
     }
 
+    #[tokio::test]
+    async fn harness_run_is_idempotent_replayable_and_terminal() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let session = store
+            .create_session(
+                "agent-harness",
+                RunnableKind::Agent,
+                Some("agent-harness"),
+                Some("Harness test"),
+                Tenancy::Unattributed,
+            )
+            .await
+            .unwrap();
+        let profile = ExecutionProfile::worktree(
+            Some("/tmp/ryu-harness-project".to_owned()),
+            Some("harness-test".to_owned()),
+        );
+        assert!(store
+            .set_session_execution_profile(&session.id, &profile, None)
+            .await
+            .unwrap());
+
+        let request = StartRunRequest {
+            input: serde_json::json!({ "prompt": "inspect" }),
+            idempotency_key: Some("turn-1".to_owned()),
+            execution_profile: None,
+            resume_run_id: None,
+        };
+        let first = store
+            .start_harness_run(&session.id, &request)
+            .await
+            .unwrap();
+        assert!(first.created);
+        assert_eq!(first.run.attempt, 1);
+        assert_eq!(first.run.status, HarnessRunStatus::Running);
+        assert_eq!(first.run.event_cursor, 2);
+        assert_eq!(first.run.execution_profile, profile);
+
+        let replay = store
+            .start_harness_run(&session.id, &request)
+            .await
+            .unwrap();
+        assert!(!replay.created);
+        assert_eq!(replay.run.id, first.run.id);
+        assert_eq!(replay.run.event_cursor, 2);
+
+        let different_request = StartRunRequest {
+            input: serde_json::json!({ "prompt": "different" }),
+            idempotency_key: Some("turn-1".to_owned()),
+            execution_profile: None,
+            resume_run_id: None,
+        };
+        assert!(store
+            .start_harness_run(&session.id, &different_request)
+            .await
+            .is_err());
+
+        let delta = store
+            .append_harness_event(
+                &first.run.id,
+                RunEvent::TextDelta {
+                    delta: "done".to_owned(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(delta.seq, 3);
+        let events = store
+            .list_harness_events(&first.run.id, 0, 20)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events[2].event,
+            RunEvent::TextDelta {
+                delta: "done".into()
+            }
+        );
+
+        let finished = store
+            .finish_harness_run(
+                &first.run.id,
+                HarnessRunStatus::Completed,
+                None,
+                Some(&serde_json::json!({ "text": "done" })),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(finished.status, HarnessRunStatus::Completed);
+        assert_eq!(finished.event_cursor, 4);
+        assert_eq!(finished.output, Some(serde_json::json!({ "text": "done" })));
+
+        // A late duplicate terminal callback is a no-op and cannot overwrite
+        // the successful result.
+        let duplicate = store
+            .finish_harness_run(
+                &first.run.id,
+                HarnessRunStatus::Failed,
+                Some("late failure"),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(duplicate.status, HarnessRunStatus::Completed);
+        assert_eq!(
+            duplicate.output,
+            Some(serde_json::json!({ "text": "done" }))
+        );
+    }
+
     #[test]
     fn folder_paths_normalize_to_one_spelling() {
         // The reported bug: an imported thread's cwd and a native run's folder
@@ -7302,8 +8278,8 @@ mod tests {
         store.set_run_status("conv-ok", "completed").await.unwrap();
 
         let (runs, flagged) = {
-            let conn = store.conn.lock().await;
-            ConversationStore::reconcile_interrupted_runs(&conn).unwrap()
+            let mut conn = store.conn.lock().await;
+            ConversationStore::reconcile_interrupted_runs(&mut conn, &store.cipher).unwrap()
         };
         assert_eq!(runs, 1, "only the stuck run is reconciled");
         assert_eq!(flagged, 1, "only its trailing assistant row is flagged");
@@ -7335,10 +8311,93 @@ mod tests {
         // Idempotent: a second boot flips nothing further (there is no `running`
         // row left) and does not re-flag anything.
         let (runs2, flagged2) = {
-            let conn = store.conn.lock().await;
-            ConversationStore::reconcile_interrupted_runs(&conn).unwrap()
+            let mut conn = store.conn.lock().await;
+            ConversationStore::reconcile_interrupted_runs(&mut conn, &store.cipher).unwrap()
         };
         assert_eq!((runs2, flagged2), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn reconcile_interrupted_harness_run_appends_terminal_event() {
+        let store = ConversationStore::open_in_memory().unwrap();
+        let session = store
+            .create_session(
+                "agent-1",
+                RunnableKind::Agent,
+                Some("agent-1"),
+                Some("Harness crash"),
+                Tenancy::Unattributed,
+            )
+            .await
+            .unwrap();
+        let started = store
+            .start_harness_run(
+                &session.id,
+                &StartRunRequest {
+                    input: serde_json::json!({ "prompt": "continue" }),
+                    idempotency_key: None,
+                    execution_profile: None,
+                    resume_run_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .set_harness_run_status(&started.run.id, HarnessRunStatus::AwaitingApproval)
+            .await
+            .unwrap();
+
+        let (runs, flagged) = {
+            let mut conn = store.conn.lock().await;
+            ConversationStore::reconcile_interrupted_runs(&mut conn, &store.cipher).unwrap()
+        };
+        assert_eq!((runs, flagged), (1, 0));
+
+        let run = store
+            .get_harness_run(&started.run.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(run.status, HarnessRunStatus::Interrupted);
+        assert_eq!(run.event_cursor, 3);
+        let events = store
+            .list_harness_events(&started.run.id, 0, 10)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            events.get(1).map(|event| &event.event),
+            Some(RunEvent::InputAccepted {
+                message_count: 1,
+                ..
+            })
+        ));
+        assert!(matches!(
+            events.last().map(|event| &event.event),
+            Some(RunEvent::RunInterrupted)
+        ));
+
+        let session = store
+            .get_harness_session(&session.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(session.status, HarnessRunStatus::Interrupted);
+
+        let (runs_again, flagged_again) = {
+            let mut conn = store.conn.lock().await;
+            ConversationStore::reconcile_interrupted_runs(&mut conn, &store.cipher).unwrap()
+        };
+        assert_eq!((runs_again, flagged_again), (0, 0));
+        assert_eq!(
+            store
+                .list_harness_events(&started.run.id, 0, 10)
+                .await
+                .unwrap()
+                .len(),
+            3,
+            "reconciliation must not append a second terminal event"
+        );
     }
 
     #[tokio::test]

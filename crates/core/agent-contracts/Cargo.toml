@@ -1,0 +1,15 @@
+[package]
+name = "ryu-agent-contracts"
+version = "0.2.5"
+edition = "2021"
+license = "Apache-2.0"
+description = "Versioned, pure-data contracts for Ryu durable agent sessions, runs, events, and execution profiles."
+repository = "https://github.com/amajorai/ryu"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+
+[dev-dependencies]
+serde_json = "1"

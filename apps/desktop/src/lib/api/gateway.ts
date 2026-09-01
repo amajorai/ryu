@@ -2396,14 +2396,22 @@ export function subscribeGatewayTraffic(
  * GET responses from the gateway.
  */
 export interface AuditEntry {
+	/** Stable selected agent id for per-agent passport filtering. */
+	agent_id: string | null;
 	/** API key that made the request (always "***" in read responses). */
 	api_key: string | null;
+	/** Gateway backend that performed an execution or control operation. */
+	backend: string | null;
+	/** Tool/command or control action, when applicable. */
+	command: string | null;
 	/**
 	 * Derived estimated cost for this call in micro-USD (#548). The gateway
 	 * computes it from tokens at its configured rate; `null` when cost
 	 * attribution is disabled (rate 0) or for non-model events.
 	 */
 	cost_micro_usd: number | null;
+	/** Execution wall-clock duration, when applicable. */
+	duration_ms: number | null;
 	/** Error message, if the request failed. */
 	error: string | null;
 	/** Eval score for this request, if an eval was attached. */
@@ -2424,6 +2432,8 @@ export interface AuditEntry {
 	output_tokens: number | null;
 	/** Provider used for the request (e.g. "openai", "anthropic"). */
 	provider: string | null;
+	/** Request correlation id carried by the gateway audit row. */
+	request_id: string;
 	/** Core session/conversation id for per-run correlation. */
 	session_id: string | null;
 	/** Billing/hosting source classified by the gateway for usage analytics. */
@@ -2432,6 +2442,10 @@ export interface AuditEntry {
 	timestamp: string;
 	/** Forwarded end-user id when the node could attribute the request. */
 	user_id: string | null;
+	/** Forwarded display name for the end user, when available. */
+	user_name: string | null;
+	/** Widget instance correlation id, when the row came from a widget. */
+	widget_instance_id?: string | null;
 }
 
 /** Response from GET /api/gateway/audit (Core proxy). */
@@ -2446,6 +2460,8 @@ export interface GatewayAuditResponse {
 
 /** Filters accepted by fetchGatewayAudit. */
 export interface GatewayAuditFilters {
+	/** Filter by the stable agent id attached by Core. */
+	agentId?: string;
 	/** Return only entries that have an error. */
 	errorsOnly?: boolean;
 	/** Inclusive ISO timestamp lower bound. */
@@ -2615,6 +2631,9 @@ export async function fetchGatewayAudit(
 	}
 	if (filters.sessionId) {
 		qs.set("session_id", filters.sessionId);
+	}
+	if (filters.agentId) {
+		qs.set("agent_id", filters.agentId);
 	}
 	if (filters.errorsOnly) {
 		qs.set("errors_only", "true");

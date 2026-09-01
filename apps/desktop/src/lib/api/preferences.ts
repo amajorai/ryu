@@ -1806,40 +1806,44 @@ export function setSkillsProgressive(
 // Stored raw under `tools.active_ranker`, the key `ryu_tool_registry`'s
 // `RANKER_PREF_KEY` names (crates/core/tool-registry/src/lib.rs).
 //
-// Core's `ToolRanker::from_pref` matches the trimmed, lowercased literal
-// "semantic" and treats EVERY other value — including junk and an unset key —
-// as BM25, so an unknown value degrades to the lexical default rather than
-// erroring. `semantic` additionally needs a reachable embedder: `run_search`
-// builds one only when the ranker is Semantic, and `ToolRanker::rank` falls
-// back to BM25 ordering when that embedder returns nothing. So picking Semantic
-// on a node with no embedder changes results back to BM25 order — it does not
-// fail the search. The UI says so rather than implying semantic is guaranteed.
+// Core's `ToolRanker::from_pref` matches the trimmed, lowercased literals
+// "needle2", "bm25", and "semantic". An unset or unknown value selects the
+// Needle 2 default. Needle 2 itself falls back to BM25 when its optional native
+// runtime is unavailable; `semantic` additionally needs a reachable embedder.
+// The UI says so rather than implying either model-backed path is guaranteed.
 
 export const TOOL_RANKER_PREF_KEY = "tools.active_ranker";
 
-/** The two rankers Core implements. Anything else resolves to `bm25`. */
-export type ToolRankerId = "bm25" | "semantic";
+/** The three rankers Core implements. Anything else resolves to `needle2`. */
+export type ToolRankerId = "needle2" | "bm25" | "semantic";
 
 /**
  * Coerce a raw `tools.active_ranker` value the way Core does. PURE.
  *
- * Mirrors `ToolRanker::from_pref`: trim + lowercase, then only the exact
- * literal "semantic" selects semantic ranking; everything else (unset,
- * "BM25", "Semantic ", a typo) is BM25.
+ * Mirrors `ToolRanker::from_pref`: trim + lowercase, then select the explicit
+ * `bm25`/`semantic` opt-outs; unset, Needle aliases, and unknown values use the
+ * Needle 2 default.
  */
 export function coerceToolRanker(raw: string | null): ToolRankerId {
-	return (raw ?? "").trim().toLowerCase() === "semantic" ? "semantic" : "bm25";
+	switch ((raw ?? "").trim().toLowerCase()) {
+		case "bm25":
+			return "bm25";
+		case "semantic":
+			return "semantic";
+		default:
+			return "needle2";
+	}
 }
 
-/** Read the active tool/skill search ranker. Defaults to BM25 (matches Core). */
+/** Read the active tool/skill search ranker. Defaults to Needle 2 (matches Core). */
 export async function getToolRanker(target: ApiTarget): Promise<ToolRankerId> {
 	return coerceToolRanker(await getPreference(target, TOOL_RANKER_PREF_KEY));
 }
 
 /**
  * Persist the active ranker. Written lowercase and unwrapped because Core
- * compares against the bare literal "semantic" — a JSON-quoted `"semantic"`
- * would silently select BM25.
+ * compares against bare ranker literals; a JSON-quoted value would silently
+ * select the Needle 2 default.
  */
 export function setToolRanker(
 	target: ApiTarget,

@@ -9,6 +9,7 @@
 //   for await (const chunk of client.agents.stream("pi", messages)) { ... }
 
 import { AgentsAPI } from "./agents.ts";
+import { HarnessAPI } from "./harness.ts";
 import { SessionsAPI } from "./sessions.ts";
 import { SpacesAPI } from "./spaces.ts";
 import type { RyuClientOptions } from "./types.ts";
@@ -18,12 +19,15 @@ export class RyuClient {
 	readonly agents: AgentsAPI;
 	/** Conversation session listing and retrieval. */
 	readonly sessions: SessionsAPI;
+	/** Durable, replayable agent sessions and runs. */
+	readonly harness: HarnessAPI;
 	/** Spaces / RAG document collection search. */
 	readonly spaces: SpacesAPI;
 
 	constructor(options: RyuClientOptions) {
 		this.agents = new AgentsAPI(options);
 		this.sessions = new SessionsAPI(options);
+		this.harness = new HarnessAPI(options);
 		this.spaces = new SpacesAPI(options);
 	}
 }

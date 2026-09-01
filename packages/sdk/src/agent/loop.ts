@@ -15,12 +15,16 @@
 
 import {
 	type AssistantMessage,
-	callModelWithTools,
+	type callModelWithTools,
 	type LoopMessage,
 	type ModelUsage,
+	streamModelWithTools,
 	type ToolCall,
 } from "./model-call.ts";
 import {
+	type AgentApprovalHandler,
+	type AgentApprovalOption,
+	type AgentApprovalRequest,
 	type AgentTool,
 	detectElicitation,
 	executeTool,
@@ -60,6 +64,16 @@ export interface AgentEventAuthRequired {
 	url?: string;
 }
 
+/** A durable harness run paused behind a human approval decision. */
+export interface AgentEventApprovalRequested {
+	approvalId: string;
+	input?: unknown;
+	name?: string;
+	options?: AgentApprovalOption[];
+	summary: string;
+	type: "approval_requested";
+}
+
 /** A fatal loop error — the stream ends after this. */
 export interface AgentEventError {
 	message: string;
@@ -68,6 +82,7 @@ export interface AgentEventError {
 
 /** Terminal event carrying the final text, step count, and aggregate usage. */
 export interface AgentEventResult {
+	output?: unknown;
 	steps: number;
 	text: string;
 	type: "result";
@@ -76,6 +91,7 @@ export interface AgentEventResult {
 
 /** Union of everything the loop yields. */
 export type AgentEvent =
+	| AgentEventApprovalRequested
 	| AgentEventAuthRequired
 	| AgentEventError
 	| AgentEventResult
@@ -87,6 +103,8 @@ export type AgentEvent =
 
 /** Inputs for a single loop run. */
 export interface LoopConfig {
+	/** Optional human decision callback for tools marked `needsApproval`. */
+	approvalHandler?: AgentApprovalHandler;
 	/** Gateway base URL for inference (the target node). */
 	gatewayBaseUrl: string;
 	/** Gateway bearer token. */
@@ -97,6 +115,8 @@ export interface LoopConfig {
 	messages: LoopMessage[];
 	/** Model id routed by the gateway. */
 	model: string;
+	/** Optional JSON Schema for the final structured output. */
+	outputSchema?: Record<string, unknown>;
 	/** Abort signal. */
 	signal?: AbortSignal;
 	/** Context for resolving + executing tools. */
@@ -124,6 +144,20 @@ function addUsage(a: ModelUsage | undefined, b: ModelUsage | undefined) {
 	};
 }
 
+function parseStructuredOutput(
+	text: string,
+	schema?: Record<string, unknown>
+): unknown {
+	if (!schema) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+}
+
 /** Look at a tool output (object or JSON string) for the elicitation envelope. */
 function findElicitation(output: unknown) {
 	const direct = detectElicitation(output);
@@ -134,6 +168,16 @@ function findElicitation(output: unknown) {
 		return detectElicitation(safeParse(output));
 	}
 	return null;
+}
+
+function requiresApproval(tool: AgentTool): boolean {
+	return tool.needsApproval === true;
+}
+
+function approvalId(): string {
+	const random =
+		globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+	return `sdk_approval_${random}`;
 }
 
 /**
@@ -156,19 +200,43 @@ export async function* runAgentLoop(
 	let lastText = "";
 
 	for (let step = 1; step <= config.maxSteps; step++) {
-		let result: Awaited<ReturnType<typeof callModelWithTools>>;
+		let result: Awaited<ReturnType<typeof callModelWithTools>> | undefined;
+		let roundText = "";
 		try {
-			result = await callModelWithTools({
+			for await (const modelEvent of streamModelWithTools({
 				baseUrl: config.gatewayBaseUrl,
 				token: config.gatewayToken,
 				model: config.model,
 				messages,
 				tools: toolDefs.length > 0 ? toolDefs : undefined,
 				toolChoice: toolDefs.length > 0 ? "auto" : undefined,
+				...(config.outputSchema
+					? {
+							responseFormat: {
+								type: "json_schema",
+								json_schema: {
+									name: "ryu_output",
+									strict: true,
+									schema: config.outputSchema,
+								},
+							},
+						}
+					: {}),
 				signal: config.signal,
-			});
+			})) {
+				if (modelEvent.type === "text_delta") {
+					roundText += modelEvent.delta;
+					yield { type: "text", content: modelEvent.delta };
+				} else {
+					result = modelEvent.result;
+				}
+			}
 		} catch (err) {
 			yield { type: "error", message: describeError(err) };
+			return;
+		}
+		if (!result) {
+			yield { type: "error", message: "gateway stream ended without a result" };
 			return;
 		}
 
@@ -176,14 +244,27 @@ export async function* runAgentLoop(
 		const assistant: AssistantMessage = result.message;
 		messages.push(assistant);
 
-		if (assistant.content) {
+		if (roundText) {
+			lastText = roundText;
+		} else if (assistant.content) {
+			// JSON fallback responses are surfaced as one text event. A streamed
+			// response with no text delta (for example a tool-call preamble) still
+			// exposes the completed assistant content.
 			lastText = assistant.content;
 			yield { type: "text", content: assistant.content };
 		}
 
 		const toolCalls = assistant.tool_calls ?? [];
 		if (toolCalls.length === 0) {
-			yield { type: "result", text: lastText, steps: step, usage };
+			const output = parseStructuredOutput(lastText, config.outputSchema);
+			if (config.outputSchema && output === undefined) {
+				yield {
+					type: "error",
+					message: "model did not return valid structured JSON output",
+				};
+				return;
+			}
+			yield { type: "result", text: lastText, steps: step, usage, output };
 			return;
 		}
 
@@ -213,6 +294,50 @@ async function* runToolCalls(
 		yield { type: "tool_call", id: call.id, name, input };
 
 		let output: unknown;
+		const tool = config.tools[name];
+		if (tool && requiresApproval(tool)) {
+			const approval: AgentApprovalRequest = {
+				approvalId: approvalId(),
+				input,
+				name,
+				summary: `The agent requested permission to run ${name}.`,
+			};
+			yield { type: "approval_requested", ...approval };
+			if (!config.approvalHandler) {
+				return true;
+			}
+			let decision: Awaited<ReturnType<AgentApprovalHandler>> = false;
+			try {
+				decision = await config.approvalHandler(approval);
+			} catch (error) {
+				const approvalError = { error: describeError(error) };
+				messages.push({
+					role: "tool",
+					tool_call_id: call.id,
+					content: JSON.stringify(approvalError),
+				});
+				yield {
+					type: "tool_result",
+					id: call.id,
+					name,
+					output: approvalError,
+				};
+				continue;
+			}
+			const approved =
+				decision === true ||
+				(typeof decision === "string" && decision.trim().length > 0);
+			if (!approved) {
+				const denied = { error: "tool execution was not approved" };
+				messages.push({
+					role: "tool",
+					tool_call_id: call.id,
+					content: JSON.stringify(denied),
+				});
+				yield { type: "tool_result", id: call.id, name, output: denied };
+				continue;
+			}
+		}
 		try {
 			const res = await executeTool(
 				name,

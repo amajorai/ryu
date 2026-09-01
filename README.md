@@ -69,25 +69,28 @@ a limited/preview surface · ❌ not the product's primary documented surface.
 
 The hosted `eve`/Vercel path is usage-metered: Vercel charges for Function active CPU,
 provisioned memory time, and invocations. Ryu's self-hosted path runs on infrastructure you
-control. See [Vercel Functions pricing](https://vercel.com/docs/functions/usage-and-pricing).
+control. DeepSeek Harness is a developer preview built on the Cordis composability kernel, so
+its runtime internals are a useful comparison point but not a maturity or model-quality claim.
+See [Vercel Functions pricing](https://vercel.com/docs/functions/usage-and-pricing), [DeepSeek
+Harness](https://github.com/deepseek-ai/deepseek-harness), and [Cordis](https://github.com/cordiverse/cordis).
 
 ### Agent frameworks and local runtimes
 
-| Capability | [Ryu](https://github.com/amajorai/ryu) | [Mastra](https://mastra.ai/ai-agents) | [LangChain / LangGraph](https://www.langchain.com/) | [eve](https://eve.dev/) | [OpenClaw](https://github.com/openclaw/openclaw) | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | [Omnigent](https://github.com/omnigent-ai/omnigent) |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Use an existing agent or harness | ✅ | ❌ | ❌ | ❌ | ❌ | 🟡 | ✅ |
-| BYO models and providers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Local or self-hosted runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Managed hosting | ✅ | 🟡 | ✅ | 🟡 | ❌ | 🟡 | 🟡 |
-| Multi-agent coordination | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Durable workflows and triggers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
-| Tools and MCP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Memory and retrieval | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | 🟡 |
-| Routing, budgets, approvals, and audit | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 | ✅ |
-| Sandboxed execution | ✅ | 🟡 | 🟡 | ✅ | 🟡 | 🟡 | ✅ |
-| Background schedules | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 |
-| CLI, app, and channel delivery | ✅ | 🟡 | 🟡 | ✅ | ✅ | ✅ | ✅ |
-| Skills, plugins, and integrations | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | 🟡 |
+| Capability | [Ryu](https://github.com/amajorai/ryu) | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | [Mastra](https://mastra.ai/ai-agents) | [LangChain / LangGraph](https://www.langchain.com/) | [eve](https://eve.dev/) | [OpenClaw](https://github.com/openclaw/openclaw) | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | [Omnigent](https://github.com/omnigent-ai/omnigent) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Use an existing agent or harness | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 | ✅ |
+| BYO models and providers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Local or self-hosted runtime | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Managed hosting | ✅ | ❌ | 🟡 | ✅ | 🟡 | ❌ | 🟡 | 🟡 |
+| Multi-agent coordination | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Durable workflows and triggers | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
+| Tools and MCP | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Memory and retrieval | ✅ | 🟡 | ✅ | ✅ | 🟡 | ✅ | ✅ | 🟡 |
+| Routing, budgets, approvals, and audit | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 | ✅ |
+| Sandboxed execution | ✅ | ✅ | 🟡 | 🟡 | ✅ | 🟡 | 🟡 | ✅ |
+| Background schedules | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | 🟡 |
+| CLI, app, and channel delivery | ✅ | 🟡 | 🟡 | 🟡 | ✅ | ✅ | ✅ | ✅ |
+| Skills, plugins, and integrations | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | 🟡 |
 
 ### Managed agent products and cloud platforms
 

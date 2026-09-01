@@ -5,6 +5,22 @@
 
 export { type AgentRunOptions, AgentsAPI } from "./agents.ts";
 export { createRyuClient, RyuClient } from "./client.ts";
+export type {
+	ApprovalMode,
+	ExecutionProfile,
+	ExecutionProfileKind,
+	HarnessApprovalOption,
+	HarnessRun,
+	HarnessRunEvent,
+	HarnessRunEventEnvelope,
+	HarnessRunStatus,
+	HarnessSession,
+	NetworkMode,
+	SandboxMode,
+	StartRunInput,
+	StartRunResponse,
+} from "./harness.ts";
+export { HarnessAPI } from "./harness.ts";
 export { SessionsAPI } from "./sessions.ts";
 export {
 	type RetrievalModeCancellation,
@@ -13,7 +29,6 @@ export {
 	type RetrievalModeStatus,
 	SpacesAPI,
 } from "./spaces.ts";
-
 export type {
 	Agent,
 	AgentSummary,

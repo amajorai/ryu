@@ -14,6 +14,7 @@ export type {
 export { Agent, createAgent } from "./agent.ts";
 export type {
 	AgentEvent,
+	AgentEventApprovalRequested,
 	AgentEventAuthRequired,
 	AgentEventError,
 	AgentEventResult,
@@ -28,14 +29,19 @@ export type {
 	LoopMessage,
 	ModelCallOptions,
 	ModelCallResult,
+	ModelStreamEvent,
 	ModelUsage,
 	ToolCall,
 	ToolFunctionDef,
 } from "./model-call.ts";
-export { callModelWithTools } from "./model-call.ts";
+export { callModelWithTools, streamModelWithTools } from "./model-call.ts";
 export type { QueryInput, QueryOptions } from "./query.ts";
 export { query } from "./query.ts";
 export type {
+	AgentApprovalDecision,
+	AgentApprovalHandler,
+	AgentApprovalOption,
+	AgentApprovalRequest,
 	AgentTool,
 	Elicitation,
 	RemoteToolRef,

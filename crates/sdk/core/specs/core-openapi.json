@@ -5266,6 +5266,284 @@
         }
       }
     },
+    "/api/harness/runs/{id}": {
+      "get": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Get a durable harness run",
+        "operationId": "get_harness_run_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/runs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Cancel a durable harness run",
+        "operationId": "cancel_harness_run_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/runs/{id}/events": {
+      "get": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Stream durable harness run events",
+        "operationId": "harness_run_events_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream"
+          }
+        }
+      }
+    },
+    "/api/harness/sessions": {
+      "post": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Create a durable harness session",
+        "operationId": "create_harness_session_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/sessions/{id}": {
+      "get": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Get a durable harness session",
+        "operationId": "get_harness_session_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/sessions/{id}/children": {
+      "get": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "List a session's child sessions",
+        "operationId": "list_child_harness_sessions_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/sessions/{id}/native": {
+      "put": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Bind an external runtime session id",
+        "operationId": "bind_native_session_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/harness/sessions/{id}/runs": {
+      "get": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "List runs in a harness session",
+        "operationId": "list_harness_runs_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Harness"
+        ],
+        "summary": "Start a durable harness run",
+        "operationId": "start_harness_run_handler",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "tags": [
@@ -14669,6 +14947,10 @@
     {
       "name": "Conversations",
       "description": "Conversations, sessions, and runs."
+    },
+    {
+      "name": "Harness",
+      "description": "Durable, replayable agent sessions and runs."
     },
     {
       "name": "Spaces",

@@ -29,6 +29,8 @@ export interface RemoteToolRef {
 	/** Fully-qualified Ryu tool id, e.g. `composio.GMAIL_SEARCH_EMAILS`. */
 	id: string;
 	readonly kind: "remote";
+	/** Pause before dispatching this tool when the caller supplied an approval handler. */
+	needsApproval?: boolean;
 	/**
 	 * JSON Schema for the tool's arguments. Optional: when omitted, a permissive
 	 * open-object schema is used (Composio `describe` is shallow), so supplying
@@ -40,6 +42,7 @@ export interface RemoteToolRef {
 /** Options accepted by `ryuTool`. */
 export interface RyuToolOptions {
 	description?: string;
+	needsApproval?: boolean;
 	parameters?: Record<string, unknown>;
 }
 
@@ -59,6 +62,7 @@ export function ryuTool(id: string, opts: RyuToolOptions = {}): RemoteToolRef {
 		kind: "remote",
 		id,
 		description: opts.description,
+		needsApproval: opts.needsApproval,
 		parameters: opts.parameters,
 	};
 }
@@ -88,6 +92,28 @@ export interface ToolExecContext {
 	/** Composio connected-account entity selector. */
 	userId?: string;
 }
+
+/** Data passed to an SDK-local approval handler. */
+export interface AgentApprovalOption {
+	kind: string;
+	name: string;
+	optionId: string;
+}
+
+export interface AgentApprovalRequest {
+	approvalId: string;
+	input: unknown;
+	name: string;
+	options?: AgentApprovalOption[];
+	summary: string;
+}
+
+/** Resolve a local/remote SDK tool approval before it executes. */
+export type AgentApprovalDecision = boolean | string;
+
+export type AgentApprovalHandler = (
+	request: AgentApprovalRequest
+) => Promise<AgentApprovalDecision>;
 
 const PERMISSIVE_OBJECT_SCHEMA: Record<string, unknown> = {
 	type: "object",

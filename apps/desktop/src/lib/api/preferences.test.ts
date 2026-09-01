@@ -363,9 +363,8 @@ describe("preference keys mirror Core", () => {
 	});
 
 	it("writes the exact literal Core's ranker parser matches", () => {
-		// `ToolRanker::from_pref` compares against the lowercase literal and treats
-		// everything else as BM25, so a capitalised or JSON-quoted write would
-		// silently select BM25 while the select showed "Meaning".
+		// `ToolRanker::from_pref` compares against the lowercase literal and keeps
+		// Needle 2 as the safe default when a value is unknown.
 		expect(
 			rustAnchor(
 				toolRegistryRs,
@@ -688,12 +687,14 @@ describe("contextHistoryBudget", () => {
 });
 
 describe("coerceToolRanker", () => {
-	it("defaults to BM25 for unset, unknown and mis-cased values", () => {
-		expect(coerceToolRanker(null)).toBe("bm25");
-		expect(coerceToolRanker("")).toBe("bm25");
+	it("defaults to Needle 2 for unset and unknown values", () => {
+		expect(coerceToolRanker(null)).toBe("needle2");
+		expect(coerceToolRanker("")).toBe("needle2");
 		expect(coerceToolRanker("bm25")).toBe("bm25");
-		expect(coerceToolRanker("vector")).toBe("bm25");
-		expect(coerceToolRanker('"semantic"')).toBe("bm25");
+		expect(coerceToolRanker("vector")).toBe("needle2");
+		expect(coerceToolRanker('"semantic"')).toBe("needle2");
+		expect(coerceToolRanker("needle")).toBe("needle2");
+		expect(coerceToolRanker("NEEDLE2")).toBe("needle2");
 	});
 
 	it("selects semantic for the literal Core matches, trimmed and lowercased", () => {
@@ -715,7 +716,7 @@ describe("the anchor helpers fail for the right reasons", () => {
 		"    pub fn from_pref(s: Option<&str>) -> ToolRanker {",
 		"        match s {",
 		'            Some("semantic") => ToolRanker::Semantic,',
-		"            _ => ToolRanker::Bm25,",
+		"            _ => ToolRanker::Needle2,",
 		"        }",
 		"    }",
 		"",

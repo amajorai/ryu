@@ -88,6 +88,8 @@ fn audit_payload_entry(entry: &AuditEntry, cp: &ControlPlaneConfig) -> Value {
         "id": entry.id,
         "timestamp": entry.timestamp,
         "requestId": entry.request_id,
+        "sessionId": entry.session_id,
+        "agentId": entry.agent_id,
         "eventType": entry.event_type,
         "apiKey": entry.api_key,
         "userName": entry.user_name,
@@ -99,6 +101,7 @@ fn audit_payload_entry(entry: &AuditEntry, cp: &ControlPlaneConfig) -> Value {
         "provider": entry.provider,
         "model": entry.model,
         "feature": entry.feature,
+        "widgetInstanceId": entry.widget_instance_id,
         "inputTokens": entry.input_tokens,
         "outputTokens": entry.output_tokens,
         "managedInference": entry.managed_inference,
@@ -557,13 +560,17 @@ mod tests {
     fn audit_payload_carries_rollup_dimensions_and_exact_managed_cost() {
         let state = test_state();
         let mut entry = base_entry();
+        entry.agent_id = Some("agent-1".to_string());
         entry.feature = Some("agent".to_string());
+        entry.session_id = Some("session-1".to_string());
         entry.duration_ms = Some(2_500);
         entry.provider_cost_micro_usd = Some(125);
 
         let payload = audit_payload_entry(&entry, &state.config.control_plane);
 
         assert_eq!(payload["feature"], "agent");
+        assert_eq!(payload["agentId"], "agent-1");
+        assert_eq!(payload["sessionId"], "session-1");
         assert_eq!(payload["durationMs"], 2_500);
         assert_eq!(payload["costMicroUsd"], 125);
     }

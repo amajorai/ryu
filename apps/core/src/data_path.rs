@@ -10,7 +10,7 @@
 //! All path *logic* lives here in Core per the Core-vs-Gateway rule — the desktop
 //! only orchestrates stop → run subcommand (with progress) → restart.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -137,6 +137,50 @@ pub struct Progress {
     pub phase: &'static str,
     pub copied_bytes: u64,
     pub total_bytes: u64,
+}
+
+const MAX_DATA_IMPORT_ENTRIES: usize = 100_000;
+const MAX_DATA_IMPORT_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+// Export and import apply this denylist by basename at every depth. These files
+// either contain reusable credentials or bind the data to the source node. The
+// encryption key is deliberately not here: it is required to restore the
+// encrypted customer databases, so the backup itself must be kept private.
+const BACKUP_EXCLUDE_NAMES: &[&str] = &[
+    "accounts.json",
+    ".reset-pending",
+    "auth.json",
+    "bootstrap-ack.token",
+    "core.token",
+    "delegation-ed25519.pub",
+    "fleet-artifacts",
+    "fleet-desired.json",
+    "fleet-enforcement.json",
+    "fleet-enrolled-node.json",
+    "fleet-enrollment-pending.json",
+    "fleet-identity.json",
+    "fleet-instance-id.json",
+    "fleet-skill-blocks.json",
+    "fleet-status.json",
+    "gateway-admin.key",
+    "gateway-durable.token",
+    "gateway-relay.token",
+    "mcp.json",
+    "models.json",
+    "node-auth.token",
+    "node-control.token",
+    "nodes.json",
+    "paired-clients.json",
+    "pi-accounts.db",
+    "plugin-credentials",
+    "plugin-secrets.db",
+    "org-project-mappings.json",
+    "ryu-core.pid",
+];
+
+fn is_backup_excluded(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| BACKUP_EXCLUDE_NAMES.contains(&name))
 }
 
 fn emit(progress: &Progress) {
@@ -540,27 +584,54 @@ pub fn migrate(from: &Path, to: &Path, move_source: bool) -> std::io::Result<()>
 /// data folder, so it's safe to call while Core is running (DB rows mid-write may
 /// land in an inconsistent snapshot — acceptable for a manual backup).
 pub fn export_zip(from: &Path, out: &Path) -> std::io::Result<u64> {
-    if let Some(parent) = out.parent() {
-        std::fs::create_dir_all(parent)?;
+    let out = if out.is_absolute() {
+        out.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(out)
+    };
+    if paths::paths_overlap(from, &out) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "export destination cannot be inside the data folder",
+        ));
     }
-    let file = std::fs::File::create(out)?;
-    let mut zip = zip::ZipWriter::new(file);
+    let parent = out.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "export destination has no parent folder",
+        )
+    })?;
+    std::fs::create_dir_all(parent)?;
+    if let Ok(metadata) = std::fs::symlink_metadata(&out) {
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "export destination cannot be a symbolic link",
+            ));
+        }
+    }
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".ryu-backup-")
+        .tempfile_in(parent)?;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    let mut buf = Vec::new();
     let mut written = 0u64;
-    zip_dir(from, from, &mut zip, options, &mut buf, &mut written)?;
-    zip.finish()?;
+    {
+        let mut zip = zip::ZipWriter::new(temporary.as_file_mut());
+        zip_dir(from, from, &mut zip, options, &mut written)?;
+        zip.finish()?;
+    }
+    temporary.as_file().sync_all()?;
+    temporary.persist(&out).map_err(|error| error.error)?;
     Ok(written)
 }
 
-fn zip_dir(
+fn zip_dir<W: Write + std::io::Seek>(
     root: &Path,
     dir: &Path,
-    zip: &mut zip::ZipWriter<std::fs::File>,
+    zip: &mut zip::ZipWriter<W>,
     options: zip::write::FileOptions,
-    buf: &mut Vec<u8>,
     written: &mut u64,
 ) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
@@ -568,19 +639,41 @@ fn zip_dir(
         let path = entry.path();
         let ft = entry.file_type()?;
         let rel = path.strip_prefix(root).unwrap_or(&path);
+        if is_backup_excluded(rel) {
+            continue;
+        }
         let name = rel.to_string_lossy().replace('\\', "/");
         if ft.is_dir() {
-            zip_dir(root, &path, zip, options, buf, written)?;
+            zip_dir(root, &path, zip, options, written)?;
         } else if ft.is_file() {
             zip.start_file(name, options)
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
-            buf.clear();
-            std::fs::File::open(&path)?.read_to_end(buf)?;
-            zip.write_all(buf)?;
-            *written += buf.len() as u64;
+            let mut file = std::fs::File::open(&path)?;
+            *written += std::io::copy(&mut file, zip)?;
         }
     }
     Ok(())
+}
+
+fn path_contains_symlink(root: &Path, target: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    match std::fs::symlink_metadata(&current) {
+        Ok(metadata) if metadata.file_type().is_symlink() => return true,
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return true,
+        _ => {}
+    }
+    let Ok(relative) = target.strip_prefix(root) else {
+        return true;
+    };
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return true,
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 // ── Import (restore from zip) ──────────────────────────────────────────────────────
@@ -592,13 +685,79 @@ pub fn import_zip(archive: &Path, to: &Path) -> std::io::Result<()> {
     let file = std::fs::File::open(archive)?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| std::io::Error::other(e.to_string()))?;
     let total = zip.len();
+    if total > MAX_DATA_IMPORT_ENTRIES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "data backup contains too many entries",
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut planned_bytes = 0u64;
+    for i in 0..total {
+        let entry = zip
+            .by_index(i)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let Some(rel) = entry.enclosed_name() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "data backup contains an unsafe path",
+            ));
+        };
+        if is_backup_excluded(rel) {
+            continue;
+        }
+        let normalized = rel.to_string_lossy().replace('\\', "/");
+        if !seen.insert(normalized) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "data backup contains duplicate paths",
+            ));
+        }
+        if path_contains_symlink(to, &to.join(rel)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "data backup destination contains a symbolic link",
+            ));
+        }
+        if entry.is_dir() {
+            continue;
+        }
+        if entry.size() > MAX_DATA_IMPORT_FILE_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "data backup contains an oversized file",
+            ));
+        }
+        planned_bytes = planned_bytes.checked_add(entry.size()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "data backup size is invalid",
+            )
+        })?;
+    }
+    let available = paths::available_space_for(to);
+    if available > 0 && planned_bytes > available {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WriteZero,
+            "not enough free space for the data backup",
+        ));
+    }
     emit(&Progress {
         phase: "extract",
         copied_bytes: 0,
         total_bytes: total as u64,
     });
 
-    std::fs::create_dir_all(to)?;
+    if let Ok(metadata) = std::fs::symlink_metadata(to) {
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "data backup destination must be a directory",
+            ));
+        }
+    } else {
+        std::fs::create_dir_all(to)?;
+    }
     for i in 0..total {
         let mut entry = zip
             .by_index(i)
@@ -606,7 +765,16 @@ pub fn import_zip(archive: &Path, to: &Path) -> std::io::Result<()> {
         let Some(rel) = entry.enclosed_name() else {
             continue; // path-traversal guard (zip-slip): skip unsafe names
         };
+        if is_backup_excluded(rel) {
+            continue;
+        }
         let out = to.join(rel);
+        if path_contains_symlink(to, &out) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "data backup destination contains a symbolic link",
+            ));
+        }
         if entry.is_dir() {
             std::fs::create_dir_all(&out)?;
             continue;
@@ -614,8 +782,18 @@ pub fn import_zip(archive: &Path, to: &Path) -> std::io::Result<()> {
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut writer = std::fs::File::create(&out)?;
-        std::io::copy(&mut entry, &mut writer)?;
+        let parent = out.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "data backup entry has no parent",
+            )
+        })?;
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".ryu-import-")
+            .tempfile_in(parent)?;
+        std::io::copy(&mut entry, temporary.as_file_mut())?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(&out).map_err(|error| error.error)?;
         if i % 16 == 0 || i + 1 == total {
             emit(&Progress {
                 phase: "extract",
@@ -974,6 +1152,112 @@ mod tests {
         assert_eq!(written, 0);
         assert!(zip.exists(), "an empty archive is still produced");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn export_zip_omits_credentials_and_runtime_markers() {
+        let base = std::env::temp_dir().join(format!("ryu-dp-safe-export-{}", uniq()));
+        let src = base.join("src");
+        std::fs::create_dir_all(src.join("nested")).unwrap();
+        for name in [
+            "accounts.json",
+            "auth.json",
+            "bootstrap-ack.token",
+            "core.token",
+            "delegation-ed25519.pub",
+            "fleet-desired.json",
+            "fleet-enforcement.json",
+            "fleet-enrolled-node.json",
+            "fleet-enrollment-pending.json",
+            "fleet-identity.json",
+            "fleet-instance-id.json",
+            "fleet-skill-blocks.json",
+            "fleet-status.json",
+            "gateway-admin.key",
+            "gateway-durable.token",
+            "gateway-relay.token",
+            "mcp.json",
+            "models.json",
+            "node-auth.token",
+            "node-control.token",
+            "nodes.json",
+            "paired-clients.json",
+            "pi-accounts.db",
+            "plugin-secrets.db",
+            "ryu-core.pid",
+        ] {
+            std::fs::write(src.join(name), b"secret").unwrap();
+        }
+        std::fs::create_dir_all(src.join("fleet-artifacts")).unwrap();
+        std::fs::write(src.join("fleet-artifacts/private.json"), b"secret").unwrap();
+        std::fs::create_dir_all(src.join("plugin-credentials")).unwrap();
+        std::fs::write(src.join("plugin-credentials/private.json"), b"secret").unwrap();
+        std::fs::write(src.join("nested/auth.json"), b"nested-secret").unwrap();
+        std::fs::write(src.join("conversations.db"), b"customer-data").unwrap();
+
+        let archive_path = base.join("backup.zip");
+        export_zip(&src, &archive_path).unwrap();
+        let file = std::fs::File::open(&archive_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let names = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_owned())
+            .collect::<Vec<_>>();
+        for name in [
+            "accounts.json",
+            "auth.json",
+            "bootstrap-ack.token",
+            "core.token",
+            "delegation-ed25519.pub",
+            "fleet-desired.json",
+            "fleet-enforcement.json",
+            "fleet-enrolled-node.json",
+            "fleet-enrollment-pending.json",
+            "fleet-identity.json",
+            "fleet-instance-id.json",
+            "fleet-skill-blocks.json",
+            "fleet-status.json",
+            "fleet-artifacts/private.json",
+            "gateway-admin.key",
+            "gateway-durable.token",
+            "gateway-relay.token",
+            "mcp.json",
+            "models.json",
+            "node-auth.token",
+            "node-control.token",
+            "nodes.json",
+            "paired-clients.json",
+            "pi-accounts.db",
+            "plugin-credentials/private.json",
+            "plugin-secrets.db",
+            "ryu-core.pid",
+            "nested/auth.json",
+        ] {
+            assert!(!names.iter().any(|entry| entry == name), "exported {name}");
+        }
+        assert!(names.iter().any(|entry| entry == "conversations.db"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn export_zip_rejects_a_destination_inside_the_data_folder() {
+        let base = std::env::temp_dir().join(format!("ryu-dp-overlap-{}", uniq()));
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let result = export_zip(&src, &src.join("backup.zip"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("inside the data folder"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn backup_exclusion_applies_to_nested_credentials_and_runtime_state() {
+        assert!(is_backup_excluded(Path::new("nested/node-auth.token")));
+        assert!(is_backup_excluded(Path::new("plugin-credentials")));
+        assert!(is_backup_excluded(Path::new("fleet-enrolled-node.json")));
+        assert!(!is_backup_excluded(Path::new("nested/conversations.db")));
     }
 
     #[test]

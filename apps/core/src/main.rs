@@ -100,6 +100,7 @@ mod model_catalog_host;
 pub use ryu_model_format as model_format;
 mod monitors_client;
 mod native_history;
+mod needle2;
 mod node_token;
 mod notify;
 /// Re-export shim: the Open Knowledge Format (OKF) primitive now lives in the
@@ -578,6 +579,7 @@ async fn main() {
     // + reconcile orphan `.part` files (auto-resume when RYU_DOWNLOADS_AUTORESUME=1).
     let download_center = crate::downloads::DownloadCenter::with_default_client();
     download_center.load().await;
+    crate::needle2::install_downloads(download_center.clone());
 
     // Island is a desktop-owned companion, not a Core sidecar: Core never starts
     // it and it stays out of the node selector while the feature is disabled. Its
@@ -1905,6 +1907,7 @@ async fn main() {
         catalog_client: Arc::new(crate::plugins::catalog::PluginCatalogClient::new()),
         skills: skill_registry,
         app_contrib: crate::plugins::app_contrib::AppContribRegistry::new(),
+        plugin_runtime: crate::plugins::runtime::PluginRuntime::new(),
         traces,
         preferences,
         support_audit,
@@ -2005,10 +2008,13 @@ async fn main() {
     // `onStartup` wakes here. Spawned (not awaited) so a slow registration never
     // delays the listener bind. onChat/onCommand are data-wiring follow-ons that
     // call the same `fire_activation_event` driver from the chat/palette paths.
+    // Sidecar reconciliation follows this activation pass in the same task so
+    // its generation binding cannot race the initial runnable registration.
     {
         let startup_state = server_state.clone();
         tokio::spawn(async move {
             crate::server::fire_activation_event(&startup_state, "onStartup").await;
+            crate::server::reconcile_plugin_sidecars(&startup_state).await;
         });
     }
 
@@ -2025,19 +2031,6 @@ async fn main() {
         Ok(0) => {}
         Ok(n) => tracing::info!("purged {n} stale sidecar provider entr(ies) from models.json"),
         Err(e) => tracing::warn!("purging stale sidecar provider entries failed: {e}"),
-    }
-
-    // Reconcile manifest-declared managed sidecars (the app ⇄ sidecar bridge):
-    // re-register + start every enabled plugin's declared sidecar. These are not in
-    // the SidecarManager's `startup_order`, so nothing else restarts them after a
-    // Core restart — without this an enabled plugin's process stays dead while the
-    // plugin still reads as enabled. Spawned (not awaited) so slow binary downloads
-    // never delay the listener bind; idempotent with the enable path.
-    {
-        let sidecar_state = server_state.clone();
-        tokio::spawn(async move {
-            crate::server::reconcile_plugin_sidecars(&sidecar_state).await;
-        });
     }
 
     // Reconcile the bundled system-skills catalog in the background: install

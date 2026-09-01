@@ -1,0 +1,884 @@
+{
+  "properties": {
+    "event": {
+      "$defs": {
+        "ApprovalMode": {
+          "description": "Human-in-the-loop preference requested by an execution profile. The final\ndecision is made by the Core/Gateway approval boundary.",
+          "enum": [
+            "inherit",
+            "on_risk",
+            "always",
+            "never"
+          ],
+          "type": "string"
+        },
+        "ApprovalOption": {
+          "description": "One choice offered by a runtime for an interactive approval request.\n\nThe option id is opaque to the harness; clients send it back through the\npermission resolver without hard-coding a particular runtime's vocabulary.",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "optionId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "optionId"
+          ],
+          "type": "object"
+        },
+        "ExecutionProfile": {
+          "description": "Portable execution settings. It intentionally contains no credentials,\nprovider keys, or opaque process handles.",
+          "properties": {
+            "approval": {
+              "$ref": "#/$defs/ApprovalMode",
+              "default": "inherit"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/$defs/ExecutionProfileKind",
+              "default": "local"
+            },
+            "network": {
+              "$ref": "#/$defs/NetworkMode",
+              "default": "inherit"
+            },
+            "sandbox": {
+              "$ref": "#/$defs/SandboxMode",
+              "default": "inherit"
+            },
+            "worktreeBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeIsolation": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "ExecutionProfileKind": {
+          "description": "Where a run executes. Remote and cloud are explicit protocol values even\nwhen a node does not currently advertise those adapters; such a request is\nrejected at the Core boundary instead of silently running locally.",
+          "enum": [
+            "local",
+            "worktree",
+            "remote",
+            "cloud"
+          ],
+          "type": "string"
+        },
+        "NetworkMode": {
+          "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
+          "enum": [
+            "inherit",
+            "denied",
+            "gateway_only",
+            "allow"
+          ],
+          "type": "string"
+        },
+        "SandboxMode": {
+          "description": "Process/filesystem isolation requested by an execution profile.",
+          "enum": [
+            "inherit",
+            "workspace",
+            "strict"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A replayable, strictly ordered event envelope.",
+      "oneOf": [
+        {
+          "properties": {
+            "executionProfile": {
+              "$ref": "#/$defs/ExecutionProfile"
+            },
+            "type": {
+              "const": "run_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "executionProfile"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The accepted input boundary for this run. The payload is intentionally\na digest and bounded count rather than raw user content; the sealed run\ninput remains Core-owned and is never copied into an event projection.",
+          "properties": {
+            "inputHash": {
+              "type": "string"
+            },
+            "messageCount": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "input_accepted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "inputHash",
+            "messageCount"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "delta": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text_delta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "delta"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "inputHash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "toolCallId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "toolCallId",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "durationMs": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "resultHash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "toolCallId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_call_completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "toolCallId",
+            "name",
+            "ok"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "approvalId": {
+              "type": "string"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/ApprovalOption"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "type": {
+              "const": "approval_requested",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "approvalId",
+            "summary"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "messageId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "checkpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "output": true,
+            "type": {
+              "const": "run_completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "run_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "run_canceled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "run_interrupted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A bounded provider/UI frame retained for adapters that need to replay\nricher content parts without inventing a second transport.",
+          "properties": {
+            "frame": {
+              "type": "string"
+            },
+            "type": {
+              "const": "ui_frame",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "frame"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "id",
+        "runId",
+        "sessionId",
+        "seq",
+        "createdAt"
+      ],
+      "title": "RunEventEnvelope",
+      "type": "object"
+    },
+    "run": {
+      "$defs": {
+        "ApprovalMode": {
+          "description": "Human-in-the-loop preference requested by an execution profile. The final\ndecision is made by the Core/Gateway approval boundary.",
+          "enum": [
+            "inherit",
+            "on_risk",
+            "always",
+            "never"
+          ],
+          "type": "string"
+        },
+        "ExecutionProfile": {
+          "description": "Portable execution settings. It intentionally contains no credentials,\nprovider keys, or opaque process handles.",
+          "properties": {
+            "approval": {
+              "$ref": "#/$defs/ApprovalMode",
+              "default": "inherit"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/$defs/ExecutionProfileKind",
+              "default": "local"
+            },
+            "network": {
+              "$ref": "#/$defs/NetworkMode",
+              "default": "inherit"
+            },
+            "sandbox": {
+              "$ref": "#/$defs/SandboxMode",
+              "default": "inherit"
+            },
+            "worktreeBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeIsolation": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "ExecutionProfileKind": {
+          "description": "Where a run executes. Remote and cloud are explicit protocol values even\nwhen a node does not currently advertise those adapters; such a request is\nrejected at the Core boundary instead of silently running locally.",
+          "enum": [
+            "local",
+            "worktree",
+            "remote",
+            "cloud"
+          ],
+          "type": "string"
+        },
+        "NetworkMode": {
+          "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
+          "enum": [
+            "inherit",
+            "denied",
+            "gateway_only",
+            "allow"
+          ],
+          "type": "string"
+        },
+        "RunStatus": {
+          "description": "Lifecycle shared by sessions and runs.",
+          "oneOf": [
+            {
+              "const": "pending",
+              "description": "Created but not dispatched.",
+              "type": "string"
+            },
+            {
+              "const": "running",
+              "description": "The runtime is actively executing.",
+              "type": "string"
+            },
+            {
+              "const": "awaiting_approval",
+              "description": "Execution is parked behind a human decision.",
+              "type": "string"
+            },
+            {
+              "const": "completed",
+              "description": "The runtime produced a successful terminal result.",
+              "type": "string"
+            },
+            {
+              "const": "failed",
+              "description": "The runtime produced a terminal failure.",
+              "type": "string"
+            },
+            {
+              "const": "canceled",
+              "description": "The caller explicitly canceled the run.",
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "description": "The runtime stopped unexpectedly and can be inspected or retried.",
+              "type": "string"
+            }
+          ]
+        },
+        "SandboxMode": {
+          "description": "Process/filesystem isolation requested by an execution profile.",
+          "enum": [
+            "inherit",
+            "workspace",
+            "strict"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A durable attempt within a session.",
+      "properties": {
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eventCursor": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "executionProfile": {
+          "$ref": "#/$defs/ExecutionProfile",
+          "default": {
+            "approval": "inherit",
+            "kind": "local",
+            "network": "inherit",
+            "sandbox": "inherit",
+            "worktreeIsolation": false
+          }
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output": true,
+        "parentRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "id",
+        "sessionId",
+        "status",
+        "attempt",
+        "eventCursor",
+        "createdAt"
+      ],
+      "title": "HarnessRun",
+      "type": "object"
+    },
+    "session": {
+      "$defs": {
+        "ApprovalMode": {
+          "description": "Human-in-the-loop preference requested by an execution profile. The final\ndecision is made by the Core/Gateway approval boundary.",
+          "enum": [
+            "inherit",
+            "on_risk",
+            "always",
+            "never"
+          ],
+          "type": "string"
+        },
+        "ExecutionProfile": {
+          "description": "Portable execution settings. It intentionally contains no credentials,\nprovider keys, or opaque process handles.",
+          "properties": {
+            "approval": {
+              "$ref": "#/$defs/ApprovalMode",
+              "default": "inherit"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/$defs/ExecutionProfileKind",
+              "default": "local"
+            },
+            "network": {
+              "$ref": "#/$defs/NetworkMode",
+              "default": "inherit"
+            },
+            "sandbox": {
+              "$ref": "#/$defs/SandboxMode",
+              "default": "inherit"
+            },
+            "worktreeBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeIsolation": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "ExecutionProfileKind": {
+          "description": "Where a run executes. Remote and cloud are explicit protocol values even\nwhen a node does not currently advertise those adapters; such a request is\nrejected at the Core boundary instead of silently running locally.",
+          "enum": [
+            "local",
+            "worktree",
+            "remote",
+            "cloud"
+          ],
+          "type": "string"
+        },
+        "NetworkMode": {
+          "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
+          "enum": [
+            "inherit",
+            "denied",
+            "gateway_only",
+            "allow"
+          ],
+          "type": "string"
+        },
+        "RunStatus": {
+          "description": "Lifecycle shared by sessions and runs.",
+          "oneOf": [
+            {
+              "const": "pending",
+              "description": "Created but not dispatched.",
+              "type": "string"
+            },
+            {
+              "const": "running",
+              "description": "The runtime is actively executing.",
+              "type": "string"
+            },
+            {
+              "const": "awaiting_approval",
+              "description": "Execution is parked behind a human decision.",
+              "type": "string"
+            },
+            {
+              "const": "completed",
+              "description": "The runtime produced a successful terminal result.",
+              "type": "string"
+            },
+            {
+              "const": "failed",
+              "description": "The runtime produced a terminal failure.",
+              "type": "string"
+            },
+            {
+              "const": "canceled",
+              "description": "The caller explicitly canceled the run.",
+              "type": "string"
+            },
+            {
+              "const": "interrupted",
+              "description": "The runtime stopped unexpectedly and can be inspected or retried.",
+              "type": "string"
+            }
+          ]
+        },
+        "SandboxMode": {
+          "description": "Process/filesystem isolation requested by an execution profile.",
+          "enum": [
+            "inherit",
+            "workspace",
+            "strict"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "A durable session that can own multiple attempts/runs.",
+      "properties": {
+        "conversationId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "executionProfile": {
+          "$ref": "#/$defs/ExecutionProfile",
+          "default": {
+            "approval": "inherit",
+            "kind": "local",
+            "network": "inherit",
+            "sandbox": "inherit",
+            "worktreeIsolation": false
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "nativeSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocolVersion": {
+          "type": "string"
+        },
+        "runnableId": {
+          "type": "string"
+        },
+        "runnableKind": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "id",
+        "conversationId",
+        "runnableId",
+        "runnableKind",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "HarnessSession",
+      "type": "object"
+    },
+    "startRequest": {
+      "$defs": {
+        "ApprovalMode": {
+          "description": "Human-in-the-loop preference requested by an execution profile. The final\ndecision is made by the Core/Gateway approval boundary.",
+          "enum": [
+            "inherit",
+            "on_risk",
+            "always",
+            "never"
+          ],
+          "type": "string"
+        },
+        "ExecutionProfile": {
+          "description": "Portable execution settings. It intentionally contains no credentials,\nprovider keys, or opaque process handles.",
+          "properties": {
+            "approval": {
+              "$ref": "#/$defs/ApprovalMode",
+              "default": "inherit"
+            },
+            "cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "$ref": "#/$defs/ExecutionProfileKind",
+              "default": "local"
+            },
+            "network": {
+              "$ref": "#/$defs/NetworkMode",
+              "default": "inherit"
+            },
+            "sandbox": {
+              "$ref": "#/$defs/SandboxMode",
+              "default": "inherit"
+            },
+            "worktreeBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeIsolation": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "ExecutionProfileKind": {
+          "description": "Where a run executes. Remote and cloud are explicit protocol values even\nwhen a node does not currently advertise those adapters; such a request is\nrejected at the Core boundary instead of silently running locally.",
+          "enum": [
+            "local",
+            "worktree",
+            "remote",
+            "cloud"
+          ],
+          "type": "string"
+        },
+        "NetworkMode": {
+          "description": "Network authority requested by an execution profile. Gateway policy remains\nauthoritative; these values are a request/provenance field, not a bypass.",
+          "enum": [
+            "inherit",
+            "denied",
+            "gateway_only",
+            "allow"
+          ],
+          "type": "string"
+        },
+        "SandboxMode": {
+          "description": "Process/filesystem isolation requested by an execution profile.",
+          "enum": [
+            "inherit",
+            "workspace",
+            "strict"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "description": "Request to start or resume a run inside a session.",
+      "properties": {
+        "executionProfile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idempotencyKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "default": {},
+          "description": "JSON input interpreted by the selected runnable. Chat adapters commonly\nuse an object containing `messages`."
+        },
+        "resumeRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "title": "StartRunRequest",
+      "type": "object"
+    }
+  },
+  "required": [
+    "session",
+    "run",
+    "startRequest",
+    "event"
+  ],
+  "title": "RyuAgentHarness",
+  "type": "object"
+}

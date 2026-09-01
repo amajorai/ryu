@@ -5780,6 +5780,23 @@ function formatTokens(input: number | null, output: number | null): string {
 	return `${formatNumber(i)} / ${formatNumber(o)}`;
 }
 
+function auditEventLabel(entry: AuditEntry): string {
+	switch (entry.event_type) {
+		case "model_call":
+			return "Model call";
+		case "exec_call":
+			return "Tool execution";
+		case "credential_read":
+			return "Credential read";
+		case "widget_follow_up":
+			return "Widget follow-up";
+		case "control_change":
+			return "Control change";
+		default:
+			return entry.event_type ?? "Activity";
+	}
+}
+
 function AuditTable({ entries }: { entries: AuditEntry[] }) {
 	return (
 		<div className="overflow-x-auto">
@@ -5787,12 +5804,11 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 				<thead>
 					<tr className="border-b text-left text-muted-foreground text-xs">
 						<th className="pr-3 pb-2 font-medium">Time</th>
-						<th className="pr-3 pb-2 font-medium">Provider</th>
-						<th className="pr-3 pb-2 font-medium">Model</th>
-						<th className="pr-3 pb-2 font-medium">Tokens (in/out)</th>
-						<th className="pr-3 pb-2 font-medium">Latency</th>
-						<th className="pr-3 pb-2 font-medium">Score</th>
-						<th className="pb-2 font-medium">Error</th>
+						<th className="pr-3 pb-2 font-medium">Event / target</th>
+						<th className="pr-3 pb-2 font-medium">Agent / caller</th>
+						<th className="pr-3 pb-2 font-medium">Trace IDs</th>
+						<th className="pr-3 pb-2 font-medium">Usage</th>
+						<th className="pb-2 font-medium">Result</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -5813,49 +5829,52 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
 									/>
 									<TooltipContent>{entry.timestamp}</TooltipContent>
 								</Tooltip>
-								<td className="py-2 pr-3 text-xs">{entry.provider ?? "—"}</td>
-								{entry.model ? (
-									<Tooltip>
-										<TooltipTrigger
-											render={
-												<td className="max-w-32 truncate py-2 pr-3 font-mono text-xs">
-													{entry.model}
-												</td>
-											}
-										/>
-										<TooltipContent>{entry.model}</TooltipContent>
-									</Tooltip>
-								) : (
-									<td className="max-w-32 truncate py-2 pr-3 font-mono text-xs">
-										—
-									</td>
-								)}
-								<td className="py-2 pr-3 font-mono text-xs tabular-nums">
-									{formatTokens(entry.input_tokens, entry.output_tokens)}
+								<td className="min-w-40 py-2 pr-3">
+									<Badge variant="outline">{auditEventLabel(entry)}</Badge>
+									<div className="mt-1 max-w-48 truncate font-mono text-xs">
+										{entry.command ?? entry.model ?? entry.provider ?? "—"}
+									</div>
+									<div className="text-[10px] text-muted-foreground">
+										{entry.provider ?? entry.backend ?? "Gateway"}
+									</div>
 								</td>
-								<td className="py-2 pr-3 font-mono text-xs tabular-nums">
-									{formatLatency(entry.latency_ms)}
+								<td className="min-w-40 py-2 pr-3 text-xs">
+									<div className="break-all font-mono">
+										agent {entry.agent_id ?? "—"}
+									</div>
+									<div className="mt-1 break-all text-muted-foreground">
+										{entry.user_name ?? entry.user_id ?? "system / gateway"}
+									</div>
 								</td>
-								<td className="py-2 pr-3 font-mono text-xs tabular-nums">
-									{entry.eval_score === null
-										? "—"
-										: `${Math.round(entry.eval_score * 100)}%`}
+								<td className="min-w-44 py-2 pr-3 font-mono text-[10px] text-muted-foreground">
+									<div className="break-all">request {entry.request_id}</div>
+									{entry.session_id ? (
+										<div className="mt-1 break-all">
+											session {entry.session_id}
+										</div>
+									) : null}
 								</td>
-								<td className="max-w-40 truncate py-2 text-xs">
+								<td className="min-w-32 py-2 pr-3 font-mono text-xs tabular-nums">
+									<div>
+										{formatTokens(entry.input_tokens, entry.output_tokens)}{" "}
+										tokens
+									</div>
+									<div className="mt-1 text-muted-foreground">
+										{formatLatency(entry.latency_ms)}
+										{entry.eval_score === null
+											? ""
+											: ` · ${Math.round(entry.eval_score * 100)}% score`}
+									</div>
+								</td>
+								<td className="max-w-48 py-2 text-xs">
+									<Badge variant={entry.error ? "destructive" : "secondary"}>
+										{entry.error ? "Failed" : "Recorded"}
+									</Badge>
 									{entry.error ? (
-										<Tooltip>
-											<TooltipTrigger
-												render={
-													<span className="text-destructive">
-														{entry.error}
-													</span>
-												}
-											/>
-											<TooltipContent>{entry.error}</TooltipContent>
-										</Tooltip>
-									) : (
-										<span className="text-muted-foreground">—</span>
-									)}
+										<div className="mt-1 max-w-48 break-words text-destructive">
+											{entry.error}
+										</div>
+									) : null}
 								</td>
 							</tr>
 						);
@@ -5905,7 +5924,7 @@ function AuditPanel({ target }: { target: ApiTarget }) {
 
 	return (
 		<SettingsSection
-			caption="Gateway request log: provider, model, token usage, latency, and eval score. API keys are always redacted. Newest first."
+			caption="Every governed model, tool, credential, widget, and control event. Agent IDs, caller IDs, request IDs, and session IDs make each row followable; API keys, prompts, and tool payloads are always redacted. Newest first."
 			headerAction={
 				<div className="flex items-center gap-3">
 					<div className="flex items-center gap-2">
@@ -6026,7 +6045,8 @@ function AuditBody({
 					</EmptyMedia>
 					<EmptyTitle>No audit entries yet</EmptyTitle>
 					<EmptyDescription>
-						Drive a chat turn through the gateway and refresh to see entries.
+						Run a model, tool, or control action through the gateway and refresh
+						to see its trace.
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>

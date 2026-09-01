@@ -439,10 +439,8 @@ function TeamSection() {
 	if (selectedAgent) {
 		return (
 			<AgentProfile
-				agentId={selectedAgent.id}
-				description={selectedAgent.description}
+				agent={selectedAgent}
 				key={selectedAgent.id}
-				name={selectedAgent.name}
 				onBack={() => setSelectedAgentId(null)}
 			/>
 		);

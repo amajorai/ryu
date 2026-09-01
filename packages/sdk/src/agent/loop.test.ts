@@ -100,6 +100,108 @@ async function collect(gen: AsyncGenerator<AgentEvent>): Promise<AgentEvent[]> {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("runAgentLoop", () => {
+	it("forwards real gateway text deltas and assembles a streamed tool call", async () => {
+		let modelCalls = 0;
+		let firstBody: string | undefined;
+		globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+			const url = String(input);
+			if (!url.includes("/v1/chat/completions")) {
+				return Promise.resolve(new Response("not found", { status: 404 }));
+			}
+			modelCalls += 1;
+			if (modelCalls === 1) {
+				firstBody = init?.body?.toString();
+			}
+			const frames =
+				modelCalls === 1
+					? [
+							{
+								choices: [
+									{
+										delta: {
+											tool_calls: [
+												{
+													index: 0,
+													id: "call-1",
+													function: {
+														arguments: '{"text":"hi"',
+														name: "echo",
+													},
+												},
+											],
+										},
+										finish_reason: null,
+									},
+								],
+							},
+							{
+								choices: [
+									{
+										delta: {
+											tool_calls: [
+												{
+													index: 0,
+													function: { arguments: "}" },
+												},
+											],
+										},
+										finish_reason: "tool_calls",
+									},
+								],
+							},
+						]
+					: [
+							{
+								choices: [{ delta: { content: "hel" }, finish_reason: null }],
+							},
+							{
+								choices: [{ delta: { content: "lo" }, finish_reason: "stop" }],
+								usage: {
+									prompt_tokens: 2,
+									completion_tokens: 2,
+									total_tokens: 4,
+								},
+							},
+						];
+			const body = `${frames
+				.map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+				.join("")}data: [DONE]\n\n`;
+			return Promise.resolve(
+				new Response(body, { headers: { "content-type": "text/event-stream" } })
+			);
+		}) as typeof globalThis.fetch;
+
+		const echo = defineTool({
+			id: "echo",
+			name: "Echo",
+			schema: {
+				type: "object",
+				properties: { text: { type: "string" } },
+				required: ["text"],
+			},
+			run: (input) => Promise.resolve({ echoed: input.text }),
+		});
+		const events = await collect(
+			new Agent({
+				model: "gpt-4o",
+				name: "streaming",
+				node: { baseUrl: NODE },
+				tools: { echo },
+			}).stream("go")
+		);
+
+		expect(
+			events
+				.filter((event) => event.type === "text")
+				.map((event) => event.content)
+		).toEqual(["hel", "lo"]);
+		expect(events.some((event) => event.type === "tool_call")).toBe(true);
+		const result = events.find((event) => event.type === "result");
+		expect(result?.type === "result" && result.text).toBe("hello");
+		expect(modelCalls).toBe(2);
+		expect(JSON.parse(String(firstBody)).stream).toBe(true);
+	});
+
 	it("executes a local tool, feeds the result back, and terminates", async () => {
 		let ran = false;
 		const echo = defineTool({
@@ -139,6 +241,78 @@ describe("runAgentLoop", () => {
 		expect(result?.type === "result" && result.text).toBe("All done.");
 		// Usage aggregates across both model rounds (8 + 8).
 		expect(result?.type === "result" && result.usage?.totalTokens).toBe(16);
+	});
+
+	it("pauses a gated tool until the approval handler allows it", async () => {
+		let ran = false;
+		let approvalName = "";
+		const gated = defineTool({
+			id: "gated",
+			name: "Gated tool",
+			needsApproval: true,
+			schema: { type: "object", properties: {} },
+			run: () => {
+				ran = true;
+				return Promise.resolve({ ok: true });
+			},
+		});
+		modelQueue = [
+			modelResponse({ toolCalls: [toolCall("c1", "gated", {})] }),
+			modelResponse({ content: "approved", finish: "stop" }),
+		];
+		const events = await collect(
+			new Agent({
+				name: "approval",
+				model: "gpt-4o",
+				node: { baseUrl: NODE },
+				tools: { gated },
+				approvalHandler: async (request) => {
+					approvalName = request.name;
+					return true;
+				},
+			}).stream("run it")
+		);
+		expect(ran).toBe(true);
+		expect(approvalName).toBe("gated");
+		expect(events.some((event) => event.type === "approval_requested")).toBe(
+			true
+		);
+		expect(events.find((event) => event.type === "result")?.type).toBe(
+			"result"
+		);
+	});
+
+	it("parses structured output and rejects invalid JSON", async () => {
+		modelQueue = [
+			modelResponse({ content: '{"answer":"ok"}', finish: "stop" }),
+		];
+		const resultEvents = await collect(
+			new Agent({
+				name: "structured",
+				model: "gpt-4o",
+				node: { baseUrl: NODE },
+				outputSchema: {
+					type: "object",
+					properties: { answer: { type: "string" } },
+					required: ["answer"],
+				},
+			}).stream("return JSON")
+		);
+		const result = resultEvents.find((event) => event.type === "result");
+		expect(result?.type === "result" && result.output).toEqual({
+			answer: "ok",
+		});
+
+		modelQueue = [modelResponse({ content: "not json", finish: "stop" })];
+		const invalid = await collect(
+			new Agent({
+				name: "structured-invalid",
+				model: "gpt-4o",
+				node: { baseUrl: NODE },
+				outputSchema: { type: "object" },
+			}).stream("return JSON")
+		);
+		expect(invalid.some((event) => event.type === "error")).toBe(true);
 	});
 
 	it("executes a remote tool via Core /api/mcp/tools/call", async () => {

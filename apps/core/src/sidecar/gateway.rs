@@ -2524,6 +2524,18 @@ pub async fn check_exec_scan(
 ///
 /// Best-effort: the exec already ran with permission, so if the gateway is
 /// unreachable we log a warning but do not fail the caller.
+#[derive(Debug, Clone, Default)]
+pub struct ExecAuditAttribution {
+    /// Stable Core agent id that performed the execution, when known.
+    pub agent_id: Option<String>,
+    /// Verified user id on whose behalf the execution ran, when known.
+    pub user_id: Option<String>,
+    /// Bounded display label for the verified user, when known.
+    pub user_name: Option<String>,
+    /// Product surface that initiated the execution, when known.
+    pub feature: Option<String>,
+}
+
 pub async fn report_exec_audit(
     backend: &str,
     command: &str,
@@ -2531,6 +2543,30 @@ pub async fn report_exec_audit(
     exit_code: i32,
     session_id: Option<String>,
     error: Option<String>,
+) {
+    report_exec_audit_with_attribution(
+        backend,
+        command,
+        duration_ms,
+        exit_code,
+        session_id,
+        error,
+        ExecAuditAttribution::default(),
+    )
+    .await;
+}
+
+/// Report a completed execution with the verified agent/user attribution that
+/// was available at the Core boundary. The legacy helper above remains the
+/// compatibility path for callers that do not have that context yet.
+pub async fn report_exec_audit_with_attribution(
+    backend: &str,
+    command: &str,
+    duration_ms: u64,
+    exit_code: i32,
+    session_id: Option<String>,
+    error: Option<String>,
+    attribution: ExecAuditAttribution,
 ) {
     let base = gateway_url();
     let endpoint = format!("{}/v1/exec/audit", base.trim_end_matches('/'));
@@ -2547,6 +2583,10 @@ pub async fn report_exec_audit(
             "exit_code": exit_code,
             "session_id": session_id,
             "error": error,
+            "agent_id": attribution.agent_id,
+            "user_id": attribution.user_id,
+            "user_name": attribution.user_name,
+            "feature": attribution.feature,
         }));
     if let Some(tok) = token {
         req = req.bearer_auth(tok);
@@ -2691,6 +2731,25 @@ pub async fn report_credential_read_audit(
     session_id: Option<String>,
     error: Option<String>,
 ) {
+    report_credential_read_audit_with_attribution(
+        source,
+        domain,
+        session_id,
+        error,
+        ExecAuditAttribution::default(),
+    )
+    .await;
+}
+
+/// Report a credential read with the agent/user attribution available at the
+/// tool-call boundary. The credential value itself is never included.
+pub async fn report_credential_read_audit_with_attribution(
+    source: &str,
+    domain: &str,
+    session_id: Option<String>,
+    error: Option<String>,
+    attribution: ExecAuditAttribution,
+) {
     let base = gateway_url();
     let endpoint = format!("{}/v1/exec/audit", base.trim_end_matches('/'));
     let token = gateway_token();
@@ -2709,6 +2768,10 @@ pub async fn report_credential_read_audit(
             "exit_code": 0,
             "session_id": session_id,
             "error": error,
+            "agent_id": attribution.agent_id,
+            "user_id": attribution.user_id,
+            "user_name": attribution.user_name,
+            "feature": attribution.feature,
         }));
     if let Some(tok) = token {
         req = req.bearer_auth(tok);

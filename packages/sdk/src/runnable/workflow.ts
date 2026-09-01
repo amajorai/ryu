@@ -44,6 +44,13 @@ export interface WorkflowOptions<TInput, TOutput> {
 	steps?: readonly Runnable[];
 }
 
+/** A workflow runnable with its executable composition graph preserved. */
+export interface WorkflowRunnable<TInput = unknown, TOutput = unknown>
+	extends Runnable<TInput, TOutput> {
+	readonly kind: "workflow";
+	readonly steps: readonly Runnable[];
+}
+
 /**
  * Create a Runnable workflow.
  *
@@ -65,12 +72,13 @@ export interface WorkflowOptions<TInput, TOutput> {
  */
 export function defineWorkflow<TInput = unknown, TOutput = unknown>(
 	options: WorkflowOptions<TInput, TOutput>
-): Runnable<TInput, TOutput> {
-	const { id, name, run } = options;
+): WorkflowRunnable<TInput, TOutput> {
+	const { id, name, run, steps = [] } = options;
 	return {
 		id,
 		name,
 		kind: "workflow",
+		steps,
 		run,
-	} satisfies Runnable<TInput, TOutput>;
+	} satisfies WorkflowRunnable<TInput, TOutput>;
 }

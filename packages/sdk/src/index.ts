@@ -9,8 +9,13 @@
  */
 
 export type {
+	AgentApprovalDecision,
+	AgentApprovalHandler,
+	AgentApprovalOption,
+	AgentApprovalRequest,
 	AgentConfig,
 	AgentEvent,
+	AgentEventApprovalRequested,
 	AgentTool,
 	Endpoint,
 	GenerateResult,
@@ -18,7 +23,15 @@ export type {
 	QueryOptions,
 	RemoteToolRef,
 } from "./agent/index.ts";
-export { Agent, createAgent, query, ryuTool } from "./agent/index.ts";
+export {
+	Agent,
+	createAgent,
+	query,
+	runAgentLoop,
+	ryuTool,
+	streamModelWithTools,
+} from "./agent/index.ts";
+export type { ModelStreamEvent } from "./agent/model-call.ts";
 export {
 	AgentBuilder,
 	AppBuilder,
@@ -190,5 +203,9 @@ export type {
 	SideModelArgs,
 } from "./runnable/turn-hook.ts";
 export { definePlugin, defineTurnHook } from "./runnable/turn-hook.ts";
-export type { WorkflowOptions, WorkflowStep } from "./runnable/workflow.ts";
+export type {
+	WorkflowOptions,
+	WorkflowRunnable,
+	WorkflowStep,
+} from "./runnable/workflow.ts";
 export { defineWorkflow } from "./runnable/workflow.ts";

@@ -89,6 +89,23 @@ describe("defineWorkflow", () => {
 		expect(wf.kind).toBe("workflow");
 		expect(typeof wf.run).toBe("function");
 	});
+
+	it("preserves the executable step graph", () => {
+		const step = defineTool({
+			id: "step-tool",
+			name: "Step tool",
+			schema: { type: "object", properties: {} },
+			run: () => Promise.resolve({ ok: true }),
+		});
+		const wf = defineWorkflow({
+			id: "workflow-steps",
+			name: "Workflow with steps",
+			steps: [step],
+			run: () => Promise.resolve("done"),
+		});
+
+		expect(wf.steps).toEqual([step]);
+	});
 });
 
 describe("defineTool", () => {

@@ -145,6 +145,7 @@ const BUDGET_ITEMS = [
 ];
 
 const RANKER_ITEMS: { value: ToolRankerId; label: string }[] = [
+	{ value: "needle2", label: "Needle 2 (on-device selector)" },
 	{ value: "bm25", label: "Keyword (BM25)" },
 	{ value: "semantic", label: "Meaning (embeddings)" },
 ];
@@ -433,7 +434,7 @@ function ContextWindowSection({ target }: { target: ApiTarget }) {
 // and this is the tab that already owns how skills reach the model.
 
 function ToolRankerSection({ target }: { target: ApiTarget }) {
-	const [ranker, setRanker] = useState<ToolRankerId>("bm25");
+	const [ranker, setRanker] = useState<ToolRankerId>("needle2");
 
 	useEffect(() => {
 		let cancelled = false;
@@ -444,7 +445,7 @@ function ToolRankerSection({ target }: { target: ApiTarget }) {
 				}
 			})
 			.catch(() => {
-				// Leaves the BM25 default showing, which is what Core uses when the
+				// Leaves the Needle 2 default showing, which is what Core uses when the
 				// pref is unreadable.
 			});
 		return () => {
@@ -454,10 +455,14 @@ function ToolRankerSection({ target }: { target: ApiTarget }) {
 
 	const handleChange = useCallback(
 		(value: string) => {
-			// Mirrors Core's `ToolRanker::from_pref`: only the exact "semantic"
-			// selects semantic ranking, so a cleared selection means BM25 — the
-			// same thing an unset preference means.
-			const next: ToolRankerId = value === "semantic" ? "semantic" : "bm25";
+			// Mirrors Core's `ToolRanker::from_pref`: explicit BM25 and Semantic
+			// values opt out of the Needle 2 default; unknown values use Needle 2.
+			const next: ToolRankerId =
+				value === "bm25"
+					? "bm25"
+					: value === "semantic"
+						? "semantic"
+						: "needle2";
 			setRanker(next);
 			persist(setToolRanker(target, next), "the search ranking");
 		},
@@ -466,7 +471,7 @@ function ToolRankerSection({ target }: { target: ApiTarget }) {
 
 	return (
 		<SettingsSection
-			caption="How Ryu picks which tools and skills to offer the model for a given request. Keyword matching is the default and needs nothing installed. Meaning-based ranking compares your request to each tool or skill using the embedding model this node is configured with. Where no embedding model is reachable, it quietly falls back to keyword order rather than failing the search."
+			caption="How Ryu picks which tools and skills to offer the model for a given request. Needle 2 is the default on-device selector and falls back to keyword order when its runtime is unavailable. Keyword matching is the explicit no-model option. Meaning-based ranking compares your request to each tool or skill using this node's embedding model."
 			title="Tool and skill search"
 		>
 			<SettingsCard>

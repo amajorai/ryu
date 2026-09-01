@@ -69,6 +69,8 @@ export interface ToolOptions<TInput extends Record<string, unknown>, TOutput> {
 	id: string;
 	/** Human-readable display name. */
 	name: string;
+	/** Pause before execution when the Agent is configured with an approval handler. */
+	needsApproval?: boolean;
 	/**
 	 * The tool's run implementation.
 	 *
@@ -178,6 +180,8 @@ export interface ToolRunnable<
 	/** Optional description surfaced to models and tool discovery. */
 	readonly description?: string;
 	readonly kind: "tool";
+	/** Whether the loop must obtain human approval before executing this tool. */
+	readonly needsApproval?: boolean;
 	/** JSON Schema for this tool's input — compatible with Core's ToolInfo.schema. */
 	readonly schema: ToolSchema;
 }
@@ -217,7 +221,7 @@ export function defineTool<
 	TInput extends Record<string, unknown> = Record<string, unknown>,
 	TOutput = unknown,
 >(options: ToolOptions<TInput, TOutput>): ToolRunnable<TInput, TOutput> {
-	const { description, id, name, schema, run } = options;
+	const { description, id, name, needsApproval, schema, run } = options;
 
 	// Serialize the run body for Core's `inline_deno` backend — the same approach
 	// `defineTurnHook` uses: the sandbox wraps this in an async IIFE where `input`
@@ -230,6 +234,7 @@ export function defineTool<
 		kind: "tool",
 		schema,
 		...(description === undefined ? {} : { description }),
+		...(needsApproval === undefined ? {} : { needsApproval }),
 		code,
 		run(input: TInput, ctx: RunnableContext): Promise<TOutput> {
 			validateInput(input, schema, id);

@@ -12,7 +12,7 @@
 //!
 //! Placement (CLAUDE.md §1): the gateway decides *what is allowed/measured*
 //! (allowlist gate, audit, budget) and drives the loop; Core decides *what
-//! runs* (search ranking, tool execution). Every privileged op crosses to Core
+//! runs* (Needle 2-backed search ranking, tool execution). Every privileged op crosses to Core
 //! over HTTP via [`catalog_client::CoreCatalog`].
 
 pub mod catalog_client;
