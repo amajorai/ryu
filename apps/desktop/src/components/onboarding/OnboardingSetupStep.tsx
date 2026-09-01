@@ -1,6 +1,7 @@
 import { Search01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ONBOARDING_CONTENT_DELAY_MS } from "@ryu/blocks/desktop/onboarding";
+import { SvglIcon, type SvglSpec } from "@ryu/blocks/web/svgl-icon.tsx";
 import { Button } from "@ryu/ui/components/button";
 import { Input } from "@ryu/ui/components/input";
 import { Logo as GhostOrb } from "@ryu/ui/components/logo";
@@ -11,7 +12,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AgentSelectionField } from "@/components/agent-elements/input/agent-selection-field.tsx";
 import { ConnectionPermissionDialog } from "@/src/components/marketplace/ConnectionPermissionDialog.tsx";
-import { AgentSuggestionsStep } from "@/src/components/onboarding/AgentSuggestionsStep.tsx";
+import {
+	AgentSuggestionsStep,
+	type OnboardingConnectedApp,
+} from "@/src/components/onboarding/AgentSuggestionsStep.tsx";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { NativeThread } from "@/src/lib/api/agent-threads.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
@@ -56,13 +60,80 @@ export interface OnboardingThreadGroup {
 	threads: NativeThread[];
 }
 
-function connectedAppNames(
+const INTEGRATION_SVGL: readonly [string, SvglSpec][] = [
+	// SVGL's bundled Google mark is the closest local mark for Gmail and the
+	// Google Workspace family when Composio does not return a toolkit logo.
+	["gmail", "google"],
+	["googlemail", "google"],
+	["google-drive", "google"],
+	["googledrive", "google"],
+	["google-docs", "google"],
+	["googledocs", "google"],
+	["google-sheets", "google"],
+	["googlesheets", "google"],
+	["google-calendar", "google"],
+	["googlecalendar", "google"],
+	["notion", "notion"],
+	["slack", "slack"],
+	["github", { light: "github_light", dark: "github_dark" }],
+	["linear", "linear"],
+	["discord", "discord"],
+	["figma", "figma"],
+	["stripe", "stripe"],
+	["dropbox", "dropbox"],
+	["zoom", "zoom"],
+	["asana", "asana-logo"],
+	["cloudflare", "cloudflare"],
+	["vercel", "vercel"],
+];
+
+function svglForIntegration(haystack: string): SvglSpec | null {
+	const normalized = haystack.toLowerCase();
+	for (const [needle, spec] of INTEGRATION_SVGL) {
+		if (normalized.includes(needle)) {
+			return spec;
+		}
+	}
+	return null;
+}
+
+function ConnectedAppLogo({
+	name,
+	slug,
+	toolkit,
+}: {
+	name: string;
+	slug: string;
+	toolkit?: ComposioToolkit;
+}) {
+	const spec = svglForIntegration(`${slug} ${name}`);
+	if (spec) {
+		return <SvglIcon size={16} spec={spec} />;
+	}
+	if (toolkit?.logo) {
+		return (
+			// biome-ignore lint/performance/noImgElement: Composio supplies toolkit logos
+			<img alt="" className="size-4 object-contain" src={toolkit.logo} />
+		);
+	}
+	return (
+		<span className="flex size-4 items-center justify-center rounded bg-muted font-medium text-[9px]">
+			{name.slice(0, 1).toUpperCase()}
+		</span>
+	);
+}
+
+function connectedAppDetails(
 	connections: readonly ComposioConnection[],
 	toolkits: readonly ComposioToolkit[]
-): string[] {
-	const names = new Set<string>();
+): OnboardingConnectedApp[] {
+	const apps = new Map<string, OnboardingConnectedApp>();
 	for (const connection of connections) {
 		if (!connection.active) {
+			continue;
+		}
+		const slug = connection.toolkit.trim().toLowerCase();
+		if (!slug || apps.has(slug)) {
 			continue;
 		}
 		const toolkit = toolkits.find((item) => item.slug === connection.toolkit);
@@ -73,10 +144,14 @@ function connectedAppNames(
 			.join(" ");
 		const name = toolkit?.name.trim() || fallback;
 		if (name) {
-			names.add(name);
+			apps.set(slug, {
+				logo: <ConnectedAppLogo name={name} slug={slug} toolkit={toolkit} />,
+				name,
+				slug,
+			});
 		}
 	}
-	return [...names];
+	return [...apps.values()];
 }
 
 interface OnboardingSetupStepProps {
@@ -968,7 +1043,7 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 			>
 				<AgentSuggestionsStep
 					busy={props.agentSuggestionsSubmitting}
-					connectedApps={connectedAppNames(props.connections, props.toolkits)}
+					connectedApps={connectedAppDetails(props.connections, props.toolkits)}
 					error={props.agentSuggestionsError}
 					onCreate={props.onCreateAgentSuggestions}
 					onSkip={props.onSkip}

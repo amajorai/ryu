@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./agent-rules": "./src/agent-rules.ts",
+    "./connection-status": "./src/connection-status.ts",
     "./continuity": "./src/continuity.ts",
     "./deep-link": "./src/deep-link.ts",
     "./hardware": "./src/hardware.ts",

@@ -632,6 +632,7 @@
         "@react-three/fiber": "^9.0.0",
         "@react-three/rapier": "^2.1.0",
         "@ryu/app-host": "workspace:*",
+        "@ryuhq/protocol": "workspace:*",
         "@shadcn/react": "^0.1.0",
         "@slate-yjs/react": "^1.1.0",
         "@tanstack/react-table": "^8.21.3",

@@ -36,6 +36,7 @@ export const RYU_APP_UI_PRIMITIVES = [
 export const RYU_APP_UI_AGENT_RULES = [
 	"Use RyuAppShell and the Ryu App UI primitives for every Companion surface.",
 	"Use @ryu/ui controls for buttons, inputs, dialogs, menus, badges, and status.",
+	"Use ConnectionStatusToast from @ryu/ui/components/connection-status for host-provided network or node states; keep the app mounted while live work waits.",
 	"Use semantic Ryu tokens; do not invent raw colors, radii, shadows, or typography scales.",
 	"Keep Marketplace listing copy out of the Companion; open directly into the working surface.",
 	"Every async surface must provide loading, empty, error, and disabled states.",

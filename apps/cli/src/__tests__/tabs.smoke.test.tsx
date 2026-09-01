@@ -48,6 +48,20 @@ async function press(
 	await setup.renderOnce();
 }
 
+async function frameSatisfying(
+	setup: Awaited<ReturnType<typeof testRender>>,
+	predicate: (frame: string) => boolean,
+	maxFrames = 30
+): Promise<string> {
+	let frame = setup.captureCharFrame();
+	for (let i = 0; i < maxFrames && !predicate(frame); i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await setup.renderOnce();
+		frame = setup.captureCharFrame();
+	}
+	return frame;
+}
+
 test("router seeds the chat surface as the home surface", () => {
 	const chat = resolveSurface("/chat");
 	expect(chat?.id).toBe("chat");
@@ -68,7 +82,10 @@ test("Ctrl+Alt+S splits the workspace into two chat panes", async () => {
 	expect(countOccurrences(before, "route")).toBe(1);
 
 	await press(testSetup, { name: "s", ctrl: true, option: true });
-	const after = testSetup.captureCharFrame();
+	const after = await frameSatisfying(
+		testSetup,
+		(frame) => countOccurrences(frame, "route") >= 2
+	);
 	expect(after).not.toContain("Error:");
 	// Two panes now render, each its own chat surface -> two WorkspaceBars.
 	expect(countOccurrences(after, "route")).toBeGreaterThanOrEqual(2);

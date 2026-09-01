@@ -28,6 +28,7 @@
     "./components/card": "./src/components/card.tsx",
     "./components/chart": "./src/components/chart.tsx",
     "./components/checkbox": "./src/components/checkbox.tsx",
+    "./components/connection-status": "./src/components/connection-status.tsx",
     "./components/collapsible": "./src/components/collapsible.tsx",
     "./components/command": "./src/components/command.tsx",
     "./components/contributions-graph": "./src/components/contributions-graph.tsx",
@@ -125,6 +126,7 @@
   },
   "dependencies": {
     "@ryu/app-host": "workspace:*",
+    "@ryuhq/protocol": "workspace:*",
     "@ai-sdk/openai-compatible": "^3.0.0",
     "@ai-sdk/react": "4",
     "@ariakit/react": "^0.4.29",

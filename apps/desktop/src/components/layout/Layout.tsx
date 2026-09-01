@@ -793,7 +793,7 @@ function LayoutContent({
 			<MediaPipDock />
 			<PrivacyDisclosure />
 			{!(botProduct || osProduct) && <SupportAccessBanner />}
-			{!(botProduct || osProduct) && <ConnectionStatusToast />}
+			<ConnectionStatusToast />
 			{!osProduct && <ReconnectRetryBanner state={reconnectRetryState} />}
 			{/* Mounted app-wide, not per-page: Safe Mode changes what the whole node
 			    loads, and a missing app must be explained wherever the user notices

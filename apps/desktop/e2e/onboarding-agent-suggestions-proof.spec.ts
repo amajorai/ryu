@@ -20,15 +20,30 @@ test.describe("onboarding agent suggestions proof", () => {
 			)
 		).toBeVisible();
 		await expect(page.getByText("Connected apps", { exact: true })).toHaveCount(
-			2
+			0
 		);
 		await expect(page.getByText("Gmail", { exact: true })).toHaveCount(2);
 		await expect(page.getByText("Notion", { exact: true })).toHaveCount(2);
 		await expect(
-			page.getByRole("img", {
-				name: "onboarding:agent-suggestion-release-desk avatar",
-			})
+			page.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
 		).toBeVisible();
+		await expect(
+			page
+				.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
+				.locator("[data-expressive-animation]")
+		).toBeVisible();
+		await expect(
+			page
+				.getByTestId("agent-suggestion-avatar-agent-suggestion-release-desk")
+				.locator('[data-siri-orb="aura"]')
+		).toBeVisible();
+		const gmailLogos = page.getByTestId("connected-app-gmail").locator("img");
+		await expect(gmailLogos).toHaveCount(2);
+		await expect(gmailLogos.first()).toBeVisible();
+		const notionLogos = page.getByTestId("connected-app-notion").locator("img");
+		await expect(notionLogos).toHaveCount(2);
+		await expect(notionLogos.first()).toBeVisible();
+		await expect(page.locator("canvas")).toHaveCount(0);
 		await expect(
 			page.getByRole("button", { name: "Select Release Desk" })
 		).toBeVisible();

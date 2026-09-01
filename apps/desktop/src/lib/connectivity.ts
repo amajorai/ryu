@@ -1,9 +1,12 @@
 /** The connection phases the desktop shell can explain to a user. */
-export type ConnectionPhase =
-	| "checking"
-	| "node-unreachable"
-	| "offline"
-	| "online";
+
+import type { ConnectionPhase } from "@ryuhq/protocol/connection-status";
+import {
+	isConnectionUnavailable,
+	resolveConnectionPhase as resolveNetworkConnectionPhase,
+} from "@ryuhq/protocol/connection-status";
+
+export type { ConnectionPhase };
 
 export interface ConnectionPhaseInput {
 	browserOnline: boolean;
@@ -11,26 +14,17 @@ export interface ConnectionPhaseInput {
 	nodeReachable: boolean | null;
 }
 
-/**
- * Resolve the user-facing connection state from the browser signal and the
- * active node probe. Browser offline wins because it explains why a remote node
- * cannot be reached; an unanswered node is a different, actionable failure.
- */
+/** Desktop compatibility adapter; the canonical contract is host-neutral. */
 export function resolveConnectionPhase({
 	browserOnline,
 	loading,
 	nodeReachable,
 }: ConnectionPhaseInput): ConnectionPhase {
-	if (!browserOnline) {
-		return "offline";
-	}
-	if (loading || nodeReachable === null) {
-		return "checking";
-	}
-	return nodeReachable ? "online" : "node-unreachable";
+	return resolveNetworkConnectionPhase({
+		loading,
+		networkOnline: browserOnline,
+		nodeReachable,
+	});
 }
 
-/** Whether a phase represents a connection that is not ready yet. */
-export function isConnectionUnavailable(phase: ConnectionPhase): boolean {
-	return phase !== "online";
-}
+export { isConnectionUnavailable };

@@ -4,8 +4,8 @@ import "../../src/index.css";
 import {
 	ConnectionStatusToastView,
 	type ConnectionStatusToastViewProps,
-} from "../../src/components/shell/ConnectionStatusToast.tsx";
-import type { ConnectionPhase } from "../../src/lib/connectivity.ts";
+} from "@ryu/ui/components/connection-status";
+import type { ConnectionPhase } from "@ryuhq/protocol/connection-status";
 
 type ProofState = "checking" | "node-unreachable" | "offline" | "restored";
 

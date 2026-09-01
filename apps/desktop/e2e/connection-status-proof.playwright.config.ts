@@ -21,8 +21,8 @@ export default defineConfig({
 	webServer: {
 		command:
 			"bunx vite --config harness/vite.connection-status-proof.config.ts",
+		reuseExistingServer: true,
 		url: `${PROOF_URL}connection-status-proof.html`,
-		reuseExistingServer: false,
 		timeout: 120_000,
 	},
 });
