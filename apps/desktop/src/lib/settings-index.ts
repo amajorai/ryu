@@ -182,6 +182,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		keywords: "launch boot first screen home",
 	},
 	{
+		id: "general.on-startup.realm",
+		desktopOnly: true,
+		dialog: "app",
+		section: "general",
+		group: "On startup",
+		label: "Realm on startup",
+		keywords: "bot console os last used product mode launch",
+	},
+	{
 		id: "general.on-startup.account-and-node-selection",
 		dialog: "app",
 		section: "general",

@@ -20,6 +20,7 @@ const SERVICE_TONES: Record<string, LandingCardTone> = {
 const SERVICE_ENDPOINTS: Record<string, string> = {
 	box: "Persistent workspace API",
 	gateway: "Model + tool gateway",
+	hire: "Pay-per-run specialists",
 	mail: "Agent inbox API",
 	notify: "POST /v1/events",
 };
@@ -37,13 +38,13 @@ export function StandaloneServicesSection() {
 			<div className="max-w-2xl">
 				<h2 className={landingHeadlineClass}>Use the pieces as services.</h2>
 				<p className={sectionSubtitleClass}>
-					Ryu Gateway, Box, Mail, and Notify can run as separate APIs. Connect
-					only the service your product needs, or use them together around one
-					agent.
+					Ryu Gateway, Box, Mail, Notify, and Hire each own a focused service
+					boundary. Connect only the service your product needs, or use them
+					together around one agent.
 				</p>
 			</div>
 
-			<div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+			<div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
 				{STANDALONE_PRODUCTS.map((product) => {
 					const Icon = product.Icon;
 					const tone =

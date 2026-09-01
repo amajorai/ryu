@@ -27,15 +27,19 @@ import {
 	Puzzle,
 	Radio,
 	RefreshCw,
+	Settings2,
 	Shield,
 	Smartphone,
 	Sparkles,
 	Store,
 	Terminal as TerminalIcon,
 	Users,
+	Workflow,
 	Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { BotAppVisual } from "../bot-visual.tsx";
+import { ConsoleWorkflowVisual } from "../console-workflow-visual.tsx";
 import type {
 	BentoItem,
 	CtaLink,
@@ -982,6 +986,7 @@ export const products: Product[] = [
 		name: "Ryu Hire",
 		navLabel: "Hire",
 		category: "Platform",
+		standalone: true,
 		tagline: "Recruit a specialist for one run and pay with credits.",
 		Icon: Zap,
 		hero: {
@@ -1874,6 +1879,234 @@ export const products: Product[] = [
 	},
 
 	/* =========================== SURFACES ========================== */
+	{
+		slug: "bot",
+		name: "Ryu Bot",
+		navLabel: "Bot",
+		category: "Surfaces",
+		tagline: "Managed AI you can give real work to without setting up a stack.",
+		Icon: Bot,
+		hero: {
+			eyebrow: "Ryu Bot · managed work",
+			title: "Give AI a job, not a setup.",
+			subtitle:
+				"For teams already using ChatGPT or Claude but still doing the checking and copy-paste themselves. Ryu Bot takes the task, works in its own computer, and brings back a result you can review.",
+			primaryCta: DOWNLOAD,
+			secondaryCta: BOOK_DEMO,
+			visual: <BotAppVisual />,
+		},
+		highlights: [
+			{
+				title: "Start with a task",
+				description:
+					"Send a request in plain language and keep the same thread going.",
+				icon: Workflow,
+			},
+			{
+				title: "It has a computer",
+				description:
+					"Ryu Bot works in a private computer and sandbox while you are away.",
+				icon: Monitor,
+			},
+			{
+				title: "Approve the important parts",
+				description: "Choose what it can read, change, or send before it acts.",
+				icon: Shield,
+			},
+			{
+				title: "Keep the result",
+				description:
+					"The thread keeps the context, output, and review state together.",
+				icon: Check,
+			},
+		],
+		bento: {
+			eyebrow: "A managed computer for work",
+			title: "Give the task. Keep the result.",
+			subtitle:
+				"Bot handles the repetitive work in a private workspace while your team stays in control of the important decisions.",
+			items: [
+				{
+					title: "Plain-language requests",
+					description:
+						"Describe the outcome you need instead of wiring another workflow by hand.",
+					icon: Workflow,
+				},
+				{
+					title: "Private computer",
+					description:
+						"Each task gets a bounded computer and sandbox for the work it needs to do.",
+					icon: Monitor,
+				},
+				{
+					title: "Review before sending",
+					description:
+						"Pause before the task reaches an important app, person, or external system.",
+					icon: Shield,
+				},
+				{
+					title: "A thread you can follow",
+					description:
+						"See what happened and pick the work back up without losing the context.",
+					icon: Check,
+				},
+			],
+		},
+		splits: [
+			{
+				eyebrow: "The managed path",
+				title: "Less checking. More finished work.",
+				description:
+					"Ryu Bot takes on the steps between a request and a usable result, then brings the decision back to your team when it matters.",
+				bullets: [
+					"Works with the tools your team already uses",
+					"Keeps access and review points explicit",
+					"Returns a result your team can inspect",
+				],
+				visual: <BotAppVisual />,
+			},
+		],
+		faq: [
+			{
+				q: "Do I need to configure a model or provider?",
+				a: "No. Ryu Bot is the managed path. It keeps provider and runtime setup out of the everyday work surface.",
+			},
+			{
+				q: "Can Bot act without asking me?",
+				a: "Bot can work through the task, but your configured access and review points still govern what it can read, change, or send.",
+			},
+		],
+		cta: {
+			title: "Give the next task to Ryu Bot.",
+			subtitle:
+				"Download the managed workspace or talk with us about the workflows your team wants off its plate.",
+			primaryCta: DOWNLOAD,
+			secondaryCta: BOOK_DEMO,
+			note: "Managed · Private computer · Reviewable work",
+		},
+	},
+
+	{
+		slug: "console",
+		name: "Ryu Console",
+		navLabel: "Console",
+		category: "Surfaces",
+		tagline:
+			"Operate Ryu with the models, tools, permissions, and records you choose.",
+		Icon: Settings2,
+		hero: {
+			eyebrow: "Ryu Console · operator workspace",
+			title: "Your AI, your models, your rules.",
+			subtitle:
+				"Ryu Console is the workspace for power users and admins. Use Ryu's AI or bring your own, then configure the server, tools, and access your team relies on.",
+			primaryCta: DOWNLOAD,
+			secondaryCta: BOOK_DEMO,
+			visual: <ConsoleWorkflowVisual />,
+		},
+		highlights: [
+			{
+				title: "Bring your model",
+				description:
+					"Use Ryu's AI, a local model, or a provider your team already pays for.",
+				icon: Cpu,
+			},
+			{
+				title: "Keep tools close",
+				description:
+					"Choose the tools, Skills, and connections each workflow can use.",
+				icon: Blocks,
+			},
+			{
+				title: "Set the review points",
+				description:
+					"Make sensitive actions visible and require a decision before they happen.",
+				icon: Shield,
+			},
+			{
+				title: "Leave a record",
+				description:
+					"Inspect runs, cost, access, and the audit trail left by the work.",
+				icon: GitBranch,
+			},
+		],
+		bento: {
+			eyebrow: "The operator surface",
+			title: "Make your setup reusable.",
+			subtitle:
+				"Console keeps configuration and execution in one place, so teams can improve the next run without rebuilding the stack around it.",
+			items: [
+				{
+					title: "Models and routing",
+					description:
+						"Choose local, managed, or bring-your-own model paths without changing the workflow.",
+					icon: Cpu,
+				},
+				{
+					title: "Tools and Skills",
+					description:
+						"Keep the capabilities a run needs visible and allowlisted.",
+					icon: Blocks,
+				},
+				{
+					title: "Permissions and approvals",
+					description:
+						"Decide what the work may reach and where a person must take over.",
+					icon: Shield,
+				},
+				{
+					title: "Runs and workspaces",
+					description:
+						"Keep active work, background runs, and their outputs easy to find.",
+					icon: Workflow,
+				},
+				{
+					title: "Cost and context",
+					description:
+						"See what a workflow used and what it cost while it was running.",
+					icon: Zap,
+				},
+				{
+					title: "Reusable setup",
+					description:
+						"Capture the tools and preferences that make a good run repeatable.",
+					icon: RefreshCw,
+				},
+			],
+		},
+		splits: [
+			{
+				eyebrow: "One place to operate",
+				title: "See what happens before you hand it off.",
+				description:
+					"Console keeps the request, context, actions, and handoff visible so a team can tune a workflow and trust the next run.",
+				bullets: [
+					"Use local models, Ryu models, or your own provider",
+					"Keep tools and approvals close to the work",
+					"Capture a workflow and run it again next time",
+				],
+				visual: <CodePaneSplit />,
+			},
+		],
+		faq: [
+			{
+				q: "Is Console a separate runtime?",
+				a: "No. Console is the operator surface for the same Ryu Core and Gateway contracts used by the other Ryu products.",
+			},
+			{
+				q: "Can I use my own model and server?",
+				a: "Yes. Console can operate managed or self-hosted nodes and can use local, Ryu-managed, or provider models according to your configuration.",
+			},
+		],
+		cta: {
+			title: "Operate the work you care about.",
+			subtitle:
+				"Download Ryu Console and keep models, tools, permissions, and the run record in one workspace.",
+			primaryCta: DOWNLOAD,
+			secondaryCta: BOOK_DEMO,
+			note: "Operator workspace · Models · Tools · Approvals · Audit",
+		},
+	},
+
 	{
 		slug: "os",
 		name: "Ryu OS",

@@ -15,10 +15,16 @@ test("landing page carries the composable cloud positioning", () => {
 	expect(html).toContain('aria-label="Ryu surfaces"');
 	expect(html).toContain('data-testid="managed-deployment"');
 	expect(html).toContain('data-testid="standalone-services"');
-	for (const slug of ["gateway", "box", "notify", "mail"]) {
+	for (const slug of ["gateway", "box", "notify", "mail", "hire"]) {
 		expect(html).toContain(`data-testid="standalone-service-${slug}"`);
 	}
-	for (const label of ["Ryu Gateway", "Ryu Box", "Ryu Notify", "Ryu Mail"]) {
+	for (const label of [
+		"Ryu Gateway",
+		"Ryu Box",
+		"Ryu Notify",
+		"Ryu Mail",
+		"Ryu Hire",
+	]) {
 		expect(html).toContain(label);
 	}
 	expect(html).toContain('id="integration-layer"');
@@ -36,6 +42,7 @@ test("landing page carries the composable cloud positioning", () => {
 	expect(html).toContain("After a call");
 	expect(html).toContain("Download");
 	expect(html).toContain("Documentation");
+	expect(html).toContain('data-testid="hero-workflow-background"');
 	expect(html).toContain('aria-label="More download options"');
 	expect(html).not.toContain("Explore Ryu Apps");
 	expect(html).not.toContain("Book a Demo");

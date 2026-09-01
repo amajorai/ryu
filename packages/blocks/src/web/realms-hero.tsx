@@ -12,6 +12,7 @@ import {
 	Timer,
 	Workflow,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { DOCS_URL } from "./data/resources.tsx";
@@ -225,10 +226,17 @@ export default function RealmsHero() {
 						current={scenarioIndex}
 						onPick={setScenarioIndex}
 					/>
-					<div className="relative mt-4 flex min-h-[28rem] items-center justify-center overflow-hidden rounded-2xl px-4 py-6 md:min-h-[34rem] md:px-8 md:py-10">
-						<div
+					<div className="relative mt-4 flex min-h-[28rem] items-center justify-center overflow-hidden rounded-2xl bg-[#8ecbec] px-4 py-6 md:min-h-[34rem] md:px-8 md:py-10">
+						<Image
+							alt=""
 							aria-hidden="true"
-							className="pointer-events-none absolute inset-0 bg-[url('/background.png')] bg-center bg-cover opacity-80"
+							className="pointer-events-none absolute inset-x-0 top-0 h-auto w-full max-w-none opacity-80"
+							data-testid="hero-workflow-background"
+							height={1440}
+							priority
+							sizes="(max-width: 1024px) calc(100vw - 32px), 1024px"
+							src="/background.png"
+							width={2520}
 						/>
 						<div className="relative z-10 w-full max-w-6xl py-4 md:py-6">
 							<HeroWorkflowLoop

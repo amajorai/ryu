@@ -57,6 +57,7 @@ import {
 	setStartupBehavior,
 	useStartupBehavior,
 } from "@/src/hooks/useStartupBehavior.ts";
+import { useStartupRealm } from "@/src/hooks/useStartupRealm.ts";
 import { useStartupSelection } from "@/src/hooks/useStartupSelection.ts";
 import {
 	setTabLayout,
@@ -75,6 +76,11 @@ import {
 	useTabSwitchBehavior,
 } from "@/src/hooks/useTabSwitchBehavior.ts";
 import type { DefaultFileOpener } from "@/src/lib/default-file-opener.ts";
+import {
+	isStartupRealm,
+	STARTUP_REALM_OPTIONS,
+	type StartupRealm,
+} from "@/src/lib/product-mode.ts";
 import type { StartupSelectionMode } from "@/src/lib/startup-selection.ts";
 import { STORAGE_KEYS } from "@/src/lib/themes/presets.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
@@ -171,7 +177,8 @@ const TAB_SWITCH_OPTIONS: { value: TabSwitchBehavior; label: string }[] = [
 ];
 
 export function GeneralTab() {
-	const { canManageDesktopLifecycle, canUseNativeShell } = useAppSurface();
+	const { canManageDesktopLifecycle, canUseNativeShell, isDesktop } =
+		useAppSurface();
 	// Which sub-page a settings-search hit lives on, so the reveal has something
 	// to find — a row on a closed page is not in the DOM.
 	const pendingSubpage = usePendingSubpage("general");
@@ -184,6 +191,8 @@ export function GeneralTab() {
 	const tabOpenBehavior = useTabOpenBehavior();
 	const tabSwitchBehavior = useTabSwitchBehavior();
 	const startupBehavior = useStartupBehavior();
+	const { realm: startupRealm, setRealm: setStartupRealmPreference } =
+		useStartupRealm();
 	const {
 		preferences: startupSelection,
 		setDefaultAccountId,
@@ -397,6 +406,41 @@ export function GeneralTab() {
 						description="Choose what opens when the window launches: a clean launchpad with no tabs, the Home page, a new chat, or the tabs you had open last time."
 						title="Open with"
 					/>
+					{isDesktop ? (
+						<SettingsItem
+							actions={
+								<Select
+									items={STARTUP_REALM_OPTIONS}
+									onValueChange={(value) => {
+										if (isStartupRealm(value)) {
+											setStartupRealmPreference(value);
+										}
+									}}
+									value={startupRealm}
+								>
+									<SelectTrigger
+										className="h-8 w-56 flex-shrink-0 text-sm"
+										id="startup-realm-select"
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{STARTUP_REALM_OPTIONS.map((option) => (
+											<SelectItem
+												key={option.value}
+												value={option.value satisfies StartupRealm}
+											>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							}
+							description="Choose which realm opens when Ryu launches. Last used remembers the realm you selected most recently; new users start in Bot."
+							settingsId="general.on-startup.realm"
+							title="Realm on startup"
+						/>
+					) : null}
 					<SettingsItem
 						actions={
 							<Select

@@ -40,11 +40,13 @@ export interface ProductLandingStyle {
 export const PRODUCT_LANDING_STYLES: Record<string, ProductLandingStyle> = {
 	"agents-as-a-service": { bento: "split", hero: "slab" },
 	agents: { bento: "columns", hero: "split" },
+	bot: { bento: "grid", hero: "slab" },
 	box: { bento: "columns", hero: "framed" },
 	"chrome-extension": { bento: "compact", hero: "slab" },
 	cli: { bento: "list", hero: "editorial" },
 	cloud: { bento: "mosaic", hero: "stacked" },
 	connections: { bento: "compact", hero: "reverse" },
+	console: { bento: "featured", hero: "reverse" },
 	core: { bento: "featured", hero: "split" },
 	devices: { bento: "list", hero: "stacked" },
 	desktop: { bento: "grid", hero: "framed" },

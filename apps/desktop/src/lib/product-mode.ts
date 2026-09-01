@@ -2,16 +2,81 @@ import { create } from "zustand";
 import { isRyuBot } from "./product.ts";
 
 export type ProductMode = "bot" | "console" | "os";
+export type StartupRealm = "last-used" | ProductMode;
 
 const STORAGE_KEY = "ryu:product-mode";
+export const STARTUP_REALM_KEY = "ryu:startup-realm";
 
-function readRequestedMode(): ProductMode {
+export const DEFAULT_STARTUP_REALM: StartupRealm = "last-used";
+
+export const STARTUP_REALM_OPTIONS = [
+	{ label: "Last used", value: "last-used" },
+	{ label: "Bot", value: "bot" },
+	{ label: "Console", value: "console" },
+	{ label: "OS", value: "os" },
+] as const satisfies ReadonlyArray<{ label: string; value: StartupRealm }>;
+
+const PRODUCT_MODE_VALUES: readonly ProductMode[] = ["bot", "console", "os"];
+const STARTUP_REALM_VALUES: readonly StartupRealm[] = [
+	"last-used",
+	...PRODUCT_MODE_VALUES,
+];
+
+function storage(): Storage | null {
 	try {
-		const requested = localStorage.getItem(STORAGE_KEY);
-		return requested === "console" || requested === "os" ? requested : "bot";
+		return typeof localStorage === "undefined" ? null : localStorage;
+	} catch {
+		return null;
+	}
+}
+
+export function isProductMode(value: string | null): value is ProductMode {
+	return value !== null && PRODUCT_MODE_VALUES.includes(value as ProductMode);
+}
+
+export function isStartupRealm(value: string | null): value is StartupRealm {
+	return value !== null && STARTUP_REALM_VALUES.includes(value as StartupRealm);
+}
+
+/** Resolve the realm to open before the access gate applies. */
+export function resolveStartupRealm(
+	startupRealm: StartupRealm,
+	lastUsedRealm: ProductMode
+): ProductMode {
+	return startupRealm === "last-used" ? lastUsedRealm : startupRealm;
+}
+
+function readLastUsedRealm(): ProductMode {
+	try {
+		const stored = storage()?.getItem(STORAGE_KEY) ?? null;
+		return isProductMode(stored) ? stored : "bot";
 	} catch {
 		return "bot";
 	}
+}
+
+export function readStartupRealm(): StartupRealm {
+	try {
+		const stored = storage()?.getItem(STARTUP_REALM_KEY) ?? null;
+		return isStartupRealm(stored) ? stored : DEFAULT_STARTUP_REALM;
+	} catch {
+		return DEFAULT_STARTUP_REALM;
+	}
+}
+
+export function setStartupRealm(startupRealm: StartupRealm): void {
+	try {
+		storage()?.setItem(STARTUP_REALM_KEY, startupRealm);
+	} catch {
+		// A preference that cannot be persisted still keeps its existing value.
+	}
+	if (typeof window !== "undefined") {
+		window.dispatchEvent(new Event("storage"));
+	}
+}
+
+function readRequestedMode(): ProductMode {
+	return resolveStartupRealm(readStartupRealm(), readLastUsedRealm());
 }
 
 interface ProductModeState {
@@ -37,7 +102,7 @@ export const useProductModeStore = create<ProductModeState>((set) => ({
 	setConsoleAccess: (allowed) => set({ consoleAccess: allowed }),
 	setRequestedMode: (mode) => {
 		try {
-			localStorage.setItem(STORAGE_KEY, mode);
+			storage()?.setItem(STORAGE_KEY, mode);
 		} catch {
 			// Best-effort persistence; the in-memory mode remains authoritative.
 		}
