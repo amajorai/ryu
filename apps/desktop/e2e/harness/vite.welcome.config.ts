@@ -4,9 +4,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const harnessDir = path.resolve(import.meta.dirname);
-// The checked-in dist-welcome directory is a static proof snapshot. Runtime
-// proof tests build from the source entrypoint into the ignored repository tmp
-// directory so Vite never rewrites tracked HTML with untracked hashed assets.
+// Runtime proof tests build from the source entrypoint into the ignored
+// repository tmp directory so Vite never writes hashed build output into the
+// checked-in harness source tree.
 const welcomeBuildDir = path.resolve(
 	harnessDir,
 	"../../../../tmp/ryu-welcome-proof"

@@ -90,9 +90,43 @@ opensrc/
 /.codex-tmp/
 /.tmp/
 /.worktrees/
+/.artifacts/
 /artifacts/
+/%SystemDrive%/
 /apps/artifacts/
+/apps/desktop/artifacts/
 /apps/desktop/e2e/artifacts/
+/apps/desktop/e2e/proof/
+/apps/desktop/e2e/harness/dist-*/
+/apps/desktop/e2e/harness/media-proof-dist/
+/apps/desktop/e2e/harness/.proof-screenshot.cjs
+/apps/desktop/e2e/harness/*proof*.png
+/apps/desktop/e2e/*proof.png
+/apps/desktop/apps/desktop/e2e/harness/*proof.png
+/apps/fumadocs/artifacts/
+/apps/fumadocs/ste-*-proof.png
+/apps/web/artifacts/
+/docs/proof/*.png
+/docs/proof/*.jpg
+/docs/proof/*.jpeg
+/docs/proof/*.gif
+/docs/proof/*.webp
+/docs/proof/*.svg
+/docs/proof/*.log.json
+
+# One-off root-level proof captures and scratch entrypoints
+/.codex-composer-selection-proof.png
+/.codex-island-dev.png
+/.codex-mcp-proof.html
+/.codex-referrals-verification.png
+/animator-agent-proof.html
+/animator-agent-proof.tsx
+/design-agent-template-proof.tsx
+/reelfarm-proof-*.png
+/reelfarm-verification-proof.tsx
+/release-verification-proof.tsx
+/token-table-browser-proof.png
+/token-table-verification-proof.png
 
 # Tauri Python sidecar build artifacts
 apps/desktop/src-tauri/Python/
