@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "desktop"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-permissions"
-version = "0.2.5"
+version = "0.2.6"
 
 [[package]]
 name = "gio"

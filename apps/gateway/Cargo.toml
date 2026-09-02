@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gateway"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -107,7 +107,7 @@ ryu-gw-router = { path = "../../crates/gateway/router" }
 ryu-gw-channels = { path = "../../crates/gateway/channels" }
 
 # WASM policy tier (gateway plugin plane — in-process third-party policy code).
-# Pinned to v45 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree
+# Pinned to v46 to match Core's sandbox dep (apps/core/Cargo.toml) so the tree
 # holds ONE wasmtime. Default features (proven to build on this machine via Core);
 # the sandbox posture comes entirely from the runtime `Config`/`Linker`/`StoreLimits`
 # (zero-import linker, NO WASI, fuel + epoch + memory caps), NOT from Cargo features,
@@ -116,7 +116,7 @@ ryu-gw-channels = { path = "../../crates/gateway/channels" }
 # fresh (Core's spike has none of the fuel/epoch/limit hardening) — the shared
 # `ryu-wasm-host` crate that would dedupe this AND retrofit Core is a documented
 # follow-up (see src/wasm_policy/mod.rs).
-wasmtime = "45"
+wasmtime = "46"
 
 # OpenTelemetry seam (#540, P1): mirrors Core's seam (apps/core/Cargo.toml). The
 # vendor-neutral instrumentation export path. `tracing-opentelemetry` 0.33 bridges

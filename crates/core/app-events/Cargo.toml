@@ -1,6 +1,6 @@
 [package]
 name = "ryu-app-events"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "The app-event emit client for Ryu sidecars: one dep-light helper that raises an event declared in an app's manifest `contributes.hook_events` through Core's `events.emit` host capability, so every plugin hook and workflow subscribed to it fires. The dispatch, authorization and fan-out all live Core-side; this crate holds only the outbound half an out-of-process sidecar needs, so it has ZERO dependency on apps/core."

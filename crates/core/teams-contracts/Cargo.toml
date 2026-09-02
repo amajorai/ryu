@@ -1,6 +1,6 @@
 [package]
 name = "ryu-teams-contracts"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 license = "Apache-2.0"
 description = "Shared wire types for Ryu agent teams: the `TeamRecord` / `CreateTeam` payloads and the `Coordination` strategy enum exchanged over `/api/teams/*` between Core's `@team` chat orchestration and the out-of-process `ryu-teams` sidecar that owns `teams.db`. Dep-light (serde only) and with ZERO dependency on apps/core, so both sides can link it without either linking the other."

@@ -54,7 +54,7 @@ const SAFE_COMPANION_LABEL = "App Panel";
 /** The @ryuhq/sdk semver range stamped into a generated project's dependencies.
  *  Kept in lockstep with this package's own @ryuhq/sdk dependency (package.json)
  *  so a scaffolded project pins the same SDK line the scaffolder was built against. */
-const SDK_DEPENDENCY_RANGE = "^0.2.5";
+const SDK_DEPENDENCY_RANGE = "^0.2.6";
 
 /**
  * Which of the two extension shapes a template produces. This is not cosmetic: it

@@ -1,6 +1,6 @@
 [package]
 name = "ryu-core"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -55,7 +55,7 @@ hmac = "0.12"
 shell-words = "1"
 regex = "1"
 tempfile = "3"
-cap-std = "=3.4.5"
+cap-std = "=3.4.6"
 hex = "0.4"
 semver = { version = "1", features = ["serde"] }
 indicatif = "0.17"
@@ -593,8 +593,8 @@ ryu-sandbox = { path = "../../crates/core/sandbox" }
 # separate module from the extracted `sidecar/sandbox` and uses wasmtime directly;
 # Cargo dedupes the shared build with `ryu-sandbox`'s copy. Binary-size delta
 # (release): measured in docs/spikes/0188-wasmtime-wasi-ceiling.md
-wasmtime = { version = "45", optional = true }
-wasmtime-wasi = { version = "45", features = ["p1", "p2"], optional = true }
+wasmtime = { version = "46", optional = true }
+wasmtime-wasi = { version = "46", features = ["p1", "p2"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal"] }
