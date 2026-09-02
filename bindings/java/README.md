@@ -24,7 +24,7 @@ Then add it to a Java 17+ application's `pom.xml`:
 <dependency>
   <groupId>com.ryu</groupId>
   <artifactId>ryu-client</artifactId>
-  <version>0.2.5</version>
+  <version>0.2.6</version>
 </dependency>
 ```
 

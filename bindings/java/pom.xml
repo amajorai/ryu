@@ -6,7 +6,7 @@
 
   <groupId>com.ryu</groupId>
   <artifactId>ryu-client</artifactId>
-  <version>0.2.5</version>
+  <version>0.2.6</version>
   <name>Ryu Java Client</name>
   <description>Blocking Java client for the Ryu Core HTTP API.</description>
   <url>https://docs.ryuhq.com/docs/extend/develop/sdk/java</url>

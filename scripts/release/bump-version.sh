@@ -2,7 +2,7 @@
 # One-command version-bump train.
 #
 # Ryu ships ONE version across the whole release train. Bumping it used to mean
-# hand-editing ~75 Cargo.toml, 9 package.json, a tauri.conf.json, ~27 Cargo.lock
+# hand-editing ~75 Cargo.toml, 9 package.json, the Java POM/README, a tauri.conf.json, ~27 Cargo.lock
 # files, 5 inter-crate dep strings, and the create-ryu-app SDK range — the P1 1.0
 # blocker this script closes. Run it once; it rewrites every version-carrying site
 # that currently holds the train version, idempotently.
@@ -108,13 +108,24 @@ while IFS= read -r f; do
     s/("\@ryu(?:hq)?\/[^"]+"\s*:\s*)"\^\Q$o\E"/$1"^$n"/g;' "$f"
 done < <(git ls-files '*package.json')
 
-# 3) tauri.conf.json — the desktop tag driver.
+# 3) Java SDK — Maven coordinates and the documented dependency version.
+#    The Java binding is part of the SDK hub release train even though it is not
+#    a Cargo or npm manifest, so keep its published coordinate and README example
+#    in lockstep with the other SDKs.
+log "Java SDK version (pom.xml + README.md)"
+for f in bindings/java/pom.xml bindings/java/README.md; do
+  [[ -f "$f" ]] || continue
+  perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s{<version>\Q$o\E</version>}{<version>$n</version>}g;' "$f"
+  log "  $f -> $NEW"
+done
+
+# 4) tauri.conf.json — the desktop tag driver.
 log "tauri.conf.json (desktop tag driver)"
 while IFS= read -r f; do
   perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s/"version": "\Q$o\E"/"version": "$n"/g;' "$f"
 done < <(git ls-files '*tauri.conf.json')
 
-# 4) create-ryu-app scaffolder — the SDK dependency range it writes into generated
+# 5) create-ryu-app scaffolder — the SDK dependency range it writes into generated
 #    projects, and its test's expectation of that range. Load-bearing: a stale range
 #    404s `bun install` against npm (see docs/RELEASING.md §3).
 log "create-ryu-app SDK range (index.ts + index.test.ts)"
@@ -122,7 +133,7 @@ for f in packages/create-ryu-app/index.ts packages/create-ryu-app/index.test.ts;
   [[ -f "$f" ]] && perl -0777 -pi -e 'my ($o,$n)=($ENV{OLD},$ENV{NEW}); s/\^\Q$o\E/^$n/g;' "$f"
 done
 
-# 5) Cargo.lock — rewrite the local-crate `version` entries in EVERY tracked lock
+# 6) Cargo.lock — rewrite the local-crate `version` entries in EVERY tracked lock
 #    (the root workspace lock + the standalone member locks the mirror / tauri build
 #    resolve directly). A local crate == a [[package]] block with NO `source =` line;
 #    external crates always carry a source, so this can never clobber a third-party
@@ -152,7 +163,7 @@ if changed:
 PY
 done < <(git ls-files '*Cargo.lock')
 
-# 6b) VITE_APP_VERSION in the committed .env.production files.
+# 7b) VITE_APP_VERSION in the committed .env.production files.
 #
 # Vite INLINES this into the shipped bundle, so it is what the desktop/webapp
 # actually DISPLAY as their version. It was missed by every previous bump and
@@ -164,7 +175,7 @@ for f in apps/desktop/.env.production apps/webapp/.env.production; do
   log "  $f -> $NEW"
 done
 
-# 6c) fumadocs docs version — the docs site labels the current URL space
+# 7c) fumadocs docs version — the docs site labels the current URL space
 # with /docs/<v>/... while keeping only one live deployment.
 #
 # Three sites carry the literal train version and none of them is a manifest, so
@@ -183,7 +194,7 @@ for f in apps/fumadocs/src/lib/docs-version.ts apps/fumadocs/next.config.mjs app
   log "  $f -> $NEW"
 done
 
-# 6) Validate the root workspace lock still resolves against the bumped manifests.
+# 8) Validate the root workspace lock still resolves against the bumped manifests.
 if command -v cargo >/dev/null 2>&1; then
   log "Validating: cargo metadata --locked --offline"
   if cargo metadata --locked --offline --format-version 1 >/dev/null 2>&1; then
@@ -196,7 +207,7 @@ else
   printf '\033[1;33mwarn:\033[0m cargo not found — skipped Cargo.lock validation.\n' >&2
 fi
 
-# 7) Summary.
+# 9) Summary.
 log "Bump complete: $OLD -> $NEW. Changed files:"
 git diff --stat -- $(git ls-files '*Cargo.toml' '*Cargo.lock' '*package.json' '*tauri.conf.json' 'packages/create-ryu-app/index.ts' 'packages/create-ryu-app/index.test.ts') | tail -1
 printf '\nReview with: git diff --stat\n'
