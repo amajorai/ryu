@@ -145,11 +145,13 @@ export default function LoginPage() {
 				info,
 				async (token) => {
 					await storeSessionToken(token);
-					await getCurrentWindow()
-						.setFocus()
-						.catch(() => {
-							// Focusing the window is best-effort; ignore failures.
-						});
+					if (!IS_WEBAPP) {
+						await getCurrentWindow()
+							.setFocus()
+							.catch(() => {
+								// Focusing the window is best-effort; ignore failures.
+							});
+					}
 					// Webapp: prefer local Core when reachable; else cloud + nudge.
 					const pick = await preferLocalOrCloud();
 					if (pick === "local") {
