@@ -1,6 +1,6 @@
 [package]
 name = "ryu-egress"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Shared SSRF-guarded outbound HTTP primitive for Ryu app satellites"

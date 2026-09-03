@@ -1,6 +1,6 @@
 [package]
 name = "ryu-skills"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Agent Skills: the SKILL.md registry, dual-root (~/.claude + ~/.agents) scan, progressive-disclosure injection block, authoring + version history, and the `/api/skills/*` CRUD surface — an extracted Core capability crate. Kernel-required (the registry is injected into every chat turn), in-process only. Core consumes it as a path dependency and injects the ryu data dir + implements `Runnable` for `SkillRecord` host-side, so this crate has ZERO dependency on apps/core."
@@ -19,8 +19,8 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 anyhow = "1"
-ryu-json-store = { path = "../json-store", version = "0.2.6" }
-ryu-workspace = { path = "../workspace", version = "0.2.6" }
+ryu-json-store = { path = "../json-store", version = "0.2.7" }
+ryu-workspace = { path = "../workspace", version = "0.2.7" }
 
 [dev-dependencies]
 tempfile = "3"

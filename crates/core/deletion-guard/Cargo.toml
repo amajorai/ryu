@@ -1,6 +1,6 @@
 [package]
 name = "ryu-deletion-guard"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/amajorai/ryu"

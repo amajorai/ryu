@@ -1,6 +1,6 @@
 [package]
 name = "ryu-a2a"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "A2A v1 protocol, trust, persistence, and transport-safety primitives for Ryu"
@@ -24,7 +24,7 @@ tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
-ryu-crypto = { path = "../crypto", version = "0.2.6" }
+ryu-crypto = { path = "../crypto", version = "0.2.7" }
 
 [dev-dependencies]
 tempfile = "3"

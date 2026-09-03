@@ -1,6 +1,6 @@
 [package]
 name = "ryu-usage"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "Apache-2.0"
 description = "Per-agent subscription usage-metering primitive for Ryu: reads the credential a subscription CLI (Claude Code, Codex, Copilot, Grok, Z.ai GLM) already stored on this machine and calls the vendor's own usage endpoint to return normalized rolling rate-limit windows (5h session, weekly, per-model) plus the non-percent figures - credit balances, Codex's banked rate-limit resets with a per-credit expiry date, extra-usage spend. NEVER refreshes the token (single-use refresh tokens rotate; refreshing would log the real CLI out) and never spends a banked reset (irreversible). crates.io caps `description` at 1000 chars, so keep this under that limit."

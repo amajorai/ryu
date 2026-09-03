@@ -1,6 +1,6 @@
 [package]
 name = "ryu-gw-budget"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 license = "AGPL-3.0-only"
 repository = "https://github.com/amajorai/ryu"
@@ -9,7 +9,7 @@ description = "Ryu Gateway charged-spend stage: per-user / per-agent / per-sessi
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 dashmap = "6"
-ryu-gw-contracts = { path = "../contracts", version = "0.2.6" }
+ryu-gw-contracts = { path = "../contracts", version = "0.2.7" }
 
 [dev-dependencies]
 serde_json = "1"
