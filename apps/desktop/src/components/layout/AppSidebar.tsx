@@ -342,6 +342,7 @@ import { CustomizeSidebarDialog } from "./CustomizeSidebarDialog.tsx";
 import { NavUser } from "./NavUser.tsx";
 import { OverflowTooltip } from "./overflow-tooltip.tsx";
 import { PinnedAgentStage } from "./pinned-agent-stage.tsx";
+import { type PinnedAppItem, PinnedAppStage } from "./pinned-app-stage.tsx";
 import { SidebarBrandBadge } from "./SidebarBrandBadge.tsx";
 import { SidebarSectionNav } from "./SidebarSectionNav.tsx";
 import { SidebarTodoProgress } from "./SidebarTodoProgress.tsx";
@@ -542,6 +543,12 @@ export type DynamicChromeKey = `plugin:${string}`;
 
 export type ChromeKey = BuiltinChromeKey | DynamicChromeKey;
 
+/** First-party Ryu Apps own the app shelf. Their feature navigation belongs inside
+ * the app or in contributed sidebar sections, never as a flat host-level button list. */
+function isRyuAppId(pluginId: string): boolean {
+	return pluginId.startsWith("@ryu/");
+}
+
 // Marketplace, Apps, and Extensions folded into the Customize (Store) shell as
 // sections — they no longer get their own sidebar buttons. The keys stay in
 // ChromeKey/CHROME_LABELS so any persisted user layout referencing them is
@@ -560,11 +567,11 @@ export type ChromeKey = BuiltinChromeKey | DynamicChromeKey;
 // not enumerate Apps.
 const CHROME_ORDER: ChromeKey[] = [
 	"node-selector",
-	// "home" removed — app-registered by @ryu/dashboards (sidebar_buttons).
+	// "home" is represented by the owning app's Apps-shelf tile.
 	"new-chat",
 	"search",
 	"library",
-	// "memory" removed — now app-registered by @ryu/memory (sidebar_buttons).
+	// "memory" is represented by the owning app's Apps-shelf tile.
 	"store",
 	"inbox",
 	"announcements",
@@ -617,11 +624,11 @@ const FOOTER_CHROME: ReadonlySet<ChromeKey> = new Set([
 // below, since they ride a separate drag state. The logo + node-selector row
 // stays fixed (it is a horizontal row, not a stacked button).
 const HEADER_BUTTON_CHROME: ChromeKey[] = [
-	// "home" removed — app-registered by @ryu/dashboards (sidebar_buttons).
+	// "home" is represented by the owning app's Apps-shelf tile.
 	"new-chat",
 	"store",
 	"library",
-	// "memory" removed — app-registered by @ryu/memory (sidebar_buttons).
+	// "memory" is represented by the owning app's Apps-shelf tile.
 ];
 
 // Distinct drag-data format for reordering header buttons, so a button drag is
@@ -4983,11 +4990,9 @@ function PluginsSection({
 	);
 }
 
-/** Apps list in the sidebar — the full-page companion surfaces contributed by the
- *  user's ENABLED plugins (`GET /api/plugins/contributions`, already enabled-filtered
- *  server-side). Each row navigates to its `/plugin/<companion id>` route. Renders
- *  nothing when there are no companions, so no empty header appears for users whose
- *  plugins contribute no companion surface. */
+/** Apps shelf in the sidebar. First-party Apps get one visual tile each; their
+ * internal views are not flattened into the host's top-button list. Plugins stay in
+ * the Plugins section and never appear in this shelf. */
 function AppsSection({
 	collapsed,
 	dnd,
@@ -4997,24 +5002,89 @@ function AppsSection({
 	sort,
 }: SectionProps) {
 	const { openTab } = useTabsContext();
-	const { companions } = usePluginContributions();
+	const { companions, sidebar_buttons: sidebarButtons } =
+		usePluginContributions();
 	const report = useOptionalReport();
-	// The owning plugin of each companion, so a row can paint the app's real
-	// manifest art. A companion contribution carries only its own optional `icon`;
-	// most apps declare their icon on the MANIFEST, which is why every row here
-	// used to fall through to one repeated grid glyph.
 	const { apps } = useApps();
-	const pluginsById = useMemo(
-		() => new Map(apps.map((a) => [a.id, a])),
-		[apps]
-	);
+	const appItems = useMemo<PinnedAppItem[]>(() => {
+		const companionByApp = new Map<string, (typeof companions)[number]>();
+		for (const companion of companions) {
+			if (
+				companion.pluginId &&
+				companion.hasUi !== false &&
+				!companionByApp.has(companion.pluginId)
+			) {
+				companionByApp.set(companion.pluginId, companion);
+			}
+		}
 
-	// Critical: an always-rendered empty header would appear for every user on
-	// upgrade (loadSectionOrder splices missing default keys into persisted orders),
-	// so bail out entirely when there is nothing to list.
-	if (companions.length === 0) {
+		const entryByApp = new Map<string, { order: number; target: string }>();
+		for (const button of [...sidebarButtons]
+			.filter((candidate) => isRyuAppId(candidate.plugin))
+			.sort(
+				(a, b) =>
+					(a.order ?? Number.MAX_SAFE_INTEGER) -
+					(b.order ?? Number.MAX_SAFE_INTEGER)
+			)) {
+			if (!entryByApp.has(button.plugin)) {
+				entryByApp.set(button.plugin, {
+					order: button.order ?? Number.MAX_SAFE_INTEGER,
+					target: button.target,
+				});
+			}
+		}
+
+		return apps
+			.filter((app) => isRyuAppId(app.id) && app.installed && app.enabled)
+			.sort(
+				(a, b) =>
+					(entryByApp.get(a.id)?.order ?? Number.MAX_SAFE_INTEGER) -
+					(entryByApp.get(b.id)?.order ?? Number.MAX_SAFE_INTEGER)
+			)
+			.flatMap((app) => {
+				const companion = companionByApp.get(app.id);
+				const entry = entryByApp.get(app.id);
+				const target = companion
+					? pluginCompanionPath(companion.id)
+					: entry?.target;
+				if (!target) {
+					return [];
+				}
+				return [
+					{
+						cacheKey: iconCacheKey(app.id, app.installedVersion ?? app.version),
+						dither: app.iconDither,
+						iconBackground: app.iconBackground,
+						iconId: companion?.icon ?? app.companion?.icon ?? app.icon,
+						iconPadding: app.iconPadding,
+						iconUrl: app.iconUrl,
+						id: app.id,
+						label: app.name,
+						seedId: app.id,
+						target,
+					},
+				];
+			});
+	}, [apps, companions, sidebarButtons]);
+
+	if (appItems.length === 0) {
 		return null;
 	}
+
+	const handleOpen = (app: PinnedAppItem, newTab: boolean) => {
+		openTab(app.target, { title: app.label, forceNew: newTab });
+	};
+	const handleOpenNewWindow = (app: PinnedAppItem) => {
+		void openEntityInNewWindow({ path: app.target, title: app.label });
+	};
+	const handleReport = (app: PinnedAppItem) => {
+		report?.open({
+			id: app.id,
+			kind: "plugin",
+			itemName: app.label,
+			source: "installed",
+		});
+	};
 
 	return (
 		<SidebarSection
@@ -5027,104 +5097,12 @@ function AppsSection({
 			sectionKey="companions"
 			sort={sort}
 		>
-			<SidebarMenu className="gap-0.5">
-				{companions.map((c) => {
-					const label = c.label || c.name;
-					const owner = c.pluginId ? pluginsById.get(c.pluginId) : undefined;
-					const open = (forceNew = false) =>
-						openTab(pluginCompanionPath(c.id), { title: label, forceNew });
-					const openInNewWindow = () =>
-						void openEntityInNewWindow({
-							path: pluginCompanionPath(c.id),
-							title: label,
-						});
-					const reportApp = () => {
-						report?.open({
-							id: c.pluginId || c.id,
-							kind: "plugin",
-							itemName: label,
-							source: "installed",
-						});
-					};
-					return (
-						<SidebarMenuItem key={c.id}>
-							<ContextMenu>
-								<ContextMenuTrigger>
-									{/* biome-ignore lint/a11y/useSemanticElements: sidebar row combines nested controls with drag/middle-click */}
-									<div
-										className="group/row flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors hover:bg-muted"
-										onAuxClick={(e) => {
-											if (e.button === 1) {
-												e.preventDefault();
-												open(true);
-											}
-										}}
-										onClick={() => open()}
-										onKeyDown={(e) => {
-											if (e.key === "Enter") {
-												open();
-											}
-										}}
-										role="button"
-										tabIndex={0}
-									>
-										{/* The app's own icon square, identical to the Store's and
-										    to the Plugins section's. `c.icon` first — a companion
-										    that registers its own glyph is being specific about
-										    this surface — then the owning plugin's manifest art,
-										    then the generative tile. Seeded by the PLUGIN id, never
-										    the companion id, so an app that appears in both
-										    sections tiles the same way in both. */}
-										<AppIcon
-											cacheKey={iconCacheKey(
-												c.pluginId || c.id,
-												owner?.installedVersion ?? owner?.version
-											)}
-											className="size-5 rounded-[5px]"
-											dither={owner?.iconDither}
-											iconBackground={owner?.iconBackground}
-											iconId={c.icon ?? owner?.icon}
-											iconPadding={owner?.iconPadding}
-											iconUrl={owner?.iconUrl}
-											name={label}
-											seedId={c.pluginId || c.id}
-											size={12}
-										/>
-										<OverflowTooltip
-											className="min-w-0 flex-1 truncate text-sm"
-											text={label}
-										/>
-										{/* Built-in is the only state this row can honestly report,
-										    and it comes from the OWNING plugin — a companion has no
-										    provenance of its own. There is deliberately no
-										    "disabled" glyph here: the companions feed is
-										    server-side filtered to enabled apps, so a disabled one
-										    never reaches this list and a glyph for it would be
-										    dead code pretending to be a signal. */}
-										{owner?.builtIn ? <StatusBadge kind="builtin" /> : null}
-									</div>
-								</ContextMenuTrigger>
-								<ContextMenuContent>
-									<ContextMenuItem onClick={() => open()}>Open</ContextMenuItem>
-									<ContextMenuItem onClick={() => open(true)}>
-										<HugeiconsIcon
-											className="mr-2 size-4"
-											icon={ArrowUpRight01Icon}
-										/>
-										Open in new tab
-									</ContextMenuItem>
-									<OpenInNewWindowContextMenuItem onClick={openInNewWindow} />
-									{report ? (
-										<ContextMenuItem onClick={reportApp}>
-											Report
-										</ContextMenuItem>
-									) : null}
-								</ContextMenuContent>
-							</ContextMenu>
-						</SidebarMenuItem>
-					);
-				})}
-			</SidebarMenu>
+			<PinnedAppStage
+				apps={appItems}
+				onOpen={handleOpen}
+				onOpenNewWindow={handleOpenNewWindow}
+				onReport={report ? handleReport : undefined}
+			/>
 		</SidebarSection>
 	);
 }
@@ -8115,9 +8093,9 @@ function NavTabButton({
 }
 
 /**
- * An app-REGISTERED header button, rendered generically from a `sidebar_buttons`
- * contribution — the dynamic counterpart to the hardcoded Home/Memory/Library
- * NavTabButtons. Opens the contribution's `target` route; its glyph resolves
+ * A plugin-registered header button, rendered generically from a `sidebar_buttons`
+ * contribution. First-party Ryu Apps are filtered before this renderer and use the
+ * app shelf instead. Opens the contribution's `target` route; its glyph resolves
  * through the string-`icon` primitive (Iconify/Hugeicons) rather than a compiled
  * IconSvgElement. Present only while the owning app is enabled (the aggregator
  * filters the feed), so a disabled/absent app leaves no button behind.
@@ -8478,12 +8456,13 @@ export function SidebarPanelContent({
 	// claims the path; the Customize dialog has to make the same call, or it offers a
 	// "show Inbox" toggle whose only outcome is a tab reading "App not enabled".
 	const inboxOwner = useCompanionAlias(APPROVALS_ALIAS);
-	// App-registered header buttons (`sidebar_buttons`), appended to the persisted
-	// chrome order the same way dynamic sections are. Empty until an enabled app
-	// contributes one, so this is inert by default.
+	// Plugin-registered header buttons (`sidebar_buttons`), appended to the persisted
+	// chrome order the same way dynamic sections are. First-party App buttons are
+	// deliberately excluded; their single entry belongs in the Apps shelf.
 	const dynamicChromeKeys = useMemo<ChromeKey[]>(
 		() =>
 			[...contributedButtons]
+				.filter((button) => !isRyuAppId(button.plugin))
 				.sort(
 					(a, b) =>
 						(a.order ?? Number.MAX_SAFE_INTEGER) -
@@ -8493,8 +8472,13 @@ export function SidebarPanelContent({
 		[contributedButtons]
 	);
 	const effectiveChromeOrder = useMemo<ChromeKey[]>(() => {
-		const missing = dynamicChromeKeys.filter((k) => !chromeOrder.includes(k));
-		return missing.length > 0 ? [...chromeOrder, ...missing] : chromeOrder;
+		// Drop stale app-button keys from older releases as well as currently absent
+		// plugin buttons. The app shelf below is the only host-level app entry point.
+		const current = chromeOrder.filter(
+			(key) => !isDynamicChromeKey(key) || dynamicChromeKeys.includes(key)
+		);
+		const missing = dynamicChromeKeys.filter((k) => !current.includes(k));
+		return missing.length > 0 ? [...current, ...missing] : current;
 	}, [chromeOrder, dynamicChromeKeys]);
 	const [chromeDraggingKey, setChromeDraggingKey] = useState<ChromeKey | null>(
 		null
@@ -9113,8 +9097,7 @@ export function SidebarPanelContent({
 				);
 			// "search" now renders as an icon next to the node selector (see the
 			// SidebarHeader row below), not as a header button.
-			// "home" is app-registered by `@ryu/dashboards` (the Home dashboard's
-			// owning app, pre-installed) via a `sidebar_buttons` contribution; no hardcoded
+			// "home" is represented by the owning app's Apps-shelf tile; no hardcoded
 			// case. The key stays in BuiltinChromeKey/CHROME_LABELS for graceful
 			// filtering of any stale persisted layout.
 			case "library":
@@ -9127,11 +9110,9 @@ export function SidebarPanelContent({
 						path="/library"
 					/>
 				);
-			// "memory" is no longer a hardcoded button — it is app-registered by
-			// `@ryu/memory` via a `sidebar_buttons` contribution, so it appears in
-			// the header ONLY when that app is enabled (not pre-installed ⇒ absent). The key
-			// stays in BuiltinChromeKey/CHROME_LABELS so a stale persisted layout is
-			// filtered out gracefully rather than crashing.
+			// "memory" is represented by the owning app's Apps-shelf tile. The key stays
+			// in BuiltinChromeKey/CHROME_LABELS so a stale persisted layout is filtered
+			// out gracefully rather than crashing.
 			case "store":
 				return (
 					<NavTabButton
@@ -9157,7 +9138,7 @@ export function SidebarPanelContent({
 			// Ryu Apps, listed by `AppsSection` from the enabled-companion feed. See
 			// the note above CHROME_ORDER.
 			default: {
-				// App-registered header button (`plugin:<pluginId>:<buttonId>`): resolve
+				// Plugin-registered header button (`plugin:<pluginId>:<buttonId>`): resolve
 				// the contribution from the feed and render it generically.
 				if (isDynamicChromeKey(key)) {
 					const button = contributedButtons.find(
@@ -9352,13 +9333,6 @@ export function SidebarPanelContent({
 		<>
 			<SidebarSectionNav items={sectionNavItems} />
 			<SidebarHeader className="pt-0 pb-0">
-				{!hiddenChrome.has("logo") && (
-					<SidebarBrandBadge
-						canSwitchToConsole={canSwitchToConsole}
-						canSwitchToOs={!isRyuBot()}
-						className={hiddenChrome.has("node-selector") ? "pt-2" : ""}
-					/>
-				)}
 				{botProduct ? (
 					<BotConnectionBadge />
 				) : (
@@ -9384,13 +9358,25 @@ export function SidebarPanelContent({
 						</div>
 					)
 				)}
-				<SidebarMenu>
-					{renderChromeOrder.map((key) => (
-						<ChromeButtonShell chromeKey={key} dnd={chromeDnd} key={key}>
-							{renderHeaderButton(key)}
-						</ChromeButtonShell>
-					))}
-				</SidebarMenu>
+				{!hiddenChrome.has("logo") && (
+					<SidebarBrandBadge
+						canSwitchToConsole={canSwitchToConsole}
+						canSwitchToOs={!isRyuBot()}
+						className={hiddenChrome.has("node-selector") ? "pt-2" : ""}
+					/>
+				)}
+				<div
+					className="scroll-fade max-h-[min(50vh,28rem)] min-h-0 overflow-y-auto overscroll-contain"
+					data-testid="sidebar-header-actions"
+				>
+					<SidebarMenu>
+						{renderChromeOrder.map((key) => (
+							<ChromeButtonShell chromeKey={key} dnd={chromeDnd} key={key}>
+								{renderHeaderButton(key)}
+							</ChromeButtonShell>
+						))}
+					</SidebarMenu>
+				</div>
 				{/* Every mode but the stacked one puts the section selectors below the
 				    header button stack as a horizontal tab strip (not menu rows); the
 				    chosen section's list shows in the scrollable content below. Which

@@ -62,31 +62,37 @@ function releaseBadgeLabel(dev: boolean, channel: string): string {
 	return `${base} (${channelLabel(channel)})`;
 }
 
-function ReleaseChannelFooter() {
+function ReleaseChannelBadge() {
 	const { resolvedTheme } = useTheme();
 	const { dev } = useBuildProfile();
 	const [channel] = useReleaseChannel();
 	const beamTheme = resolvedTheme === "light" ? "light" : "dark";
 
 	return (
+		<BorderBeam
+			borderRadius={999}
+			className="beam-notch-bl inline-flex shrink-0"
+			colorVariant="colorful"
+			size="sm"
+			strength={0.85}
+			theme={beamTheme}
+		>
+			<div
+				aria-label={`Release: ${releaseBadgeLabel(dev, channel)}`}
+				className="beam-notch-bl inline-flex h-5 items-center bg-muted px-2 font-medium text-xs leading-none"
+				data-testid="release-channel-badge"
+			>
+				{releaseBadgeLabel(dev, channel)}
+			</div>
+		</BorderBeam>
+	);
+}
+
+function ReleaseChannelFooter() {
+	return (
 		<div className="flex items-center justify-between gap-3 border-border/60 border-t px-3 py-2">
 			<span className="text-muted-foreground text-xs">Release</span>
-			<BorderBeam
-				borderRadius={999}
-				className="beam-notch-bl inline-flex shrink-0"
-				colorVariant="colorful"
-				size="sm"
-				strength={0.85}
-				theme={beamTheme}
-			>
-				<div
-					aria-label={`Release: ${releaseBadgeLabel(dev, channel)}`}
-					className="beam-notch-bl inline-flex h-5 items-center bg-muted px-2 font-medium text-xs leading-none"
-					data-testid="release-channel-badge"
-				>
-					{releaseBadgeLabel(dev, channel)}
-				</div>
-			</BorderBeam>
+			<ReleaseChannelBadge />
 		</div>
 	);
 }
@@ -120,6 +126,11 @@ export function SidebarBrandBadge({
 			<div
 				className={`${compact ? "w-auto px-0 py-0" : "w-full px-3 py-2"} ${className ?? ""}`}
 			>
+				{compact ? null : (
+					<div className="mt-1.5 flex items-center px-1.5">
+						<ReleaseChannelBadge />
+					</div>
+				)}
 				{lockup}
 			</div>
 		);
@@ -129,6 +140,11 @@ export function SidebarBrandBadge({
 		<div
 			className={`${compact ? "w-auto px-0 py-0" : "w-full px-2 py-1.5"} ${className ?? ""}`}
 		>
+			{compact ? null : (
+				<div className="mb-1 flex items-center px-1.5">
+					<ReleaseChannelBadge />
+				</div>
+			)}
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					aria-label={`Change Ryu product mode, currently ${mode}`}
