@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-collab
 
-> Authoritative CRDT document engine for Ryu. Part of [Ryu](../../README.md).
+> Authoritative CRDT document engine for Ryu. Part of [Ryu](../../../README.md).
 
-[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](../../../apps/core/LICENSE)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ryu-collab` is Core's durable server-side replica of every live collaborative Yjs document (Phase 3 of the multi-user collaboration epic). "Authoritative" means **durable owner, not arbiter**: the underlying [`yrs`](https://crates.io/crates/yrs) CRDT converges without an arbiter, so Core never resolves conflicts — it stores, replays, and rebroadcasts the opaque Yjs update stream, and rehydrates late joiners.
 
@@ -31,4 +31,4 @@ cargo test  -p ryu-collab
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](../../../apps/core/LICENSE). © 2026 A Major Pte. Ltd.

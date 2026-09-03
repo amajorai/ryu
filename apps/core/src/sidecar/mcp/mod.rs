@@ -2329,6 +2329,84 @@ pub(crate) struct ActionDescriptor {
     pub registered_id: String,
 }
 
+fn has_vault_secret_reference(value: &str) -> bool {
+    value
+        .split_whitespace()
+        .any(|word| word.strip_prefix("secret:").is_some())
+}
+
+async fn resolve_mcp_secret_map(
+    store: &crate::plugin_secrets::PluginSecretStore,
+    values: &BTreeMap<String, String>,
+    context: &crate::plugin_secrets::SecretResolutionContext,
+) -> Result<BTreeMap<String, String>> {
+    let mut resolved = BTreeMap::new();
+    for (key, value) in values {
+        if !has_vault_secret_reference(value) {
+            resolved.insert(key.clone(), value.clone());
+            continue;
+        }
+        // An unavailable or unauthorized reference is omitted. Passing the
+        // literal `secret:NAME` to an upstream MCP server would turn a missing
+        // authorization into a credential-looking string and is never safe.
+        if let Some(value) = store.resolve_vault_template(value, context).await? {
+            resolved.insert(key.clone(), value);
+        }
+    }
+    Ok(resolved)
+}
+
+#[cfg(test)]
+mod vault_reference_tests {
+    use super::{resolve_mcp_secret_map, McpServerConfig};
+    use crate::plugin_secrets::{PluginSecretStore, SecretResolutionContext, SecretScope};
+    use std::collections::BTreeMap;
+
+    #[tokio::test]
+    async fn mcp_secret_references_resolve_server_side_and_missing_values_drop() {
+        let store = PluginSecretStore::in_memory().unwrap();
+        store
+            .set_vault_secret(
+                SecretScope::Node,
+                "node-1",
+                None,
+                "GITHUB_TOKEN",
+                "ghs-server-side",
+            )
+            .await
+            .unwrap();
+        let context = SecretResolutionContext::node_only("node-1", vec!["github".to_owned()]);
+        let values = BTreeMap::from([
+            (
+                "Authorization".to_owned(),
+                "Bearer secret:GITHUB_TOKEN".to_owned(),
+            ),
+            ("X-Missing".to_owned(), "secret:NO_SUCH_TOKEN".to_owned()),
+            ("X-Static".to_owned(), "static".to_owned()),
+        ]);
+        let resolved = resolve_mcp_secret_map(&store, &values, &context)
+            .await
+            .unwrap();
+        assert_eq!(
+            resolved.get("Authorization").map(String::as_str),
+            Some("Bearer ghs-server-side")
+        );
+        assert!(!resolved.contains_key("X-Missing"));
+        assert_eq!(resolved.get("X-Static").map(String::as_str), Some("static"));
+
+        // A config clone is the only carrier into client::connect; no value is
+        // written back to the original MCP configuration.
+        let original = McpServerConfig {
+            headers: values,
+            ..McpServerConfig::default()
+        };
+        assert_eq!(
+            original.headers.get("Authorization").map(String::as_str),
+            Some("Bearer secret:GITHUB_TOKEN")
+        );
+    }
+}
+
 /// The config-driven MCP server registry. Cheap to clone-share via `Arc`.
 ///
 /// Interior mutability: `servers` uses `RwLock` (reads dominate) so the
@@ -2530,6 +2608,84 @@ impl McpRegistry {
     pub fn with_spaces(mut self, spaces: crate::server::spaces::SpaceStore) -> Self {
         self.spaces = Some(spaces);
         self
+    }
+
+    /// Build the secret-resolution context for one tool dispatch from the
+    /// current registered node and the server-derived owning conversation.
+    /// `user_id` is intentionally never taken from the legacy client-supplied
+    /// Composio selector; on a bound node it comes only from conversation
+    /// tenancy metadata.
+    async fn secret_resolution_context(
+        &self,
+        host_conversation_id: Option<&str>,
+        mcp_ids: Vec<String>,
+    ) -> crate::plugin_secrets::SecretResolutionContext {
+        let node = crate::sidecar::control_plane::registered_node();
+        let node_id = node
+            .as_ref()
+            .map(|registered| registered.node_id.clone())
+            .unwrap_or_else(crate::server::agent_sync::local_node_id);
+        let mut org_id = node.as_ref().map(|registered| registered.org.id.clone());
+        let mut team_id = node
+            .as_ref()
+            .and_then(|registered| registered.team_id.clone());
+        let mut user_id = None;
+
+        if let (Some(conversations), Some(conversation_id)) = (
+            self.conversations.as_ref(),
+            host_conversation_id.filter(|id| !id.is_empty()),
+        ) {
+            if let Ok(Some(meta)) = conversations.get_access_meta(conversation_id).await {
+                user_id = meta.owner_user_id;
+                team_id = meta.team_id.or(team_id);
+                // An unbound local node deliberately has no organization
+                // context, even if an old conversation row still carries one.
+                if node.is_some() {
+                    org_id = meta.org_id.or(org_id);
+                }
+            }
+        }
+
+        // A truly unbound node has one trusted local operator behind its node
+        // bearer. Give that operator a stable pseudo-user so user-scoped local
+        // secrets work even before a conversation row exists. Bound nodes never
+        // use this fallback: shared scopes require a real conversation owner.
+        if node.is_none() && user_id.is_none() {
+            user_id = Some("local".to_owned());
+        }
+
+        crate::plugin_secrets::SecretResolutionContext {
+            user_id,
+            org_id,
+            team_id,
+            node_id,
+            mcp_ids,
+        }
+    }
+
+    /// Resolve `secret:NAME` references in a user MCP server's headers/env
+    /// immediately before a call. Unresolved references are omitted rather
+    /// than sent upstream as literal text. Static values remain unchanged.
+    async fn resolve_mcp_secret_config(
+        &self,
+        cfg: &McpServerConfig,
+        context: &crate::plugin_secrets::SecretResolutionContext,
+    ) -> Result<McpServerConfig> {
+        let Some(store) = crate::plugin_secrets::global() else {
+            let mut unresolved = cfg.clone();
+            unresolved
+                .headers
+                .retain(|_, value| !has_vault_secret_reference(value));
+            unresolved
+                .env
+                .retain(|_, value| !has_vault_secret_reference(value));
+            return Ok(unresolved);
+        };
+
+        let mut resolved = cfg.clone();
+        resolved.headers = resolve_mcp_secret_map(store, &cfg.headers, context).await?;
+        resolved.env = resolve_mcp_secret_map(store, &cfg.env, context).await?;
+        Ok(resolved)
     }
 
     /// Wire the skill registry into the registry. Must be called after
@@ -3221,6 +3377,20 @@ impl McpRegistry {
         if !cfg.enabled {
             return Ok(vec![]);
         }
+        // A stdio server may need its configured environment or a remote MCP
+        // endpoint may authenticate its `tools/list` request. Resolve the same
+        // server-side references used by call dispatch before discovery too.
+        // Discovery has no host conversation, so a shared node intentionally
+        // offers only node-local references here; user/team/org values are
+        // still resolved for the chat call itself when its owner is known.
+        let mut mcp_ids = vec![name.to_owned()];
+        if let Some(plugin_id) = cfg.owner_plugin_id.clone() {
+            mcp_ids.push(plugin_id);
+        }
+        let secret_context = self.secret_resolution_context(None, mcp_ids).await;
+        let cfg = self
+            .resolve_mcp_secret_config(&cfg, &secret_context)
+            .await?;
         let cmd = if cfg.auth.is_some() {
             if crate::sidecar::control_plane::registered_org().is_some() {
                 bail!(
@@ -4618,7 +4788,13 @@ impl McpRegistry {
             // principal must be the OWNING PLUGIN and why the loopback egress grant
             // is unioned in rather than demanded from 40 manifests.
             let plan = crate::ext_api::call_plan(&route, &grants);
-            return crate::tool_exec::run_http_tool_with_agent(
+            let secret_context = self
+                .secret_resolution_context(
+                    host_conversation_id,
+                    vec![route.plugin_id.clone(), server.to_owned()],
+                )
+                .await;
+            return crate::tool_exec::run_http_tool_with_secret_context(
                 &route.url,
                 &route.method,
                 arguments,
@@ -4642,6 +4818,7 @@ impl McpRegistry {
                 &plan.principal,
                 session_id.as_deref(),
                 agent_id,
+                Some(&secret_context),
             )
             .await
             .map_err(|e| anyhow!(e));
@@ -4847,7 +5024,13 @@ impl McpRegistry {
                         // manifest knobs, not exa-specific code.
                         let url =
                             url_for_calling_agent(&url, caller_agent_query.as_deref(), agent_id)?;
-                        return crate::tool_exec::run_http_tool_with_agent(
+                        let secret_context = self
+                            .secret_resolution_context(
+                                host_conversation_id,
+                                vec![resolved.plugin_id.clone(), server.to_owned()],
+                            )
+                            .await;
+                        return crate::tool_exec::run_http_tool_with_secret_context(
                             &url,
                             &method,
                             arguments,
@@ -4861,6 +5044,7 @@ impl McpRegistry {
                             &resolved.plugin_id,
                             session_id.as_deref(),
                             agent_id,
+                            Some(&secret_context),
                         )
                         .await
                         .map_err(|e| anyhow!(e));
@@ -5470,6 +5654,17 @@ impl McpRegistry {
                 return Err(anyhow!("tool '{tool_id}' is not in this agent's allowlist"));
             }
         }
+
+        let mut mcp_ids = vec![server.to_owned()];
+        if let Some(plugin_id) = cfg.owner_plugin_id.clone() {
+            mcp_ids.push(plugin_id);
+        }
+        let secret_context = self
+            .secret_resolution_context(host_conversation_id, mcp_ids)
+            .await;
+        let cfg = self
+            .resolve_mcp_secret_config(&cfg, &secret_context)
+            .await?;
 
         if cfg.auth.is_none() {
             return match client::call_tool(&cfg.to_target()?, tool, arguments).await {

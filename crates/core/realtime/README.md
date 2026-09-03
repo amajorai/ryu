@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-realtime
 
-> Room-keyed realtime fan-out primitive for Ryu. Part of [Ryu](../../README.md).
+> Room-keyed realtime fan-out primitive for Ryu. Part of [Ryu](../../../README.md).
 
-[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](../../../apps/core/LICENSE)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ryu-realtime` is the transport-agnostic fan-out core (Phase 1 of the multi-user collaboration epic) that chat fan-out, CRDT doc-sync, and presence/awareness all consume. It knows nothing about WebSockets, JWTs, or access control — those live in the Core WS handler that drives this registry.
 
@@ -30,4 +30,4 @@ cargo test  -p ryu-realtime
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](../../../apps/core/LICENSE). © 2026 A Major Pte. Ltd.

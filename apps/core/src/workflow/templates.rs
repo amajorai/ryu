@@ -207,7 +207,7 @@ mod tests {
             serde_json::from_str(include_str!("templates/autoresearch.json"))
                 .expect("built-in autoresearch parses");
         let marketplace: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../marketplace-store/workflows/autoresearch/workflow.json"
+            "../../../../generated/ryu-runtime/marketplace-store/workflows/autoresearch/workflow.json"
         ))
         .expect("marketplace autoresearch parses");
         assert_eq!(marketplace, builtin);

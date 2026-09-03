@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-knowledge
 
-> Open Knowledge Format (OKF) primitive for Ryu. Part of [Ryu](../../README.md).
+> Open Knowledge Format (OKF) primitive for Ryu. Part of [Ryu](../../../README.md).
 
-[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](../../../apps/core/LICENSE)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ryu-knowledge` is the in-memory model, permissive parser, and serializer for **Open Knowledge Format (OKF) v0.1** — git-shippable knowledge bundles. An OKF *bundle* is a directory of markdown files; every non-reserved `.md` file is a *concept* (YAML frontmatter + markdown body, only `type` required). Two filenames are reserved: `index.md` (bundle listing / progressive disclosure, may carry the `okf` version) and `log.md` (a `## YYYY-MM-DD` changelog).
 
@@ -30,4 +30,4 @@ cargo test  -p ryu-knowledge
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](../../../apps/core/LICENSE). © 2026 A Major Pte. Ltd.

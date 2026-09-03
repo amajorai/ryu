@@ -13,21 +13,22 @@ around one or more self-hosted nodes.
 
 ## Tier mapping
 
-Every unit in the monorepo carries its own `LICENSE` file and maps to one of these tiers.
+Public projections may split a unit across the runtime hub and a satellite. The tier map below
+identifies the source owner and license; root or subtree `LICENSE` files govern each checked-out
+path.
 
 | Path | Tier | License | Why |
 |---|---|---|---|
 | `apps/core` | OSS — self-hostable | Apache-2.0 | Orchestration engine: sessions, memory, tools, workflows, sub-agents, sidecars. Open-sourcing builds trust; zero-egress self-hosting. Max adoption → permissive. |
 | `apps/gateway` | OSS — self-hostable | **AGPL-3.0** | LLM gateway: routing, firewall, PII/DLP, budgets, evals, audit. The shared layer a team adopts and an enterprise buys — and the layer Ryu sells as a managed service. AGPL keeps it OSI-open while obligating SaaS forks to share their modifications (copyleft on the control layer). |
 | `apps/cli` | OSS — self-hostable | Apache-2.0 | Thin Core client; drives adoption. |
-| `apps/ghost` + `crates/ghost-{core,eyes,hands}` | OSS — self-hostable | Apache-2.0 | Desktop-automation MCP server + its crates. Dual-use; open for auditability. Shadow depends on the ghost crates, so they open by consequence. |
-| `apps/shadow` + `crates/shadow-core` | OSS — self-hostable | Apache-2.0 | Screen/audio capture + semantic search. Dual-use; open-sourcing a screen recorder is a trust asset. |
+| `crates/ghost/{core,eyes,hands}` + `amajorai/ghost` satellite | OSS — self-hostable | Apache-2.0 | Desktop-automation MCP server + its crates. The source and release archive are maintained in the Ghost satellite. |
+| `crates/ghost/shadow` + `amajorai/shadow` satellite | OSS — self-hostable | Apache-2.0 | Screen/audio capture + semantic search. The source and release archive are maintained in the Shadow satellite. |
 | `apps/fumadocs` → [`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs) | OSS | Apache-2.0 | Documentation site. Published as its own repo, not part of this tree. |
-| `packages/sdk` + `packages/create-ryu-app` | OSS | Apache-2.0 | Dev SDK + scaffolder; must be open to grow the plugin ecosystem. |
-| `packages/client` | OSS | Apache-2.0 | TS client for the open Core API; no internal deps. |
-| `packages/core-client` + `packages/protocol` | OSS | Apache-2.0 | Typed Core/Gateway client and shared wire helpers, published with the SDK hub. |
-| `crates/ryu-sdk{,-ffi,-napi}` | OSS | Apache-2.0 | SDK kernel + FFI/Node-API bindings. |
-| `apps/raycast` | OSS | MIT | Already MIT; fenced out of the workspace with its own toolchain. |
+| `packages/{sdk,create-ryu-app,client}` | OSS | Apache-2.0 | SDK authoring packages, published from the standalone `amajorai/ryu-sdk` hub. |
+| `packages/{core-client,protocol,config}` | OSS | Apache-2.0 | Runtime clients and shared wire/config helpers required by the public CLI and source-available shell; also published from the SDK hub. |
+| `crates/sdk/{core,ffi,napi,uniffi}` + `bindings/` | OSS | Apache-2.0 | SDK kernel, native adapters, and language bindings, published from `amajorai/ryu-sdk`, not the main runtime hub. |
+| `amajorai/ryu-raycast` satellite | OSS | MIT | Separate MIT source snapshot; not included in this runtime hub. |
 | `apps/desktop` | Closed — proprietary | Proprietary | The primary UX surface: making agents as easy as installing an app on desktop. |
 | `apps/web` | Closed — proprietary | Proprietary | Marketing, auth flows, dashboard/billing, Notion blog/help/changelog. |
 | `apps/server` | Closed — proprietary | Proprietary | Identity and content plane: Better Auth, OAuth/2FA, billing (Polar), Notion-backed content. |
@@ -38,7 +39,7 @@ Every unit in the monorepo carries its own `LICENSE` file and maps to one of the
 | `apps/extension` | Closed — proprietary | Proprietary | Browser extension. Kept closed for now (depends on the closed `@ryu/ui`); could open later for adoption after decoupling. |
 | `packages/ui` | Closed — proprietary | Proprietary | Shared design system, shared by closed desktop/extension/island/command. |
 | `packages/command` | Closed — proprietary | Proprietary | Shared command palette + ChatView. |
-| `packages/{auth,db,api,email,settings,env,config}` | Closed — proprietary | Proprietary | Identity / persistence / config layer. |
+| `packages/{auth,db,api,email,settings,env}` | Closed — proprietary | Proprietary | Identity / persistence / environment layer. |
 
 > **The closed apps are thin GUIs over the open engine.** Everything that touches your
 > data or makes a decision is open and auditable: orchestration (`apps/core`), model
@@ -96,13 +97,14 @@ commercial terms; it is not part of the public OSS self-hosting unit.
 
 ## License placement
 
-Every app, package, and crate now carries its own `LICENSE` file. By license:
+The public projection uses root or subtree license files for the following units; satellite-owned
+units retain their own repository license:
 
 | License | Units |
 |---|---|
-| **Apache-2.0** | `apps/{core,cli,ghost,shadow}` (+ the `ryu-docs` repo), `crates/{ghost-core,ghost-eyes,ghost-hands,shadow-core,ryu-sdk,ryu-sdk-ffi,ryu-sdk-napi}`, `packages/{sdk,create-ryu-app,client,headroom}` |
+| **Apache-2.0** | `apps/{core,cli}`, `crates/core/*`, `crates/ghost/*`, `crates/sdk/{core,ffi,napi,uniffi}`, `packages/{sdk,create-ryu-app,client,core-client,protocol,config,headroom}`, and the OSS satellites named above |
 | **AGPL-3.0** | `apps/gateway` |
-| **MIT** | `apps/raycast` |
-| **Proprietary** | `apps/{desktop,web,server,native,island,command,storyboard,extension}`, `packages/{ui,auth,db,api,email,settings,env,config,command}` |
+| **MIT** | `amajorai/ryu-raycast` satellite |
+| **Proprietary** | `apps/{desktop,web,server,native,island,command,storyboard,extension}`, `packages/{ui,auth,db,api,email,settings,env,command}` |
 
 Copyright 2026 A Major Pte. Ltd.

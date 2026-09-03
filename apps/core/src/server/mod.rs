@@ -90,6 +90,7 @@ pub mod spaces;
 pub mod sync;
 pub mod usage_api;
 pub mod usage_review;
+pub mod vault_api;
 pub mod voice;
 pub mod voice_ws;
 pub mod widgets;
@@ -543,6 +544,12 @@ fn route_policy(method: &Method, path: &str) -> crate::authorization::RoutePolic
         } else {
             RoutePolicy::OwnerOnly
         };
+    }
+    if path_has_prefix(path, "/api/vault") {
+        // The handler applies the scope-specific user/node/team/org check.
+        // GatewayRoute admits the managed-user route while preserving the
+        // existing node-token owner path; it does not itself expose a value.
+        return RoutePolicy::requires([Capability::GatewayRoute]);
     }
     RoutePolicy::OwnerOnly
 }
@@ -4153,6 +4160,15 @@ pub fn create_router(
         .route(
             "/api/identities/connections/:id",
             get(identity_api::poll_connection).delete(identity_api::delete_connection),
+        )
+        // User-managed vault values: metadata-only listing and write/clear
+        // mutations. Values are resolved only inside MCP dispatch.
+        .route("/api/vault/secrets", get(vault_api::list_secrets))
+        .route(
+            "/api/vault/secrets/:name",
+            put(vault_api::put_secret)
+                .delete(vault_api::delete_secret)
+                .layer(DefaultBodyLimit::max(vault_api::MAX_REQUEST_BODY_BYTES)),
         )
         // ── Private network status (#478): opt-in Tailscale/Headscale/Tailcat ──
         .route("/api/mesh/status", get(mesh_status))

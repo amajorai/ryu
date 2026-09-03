@@ -1,0 +1,11 @@
+# Workspace-wide Cargo build environment.
+#
+# CMAKE_POLICY_VERSION_MINIMUM: the `opus` crate (used by apps/core's hardware
+# audio codec) builds vendored libopus through `audiopus_sys`, whose bundled
+# CMakeLists declares `cmake_minimum_required(VERSION 3.x)` with a floor below
+# 3.5. CMake 4.x removed compatibility with policies < 3.5 and aborts the
+# configure step unless this minimum is supplied. Setting it here lets the
+# vendored build configure on modern CMake. It is read only by CMake's policy
+# engine, so it is harmless for every other crate and a no-op on older CMake.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

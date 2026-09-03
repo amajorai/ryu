@@ -1620,7 +1620,7 @@ mod tests {
     /// empty `code` and the test would silently assert against nothing.
     fn fixture_hook_from_file(plugin: &str, hook_id: &str) -> String {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../plugins-store/plugins")
+            .join("../../generated/ryu-runtime/plugins-store/plugins")
             .join(plugin);
         let path = dir.join("manifest.json");
         let display = path.display().to_string();

@@ -1326,7 +1326,7 @@ return { length: text.length };
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
-            .join("plugins-store")
+            .join("generated/ryu-runtime/plugins-store")
             .join("plugins")
             .join("toolsmith-example");
         let dir = tmp_dir();

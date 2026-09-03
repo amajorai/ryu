@@ -1,3 +1,0 @@
-[test]
-# Mock the native addon before the test module graph loads (see test-preload.ts).
-preload = ["./test-preload.ts"]

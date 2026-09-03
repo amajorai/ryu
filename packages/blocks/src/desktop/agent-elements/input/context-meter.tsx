@@ -120,7 +120,7 @@ export function ContextMeter({
 					onOpen
 						? "cursor-pointer hover:bg-accent hover:text-foreground"
 						: "cursor-default",
-					near && "text-amber-500",
+					near && "text-warning",
 					over && "text-destructive",
 					className
 				)}

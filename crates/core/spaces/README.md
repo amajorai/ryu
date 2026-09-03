@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-spaces
 
-> Spaces primitive for Ryu: named document collections with vector + GraphRAG retrieval. Part of [Ryu](../../README.md).
+> Spaces primitive for Ryu: named document collections with vector + GraphRAG retrieval. Part of [Ryu](../../../README.md).
 
-[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](../../../apps/core/LICENSE)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ryu-spaces` is Ryu's document-collection engine (spec unit U16). A *Space* is a named collection: each ingested document is chunked, embedded into a fixed-dimension vector, and stored in a [sqlite-vec](https://github.com/asg017/sqlite-vec) `vec0` table alongside human-readable `spaces` / `documents` / `chunks` rows and a content-addressed blob store. It mirrors the U10 `ConversationStore` shape.
 
@@ -31,4 +31,4 @@ cargo test  -p ryu-spaces
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](../../../apps/core/LICENSE). © 2026 A Major Pte. Ltd.

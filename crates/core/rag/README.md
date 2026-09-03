@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-rag
 
-> Retrieval-augmented-generation primitive for Ryu. Part of [Ryu](../../README.md).
+> Retrieval-augmented-generation primitive for Ryu. Part of [Ryu](../../../README.md).
 
-[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](../../../apps/core/LICENSE)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ryu-rag` is the retrieval capability behind Ryu's chat grounding (spec unit U17): embed the query, search short/long-term memory + Spaces + the OKF chunk index, merge and rank by cosine relevance, optionally re-rank the top-K candidates, and return the final chunks for the caller to inject into the model context before the model call. It also exposes the pure, bounded `MemoryGraph` GraphRAG primitive used to connect memory facts to typed topic, person, category, agent, and scope nodes. The graph is derived from the encrypted source snapshot; it is not the Space-owned GraphRAG index.
 
@@ -31,4 +31,4 @@ cargo test  -p ryu-rag
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](../../../apps/core/LICENSE). © 2026 A Major Pte. Ltd.

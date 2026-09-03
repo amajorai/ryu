@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ghost-eyes
 
-> Cross-platform screen-perception (vision) crate for desktop automation. Part of [Ryu](../../README.md).
+> Cross-platform screen-perception (vision) crate for desktop automation. Part of [Ryu](../../../README.md).
 
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ghost-eyes` is the perception half of Ryu's desktop automation: screen capture, window enumeration, accessibility-tree reads, and input monitoring. It gives an agent everything it needs to see what is on screen. It is cross-platform (Windows via Win32, macOS via Core Graphics + objc2, Linux via x11rb/evdev/AT-SPI2) with the backend selected at compile time, and is shared by both the Ghost and Shadow apps.
 

@@ -33,6 +33,7 @@ import {
 	RowDeleteIcon,
 	ServerStack01Icon,
 	Settings01Icon,
+	ShieldKeyIcon,
 	SidebarRightIcon,
 	SidebarTopIcon,
 	Tag01Icon,
@@ -274,6 +275,7 @@ const PATH_ICONS: Record<string, IconSvgElement> = {
 	"/downloads": Download01Icon,
 	"/project": GitBranchIcon,
 	"/settings": Settings01Icon,
+	"/vault": ShieldKeyIcon,
 };
 
 /** One glyph per multi-section shell, the exact counterpart of the one title

@@ -50,6 +50,7 @@
  * time, instead of being argued at each call site.
  */
 export type FeatureFlagFailMode = "closed" | "open";
+export type FeatureFlagExposure = "client" | "private" | "public";
 
 /** One rollout switch. `key` is a wire identifier — never rename one in flight. */
 export interface FeatureFlagDef {
@@ -57,11 +58,16 @@ export interface FeatureFlagDef {
 	defaultValue: boolean;
 	/** What the flag gates, in one line, for whoever flips it. */
 	description: string;
+	/** Which client boundary may receive the evaluated value. */
+	exposure: FeatureFlagExposure;
 	/** Direction to fail when a client has no value at all. See the type doc. */
 	failMode: FeatureFlagFailMode;
 	/** Stable dotted key. Namespaced by surface so it cannot collide with `FEATURES`. */
 	key: string;
 }
+
+/** Stable key for the temporary organization-first pricing rollout. */
+export const INDIVIDUAL_PLANS_FLAG = "billing.individual_plans" as const;
 
 /**
  * The catalog. Adding a row here is enough for the SERVER to serve the key; a
@@ -74,6 +80,7 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 		description:
 			"Show the Managed inference (fleet URL + org token) card in the desktop's Gateway → Network settings.",
 		defaultValue: false,
+		exposure: "client",
 		// Money-adjacent, so default OFF — but note precisely what that does and
 		// does not do. Hiding the card does NOT stop spend: the prefs persist and
 		// Core keeps resolving the fleet from them. Showing it does NOT enable
@@ -81,6 +88,17 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
 		// and `/gateway/resolve` recomputes `managedInference` on every 60s window.
 		// This flag is a ROLLOUT / DISCOVERY gate. Both real gates are server-side
 		// and must stay there — do not treat this as a money control.
+		failMode: "closed",
+	},
+	{
+		key: INDIVIDUAL_PLANS_FLAG,
+		description:
+			"Show the individual pricing shelf and allow new individual-plan checkout; existing individual entitlements remain valid when this is off.",
+		defaultValue: false,
+		exposure: "public",
+		// Money-adjacent availability must stay closed until the rollout is
+		// explicitly opened. The billing router applies the same decision, so
+		// hiding the shelf is not the security boundary.
 		failMode: "closed",
 	},
 ];

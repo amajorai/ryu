@@ -1,20 +1,29 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { expect, mock, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-const SOURCE = readFileSync(join(import.meta.dir, "mobile-nav.tsx"), "utf8");
+mock.module("next/navigation", () => ({
+	usePathname: () => "/marketplace",
+}));
 
-describe("mobile navigation dialog accessibility", () => {
-	test("keeps the sheet modal and keyboard-dismissible", () => {
-		expect(SOURCE).toContain('role="dialog"');
-		expect(SOURCE).toContain('aria-modal="true"');
-		expect(SOURCE).toContain('event.key === "Escape"');
-		expect(SOURCE).toContain('event.key !== "Tab"');
-	});
+const { MobileNav } = await import("./mobile-nav.tsx");
 
-	test("returns focus to the trigger after closing", () => {
-		expect(SOURCE).toContain("triggerRef.current?.focus()");
-		expect(SOURCE).toContain('aria-controls="mobile-nav-sheet"');
-		expect(SOURCE).toContain('aria-label="Mobile navigation"');
-	});
+test("renders five accessible mobile navigation destinations", () => {
+	const html = renderToStaticMarkup(createElement(MobileNav));
+
+	expect(html).toContain('<nav aria-label="Mobile navigation"');
+	for (const label of [
+		"Home",
+		"Products",
+		"Solutions",
+		"Resources",
+		"Download",
+	]) {
+		expect(html).toContain(label);
+	}
+	expect(html).toContain('href="/"');
+	expect(html).toContain('href="/download"');
+	expect(html.match(/aria-controls="mobile-nav-sheet"/g)).toHaveLength(3);
+	expect(html.match(/aria-expanded="false"/g)).toHaveLength(3);
+	expect(html).not.toContain('role="dialog"');
 });

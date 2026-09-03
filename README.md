@@ -53,10 +53,14 @@ stack for every job.
 - **Run it where work happens.** Use the same system through the CLI, Desktop, Web, bots, SDKs,
   or an API, with self-hosted Core and Gateway or managed options.
 
-This public repository includes the open-core runtime, Gateway, CLI/TUI clients, SDKs, capability
-crates, source-available Desktop, Island, shared UI packages, and build/deploy files for the
-self-hosted stack. The Web, server, mobile, browser-extension, identity, and billing surfaces live
-outside this repository; the full product documentation is at [docs.ryuhq.com](https://docs.ryuhq.com).
+This public repository includes the open-core runtime, Gateway, CLI/TUI clients, capability crates,
+source-available Desktop, Island, the shared UI packages those surfaces need, and build/deploy files
+for the self-hosted stack. The SDK authoring packages, Rust kernel SDK, foreign bindings, and SDK
+examples live in the [public SDK hub](https://github.com/amajorai/ryu-sdk). Feature-app source lives
+in its `ryu-<app>` satellite, while plugin source and the Marketplace catalog live in the
+[Marketplace repository](https://github.com/amajorai/ryu-marketplace). The Web, server, mobile,
+browser-extension, identity, and billing surfaces live outside this repository; the full product
+documentation is at [docs.ryuhq.com](https://docs.ryuhq.com).
 
 ## How Ryu compares
 
@@ -147,3 +151,13 @@ Contributions to the open-source units and source-available layer are welcome. O
 request in this repository and start with the [contribution guide](./CONTRIBUTING.md). Accepted
 changes are carried back into the Ryu monorepo by maintainers and included in a later sync.
 Report security issues through [SECURITY.md](./.github/SECURITY.md).
+
+For placement, use the public hub that owns the source:
+
+- Core, Gateway, CLI, Desktop, Island, and their shared runtime dependencies: this repository.
+- SDK packages, Rust SDK crates, bindings, and examples: [`amajorai/ryu-sdk`](https://github.com/amajorai/ryu-sdk).
+- A feature app's backend, UI, or sidecar: its [`amajorai/ryu-<app>`](https://github.com/amajorai) satellite.
+- Plugin source, catalog metadata, schemas, and icons: [`amajorai/ryu-marketplace`](https://github.com/amajorai/ryu-marketplace).
+
+`generated/ryu-runtime/` is a mirror build input for Core's compiled-in manifests and referenced
+assets. It is generated and is not an app or plugin authoring surface.

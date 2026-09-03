@@ -17,6 +17,7 @@ import {
 	PotionIcon,
 	Settings01Icon,
 	Settings02Icon,
+	ShieldKeyIcon,
 	Sun01Icon,
 	Target01Icon,
 	Tv01Icon,
@@ -802,6 +803,15 @@ export function CommandPalette() {
 			icon: FingerPrintIcon,
 			resultType: "identities",
 			onSelect: () => handleNavigate("/library/identity", "Identities"),
+		});
+
+		items.push({
+			id: "nav-vault",
+			group: "Navigation",
+			title: "Vault",
+			value: "navigate vault secrets variables credentials mcp",
+			icon: ShieldKeyIcon,
+			onSelect: () => handleNavigate("/vault", "Vault"),
 		});
 
 		items.push({

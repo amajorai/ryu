@@ -1,0 +1,60 @@
+{
+  "tool": "text_chunk",
+  "kind": "inline_tool",
+  "code_file": "tools/text_chunk.js",
+  "cases": [
+    {
+      "name": "splits on the default size when the text is shorter than one chunk",
+      "input": { "text": "hello world" },
+      "expect": {
+        "count": 1,
+        "chunks": [{ "start": 0, "text": "hello world" }]
+      }
+    },
+    {
+      "name": "splits into exact windows with no overlap",
+      "input": { "text": "abcdefgh", "size": 3 },
+      "expect": {
+        "count": 3,
+        "chunks": [
+          { "start": 0, "text": "abc" },
+          { "start": 3, "text": "def" },
+          { "start": 6, "text": "gh" }
+        ]
+      }
+    },
+    {
+      "name": "overlap re-reads the tail of the previous window",
+      "input": { "text": "abcdefg", "size": 4, "overlap": 2 },
+      "expect": {
+        "count": 4,
+        "chunks": [
+          { "start": 0, "text": "abcd" },
+          { "start": 2, "text": "cdef" },
+          { "start": 4, "text": "efg" },
+          { "start": 6, "text": "g" }
+        ]
+      }
+    },
+    {
+      "name": "empty text yields zero chunks, never one empty chunk",
+      "input": { "text": "" },
+      "expect": { "count": 0, "chunks": [] }
+    },
+    {
+      "name": "rejects an overlap equal to size instead of looping forever",
+      "input": { "text": "abc", "size": 2, "overlap": 2 },
+      "expectError": "'overlap' must be in \\[0, size\\)"
+    },
+    {
+      "name": "rejects a non-string text instead of stringifying it",
+      "input": { "text": 42 },
+      "expectError": "'text' is required"
+    },
+    {
+      "name": "rejects a zero size",
+      "input": { "text": "abc", "size": 0 },
+      "expectError": "'size' must be positive"
+    }
+  ]
+}

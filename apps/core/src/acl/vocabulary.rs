@@ -353,7 +353,7 @@ mod tests {
     /// from the shipped manifest.
     #[test]
     fn the_packaged_workflows_app_declares_working_levels() {
-        let raw = include_str!("../../../../apps-store/workflows/manifest.json");
+        let raw = include_str!("../../../../generated/ryu-runtime/apps-store/workflows/manifest.json");
         let manifest: ryu_kernel_contracts::manifest::PluginManifest =
             serde_json::from_str(raw).expect("packaged workflows manifest parses");
 

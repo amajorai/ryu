@@ -35,6 +35,7 @@ export const PAGE_ROUTES: Record<string, string> = {
 	// /identities/profile/:id (see builtins.ts).
 	channels: "/library/channel",
 	identities: "/library/identity",
+	vault: "/vault",
 	// `automations` was merged into Workflows; keep the alias pointing at the
 	// surviving surface so existing ryu://…automations deep links still resolve.
 	automations: "/library/workflow",
@@ -89,6 +90,7 @@ export const SIDE_PANEL_PAGES: { label: string; page: string }[] = [
 	{ page: "workflows", label: "Workflows" },
 	{ page: "channels", label: "Channels" },
 	{ page: "identities", label: "Profiles" },
+	{ page: "vault", label: "Vault" },
 	{ page: "tools", label: "Tools" },
 	{ page: "skills", label: "Skills" },
 	{ page: "models", label: "Models" },

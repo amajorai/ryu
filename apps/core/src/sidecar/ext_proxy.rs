@@ -3528,7 +3528,7 @@ mod tests {
     /// sidecar never declared in `host_api.grants` is not a licence to use it.
     #[test]
     fn host_api_grant_needs_both_declaration_and_approval() {
-        let manifest = fixture(include_str!("../../../../apps-store/recipes/manifest.json"));
+        let manifest = fixture(include_str!("../../../../generated/ryu-runtime/apps-store/recipes/manifest.json"));
         let approved: HashSet<String> = ["ghost:record".to_owned()].into_iter().collect();
         assert!(host_api_grant_usable(&manifest, &approved, "ghost:record"));
 
@@ -3561,35 +3561,35 @@ mod tests {
                 "mcp.callTool",
                 "monitors",
                 &fixture(include_str!(
-                    "../../../../apps-store/monitors/manifest.json"
+                    "../../../../generated/ryu-runtime/apps-store/monitors/manifest.json"
                 )),
             ),
             (
                 "spaces.fileNotes",
                 "meetings",
                 &fixture(include_str!(
-                    "../../../../apps-store/meetings/manifest.json"
+                    "../../../../generated/ryu-runtime/apps-store/meetings/manifest.json"
                 )),
             ),
             (
                 "ghost.recordStart",
                 "recipes",
-                &fixture(include_str!("../../../../apps-store/recipes/manifest.json")),
+                &fixture(include_str!("../../../../generated/ryu-runtime/apps-store/recipes/manifest.json")),
             ),
             (
                 "email.send",
                 "mail",
-                &fixture(include_str!("../../../../apps-store/mail/manifest.json")),
+                &fixture(include_str!("../../../../generated/ryu-runtime/apps-store/mail/manifest.json")),
             ),
             (
                 "email.status",
                 "mail",
-                &fixture(include_str!("../../../../apps-store/mail/manifest.json")),
+                &fixture(include_str!("../../../../generated/ryu-runtime/apps-store/mail/manifest.json")),
             ),
             (
                 "egress.fetch",
                 "mpp",
-                &fixture(include_str!("../../../../apps-store/mpp/manifest.json")),
+                &fixture(include_str!("../../../../generated/ryu-runtime/apps-store/mpp/manifest.json")),
             ),
         ];
         for (cap, app, manifest) in cases {

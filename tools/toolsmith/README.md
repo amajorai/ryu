@@ -177,16 +177,18 @@ that the manifest points at the file the cases test — and that it has not been
 | `tools/toolsmith/*.test.mjs` | one test file per module, beside the module |
 | `plugins-store/plugins/toolsmith-example/` | the worked example — a real verified tool, in its own plugin folder like every other package, so `bun run test:plugins` picks it up with no special-casing. Deliberately in Core's `UNREGISTERED_BY_DESIGN` list: registering a demo would put it in every user's catalog. |
 
-Both suites run in CI (`.github/workflows/ci.yml`, the `js` job):
+In the private monorepo, both suites run in CI (`.github/workflows/ci.yml`, the `js` job):
 
 ```bash
 bun run test:tools     # the harness's own tests + the repo's generators
 bun run test:plugins   # every packaged plugin's co-located tests
 ```
 
-The public-facing version of this document is
-`apps/fumadocs/content/docs/extend/develop/extensions/testing-plugin-tools.mdx`; this file
-is the contributor-facing one and may name internals the docs page must not.
+The public runtime hub carries the harness itself and exposes its standalone checks as
+`bun run test:toolsmith`. It does not carry the full packaged-plugin source tree; that source lives
+in the Marketplace projection. The public-facing version of this document is
+[`Testing Plugin Tools`](https://docs.ryuhq.com/docs/extend/develop/extensions/testing-plugin-tools);
+this file is the contributor-facing contract and may name monorepo internals the docs page must not.
 
 ## Known gaps (deliberate, not oversights)
 

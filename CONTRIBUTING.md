@@ -18,14 +18,19 @@ The closed half is handled in the monorepo by the maintainers.
 
 ## What lives here
 
-The public tree contains the open-source units and the source-available Desktop, Island, and
-shared UI layer. The Web, server, mobile, and identity apps are developed separately. The
-documentation site is its own repository,
-[`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs); open a docs pull request there or in
-the monorepo.
+The public tree contains the open-source runtime and the source-available Desktop, Island, and
+shared UI layer those surfaces need. It also contains generated Core runtime assets under
+`generated/ryu-runtime/`; those files are build inputs, not app or plugin source. The SDK packages,
+Rust SDK, foreign bindings, and examples live in
+[`amajorai/ryu-sdk`](https://github.com/amajorai/ryu-sdk). Feature-app source lives in the relevant
+[`amajorai/ryu-<app>`](https://github.com/amajorai) satellite, and plugin source plus Marketplace
+metadata live in [`amajorai/ryu-marketplace`](https://github.com/amajorai/ryu-marketplace). The Web,
+server, mobile, and identity apps are developed separately. The documentation site is its own
+repository, [`amajorai/ryu-docs`](https://github.com/amajorai/ryu-docs); open a docs pull request
+there or in the monorepo.
 
-See [`docs/open-core.md`](./docs/open-core.md) for the tier map and the architecture guidance in
-[`AGENTS.md`](./AGENTS.md).
+See [`docs/open-core.md`](./docs/open-core.md) for the tier map and the public
+[contribution-surface guide](https://docs.ryuhq.com/docs/extend/develop/extensions/contribution-surfaces).
 
 ## Before you start
 
@@ -39,12 +44,15 @@ See [`docs/open-core.md`](./docs/open-core.md) for the tier map and the architec
 Each unit has its own `README.md`. The short version is:
 
 ```bash
-# Rust units (Core, Gateway, CLI)
+# Rust units (Core and Gateway)
 cd apps/core    && cargo build
 cd apps/gateway && cargo build
 
-# TypeScript units (SDK, docs)
+# TypeScript units in this repository
 bun install && bun run build
+
+# Public plugin-tool harness
+bun run test:toolsmith
 ```
 
 ## Placement rule

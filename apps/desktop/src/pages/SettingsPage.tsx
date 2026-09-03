@@ -3,6 +3,7 @@ import {
 	GitBranchIcon,
 	LayerIcon,
 	PlugSocketIcon,
+	ShieldKeyIcon,
 	Store01Icon,
 	Tv01Icon,
 	Wallet01Icon,
@@ -53,6 +54,12 @@ export default function SettingsPage() {
 			label: "Channels",
 			icon: Tv01Icon,
 			description: "Connect Telegram, Slack, WhatsApp, and Discord bots",
+		},
+		{
+			to: "/vault",
+			label: "Vault",
+			icon: ShieldKeyIcon,
+			description: "Write-only secrets for governed MCP calls",
 		},
 		{
 			to: "/engines",

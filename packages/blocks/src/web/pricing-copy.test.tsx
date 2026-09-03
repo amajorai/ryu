@@ -73,6 +73,13 @@ test("the public business shelf omits the seat-sizing explainer", () => {
 	expect(html).not.toMatch(/\.\s*<\/(?:span|p)>/);
 });
 
+test("pricing defaults to the organization shelf", () => {
+	const html = renderToStaticMarkup(<PricingPlanGrid />);
+
+	expect(html).toContain("5 seats included");
+	expect(html).not.toContain("Local Desktop");
+});
+
 test("the public individual shelf exposes the local desktop offer", () => {
 	const html = renderToStaticMarkup(<PricingPlanGrid audience="individual" />);
 
@@ -107,6 +114,9 @@ test("the hosted cards use the current included capacity ladder", () => {
 	);
 	expect(business).toContain("16 vCPU, 32 GB RAM, and 320 GB SSD");
 	expect(teams).not.toContain("2 vCPU, 4 GB RAM, and 40 GB SSD");
+	expect(teams).toContain("Centralized team billing and settings");
+	expect(teams).toContain("Team marketplace for skills and plugins");
+	expect(teams).toContain("Shared usage analytics");
 	expect(business).not.toContain("4 vCPU, 8 GB RAM, and 160 GB SSD");
 });
 

@@ -26,12 +26,14 @@ import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	ArrowLeft,
+	BarChart3,
 	Bot,
 	Calendar,
 	ChevronDown,
 	Cloud,
 	Coins,
 	Cpu,
+	CreditCard,
 	Download,
 	Key,
 	Loader2,
@@ -41,6 +43,7 @@ import {
 	Server,
 	Shield,
 	Star,
+	Store,
 	Users,
 	Wrench,
 	Zap,
@@ -527,7 +530,7 @@ export function PricingDeploymentToggle({
  * on the self-hosted side.
  */
 export function PricingAudienceToggle({
-	audience = "individual",
+	audience = "business",
 	onAudienceChange = noop,
 }: {
 	audience?: PricingAudience;
@@ -1240,6 +1243,18 @@ export function TeamsPlanCard({
 						<span>Access controls, spend controls, and audit history</span>
 					</li>
 					<li className="flex items-center">
+						<CreditCard className="mr-2 size-4" />
+						<span>Centralized team billing and settings</span>
+					</li>
+					<li className="flex items-center">
+						<Store className="mr-2 size-4" />
+						<span>Team marketplace for skills and plugins</span>
+					</li>
+					<li className="flex items-center">
+						<BarChart3 className="mr-2 size-4" />
+						<span>Shared usage analytics</span>
+					</li>
+					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
 						<span>Guided setup for agent workflows</span>
 					</li>
@@ -1418,6 +1433,22 @@ export function HostedAgentPlanCard({
 								: "Spend controls and audit history"}
 						</span>
 					</li>
+					{isTeams || isBusiness ? (
+						<>
+							<li className="flex items-center">
+								<CreditCard className="mr-2 size-4" />
+								<span>Centralized team billing and settings</span>
+							</li>
+							<li className="flex items-center">
+								<Store className="mr-2 size-4" />
+								<span>Team marketplace for skills and plugins</span>
+							</li>
+							<li className="flex items-center">
+								<BarChart3 className="mr-2 size-4" />
+								<span>Shared usage analytics</span>
+							</li>
+						</>
+					) : null}
 					<li className="flex items-center">
 						<Wrench className="mr-2 size-4" />
 						<span>
@@ -1715,7 +1746,7 @@ export function SelfHostedPlanGrid() {
  * renders at an accidental quarter-width.
  */
 export function PricingPlanGrid({
-	audience = "individual",
+	audience = "business",
 	hostedAgentCount = HOSTED_AGENT_SLIDER_MIN,
 	isYearly = false,
 	loadingPlan = null,

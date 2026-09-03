@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; ryu-memory
 
-> Long-term memory primitive for Ryu. Part of [Ryu](../../README.md).
+> Long-term memory primitive for Ryu. Part of [Ryu](../../../README.md).
 
-[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](../../../apps/core/LICENSE)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `ryu-memory` owns the durable, cross-conversation facts an agent recalls (spec unit U11). It is the SQLite-backed, encryption-at-rest `MemoryStore` plus the multi-level scope model, category/importance/tags metadata, sensitive-topic consent, and scoped recall/CRUD. Long-term memory is **opt-in** (privacy-by-default): nothing is recorded or recalled unless the request enables it. Short-term memory (recent turns of the current conversation) is derived from the conversation store and needs no storage here.
 
@@ -32,4 +32,4 @@ cargo test  -p ryu-memory
 
 ## License
 
-Apache-2.0; see [LICENSE](./LICENSE). © 2026 A Major Pte. Ltd.
+Apache-2.0; see [LICENSE](../../../apps/core/LICENSE). © 2026 A Major Pte. Ltd.

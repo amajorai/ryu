@@ -757,11 +757,14 @@ fn resolve_process_env_value(
 ///   - `vault:<domain>` → the governed `identity::read_credential` (grant
 ///     `identity.read` + audit) for the connection bound to `<domain>` among the
 ///     agent's `profile_ids`.
+///   - `secret:NAME`     → the encrypted user-managed vault, resolved against
+///     the server-derived node/user/team/org context for this MCP call.
 async fn resolve_secret_token(
     word: &str,
     plugin_id: &str,
     profile_ids: &[String],
     session_id: Option<&str>,
+    secret_context: Option<&crate::plugin_secrets::SecretResolutionContext>,
 ) -> SecretToken {
     if let Some(var) = word.strip_prefix("env:") {
         return resolve_env_secret_from(plugin_id, var, crate::plugin_secrets::global()).await;
@@ -792,7 +795,21 @@ async fn resolve_secret_token(
         }
         return SecretToken::Absent;
     }
-    SecretToken::Literal
+    if let Some(name) = word.strip_prefix("secret:") {
+        let (Some(store), Some(context)) = (crate::plugin_secrets::global(), secret_context) else {
+            return SecretToken::Absent;
+        };
+        match store.resolve_vault_secret(name, context).await {
+            Ok(Some(value)) if !value.is_empty() => SecretToken::Value(value),
+            Ok(_) => SecretToken::Absent,
+            Err(error) => {
+                tracing::warn!("reading user-managed vault secret failed: {error:#}");
+                SecretToken::Absent
+            }
+        }
+    } else {
+        SecretToken::Literal
+    }
 }
 
 /// Resolve a `secret_headers` value TEMPLATE to its concrete header value, or
@@ -813,6 +830,8 @@ async fn resolve_secret_token(
 ///   - `vault:<domain>` → the governed `identity::read_credential` (grant
 ///     `identity.read` + audit) for the connection bound to `<domain>` among the
 ///     agent's `profile_ids`.
+///   - `secret:NAME`     → the encrypted user-managed vault, resolved against
+///     the server-derived user/node/team/org context.
 ///
 /// A value carrying NO token at all is an `Err` (never a silent skip — mirrors
 /// the command `env:` unsupported-source rejection). Resolved values are spliced
@@ -824,6 +843,25 @@ async fn resolve_secret_header_source(
     plugin_id: &str,
     profile_ids: &[String],
     session_id: Option<&str>,
+) -> Result<Option<String>, String> {
+    resolve_secret_header_source_with_context(
+        header_name,
+        source,
+        plugin_id,
+        profile_ids,
+        session_id,
+        None,
+    )
+    .await
+}
+
+async fn resolve_secret_header_source_with_context(
+    header_name: &str,
+    source: &str,
+    plugin_id: &str,
+    profile_ids: &[String],
+    session_id: Option<&str>,
+    secret_context: Option<&crate::plugin_secrets::SecretResolutionContext>,
 ) -> Result<Option<String>, String> {
     let mut out = String::with_capacity(source.len());
     let mut saw_token = false;
@@ -843,7 +881,7 @@ async fn resolve_secret_header_source(
         let word_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
         let word = &rest[..word_len];
         cursor += word_len;
-        match resolve_secret_token(word, plugin_id, profile_ids, session_id).await {
+        match resolve_secret_token(word, plugin_id, profile_ids, session_id, secret_context).await {
             SecretToken::Literal => out.push_str(word),
             SecretToken::Value(v) => {
                 saw_token = true;
@@ -855,7 +893,7 @@ async fn resolve_secret_header_source(
     }
     if !saw_token {
         return Err(format!(
-            "http tool: unsupported secret source '{source}' for header '{header_name}' (expected an 'env:VARNAME' or 'vault:<domain>' token)"
+            "http tool: unsupported secret source '{source}' for header '{header_name}' (expected an 'env:VARNAME', 'vault:<domain>', or 'secret:NAME' token)"
         ));
     }
     Ok(Some(out))
@@ -992,25 +1030,46 @@ pub async fn run_http_tool_with_agent(
     session_id: Option<&str>,
     audit_agent_id: Option<&str>,
 ) -> Result<Value, String> {
-    // 0. Resolve the server-side SECRET headers (async + governed) BEFORE building
-    //    the request. Each source (`env:` / `vault:`) resolves to a concrete value
-    //    or "absent" (header omitted). These are pre-resolved so `build_rest_request`
-    //    stays PURE (no env, no await) — the same testability reason the allowlist
-    //    parse was extracted. Secret VALUES never enter the args map, so they never
-    //    reach the path/query/body or the model-visible schema.
-    //    The `env:` arm is scoped to what the OWNING PLUGIN may read (`agent_id` is
-    //    the owning plugin id at this seam — see `resolve_app_tool_backend`), so a
-    //    disk manifest cannot name an unrelated credential var.
-    let mut resolved_secret_headers: Vec<(String, String)> = Vec::new();
-    for (name, source) in secret_headers {
-        if let Some(value) =
-            resolve_secret_header_source(name, source, agent_id, profile_ids, session_id).await?
-        {
-            resolved_secret_headers.push((name.clone(), value));
-        }
-    }
+    run_http_tool_with_secret_context(
+        url,
+        method,
+        args,
+        header_params,
+        secret_headers,
+        fail_open,
+        unwrap_body,
+        body_defaults,
+        grants,
+        profile_ids,
+        agent_id,
+        session_id,
+        audit_agent_id,
+        None,
+    )
+    .await
+}
 
-    // 0b. Lower the REST args onto the request BEFORE any guard, so the egress /
+/// Variant of [`run_http_tool_with_agent`] that carries the server-derived
+/// user/node/team/org context needed for `secret:NAME` references. The context
+/// is only used during this call and is never placed in the model-visible args.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_http_tool_with_secret_context(
+    url: &str,
+    method: &str,
+    args: Value,
+    header_params: &[String],
+    secret_headers: &std::collections::BTreeMap<String, String>,
+    fail_open: bool,
+    unwrap_body: bool,
+    body_defaults: &Value,
+    grants: &std::collections::HashSet<String>,
+    profile_ids: &[String],
+    agent_id: &str,
+    session_id: Option<&str>,
+    audit_agent_id: Option<&str>,
+    secret_context: Option<&crate::plugin_secrets::SecretResolutionContext>,
+) -> Result<Value, String> {
+    // 0. Lower the REST args onto the request BEFORE any guard, so the egress /
     //    SSRF checks below run on the FINAL host (path params can appear before
     //    the host in a templated base, and query/body partitioning is settled here).
     let method_upper = method.to_ascii_uppercase();
@@ -1020,13 +1079,11 @@ pub async fn run_http_tool_with_agent(
     // Expand `core:` to this profile's loopback origin BEFORE the egress/SSRF
     // guards, so they screen the URL that is actually dialled.
     let url = resolve_core_url(url);
-    let (final_url, query_pairs, mut body, headers) = build_rest_request(
-        &url,
-        &args,
-        bodyless,
-        header_params,
-        &resolved_secret_headers,
-    )?;
+    // Secret headers are deliberately omitted from this first lowering pass. The
+    // URL, query, and body do not depend on them, and this lets the cheap egress /
+    // SSRF / gateway gates run before Core decrypts any user-managed value.
+    let (final_url, query_pairs, mut body, _) =
+        build_rest_request(&url, &args, bodyless, header_params, &[])?;
 
     // 0c. Apply the manifest's static `body_defaults` UNDER the model-provided body
     //     (model args win; nested objects merge key-by-key). This is a declarative,
@@ -1093,6 +1150,41 @@ pub async fn run_http_tool_with_agent(
             return Err(format!("gateway denied http egress: {reason}"));
         }
     }
+
+    // 2b. Resolve server-side SECRET headers only after the destination and
+    // governance gates pass. Each source (`env:` / `vault:` / `secret:`) resolves
+    // to a concrete value or "absent" (header omitted). Secret VALUES never enter
+    // the args map, so they never reach the path/query/body, model-visible schema,
+    // firewall/DLP scan, or audit trail.
+    //
+    // The `env:` arm is scoped to what the OWNING PLUGIN may read (`agent_id` is
+    // the owning plugin id at this seam — see `resolve_app_tool_backend`), so a
+    // disk manifest cannot name an unrelated credential var.
+    let mut resolved_secret_headers: Vec<(String, String)> = Vec::new();
+    for (name, source) in secret_headers {
+        if let Some(value) = resolve_secret_header_source_with_context(
+            name,
+            source,
+            agent_id,
+            profile_ids,
+            session_id,
+            secret_context,
+        )
+        .await?
+        {
+            resolved_secret_headers.push((name.clone(), value));
+        }
+    }
+    // Lower the same args a second time to attach the now-resolved headers. The
+    // first pass already established the final URL/query/body, so only this
+    // metadata-free header projection is used below.
+    let (_, _, _, headers) = build_rest_request(
+        &url,
+        &args,
+        bodyless,
+        header_params,
+        &resolved_secret_headers,
+    )?;
 
     // 3. Perform the request. Body is the tool args as JSON for methods that carry
     //    one; GET/HEAD send none. Response is `{ status, body }` (JSON if parseable).

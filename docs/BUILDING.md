@@ -1,92 +1,117 @@
 # Building Ryu from source
 
-This repository is a **mirror** of a private monorepo. Everything here is buildable,
-but not everything here is open source — read [`../LICENSING.md`](../LICENSING.md)
-first, and note that the commercial tier (desktop, Island, shared UI packages) is
-**source-available**: you may build it locally to evaluate, audit, or contribute, but
-not ship it. See [`../LICENSE-COMMERCIAL.md`](../LICENSE-COMMERCIAL.md).
+This repository is the public runtime and source-available Desktop/Island projection of Ryu.
+It is generated from the private monorepo, so the generated `generated/ryu-runtime/` directory is
+build input only. App implementations live in their `amajorai/ryu-<app>` satellite repositories;
+the SDK packages, kernel crates, bindings, and examples live in
+[`amajorai/ryu-sdk`](https://github.com/amajorai/ryu-sdk).
+
+Not every published unit has the same license. Read [`../LICENSING.md`](../LICENSING.md) and
+[`../LICENSE-COMMERCIAL.md`](../LICENSE-COMMERCIAL.md) before building the source-available tier.
 
 ## Prerequisites
 
 | Tool | Version | Needed for |
 |---|---|---|
-| [Bun](https://bun.sh) | 1.3.5 | everything JS/TS (matches CI — other versions can drift `bun.lock`) |
-| Rust (stable) | latest | `apps/core`, `apps/gateway`, `apps/cli`, `crates/*` |
-| System deps (Linux) | see below | the desktop app only |
+| [Bun](https://bun.sh) | 1.3.14 | JavaScript/TypeScript workspaces and the public toolsmith tests |
+| Rust (stable) | latest | `apps/core` and `apps/gateway` |
+| Node.js | 22+ | the public toolsmith tests |
+| System deps (Linux) | see below | the Desktop app only |
 
-Linux desktop build deps:
+Linux Desktop build dependencies:
 
 ```bash
 sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 ```
 
+Install the public workspaces from the repository root:
+
 ```bash
 bun install --frozen-lockfile
 ```
 
-## The open-source parts
+## Open-source runtime
 
-These are Apache-2.0 / AGPL-3.0 and build standalone:
-
-```bash
-# Core — the orchestration engine (Apache-2.0)
-cargo build --release -p ryu-core
-
-# Gateway — the LLM control layer (AGPL-3.0)
-cargo build --release -p ryu-gateway
-
-# CLI (Apache-2.0)
-cargo build --release -p ryu-cli
-```
-
-Run Core on its own — no UI, no cloud, no API key required:
+Core and Gateway are standalone Cargo packages in this projection; there is no root Cargo
+workspace. Build them by pointing Cargo at their manifests:
 
 ```bash
-./target/release/ryu-core        # listens on :7980
-curl -s localhost:7980/api/health
+cargo build --release --manifest-path apps/core/Cargo.toml
+cargo build --release --manifest-path apps/gateway/Cargo.toml
 ```
 
-Feature-app backends build standalone from their own manifest:
+Run Core locally without a UI, cloud account, or provider key:
 
 ```bash
-cargo build --release --manifest-path apps-store/mail/backend/Cargo.toml
+cargo run --release --manifest-path apps/core/Cargo.toml
+curl -s http://localhost:7980/api/health
 ```
 
-## The commercial tier (source-available)
+The CLI is a Bun workspace:
+
+```bash
+bun run --cwd apps/cli check-types
+bun run --cwd apps/cli start
+```
+
+## Feature apps
+
+Feature-app source is not carried in this repository. Each app has its own public satellite, for
+example:
+
+```bash
+git clone https://github.com/amajorai/ryu-mail.git
+cargo build --release --manifest-path ryu-mail/backend/Cargo.toml
+```
+
+Use the [Marketplace catalog](https://github.com/amajorai/ryu-marketplace) to find the app
+repository for another feature. The `generated/ryu-runtime/` files in this repository only let
+Core embed the app's signed manifest and are not an app development checkout.
+
+## Source-available Desktop and Island
 
 Building these locally is permitted; shipping them is not.
 
 ```bash
-# Desktop (Tauri). Needs the Rust toolchain + the Linux deps above.
-cd apps/desktop && bun run build:vite      # frontend only
-cd apps/desktop && bun run tauri build     # full installer
+# Desktop (Tauri)
+bun run --cwd apps/desktop build:vite
+bun run --cwd apps/desktop tauri build
 
 # Island (Electron companion)
-cd apps/island && bun run build
+bun run --cwd apps/island build
 ```
 
-The desktop app does not compile without the shared UI packages
-(`packages/{ui,blocks,settings,command,hotkeys,app-host,marketplace,auth}`), which is
-why they are mirrored alongside it.
+The Desktop app uses the shared UI packages mirrored alongside it, including
+`packages/{ui,blocks,settings,command,hotkeys,app-host,marketplace,auth}`.
+
+## SDK and bindings
+
+Clone the standalone SDK hub for the authoring packages, Rust SDK, language bindings, and
+examples:
+
+```bash
+git clone https://github.com/amajorai/ryu-sdk.git
+cd ryu-sdk
+bun install --frozen-lockfile --ignore-scripts
+bun run check-types
+bun run test:packages
+```
+
+## Plugin-tool harness
+
+The only general-purpose tool shipped in this repository is the public plugin authoring harness:
+
+```bash
+node tools/toolsmith/index.mjs scaffold --id @scope/name --tool slug --out ./plugin
+bun run test:toolsmith
+```
+
+It does not make `generated/ryu-runtime/` or the Marketplace directories authoring surfaces.
 
 ## Docker
 
-A `Dockerfile` and `docker-compose.yml` sit at the repo root and run Core headless:
+The root `Dockerfile` and `docker-compose.yml` run Core headless:
 
 ```bash
 docker compose up
 ```
-
-## Notes that will save you time
-
-- **Use Bun 1.3.5.** CI and the Docker images pin it; a different version can rewrite
-  `bun.lock` and break `--frozen-lockfile`.
-- **The desktop frontend is a ~21k-module Vite bundle.** It wants a large heap; if the
-  build stalls in rollup's "rendering chunks" phase you are out of memory, not hung:
-  `NODE_OPTIONS=--max-old-space-size=12288 bunx vite build --sourcemap false`.
-- **Fonts** are imported from the JS entrypoints, not via CSS `@import`. Tailwind v4
-  inlines an `@import`ed package's CSS without rebasing its relative `url()`s, which
-  silently drops the `.woff2` files from the build output.
-- **Contributions** go to this repo's issues and PRs for the open-source parts. For the
-  commercial tier, contributions are welcome under the terms in
-  [`../LICENSE-COMMERCIAL.md`](../LICENSE-COMMERCIAL.md).

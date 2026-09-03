@@ -1,9 +1,0 @@
-{
-  "extends": "../../packages/sdk/tsconfig.json",
-  "compilerOptions": {
-    "allowJs": true,
-    "noEmit": true,
-    "types": ["bun", "node"]
-  },
-  "include": ["src/**/*.ts"]
-}

@@ -488,6 +488,7 @@ const PATH_TITLES: Record<string, string> = {
 	"/chat": "New chat",
 	[PANE_CHOOSER_PATH]: "Empty pane",
 	"/identities/new": "New identity",
+	"/vault": "Vault",
 	"/workflows/build": "Build a workflow",
 	"/calendar": "Calendar",
 	"/meetings": "Meetings",

@@ -40,7 +40,7 @@ export function contextRingColor(pct: number): string {
 		return "text-destructive";
 	}
 	if (pct >= CONTEXT_WARN_PCT) {
-		return "text-amber-500";
+		return "text-warning";
 	}
 	return "text-muted-foreground";
 }

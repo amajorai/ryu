@@ -84,6 +84,7 @@ import SpaceDocEditorPage from "@/src/pages/SpaceDocEditorPage.tsx";
 import SpaceFileViewerPage from "@/src/pages/SpaceFileViewerPage.tsx";
 import SpacesPage from "@/src/pages/SpacesPage.tsx";
 import StorePage from "@/src/pages/StorePage.tsx";
+import VaultPage from "@/src/pages/VaultPage.tsx";
 import WorkflowsPage from "@/src/pages/WorkflowsPage.tsx";
 import {
 	APPROVALS_ALIAS,
@@ -327,6 +328,7 @@ export function seedBuiltinRoutes(): void {
 	exact("/identities/new", () =>
 		createElement(IdentitiesPage, { initialNew: true })
 	);
+	exact("/vault", () => createElement(VaultPage));
 	exact("/models", () =>
 		createElement(StorePage, { initialSection: "models" })
 	);

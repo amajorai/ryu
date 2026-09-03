@@ -1,9 +1,9 @@
 # <img src="https://raw.githubusercontent.com/amajorai/ryu/main/.github/logo.png" width="50" align="middle" alt="" />&nbsp; shadow-core
 
-> Capture, storage, and semantic-search engine crate for Ryu's Shadow sidecar. Part of [Ryu](../../README.md).
+> Capture, storage, and semantic-search engine crate for Ryu's Shadow sidecar. Part of [Ryu](../../../README.md).
 
 [![License](https://shieldcn.dev/badge/License-Apache--2.0-73DC8C.svg?logo=apache&logoColor=white)](./LICENSE)
-[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../README.md)
+[![Stack](https://shieldcn.dev/badge/Rust-Crate-dea584.svg?logo=rust&logoColor=white)](../../../README.md)
 
 `shadow-core` is the storage and search engine behind the Shadow sidecar. It captures screen/audio/OCR events into an append-only MessagePack log (zstd-compressed), indexes them in a SQLite timeline for time-range queries, and serves recall via Tantivy full-text search plus vector embeddings, including hybrid text + visual search and a media/keyframe retention tier.
 
