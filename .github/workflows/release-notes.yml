@@ -34,6 +34,7 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_MODEL: mimo-v2.5
           OPENCODE_MAX_TOKENS: "8000"
+          OPENCODE_SESSION_ID: "ryu-${{ github.repository }}-${{ github.run_id }}"
         shell: bash
         run: |
           set -euo pipefail

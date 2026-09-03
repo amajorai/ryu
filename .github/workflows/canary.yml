@@ -92,6 +92,7 @@ jobs:
           # Optional. Unset = the changelog is the raw mirror-commit bullets,
           # which is already real content; set, they are merged into highlights.
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_SESSION_ID: "ryu-${{ github.repository }}-${{ github.run_id }}"
         run: |
           set -e
           # Notes must be GENERATED before the release references them — the

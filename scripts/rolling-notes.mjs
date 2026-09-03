@@ -27,6 +27,7 @@
 // call exits non-zero instead of silently shipping fallback notes.
 
 import { execFileSync } from "node:child_process";
+import { opencodeHeaders } from "./opencode-session.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -46,6 +47,9 @@ const tag = typeof args.get("tag") === "string" ? args.get("tag") : "";
 const requireAi = args.get("require-ai") === true;
 const releaseKind =
 	channel === "release" ? "stable release" : `rolling ${channel} build`;
+const sessionContext = ["rolling-notes", repo, tag || "head", channel].join(
+	":"
+);
 
 const git = (...a) => {
 	try {
@@ -167,10 +171,7 @@ try {
 		`${process.env.OPENCODE_API_BASE || "https://opencode.ai/zen/go/v1"}/chat/completions`,
 		{
 			method: "POST",
-			headers: {
-				Authorization: `Bearer ${key}`,
-				"Content-Type": "application/json",
-			},
+			headers: opencodeHeaders(key, sessionContext),
 			body: JSON.stringify({
 				model: process.env.OPENCODE_MODEL || "mimo-v2.5",
 				temperature: 0.2,
