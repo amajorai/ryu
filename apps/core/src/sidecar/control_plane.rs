@@ -324,6 +324,15 @@ pub struct OrgTeam {
     pub name: Option<String>,
 }
 
+/// One custom Ryu role in the node's organization. The ACL editor needs the
+/// stable key and label only; permission bodies stay on the control plane.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrgRole {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct TeamsResponse {
     #[serde(default)]
@@ -376,6 +385,46 @@ pub async fn resolve_teams(client: &reqwest::Client) -> Vec<OrgTeam> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct RolesResponse {
+    #[serde(default)]
+    roles: Vec<OrgRole>,
+}
+
+/// Resolve custom roles for the node's ACL target picker. Built-in role ids are
+/// local and are added by Core; this endpoint supplies only organization-owned
+/// custom keys and is narrowed by the presenting gateway credential.
+pub async fn resolve_roles(client: &reqwest::Client) -> Vec<OrgRole> {
+    let Some(key) = gateway_key() else {
+        return Vec::new();
+    };
+    let url = format!(
+        "{}/api/control-plane/gateway/roles",
+        control_plane_url().trim_end_matches('/')
+    );
+    let response = match client
+        .get(&url)
+        .header("x-gateway-key", key)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::debug!("roles request failed (returning empty directory): {error}");
+            return Vec::new();
+        }
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+    response
+        .json::<RolesResponse>()
+        .await
+        .map(|body| body.roles)
+        .unwrap_or_default()
+}
+
 // ── Effective-permission resolution (org/team RBAC) ──────────────────────────
 
 use std::collections::{HashMap, HashSet};
@@ -391,13 +440,32 @@ const PERMISSIONS_TTL: Duration = Duration::from_secs(30);
 struct PermissionsResponse {
     #[serde(default)]
     permissions: Vec<String>,
+    #[serde(default, rename = "roleKeys")]
+    role_keys: Vec<String>,
+}
+
+/// The control-plane slice of one caller's authorization. Permissions answer
+/// whether a capability is held; role keys let the node ACL resolver apply a
+/// resource overwrite targeted at a named custom role.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedPermissions {
+    pub permissions: HashSet<String>,
+    pub role_ids: HashSet<String>,
 }
 
 /// Process-wide TTL cache of effective permissions keyed by user id. Only positive
 /// results land here (see [`resolve_permissions`]).
-fn permissions_cache() -> &'static Mutex<HashMap<String, (Instant, HashSet<String>)>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, HashSet<String>)>>> = OnceLock::new();
+fn permissions_cache() -> &'static Mutex<HashMap<String, (Instant, ResolvedPermissions)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, ResolvedPermissions)>>> =
+        OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn permissions_cache_key(user_id: &str) -> String {
+    let team = registered_node()
+        .and_then(|node| node.team_id)
+        .unwrap_or_default();
+    format!("{user_id}:{team}")
 }
 
 /// Resolve a user's effective permissions (built-in role tier UNION every custom
@@ -412,29 +480,37 @@ fn permissions_cache() -> &'static Mutex<HashMap<String, (Instant, HashSet<Strin
 /// Callers UNION this with the role tier from `permissions_for_role`, so an empty
 /// result simply falls back to the built-in tier (never full access). Successful
 /// lookups are cached for [`PERMISSIONS_TTL`]; failures are not cached.
-pub async fn resolve_permissions(client: &reqwest::Client, user_id: &str) -> HashSet<String> {
+pub async fn resolve_permission_context(
+    client: &reqwest::Client,
+    user_id: &str,
+) -> ResolvedPermissions {
+    let cache_key = permissions_cache_key(user_id);
     // Fast path: a fresh cached positive result.
     if let Ok(guard) = permissions_cache().lock() {
-        if let Some((at, perms)) = guard.get(user_id) {
+        if let Some((at, permissions)) = guard.get(&cache_key) {
             if at.elapsed() < PERMISSIONS_TTL {
-                return perms.clone();
+                return permissions.clone();
             }
         }
     }
 
     let Some(key) = gateway_key() else {
         // Unmanaged/local node: no control plane to consult. Fall back to role tier.
-        return HashSet::new();
+        return ResolvedPermissions::default();
     };
 
     let url = format!(
         "{}/api/control-plane/gateway/permissions",
         control_plane_url().trim_end_matches('/')
     );
+    let mut query = vec![("userId", user_id.to_owned())];
+    if let Some(team) = registered_node().and_then(|node| node.team_id) {
+        query.push(("team", team));
+    }
     let resp = match client
         .get(&url)
         .header("x-gateway-key", key)
-        .query(&[("userId", user_id)])
+        .query(&query)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -442,7 +518,7 @@ pub async fn resolve_permissions(client: &reqwest::Client, user_id: &str) -> Has
         Ok(resp) => resp,
         Err(e) => {
             tracing::debug!("resolve_permissions request failed (falling back to role tier): {e}");
-            return HashSet::new();
+            return ResolvedPermissions::default();
         }
     };
     if !resp.status().is_success() {
@@ -450,22 +526,32 @@ pub async fn resolve_permissions(client: &reqwest::Client, user_id: &str) -> Has
             "resolve_permissions returned {} (falling back to role tier)",
             resp.status()
         );
-        return HashSet::new();
+        return ResolvedPermissions::default();
     }
     let body: PermissionsResponse = match resp.json().await {
         Ok(body) => body,
         Err(e) => {
             tracing::debug!("resolve_permissions decode failed (falling back to role tier): {e}");
-            return HashSet::new();
+            return ResolvedPermissions::default();
         }
     };
 
-    let perms: HashSet<String> = body.permissions.into_iter().collect();
+    let permissions = ResolvedPermissions {
+        permissions: body.permissions.into_iter().collect(),
+        role_ids: body.role_keys.into_iter().collect(),
+    };
     // Cache only this positive result.
     if let Ok(mut guard) = permissions_cache().lock() {
-        guard.insert(user_id.to_owned(), (Instant::now(), perms.clone()));
+        guard.insert(cache_key, (Instant::now(), permissions.clone()));
     }
-    perms
+    permissions
+}
+
+/// Compatibility projection for callers that only need the effective set.
+pub async fn resolve_permissions(client: &reqwest::Client, user_id: &str) -> HashSet<String> {
+    resolve_permission_context(client, user_id)
+        .await
+        .permissions
 }
 
 // ── Managed-node registration (A4 / #501) ────────────────────────────────────

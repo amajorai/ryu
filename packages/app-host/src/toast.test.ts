@@ -171,6 +171,7 @@ describe("toast bootstrap parity", () => {
 		expect(srcdoc).toContain('call("ui.toast.show"');
 		expect(srcdoc).toContain('call("ui.toast.update"');
 		expect(srcdoc).toContain('call("ui.toast.dismiss"');
+		expect(srcdoc).toContain('call("i18n.translate"');
 		expect(srcdoc).toContain("error.code = msg.error.code");
 		// One copy belongs to context.plugin.host.ui; the other to window.ryu.ui.
 		expect(srcdoc.match(/ui\.toast\.show/g)?.length).toBeGreaterThanOrEqual(2);
@@ -185,6 +186,7 @@ describe("toast bootstrap parity", () => {
 		expect(srcdoc).toContain('call("ui.toast.show"');
 		expect(srcdoc).toContain('call("ui.toast.update"');
 		expect(srcdoc).toContain('call("ui.toast.dismiss"');
+		expect(srcdoc).toContain('call("i18n.translate"');
 		expect(srcdoc).toContain("error.code = msg.error.code");
 	});
 
@@ -195,5 +197,6 @@ describe("toast bootstrap parity", () => {
 		expect(source).toContain('call("ui.toast.show"');
 		expect(source).toContain('call("ui.toast.update"');
 		expect(source).toContain('call("ui.toast.dismiss"');
+		expect(source).toContain('call("i18n.translate"');
 	});
 });

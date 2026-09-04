@@ -1,3 +1,5 @@
+"use client";
+
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import {
@@ -5,13 +7,19 @@ import {
 	MoreHorizontalCircle01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
-function Breadcrumb({ className, ...props }: React.ComponentProps<"nav">) {
+function Breadcrumb({
+	"aria-label": ariaLabel,
+	className,
+	...props
+}: React.ComponentProps<"nav">) {
+	const localizedAriaLabel = useLocalizedString(ariaLabel ?? "breadcrumb");
 	return (
 		<nav
-			aria-label="breadcrumb"
+			aria-label={localizedAriaLabel}
 			className={cn(className)}
 			data-slot="breadcrumb"
 			{...props}

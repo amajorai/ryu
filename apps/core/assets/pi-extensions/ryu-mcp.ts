@@ -45,6 +45,8 @@
  *   - RYU_MCP_AGENT_ID   the agent id whose allowlist gates the call ("ryu").
  *   - RYU_MCP_CORE_TOKEN Core node-admittance bearer (RYU_TOKEN); absent on
  *                        loopback dev where Core requires no token.
+ *   - RYU_MCP_USER_JWT  verified human identity for shared-node requests.
+ *   - RYU_MCP_HOST_CONVERSATION_ID server-derived conversation principal.
  * The call is attributed to RYU_MCP_AGENT_ID so Core enforces that agent's tool
  * allowlist and the Gateway governs execution — never a fail-open bypass.
  *
@@ -90,6 +92,31 @@ const CORE_URL = (
 ).replace(/\/+$/, "");
 const AGENT_ID = process.env.RYU_MCP_AGENT_ID || "ryu";
 const CORE_TOKEN = process.env.RYU_MCP_CORE_TOKEN || "";
+const USER_JWT = process.env.RYU_MCP_USER_JWT || "";
+const HOST_CONVERSATION_ID = process.env.RYU_MCP_HOST_CONVERSATION_ID || "";
+
+/** Decode the optional Core-injected onboarding source scope. */
+function profileScope(): Record<string, unknown> {
+	const encoded = process.env.RYU_MCP_PROFILE_SCOPE || "";
+	if (!encoded) {
+		return {};
+	}
+	try {
+		const padded = encoded.replace(/-/g, "+").replace(/_/g, "/");
+		const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+		const bytes = Uint8Array.from(binary, (character) =>
+			character.charCodeAt(0)
+		);
+		const value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+		return value && typeof value === "object" && !Array.isArray(value)
+			? (value as Record<string, unknown>)
+			: {};
+	} catch {
+		return {};
+	}
+}
+
+const PROFILE_SCOPE = profileScope();
 
 /** Cap on how many tools we fold into a prompt/description to keep it lean. */
 const CATALOG_CAP = 60;
@@ -163,6 +190,9 @@ function authHeaders(): Record<string, string> {
 	};
 	if (CORE_TOKEN) {
 		headers.authorization = `Bearer ${CORE_TOKEN}`;
+	}
+	if (USER_JWT) {
+		headers["x-ryu-user-jwt"] = USER_JWT;
 	}
 	return headers;
 }
@@ -270,7 +300,13 @@ async function callTool(tool: string, args: unknown): Promise<unknown> {
 	const res = await fetch(`${CORE_URL}/api/mcp/tools/call`, {
 		method: "POST",
 		headers: authHeaders(),
-		body: JSON.stringify({ tool, arguments: args, agent_id: AGENT_ID }),
+		body: JSON.stringify({
+			tool,
+			arguments: args,
+			agent_id: AGENT_ID,
+			host_conversation_id: HOST_CONVERSATION_ID || undefined,
+			...PROFILE_SCOPE,
+		}),
 	});
 	const body = (await res.json().catch(() => ({}))) as {
 		ok?: boolean;

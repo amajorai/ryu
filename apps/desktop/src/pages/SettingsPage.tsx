@@ -12,11 +12,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useI18n } from "@ryu/i18n/react";
 import { Switch } from "@ryu/ui/components/switch.tsx";
+import { useCallback } from "react";
 import { NavLink } from "react-router-dom";
 import { A2aSettings } from "@/src/components/settings/A2aSettings.tsx";
 import { AudioDevicesSettings } from "@/src/components/settings/AudioDevicesSettings.tsx";
 import { EditorEmbeddingSettings } from "@/src/components/settings/EditorEmbeddingSettings.tsx";
+import { LanguageSettings } from "@/src/components/settings/LanguageSettings.tsx";
 import { TtsEngineSettings } from "@/src/components/settings/TtsEngineSettings.tsx";
 import { UpdatesSettings } from "@/src/components/settings/UpdatesSettings.tsx";
 import { VoiceInputSettings } from "@/src/components/settings/VoiceInputSettings.tsx";
@@ -26,9 +29,21 @@ import { useDeveloperMode } from "@/src/hooks/useDeveloperMode.ts";
 import { useSettingsDialog } from "@/src/store/useSettingsDialog.ts";
 
 export default function SettingsPage() {
+	const { t } = useI18n();
 	const [developerMode, setDeveloperMode] = useDeveloperMode();
 	const { openTab } = useTabsContext();
 	const openSettings = useSettingsDialog((s) => s.openSettings);
+	const translateLink = useCallback(
+		(value: string, field: "description" | "label") =>
+			t(
+				`settings.page.link.${field}.${value
+					.toLowerCase()
+					.replaceAll(" ", "_")}`,
+				{},
+				value
+			),
+		[t]
+	);
 
 	const advancedLinks: {
 		to?: string;
@@ -50,7 +65,10 @@ export default function SettingsPage() {
 			description: "Buy paid items, view licenses, and sell",
 		},
 		{
-			onClick: () => openTab("/library/channel", { title: "Channels" }),
+			onClick: () =>
+				openTab("/library/channel", {
+					title: t("settings.page.channels", {}, "Channels"),
+				}),
 			label: "Channels",
 			icon: Tv01Icon,
 			description: "Connect Telegram, Slack, WhatsApp, and Discord bots",
@@ -109,60 +127,69 @@ export default function SettingsPage() {
 
 	return (
 		<div className="mx-auto max-w-2xl px-6 py-8">
-			<h1 className="mb-8 font-semibold text-xl">Settings</h1>
+			<h1 className="mb-8 font-semibold text-xl">
+				{t("settings.page.title", {}, "Settings")}
+			</h1>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Updates
+					{t("settings.page.updates", {}, "Updates")}
 				</h2>
 				<UpdatesSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Audio
+					{t("settings.page.language", {}, "Language")}
+				</h2>
+				<LanguageSettings />
+			</section>
+
+			<section className="mb-8">
+				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
+					{t("settings.page.audio", {}, "Audio")}
 				</h2>
 				<AudioDevicesSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Voice Recognition
+					{t("settings.page.voice_recognition", {}, "Voice Recognition")}
 				</h2>
 				<VoiceInputSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Read back responses
+					{t("settings.page.read_back", {}, "Read back responses")}
 				</h2>
 				<VoiceReadbackSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Audio
+					{t("settings.page.audio", {}, "Audio")}
 				</h2>
 				<TtsEngineSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Editor & Embeddings
+					{t("settings.page.editor_embeddings", {}, "Editor & Embeddings")}
 				</h2>
 				<EditorEmbeddingSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Agent networking
+					{t("settings.page.agent_networking", {}, "Agent networking")}
 				</h2>
 				<A2aSettings />
 			</section>
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Advanced
+					{t("settings.page.advanced", {}, "Advanced")}
 				</h2>
 				<div className="space-y-1 overflow-hidden rounded-lg bg-card">
 					{advancedLinks.map(({ to, onClick, label, icon, description }) => {
@@ -175,9 +202,11 @@ export default function SettingsPage() {
 								/>
 								<div>
 									<p className="font-medium text-sm group-hover:text-foreground">
-										{label}
+										{translateLink(label, "label")}
 									</p>
-									<p className="text-muted-foreground text-xs">{description}</p>
+									<p className="text-muted-foreground text-xs">
+										{translateLink(description, "description")}
+									</p>
 								</div>
 							</div>
 						);
@@ -205,18 +234,28 @@ export default function SettingsPage() {
 
 			<section className="mb-8">
 				<h2 className="mb-4 font-medium text-muted-foreground text-sm uppercase tracking-wide">
-					Developer
+					{t("settings.page.developer", {}, "Developer")}
 				</h2>
 				<div className="rounded-lg bg-card p-4">
 					<div className="flex items-center justify-between">
 						<div>
-							<p className="font-medium text-sm">Developer mode</p>
+							<p className="font-medium text-sm">
+								{t("settings.page.developer_mode", {}, "Developer mode")}
+							</p>
 							<p className="text-muted-foreground text-xs">
-								Show advanced features: workflows, extensions, and more.
+								{t(
+									"settings.page.developer_mode_description",
+									{},
+									"Show advanced features: workflows, extensions, and more."
+								)}
 							</p>
 						</div>
 						<Switch
-							aria-label="Toggle developer mode"
+							aria-label={t(
+								"settings.page.toggle_developer_mode",
+								{},
+								"Toggle developer mode"
+							)}
 							checked={developerMode}
 							onCheckedChange={setDeveloperMode}
 						/>
@@ -238,9 +277,11 @@ export default function SettingsPage() {
 										size={14}
 									/>
 									<div>
-										<p className="font-medium text-sm">{label}</p>
+										<p className="font-medium text-sm">
+											{translateLink(label, "label")}
+										</p>
 										<p className="text-muted-foreground text-xs">
-											{description}
+											{translateLink(description, "description")}
 										</p>
 									</div>
 								</div>

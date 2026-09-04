@@ -1,3 +1,6 @@
+"use client";
+
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -54,7 +57,12 @@ function EmptyMedia({
 	);
 }
 
-function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
+function EmptyTitle({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
@@ -63,11 +71,18 @@ function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
 			)}
 			data-slot="empty-title"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 
-function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
+function EmptyDescription({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"p">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
@@ -76,7 +91,9 @@ function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
 			)}
 			data-slot="empty-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 

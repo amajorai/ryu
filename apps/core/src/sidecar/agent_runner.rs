@@ -124,6 +124,8 @@ impl AgentRunner {
             Arc::clone(&self.mcp),
             self.skills.clone(),
             self.traces.clone(),
+            None,
+            Vec::new(),
         )
         .await
     }
@@ -187,6 +189,8 @@ impl AgentRunner {
             Arc::clone(&self.mcp),
             self.skills.clone(),
             self.traces.clone(),
+            None,
+            Vec::new(),
         )
         .await
     }

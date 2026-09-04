@@ -54,6 +54,7 @@ describe("Marketplace surface contract", () => {
 			"stack_template",
 			"workflow",
 			"theme",
+			"language_pack",
 			"space",
 			"profile",
 			"output_style",

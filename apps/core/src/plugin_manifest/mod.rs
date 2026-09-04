@@ -1274,13 +1274,40 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../generated/ryu-runtime/plugins-store/lsp/typescript-lsp/manifest.json"),
 ];
 
-// Production Core embeds the small first-party set needed before the
-// marketplace is available, plus the Core-only runtime substrate. The latter
-// has no marketplace package to materialize: engines → RAG → Spaces and the
-// mandatory capability peers must be present before app seeding and dependency
-// resolution run.
+// Production Core embeds every first-party manifest that must be available before
+// the marketplace is reachable: system apps, mandatory capabilities, and the
+// CORE_PREINSTALLED defaults. The remaining compiled catalog is still available
+// for discovery and explicit install, but is not loaded into the runtime until a
+// user installs it. Keeping the preinstalled set here prevents a fresh node from
+// trying to materialize its own defaults over the network.
 const CORE_RUNTIME_BUILTIN_MANIFESTS: &[&str] = &[
     SAFE_ACTIONS_MANIFEST,
+    // These packages are part of CORE_PREINSTALLED. Keep their manifests in the
+    // production registry as well as the hermetic test catalog so a fresh node
+    // does not try to materialize its own first-party defaults from a remote
+    // marketplace before the catalog is reachable.
+    include_str!("fixtures/durable.manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/goal/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/proof/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/receipts/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/double-check/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/chat-title/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/side-chats/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ghost-chats/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/expanded-composer/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/stats/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/reactions/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/rules/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-shell/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-subagent/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-monitor/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/spider/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/exa/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/docs/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/external_plugins/composio-connect/manifest.json"),
+    include_str!("fixtures/auto-expand.manifest.json"),
+    include_str!("fixtures/agents.manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ghost/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/shadow/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/agentbrowser/manifest.json"),
@@ -2720,6 +2747,11 @@ mod tests {
             .iter()
             .copied()
             .chain(std::iter::once(crate::plugins::builtins::ENGINES_PLUGIN_ID))
+            .chain(
+                crate::plugins::builtins::CORE_PREINSTALLED
+                    .iter()
+                    .copied(),
+            )
         {
             assert!(
                 ids.contains(id),
@@ -2730,8 +2762,9 @@ mod tests {
 
     /// Every packaged app/plugin manifest has exactly ONE home — its package
     /// directory (`<root>/<x>/manifest.json`, what the owning team edits). Only
-    /// the small Core system set is embedded; ordinary official packages are
-    /// installed from the signed marketplace package.
+    /// the production runtime embeds the first-party defaults that are required
+    /// before marketplace materialization; ordinary opt-in packages are installed
+    /// from the signed marketplace package.
     ///
     /// It used to be duplicated as a byte-identical fixture copy under
     /// `src/plugin_manifest/fixtures/<x>.manifest.json`, purely so `apps/core` would

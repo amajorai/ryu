@@ -467,6 +467,13 @@ pub trait ProviderAdapter: Send + Sync {
 
 // ── Chat stream types (used by the /api/chat/stream endpoint) ─────────────────
 
+/// One server-validated Composio connection selected for a scoped profile run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ComposioConnectionBinding {
+    pub id: String,
+    pub toolkit: String,
+}
+
 /// Incoming request body from the UI (matches Vercel AI SDK v6 UIMessage format).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatStreamRequest {
@@ -503,6 +510,23 @@ pub struct ChatStreamRequest {
     /// are never treated as routing targets or merged into this conversation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub referenced_conversation_ids: Vec<String>,
+    /// Optional server-validated Composio connection scope used by the
+    /// onboarding profile builder. `None` preserves normal agent behavior;
+    /// `Some(empty)` deliberately denies every Composio action for a profile
+    /// that selected no connected accounts.
+    #[serde(
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
+    /// Optional server-owned conversation search ceiling for profile bootstrap.
+    #[serde(
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub profile_conversation_scope: Option<Vec<String>>,
     /// Opt-in long-term (cross-session) memory (spec unit U11). When `true`,
     /// prior durable facts for this user/agent are injected as context and the
     /// current turn is recorded for future sessions. Defaults to `false` per
@@ -2045,17 +2069,28 @@ fn ryu_agent_route(
     acp_registry: &AcpAgentRegistry,
     provider_reg: &ProviderRegistry,
 ) -> Option<AgentRoute> {
-    ryu_agent_route_with_user_jwt(acp_registry, provider_reg, None)
+    ryu_agent_route_with_user_jwt(acp_registry, provider_reg, None, None, None, None)
 }
 
 fn ryu_agent_route_with_user_jwt(
     acp_registry: &AcpAgentRegistry,
     provider_reg: &ProviderRegistry,
     user_jwt: Option<&str>,
+    composio_connection_scope: Option<
+        &[crate::sidecar::adapters::ComposioConnectionBinding],
+    >,
+    conversation_scope: Option<&[String]>,
+    host_conversation_id: Option<&str>,
 ) -> Option<AgentRoute> {
     // Prefer Core's own managed Pi binary (~/.ryu/bin/pi). This is a separate
     // install from any Pi the user has on PATH — same relationship as OpenClaw to Pi.
-    if let Some(cmd) = acp::ryu_pi_acp_cmd_for_agent(user_jwt, Some("ryu")) {
+    if let Some(cmd) = acp::ryu_pi_acp_cmd_for_agent(
+        user_jwt,
+        Some("ryu"),
+        composio_connection_scope,
+        conversation_scope,
+        host_conversation_id,
+    ) {
         return Some(AgentRoute::Acp { spawn_cmd: cmd });
     }
 
@@ -2094,7 +2129,8 @@ fn ryu_agent_route_with_user_jwt(
             // `mcpCapabilities {http:false, sse:false}` and drops `session/new`'s
             // `mcpServers` on the floor), so its ONLY road to Ryu's tools is the
             // `ryu-mcp` extension in the isolated config dir, which dials Core over
-            // HTTP. These three vars are how it finds and authenticates to Core.
+            // HTTP. These vars are how it finds/authenticates to Core and retains
+            // the verified caller's conversation scope.
             //
             // Omitting them does not disable the extension — it makes it guess. Its
             // defaults are `http://127.0.0.1:7980` and an EMPTY token
@@ -2110,7 +2146,13 @@ fn ryu_agent_route_with_user_jwt(
                 } else {
                     String::new()
                 };
-                let mcp_env = acp::pi_mcp_extension_env(true, user_jwt);
+                let mcp_env = acp::pi_mcp_extension_env(
+                    true,
+                    user_jwt,
+                    composio_connection_scope,
+                    conversation_scope,
+                    host_conversation_id,
+                );
                 format!(
                     "cmd /c {gateway_env}{mcp_env}set PI_CODING_AGENT_DIR={config_dir}&& {}",
                     spawn_cmd.trim_start_matches("cmd /c ")
@@ -2121,7 +2163,13 @@ fn ryu_agent_route_with_user_jwt(
                 } else {
                     String::new()
                 };
-                let mcp_env = acp::pi_mcp_extension_env(false, user_jwt);
+                let mcp_env = acp::pi_mcp_extension_env(
+                    false,
+                    user_jwt,
+                    composio_connection_scope,
+                    conversation_scope,
+                    host_conversation_id,
+                );
                 format!("{gateway_env}{mcp_env}PI_CODING_AGENT_DIR={config_dir} {spawn_cmd}")
             };
             return Some(AgentRoute::Acp {
@@ -2158,7 +2206,17 @@ fn agent_route(
     acp_registry: &AcpAgentRegistry,
     provider_reg: &ProviderRegistry,
 ) -> Option<AgentRoute> {
-    agent_route_with_user_jwt(agent_id, engine, model, acp_registry, provider_reg, None)
+    agent_route_with_user_jwt(
+        agent_id,
+        engine,
+        model,
+        acp_registry,
+        provider_reg,
+        None,
+        None,
+        None,
+        None,
+    )
 }
 
 fn agent_route_with_user_jwt(
@@ -2168,11 +2226,23 @@ fn agent_route_with_user_jwt(
     acp_registry: &AcpAgentRegistry,
     provider_reg: &ProviderRegistry,
     user_jwt: Option<&str>,
+    composio_connection_scope: Option<
+        &[crate::sidecar::adapters::ComposioConnectionBinding],
+    >,
+    conversation_scope: Option<&[String]>,
+    host_conversation_id: Option<&str>,
 ) -> Option<AgentRoute> {
     // Ryu flagship: Pi engine with gateway on top. Checked before the generic
     // default so "ryu" never falls through to the plain-LLM path.
     if agent_id == Some("ryu") {
-        return ryu_agent_route_with_user_jwt(acp_registry, provider_reg, user_jwt);
+        return ryu_agent_route_with_user_jwt(
+            acp_registry,
+            provider_reg,
+            user_jwt,
+            composio_connection_scope,
+            conversation_scope,
+            host_conversation_id,
+        );
     }
     if is_default_agent(agent_id) {
         return Some(default_agent_route(provider_reg));
@@ -3107,9 +3177,44 @@ fn project_instructions_hint_when(safe_mode: bool, cwd: Option<&str>) -> Option<
 
 const USER_PERSONALIZATION_PREF: &str = "user-personalization";
 
+fn should_include_user_personalization(
+    setup_kind: Option<crate::server::onboarding_state::NodeSetupKind>,
+    node_scope: Option<crate::sidecar::control_plane::NodeScope>,
+    managed_node: bool,
+) -> bool {
+    if managed_node
+        || matches!(
+            node_scope,
+            Some(
+                crate::sidecar::control_plane::NodeScope::Org
+                    | crate::sidecar::control_plane::NodeScope::Team
+            )
+        )
+    {
+        return false;
+    }
+    !matches!(
+        setup_kind,
+        Some(crate::server::onboarding_state::NodeSetupKind::Team)
+    )
+}
+
 async fn user_personalization_block(
     preferences: &crate::server::preferences::PreferencesStore,
 ) -> Option<String> {
+    // The preference is a desktop-facing personal field. Never fold it into a
+    // shared team node's prompt, even if an older client left the preference
+    // behind; company context and shared knowledge have their own node scope.
+    let onboarding = crate::server::onboarding_state::read_state(preferences)
+        .await
+        .ok()?;
+    if !should_include_user_personalization(
+        onboarding.setup_kind,
+        crate::sidecar::control_plane::registered_node().map(|node| node.scope),
+        crate::sidecar::control_plane::is_managed_node(),
+    ) {
+        return None;
+    }
     let raw = preferences
         .get(USER_PERSONALIZATION_PREF)
         .await
@@ -4267,6 +4372,8 @@ pub async fn run_reply_text(
             Arc::clone(&mcp),
             skills.clone(),
             traces.clone(),
+            None,
+            Vec::new(),
         )
         .await;
         let result = match turn_result {
@@ -4596,6 +4703,8 @@ pub(crate) async fn run_text_turn(
     mcp: Arc<McpRegistry>,
     skills: SkillRegistry,
     traces: TraceStore,
+    composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
+    referenced_conversation_ids: Vec<String>,
 ) -> anyhow::Result<String> {
     run_text_turn_with_metadata(
         conversation_id,
@@ -4614,6 +4723,8 @@ pub(crate) async fn run_text_turn(
         mcp,
         skills,
         traces,
+        composio_connection_scope,
+        referenced_conversation_ids,
     )
     .await
     .map(|result| result.reply)
@@ -4641,6 +4752,8 @@ async fn run_text_turn_with_metadata(
     mcp: Arc<McpRegistry>,
     skills: SkillRegistry,
     traces: TraceStore,
+    composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
+    referenced_conversation_ids: Vec<String>,
 ) -> anyhow::Result<TextReplyResult> {
     run_text_turn_in_with_metadata(
         conversation_id,
@@ -4662,6 +4775,8 @@ async fn run_text_turn_with_metadata(
         mcp,
         skills,
         traces,
+        composio_connection_scope,
+        referenced_conversation_ids,
     )
     .await
 }
@@ -4723,6 +4838,8 @@ pub(crate) async fn run_text_turn_in(
         mcp,
         skills,
         traces,
+        None,
+        Vec::new(),
     )
     .await
     .map(|result| result.reply)
@@ -4749,7 +4866,12 @@ async fn run_text_turn_in_with_metadata(
     mcp: Arc<McpRegistry>,
     skills: SkillRegistry,
     traces: TraceStore,
+    composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
+    referenced_conversation_ids: Vec<String>,
 ) -> anyhow::Result<TextReplyResult> {
+    let profile_conversation_scope = composio_connection_scope
+        .as_ref()
+        .map(|_| referenced_conversation_ids.clone());
     let req = ChatStreamRequest {
         messages: vec![UiMessage {
             role: "user".to_owned(),
@@ -4762,7 +4884,9 @@ async fn run_text_turn_in_with_metadata(
         conversation_id: Some(conversation_id),
         session_id: None,
         client_id: None,
-        referenced_conversation_ids: Vec::new(),
+        referenced_conversation_ids,
+        composio_connection_scope,
+        profile_conversation_scope,
         enable_long_term: false,
         cwd,
         workspace_folders: Vec::new(),
@@ -4876,6 +5000,8 @@ pub async fn run_proactive_opening_text(
         session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
+        composio_connection_scope: None,
+        profile_conversation_scope: None,
         enable_long_term: false,
         cwd: None,
         workspace_folders: Vec::new(),
@@ -4977,6 +5103,8 @@ pub(crate) async fn run_text_turn_stream(
         session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
+        composio_connection_scope: None,
+        profile_conversation_scope: None,
         enable_long_term: false,
         cwd: None,
         workspace_folders: Vec::new(),
@@ -5250,6 +5378,8 @@ async fn run_member_text_with_flags(
         session_id: None,
         client_id: None,
         referenced_conversation_ids: Vec::new(),
+        composio_connection_scope: None,
+        profile_conversation_scope: None,
         enable_long_term: false,
         cwd: None,
         workspace_folders: Vec::new(),
@@ -7008,6 +7138,9 @@ pub async fn route_chat_stream(
         &registry,
         &provider_reg,
         req.user_jwt.as_deref(),
+        req.composio_connection_scope.as_deref(),
+        req.profile_conversation_scope.as_deref(),
+        req.conversation_id.as_deref(),
     ) {
         Some(r) => r,
         None => {
@@ -9968,6 +10101,8 @@ async fn route_acp_stream(
         composio_actions,
         bridge_agent_id,
         identity_profile_ids,
+        req.composio_connection_scope.clone(),
+        req.profile_conversation_scope.clone(),
         turn,
         conversation_id.clone(),
     );
@@ -12240,6 +12375,33 @@ mod tests {
         assert!(project_instructions_hint_when(true, Some("/tmp")).is_none());
     }
 
+    #[test]
+    fn team_nodes_do_not_receive_personalization() {
+        use crate::server::onboarding_state::NodeSetupKind;
+
+        assert!(!should_include_user_personalization(
+            Some(NodeSetupKind::Team),
+            None,
+            false
+        ));
+        assert!(should_include_user_personalization(
+            Some(NodeSetupKind::Personal),
+            Some(crate::sidecar::control_plane::NodeScope::Personal),
+            false
+        ));
+        assert!(should_include_user_personalization(None, None, false));
+        assert!(!should_include_user_personalization(
+            Some(NodeSetupKind::Personal),
+            Some(crate::sidecar::control_plane::NodeScope::Org),
+            false
+        ));
+        assert!(!should_include_user_personalization(
+            Some(NodeSetupKind::Personal),
+            Some(crate::sidecar::control_plane::NodeScope::Personal),
+            true
+        ));
+    }
+
     // ── Output-style injection (docs/output-styles.md §5) ──────────────────────
     //
     // Two things are pinned here: what `keep-coding-instructions` does to the agent's
@@ -12853,7 +13015,7 @@ mod tests {
         // fallback's injection was deleted. So pin the property that removes the drift
         // instead: exactly one renderer, both roads calling it.
         for windows in [true, false] {
-            let env = acp::pi_mcp_extension_env(windows, None);
+            let env = acp::pi_mcp_extension_env(windows, None, None, None, None);
             for var in ["RYU_MCP_CORE_URL", "RYU_MCP_AGENT_ID"] {
                 assert!(env.contains(var), "{var} missing from rendered env: {env}");
             }
@@ -12892,18 +13054,18 @@ mod tests {
             "the PATH fallback must call pi_mcp_extension_env, not re-render the env"
         );
         // Both roads reach the renderer, in both shell forms.
-        for (file, src, call) in [
-            ("acp.rs", acp_rs, "pi_mcp_extension_env("),
-            ("mod.rs", mod_rs, "acp::pi_mcp_extension_env("),
-        ] {
-            for arg in ["true, user_jwt)", "false, user_jwt)"] {
-                let want = format!("{call}{arg}");
-                assert!(
-                    src.contains(&want),
-                    "{file} must call the shared renderer as `{want}`"
-                );
-            }
-        }
+        assert!(
+            acp_rs.contains("pi_mcp_extension_env(")
+                && acp_rs.contains("composio_connection_scope")
+                && acp_rs.contains("conversation_scope"),
+            "acp.rs must call the shared renderer with profile scope"
+        );
+        assert!(
+            mod_rs.contains("acp::pi_mcp_extension_env(")
+                && mod_rs.contains("composio_connection_scope")
+                && mod_rs.contains("conversation_scope"),
+            "mod.rs must call the shared renderer with profile scope"
+        );
 
         // Calling it is not enough — the result must reach the command. Deleting the
         // interpolation leaves the call in place and compiles cleanly, so nothing but
@@ -12919,6 +13081,19 @@ mod tests {
             mod_rs.contains(used_win.as_str()),
             "the PATH fallback renders mcp_env but never interpolates it (windows)"
         );
+
+        let identity_env = acp::pi_mcp_extension_env(
+            false,
+            Some("verified-user-jwt"),
+            None,
+            None,
+            Some("profile-conversation"),
+        );
+        assert!(identity_env.contains("RYU_MCP_USER_JWT=verified-user-jwt"));
+        assert!(identity_env.contains("RYU_MCP_HOST_CONVERSATION_ID=profile-conversation"));
+        let extension = include_str!("../../../../core/assets/pi-extensions/ryu-mcp.ts");
+        assert!(extension.contains("x-ryu-user-jwt"));
+        assert!(extension.contains("host_conversation_id"));
     }
 
     #[test]

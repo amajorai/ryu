@@ -31,7 +31,13 @@ const invitations = [
 		id: "inv-finance",
 		role: "member",
 		status: "pending",
+		teamId: "team-platform",
 	},
+] as const;
+
+const teams = [
+	{ id: "team-platform", name: "Platform" },
+	{ id: "team-design", name: "Design" },
 ] as const;
 
 const ok = <T>(data: T) => ({ data, error: null });
@@ -42,7 +48,11 @@ export const authClient = {
 		inviteMember: async () => ok({}),
 		listInvitations: async () => ok(invitations),
 		listMembers: async () => ok({ members }),
+		listTeams: async () => ok(teams),
 		removeMember: async () => ok({}),
+		setActiveTeam: async () => ok(null),
 		updateMemberRole: async () => ok({}),
 	},
 };
+
+export { teams };

@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 pub(crate) const PACKAGE_MANIFEST_FILE: &str = "ryu.package.json";
+const LANGUAGE_PACK_ARTIFACT: &str = "language-pack.json";
 const PACKAGE_SCHEMA_VERSION: u64 = 1;
 const MAX_ARCHIVE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_FILES: usize = 2048;
@@ -35,6 +36,7 @@ const PACKAGE_KINDS: &[&str] = &[
     "space",
     "profile",
     "bundle",
+    "language_pack",
 ];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -351,6 +353,29 @@ pub fn extract_archive(bytes: &[u8]) -> Result<ExtractedPackage> {
     })
 }
 
+/// Language packs are data-only overlays, not general portable packages. Keep
+/// this gate at the shared Rust install boundary so Marketplace installs and
+/// local imports cannot diverge on extra artifacts or executable grants.
+fn validate_language_pack_package(extracted: &ExtractedPackage) -> Result<()> {
+    if extracted.manifest.kind != "language_pack" {
+        return Ok(());
+    }
+    if extracted.files.len() != 1
+        || !extracted.files.contains_key(LANGUAGE_PACK_ARTIFACT)
+        || extracted.manifest.artifacts.len() != 1
+        || extracted.manifest.artifacts[0] != LANGUAGE_PACK_ARTIFACT
+        || !extracted.manifest.capabilities.is_empty()
+        || extracted.manifest.security.contains_secrets
+        || extracted.manifest.security.private_content
+        || !extracted.manifest.security.permissions.is_empty()
+    {
+        bail!(
+            "language-pack packages must contain only language-pack.json and no capabilities or permissions"
+        );
+    }
+    Ok(())
+}
+
 fn write_file(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -391,6 +416,7 @@ pub fn install(
         }
     }
     let extracted = extract_archive(archive)?;
+    validate_language_pack_package(&extracted)?;
     if extracted.manifest.kind != kind || extracted.manifest.id != id {
         bail!("package manifest identity does not match the marketplace listing");
     }

@@ -635,7 +635,7 @@ export function ResourcePermissions({
 			setLoading(false);
 		}
 		// `target` is rebuilt each render; depend on its fields.
-	}, [node.url, node.token, resourceKind, resourceId]);
+	}, [node.url, node.token, node.userJwt, resourceKind, resourceId]);
 
 	useEffect(() => {
 		void refresh();

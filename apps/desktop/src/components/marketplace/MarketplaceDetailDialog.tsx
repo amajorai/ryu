@@ -294,6 +294,7 @@ function MarketplacePreviewDetails({
 		detail.screenshots.length > 0 ||
 		externalLinks(detail).length > 0 ||
 		detail.capabilities.length > 0 ||
+		Boolean(detail.languagePack) ||
 		Boolean(detail.developer || detail.category || detail.version);
 	if (!hasDetails) {
 		return null;
@@ -634,6 +635,13 @@ function InformationBlock({ detail }: { detail: MarketplaceDetail }) {
 			label: "Version",
 			icon: InformationCircleIcon,
 			value: detail.version,
+		});
+	}
+	if (detail.languagePack) {
+		rows.push({
+			label: "Language",
+			icon: InformationCircleIcon,
+			value: `${detail.languagePack.locale} · ${detail.languagePack.baseLocale} · ${detail.languagePack.direction.toUpperCase()} · ${detail.languagePack.messageCount} strings`,
 		});
 	}
 

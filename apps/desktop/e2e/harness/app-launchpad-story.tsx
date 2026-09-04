@@ -8,7 +8,7 @@
 // browser.
 //
 // Three widths are mounted at once so one screenshot shows the measured page size
-// adapting: a narrow split pane, the start page's own 720px column, and a wide one.
+// adapting: a narrow split pane, the start page's own 880px column, and a wide one.
 // The same item list feeds all three, so the tile art is the control and the layout
 // is the variable.
 

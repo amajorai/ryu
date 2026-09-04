@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 
 import { cn } from "@ryu/ui/lib/utils.ts";
@@ -121,9 +122,11 @@ function AlertDialogMedia({
 }
 
 function AlertDialogTitle({
+	children,
 	className,
 	...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Title>) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<AlertDialogPrimitive.Title
 			className={cn(
@@ -132,14 +135,18 @@ function AlertDialogTitle({
 			)}
 			data-slot="alert-dialog-title"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</AlertDialogPrimitive.Title>
 	);
 }
 
 function AlertDialogDescription({
+	children,
 	className,
 	...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Description>) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<AlertDialogPrimitive.Description
 			className={cn(
@@ -148,7 +155,9 @@ function AlertDialogDescription({
 			)}
 			data-slot="alert-dialog-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</AlertDialogPrimitive.Description>
 	);
 }
 

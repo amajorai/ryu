@@ -115,6 +115,7 @@ import { GatewayPostureCard } from "@/src/components/gateway/GatewayPostureCard.
 import { GitSettingsSection } from "@/src/components/gateway/GitSettingsSection.tsx";
 import { HooksSection } from "@/src/components/gateway/HooksSection.tsx";
 import { McpSection } from "@/src/components/gateway/McpSection.tsx";
+import { NodeOnboardingSettings } from "@/src/components/gateway/NodeOnboardingSettings.tsx";
 import { ProviderControlCenter } from "@/src/components/gateway/ProviderControlCenter.tsx";
 import { UsageCostSection } from "@/src/components/gateway/UsageCostSection.tsx";
 import { WorkspaceSection } from "@/src/components/gateway/WorkspaceSection.tsx";
@@ -6724,6 +6725,13 @@ const GATEWAY_SECTIONS: {
 		keywords: "health diagnostics preflight restart status logs",
 	},
 	{
+		value: "onboarding",
+		label: "Onboarding",
+		hint: "Choose personal or team context for this node, or run setup again.",
+		icon: SparklesIcon,
+		keywords: "onboarding setup personal team company context reset first run",
+	},
+	{
 		value: "danger",
 		label: "Danger zone",
 		hint: "Reset or wipe this node. Read twice before clicking.",
@@ -6916,6 +6924,7 @@ const GATEWAY_NAV_GROUPS: { items: GatewaySection[]; title?: string }[] = [
 		// NOWHERE, with no type error and no warning, so the two lists move together.
 		items: [
 			"computer",
+			"onboarding",
 			"privacy",
 			"storage",
 			"encryption",
@@ -6969,6 +6978,7 @@ const SECTION_TINTS: Partial<Record<GatewaySection, SettingsTint>> = {
 	encryption: "indigo",
 	updates: "teal",
 	health: "green",
+	onboarding: "purple",
 	danger: "red",
 };
 
@@ -7423,6 +7433,9 @@ export function GatewayDialog({
 						/>
 						<PreflightPage embedded />
 					</>
+				) : null}
+				{section === "onboarding" ? (
+					<NodeOnboardingSettings canConfigure={canConfigure} target={target} />
 				) : null}
 				{section === "danger" ? <DangerZoneSettings /> : null}
 				{/* Dynamic node-scoped app/plugin settings (manifest-registered). */}

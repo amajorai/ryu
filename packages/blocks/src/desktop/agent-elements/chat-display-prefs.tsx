@@ -22,7 +22,7 @@ export interface ChatDisplayPrefs {
 	composerSendShortcut: ComposerSendShortcut;
 	/**
 	 * How much room the transcript gives each turn.
-	 * - "comfortable" (default): the full desktop chat — centred 720px column,
+	 * - "comfortable" (default): the full desktop chat — centred 880px column,
 	 *   generous padding, floating table of contents, pinned user message.
 	 * - "compact": the same components in a narrow surface (the island's mini
 	 *   chat, a companion popover). Tighter padding, no centring column, and the

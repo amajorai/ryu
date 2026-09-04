@@ -21,6 +21,7 @@
 // mount time. Reading it from the plugin's `manifest.json` grants is #443's job;
 // here we prove the gate works given a grant set.
 
+import type { I18nHostSnapshot, I18nHostTranslateInput } from "@ryu/i18n/core";
 import type {
 	Alert as MonitorAlert,
 	CheckStatus as MonitorCheckStatus,
@@ -140,6 +141,7 @@ export interface WidgetGlobalsPatch {
  *  `secret_reach_blocked` adversarial tests). */
 export type Capability =
 	| "host.capabilities"
+	| "i18n"
 	| "node.shareOrigins"
 	| "native.haptics"
 	| "native.notifications"
@@ -1348,6 +1350,17 @@ export interface HostServices {
 	hostCapabilities?():
 		| Promise<HostCapabilityDescriptor>
 		| HostCapabilityDescriptor;
+	/** Return the current locale/pack metadata. This is a local, read-only
+	 * primitive and never returns the pack's message catalog or user data. */
+	i18nSnapshot?(): Promise<I18nHostSnapshot> | I18nHostSnapshot;
+	/** Translate an app/plugin-owned message with the active shell pack. */
+	i18nTranslate?(input: I18nHostTranslateInput): Promise<string> | string;
+	/** Stream the current locale/pack snapshot and later changes as JSON. */
+	i18nSubscribe?(
+		input: Record<string, unknown>,
+		emit: (delta: string) => void,
+		signal: AbortSignal
+	): Promise<void>;
 
 	// --- Learning (grant `learning:crud`). The `@ryu/learning` app renders the
 	// read-only continual-learning surface. Host-direct (the monitors pattern): the
@@ -2062,6 +2075,44 @@ export interface HostServices {
 	workflowsWebhook?(input: { id: string }): Promise<unknown>;
 }
 
+export interface I18nHostRuntime {
+	getSnapshot(): I18nHostSnapshot;
+	subscribe(listener: () => void): () => void;
+	t(id: string, values?: Record<string, unknown>, fallback?: string): string;
+}
+
+/** Build the shared i18n host callbacks for every trusted shell surface. */
+export function createI18nHostServices(
+	runtime: I18nHostRuntime
+): Pick<HostServices, "i18nSnapshot" | "i18nTranslate" | "i18nSubscribe"> {
+	return {
+		i18nSnapshot: () => runtime.getSnapshot(),
+		i18nTranslate: (input) =>
+			runtime.t(input.id, input.values, input.defaultMessage),
+		i18nSubscribe: (_input, emit, signal) =>
+			new Promise<void>((resolve) => {
+				let done = false;
+				const finish = () => {
+					if (done) {
+						return;
+					}
+					done = true;
+					unsubscribe();
+					signal.removeEventListener("abort", finish);
+					resolve();
+				};
+				const push = () => emit(JSON.stringify(runtime.getSnapshot()));
+				const unsubscribe = runtime.subscribe(push);
+				push();
+				if (signal.aborted) {
+					finish();
+				} else {
+					signal.addEventListener("abort", finish, { once: true });
+				}
+			}),
+	};
+}
+
 /**
  * The single source of truth for the host↔plugin method vocabulary: the
  * `ryu-kernel-contracts` host-API table, blessed to
@@ -2171,6 +2222,7 @@ export const GRANT_CAPABILITY: Record<string, Capability> = grantCapability;
  * explicit contract rows; they are never inferred from plugin grants. */
 const LOCAL_HOST_CAPABILITIES: ReadonlySet<Capability> = new Set([
 	"host.capabilities",
+	"i18n",
 	"node.shareOrigins",
 ]);
 
@@ -2406,6 +2458,30 @@ export async function dispatchRpc(
 			}
 			return await (services.hostCapabilities?.() ??
 				detectBrowserHostCapabilities());
+		case "i18n.get":
+			if (args.length !== 0) {
+				throw new CapabilityError("i18n.get takes no arguments");
+			}
+			if (!services.i18nSnapshot) {
+				throw new CapabilityError("i18n.get is not available");
+			}
+			return await services.i18nSnapshot();
+		case "i18n.translate": {
+			const input = asI18nTranslateArg(args[0]);
+			if (!input || args.length !== 1) {
+				throw new CodedRpcError(
+					"invalid_args",
+					"i18n.translate requires { id, defaultMessage, values? }"
+				);
+			}
+			if (!services.i18nTranslate) {
+				throw new CodedRpcError(
+					"server_error",
+					"i18n.translate is not available"
+				);
+			}
+			return await services.i18nTranslate(input);
+		}
 		case "node.shareOrigins":
 			if (args.length !== 0) {
 				throw new CapabilityError("node.shareOrigins takes no arguments");
@@ -5156,6 +5232,64 @@ export function asPromptArg(data: unknown): { prompt: string } | null {
 		return null;
 	}
 	return { prompt: candidate.prompt };
+}
+
+/** Narrow an i18n translation request before it reaches the active runtime.
+ *  Values are deliberately primitive-only: translation arguments are labels and
+ *  counts, not a covert data channel across the app boundary. */
+export function asI18nTranslateArg(
+	data: unknown
+): I18nHostTranslateInput | null {
+	if (typeof data !== "object" || data === null || Array.isArray(data)) {
+		return null;
+	}
+	const candidate = data as Record<string, unknown>;
+	if (
+		typeof candidate.id !== "string" ||
+		candidate.id.trim().length === 0 ||
+		candidate.id.length > 200 ||
+		typeof candidate.defaultMessage !== "string" ||
+		candidate.defaultMessage.trim().length === 0 ||
+		candidate.defaultMessage.length > 32_000
+	) {
+		return null;
+	}
+	if (candidate.values === undefined) {
+		return {
+			defaultMessage: candidate.defaultMessage,
+			id: candidate.id,
+		};
+	}
+	if (
+		typeof candidate.values !== "object" ||
+		candidate.values === null ||
+		Array.isArray(candidate.values)
+	) {
+		return null;
+	}
+	const values: Record<string, string | number | boolean | null> = {};
+	for (const [key, value] of Object.entries(
+		candidate.values as Record<string, unknown>
+	).slice(0, 32)) {
+		if (
+			key.length === 0 ||
+			key.length > 80 ||
+			(typeof value !== "string" &&
+				typeof value !== "number" &&
+				typeof value !== "boolean" &&
+				value !== null) ||
+			(typeof value === "string" && value.length > 2000) ||
+			(typeof value === "number" && !Number.isFinite(value))
+		) {
+			return null;
+		}
+		values[key] = value;
+	}
+	return {
+		defaultMessage: candidate.defaultMessage,
+		id: candidate.id,
+		values,
+	};
 }
 
 // ── Assistant bridge argument validators ─────────────────────────────────────

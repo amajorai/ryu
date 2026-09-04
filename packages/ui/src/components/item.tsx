@@ -1,5 +1,8 @@
+"use client";
+
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Separator } from "@ryu/ui/components/separator.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -124,7 +127,12 @@ function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
 	);
 }
 
-function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
+function ItemTitle({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children);
 	return (
 		<div
 			className={cn(
@@ -133,11 +141,18 @@ function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
 			)}
 			data-slot="item-title"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 
-function ItemDescription({ className, ...props }: React.ComponentProps<"p">) {
+function ItemDescription({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"p">) {
+	const localizedChildren = useLocalizedText(children);
 	return (
 		<p
 			className={cn(
@@ -146,7 +161,9 @@ function ItemDescription({ className, ...props }: React.ComponentProps<"p">) {
 			)}
 			data-slot="item-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</p>
 	);
 }
 

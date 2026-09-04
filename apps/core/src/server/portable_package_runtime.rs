@@ -638,6 +638,26 @@ async fn disable_output_style(
     crate::portable_packages::set_enabled(kind, id, false).map_err(Into::into)
 }
 
+async fn enable_language_pack(
+    kind: &str,
+    id: &str,
+    package: &crate::portable_packages::InstalledPackage,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<crate::portable_packages::InstalledPackage> {
+    let manifest = crate::portable_packages::manifest(kind, id)?
+        .ok_or_else(|| anyhow::anyhow!("portable language-pack manifest is missing"))?;
+    super::language_packs::validate_language_pack_manifest(kind, id, &package.version, &manifest)?;
+    super::language_packs::validate_package_files(kind, id, &package.version, files)?;
+    crate::portable_packages::set_enabled(kind, id, true).map_err(Into::into)
+}
+
+async fn disable_language_pack(
+    kind: &str,
+    id: &str,
+) -> Result<crate::portable_packages::InstalledPackage> {
+    crate::portable_packages::set_enabled(kind, id, false).map_err(Into::into)
+}
+
 /// Enable an installed package through its host subsystem. Unsupported kinds
 /// fail closed and remain disabled rather than advertising a no-op activation.
 pub(crate) async fn enable(
@@ -665,6 +685,7 @@ pub(crate) async fn enable_with_owner(
         "agent" => enable_agent(state, &kind, id, &package, &files).await,
         "workflow" => enable_workflow(&kind, id, &package, &files).await,
         "output_style" => enable_output_style(&kind, id, &files).await,
+        "language_pack" => enable_language_pack(&kind, id, &package, &files).await,
         "space" => enable_space(state, &kind, id, &package, &files, owner).await,
         _ => bail!("portable package kind `{kind}` has no host activation path"),
     }
@@ -684,6 +705,7 @@ pub(crate) async fn disable_with_owner(
         "agent" => disable_agent(state, &kind, id).await,
         "workflow" => disable_workflow(&kind, id).await,
         "output_style" => disable_output_style(&kind, id).await,
+        "language_pack" => disable_language_pack(&kind, id).await,
         "space" => disable_space(state, &kind, id, owner).await,
         _ => bail!("portable package kind `{kind}` has no host deactivation path"),
     }
@@ -717,6 +739,10 @@ pub(crate) async fn uninstall_with_owner(
         }
         "output_style" => {
             let _ = disable_output_style(&kind, id).await?;
+            Ok(())
+        }
+        "language_pack" => {
+            let _ = disable_language_pack(&kind, id).await?;
             Ok(())
         }
         "space" => {

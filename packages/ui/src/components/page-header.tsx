@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocalizedText } from "@ryu/i18n/react";
 import { useInView } from "motion/react";
 import type { CSSProperties, ReactNode } from "react";
 import { useRef } from "react";
@@ -55,6 +56,8 @@ export function PageHeader({
 	const ref = useRef<HTMLDivElement>(null);
 	const inView = useInView(ref, { once: true });
 	const shown = stagger && inView;
+	const localizedTitle = useLocalizedText(title, { literal: true });
+	const localizedSubtitle = useLocalizedText(subtitle, { literal: true });
 
 	return (
 		<div
@@ -74,7 +77,7 @@ export function PageHeader({
 					titleClassName
 				)}
 			>
-				{title}
+				{localizedTitle}
 			</Heading>
 			{subtitle ? (
 				<p
@@ -84,7 +87,7 @@ export function PageHeader({
 						subtitleClassName
 					)}
 				>
-					{subtitle}
+					{localizedSubtitle}
 				</p>
 			) : null}
 		</div>

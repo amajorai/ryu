@@ -82,6 +82,8 @@ export interface RequestOptions {
 	headers?: Record<string, string>;
 	method?: string;
 	signal?: AbortSignal;
+	/** Skip the control-plane JWT exchange for node-local liveness probes. */
+	skipUserJwt?: boolean;
 }
 
 /** Header overrides for authenticated raw requests. `null`/`undefined` removes
@@ -510,7 +512,9 @@ export async function request<T>(
 	try {
 		resp = await fetch(apiUrl(target, path), {
 			method,
-			headers: await requestHeaders(target, options.headers),
+			headers: await requestHeaders(target, options.headers, {
+				skipUserJwt: options.skipUserJwt,
+			}),
 			body:
 				options.body === undefined ? undefined : JSON.stringify(options.body),
 			signal: options.signal,

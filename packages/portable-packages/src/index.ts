@@ -15,6 +15,14 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import {
+	LANGUAGE_PACK_ARTIFACT,
+	type LanguagePack,
+	languagePackJson,
+	languagePackPortableManifest,
+	parseLanguagePackJson,
+	validateLanguagePack,
+} from "@ryu/i18n/core";
 import { unzipSync, type Zippable, zipSync } from "fflate";
 import {
 	CONNECTION_REQUIREMENT_FIELDS,
@@ -41,6 +49,7 @@ export const PACKAGE_KINDS = [
 	"space",
 	"profile",
 	"bundle",
+	"language_pack",
 ] as const;
 export type PackageKind = (typeof PACKAGE_KINDS)[number];
 
@@ -517,6 +526,27 @@ function bytesFromString(value: string): Uint8Array {
 
 function stringFromBytes(value: Uint8Array): string {
 	return new TextDecoder().decode(value);
+}
+
+function languagePackIdentityIssues(
+	pack: LanguagePack,
+	manifest: RyuPackageManifest
+): PackageValidationIssue[] {
+	const issues: PackageValidationIssue[] = [];
+	if (pack.id !== manifest.id) {
+		issues.push({
+			path: LANGUAGE_PACK_ARTIFACT,
+			message: "language-pack id must match the package manifest",
+		});
+	}
+	const normalizeVersion = (value: string) => value.trim().replace(/^v/iu, "");
+	if (normalizeVersion(pack.version) !== normalizeVersion(manifest.version)) {
+		issues.push({
+			path: LANGUAGE_PACK_ARTIFACT,
+			message: "language-pack version must match the package manifest",
+		});
+	}
+	return issues;
 }
 
 function packageAad(manifest: RyuPackageManifest): Buffer {
@@ -1601,6 +1631,52 @@ export function packageFileJson(
 	}
 }
 
+/** Read and validate the language-pack artifact from a portable package tree. */
+export function languagePackFromTree(tree: PackageTree): LanguagePack {
+	if (tree.manifest.kind !== "language_pack") {
+		throw new PackageValidationError([
+			{
+				path: "kind",
+				message: "language-pack artifacts require kind `language_pack`",
+			},
+		]);
+	}
+	const data = tree.files[LANGUAGE_PACK_ARTIFACT];
+	if (!data) {
+		throw new PackageValidationError([
+			{
+				path: LANGUAGE_PACK_ARTIFACT,
+				message: "language-pack package is missing its language-pack artifact",
+			},
+		]);
+	}
+	const pack = parseLanguagePackJson(stringFromBytes(data));
+	const issues = languagePackIdentityIssues(pack, tree.manifest);
+	if (issues.length > 0) {
+		throw new PackageValidationError(issues);
+	}
+	return pack;
+}
+
+/** Build a portable package tree for a language pack without adding executable code. */
+export function languagePackPackageTree(
+	pack: LanguagePack,
+	options: { metadata?: Record<string, unknown> } = {}
+): PackageTree {
+	const validated = validateLanguagePack(pack);
+	const manifest = validatePackageManifest(
+		languagePackPortableManifest(validated, options)
+	);
+	return validatePackageTree({
+		files: {
+			[LANGUAGE_PACK_ARTIFACT]: new TextEncoder().encode(
+				languagePackJson(validated)
+			),
+		},
+		manifest,
+	});
+}
+
 export function packageArtifactPaths(tree: PackageTree): string[] {
 	return Object.keys(tree.files)
 		.filter((path) => path !== SECRETS_FILE)
@@ -1648,6 +1724,52 @@ export function validatePackageTree(tree: PackageTree): PackageTree {
 				message: "exceeds the 64 MiB total file limit",
 			});
 			break;
+		}
+	}
+	if (manifest.kind === "language_pack") {
+		if (paths.length !== 1 || paths[0] !== LANGUAGE_PACK_ARTIFACT) {
+			issues.push({
+				path: "files",
+				message: "language-pack packages may contain only language-pack.json",
+			});
+		}
+		if (
+			manifest.artifacts.length !== 1 ||
+			manifest.artifacts[0] !== LANGUAGE_PACK_ARTIFACT
+		) {
+			issues.push({
+				path: "artifacts",
+				message: "language-pack packages must declare only language-pack.json",
+			});
+		}
+		if (
+			manifest.capabilities.length > 0 ||
+			manifest.security.containsSecrets ||
+			manifest.security.privateContent ||
+			manifest.security.permissions.length > 0
+		) {
+			issues.push({
+				path: "security",
+				message:
+					"language-pack packages cannot declare capabilities or permissions",
+			});
+		}
+		const artifact = tree.files[LANGUAGE_PACK_ARTIFACT];
+		if (artifact) {
+			try {
+				const pack = parseLanguagePackJson(stringFromBytes(artifact));
+				issues.push(...languagePackIdentityIssues(pack, manifest));
+			} catch (error) {
+				issues.push({
+					path: LANGUAGE_PACK_ARTIFACT,
+					message: error instanceof Error ? error.message : "is invalid",
+				});
+			}
+		} else {
+			issues.push({
+				path: LANGUAGE_PACK_ARTIFACT,
+				message: "language-pack package must declare a language-pack artifact",
+			});
 		}
 	}
 	if (issues.length > 0) {

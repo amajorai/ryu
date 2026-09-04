@@ -10,7 +10,7 @@ createRoot(document.getElementById("root") as HTMLElement).render(
 		<div className="w-72" data-testid="badge-switcher">
 			<SidebarBrandBadge canSwitchToConsole canSwitchToOs />
 		</div>
-		<div className="mt-8 w-72" data-testid="badge-member">
+		<div className="mt-56 w-72" data-testid="badge-member">
 			<SidebarBrandBadge />
 		</div>
 	</div>

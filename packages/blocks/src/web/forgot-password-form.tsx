@@ -10,12 +10,15 @@ import {
 import { Input } from "@ryu/ui/components/input";
 import PageHeader from "@ryu/ui/components/page-header";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
 export interface ForgotPasswordFormProps {
+	/** Captcha widget slot (the live app injects its Turnstile here). */
+	captcha?: ReactNode;
 	/** Field-level validation error message for email. */
 	emailError?: string;
-	/** Reset-email request in flight. */
+	/** Reset-code request in flight. */
 	loading?: boolean;
 	/** Return to the sign-in view. */
 	onBackToSignIn?: () => void;
@@ -37,6 +40,7 @@ export default function ForgotPasswordForm({
 	loading = false,
 	onBackToSignIn = noop,
 	emailError,
+	captcha,
 }: ForgotPasswordFormProps) {
 	const [email, setEmail] = useState("");
 	// See sign-in-form.tsx: withhold a stale error once the field is edited.
@@ -54,7 +58,7 @@ export default function ForgotPasswordForm({
 			<StaggerReveal>
 				<PageHeader
 					stagger={false}
-					subtitle="We'll send you a link to reset your password"
+					subtitle="We'll send you a code to reset your password"
 					title="Forgot password"
 				/>
 
@@ -97,8 +101,10 @@ export default function ForgotPasswordForm({
 						</Field>
 					</FieldGroup>
 
+					{captcha}
+
 					<Button className="w-full" disabled={loading} size="lg" type="submit">
-						{loading ? "Sending..." : "Send reset email"}
+						{loading ? "Sending..." : "Send reset code"}
 					</Button>
 				</form>
 

@@ -1579,8 +1579,10 @@ export const InputBar = memo(function InputBar({
 		<motion.div
 			className={cn(
 				"composer-container relative cursor-text",
-				seamless ? "bg-transparent" : "rounded-2xl bg-muted",
-				expanded && !seamless && "border border-border/70 shadow-sm",
+				seamless
+					? "bg-transparent"
+					: "rounded-2xl border border-border/60 bg-muted/90 shadow-sm",
+				expanded && !seamless && "border-border/80 shadow-md",
 				isDragOver && "ring-2 ring-primary ring-inset",
 				ghost && "ring-1 ring-violet-500/70"
 			)}
@@ -1697,7 +1699,7 @@ export const InputBar = memo(function InputBar({
 									className={
 										expanded
 											? "min-h-[320px] pt-4 pr-14 pb-3 pl-5"
-											: "flex min-h-[56px] flex-col justify-center py-2 pr-3 pl-3.5"
+											: "flex min-h-[64px] flex-col justify-center py-2.5 pr-3 pl-3.5"
 									}
 								>
 									{inputContent}
@@ -1734,7 +1736,7 @@ export const InputBar = memo(function InputBar({
 			<motion.div
 				className={cn(
 					"mx-auto w-full",
-					isExpanded ? "max-w-[900px]" : "max-w-[720px]"
+					isExpanded ? "max-w-[980px]" : "max-w-[880px]"
 				)}
 				transition={composerTransition}
 			>

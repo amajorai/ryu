@@ -51,6 +51,7 @@ pub mod model_stream;
 // in-process `healing_api` module or `healing_routes` fn.
 pub mod agent_ui_templates;
 pub mod identity_api;
+pub mod language_packs;
 pub mod learning;
 pub mod managed_bot_api;
 pub mod mcp_oauth_api;
@@ -70,6 +71,7 @@ pub mod app_notify;
 pub mod app_tool_usage;
 pub mod notifications_api;
 pub mod onboarding_profile;
+pub mod onboarding_state;
 pub mod openapi;
 pub mod plugin_bridge_api;
 pub mod plugin_uninstall;
@@ -464,6 +466,29 @@ fn path_has_prefix(path: &str, prefix: &str) -> bool {
 fn route_policy(method: &Method, path: &str) -> crate::authorization::RoutePolicy {
     use crate::authorization::{Capability, RoutePolicy};
     let read = matches!(*method, Method::GET | Method::HEAD);
+    if path == "/api/onboarding/state" {
+        return RoutePolicy::requires([Capability::GatewayRoute]);
+    }
+    if path == "/api/language-packs/installed" {
+        return RoutePolicy::requires([Capability::GatewayRoute]);
+    }
+    if path == "/api/language-packs/import" {
+        return RoutePolicy::requires([Capability::GatewayRoute]);
+    }
+    if path == "/api/onboarding/access" || path_has_prefix(path, "/api/onboarding/profile") {
+        return RoutePolicy::requires([Capability::GatewayRoute]);
+    }
+    if path_has_prefix(path, "/api/marketplace/packages") {
+        // Package handlers perform the operation-specific node ACL check. This
+        // route gate admits managed users to that check while keeping unknown
+        // routes default-denied elsewhere.
+        return RoutePolicy::requires([Capability::GatewayRoute]);
+    }
+    if path == "/api/preferences/user-personalization" {
+        // The preference handler applies the stricter personal-node owner check;
+        // GatewayRoute is only the managed-user admission step.
+        return RoutePolicy::requires([Capability::GatewayRoute]);
+    }
     if path == "/mcp" || path_has_prefix(path, "/mcp") {
         return RoutePolicy::Authenticated;
     }
@@ -602,6 +627,74 @@ mod gateway_audit_route_policy_tests {
         assert_eq!(
             route_policy(&Method::POST, "/api/sandboxes"),
             RoutePolicy::OwnerOnly
+        );
+    }
+
+    #[test]
+    fn node_onboarding_state_uses_gateway_route_for_handler_level_permission_checks() {
+        assert_eq!(
+            route_policy(&Method::GET, "/api/onboarding/state"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
+        );
+        assert_eq!(
+            route_policy(&Method::PUT, "/api/onboarding/state"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
+        );
+        assert_eq!(
+            route_policy(&Method::DELETE, "/api/onboarding/state"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
+        );
+    }
+
+    #[test]
+    fn installed_language_packs_are_readable_with_gateway_route() {
+        assert_eq!(
+            route_policy(&Method::GET, "/api/language-packs/installed"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
+        );
+        assert_eq!(
+            route_policy(&Method::POST, "/api/language-packs/import"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
+        );
+    }
+
+    #[test]
+    fn onboarding_profile_and_package_routes_reach_handler_level_checks() {
+        let gateway_route = RoutePolicy::requires([crate::authorization::Capability::GatewayRoute]);
+        assert_eq!(
+            route_policy(&Method::GET, "/api/onboarding/access"),
+            gateway_route
+        );
+        assert_eq!(
+            route_policy(&Method::GET, "/api/onboarding/profile/availability"),
+            gateway_route
+        );
+        assert_eq!(
+            route_policy(&Method::POST, "/api/onboarding/profile/start"),
+            gateway_route
+        );
+        assert_eq!(
+            route_policy(&Method::GET, "/api/marketplace/packages/installed"),
+            gateway_route
+        );
+        assert_eq!(
+            route_policy(
+                &Method::POST,
+                "/api/marketplace/packages/language_pack/id/enable"
+            ),
+            gateway_route
+        );
+    }
+
+    #[test]
+    fn personal_onboarding_preference_reaches_its_owner_check() {
+        assert_eq!(
+            route_policy(&Method::GET, "/api/preferences/user-personalization"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
+        );
+        assert_eq!(
+            route_policy(&Method::PUT, "/api/preferences/user-personalization"),
+            RoutePolicy::requires([crate::authorization::Capability::GatewayRoute])
         );
     }
 }
@@ -1387,11 +1480,13 @@ async fn attach_verified_caller(
 /// node many people share, and the local-first single-user flow must never be
 /// degraded on someone's own machine.
 ///
-/// GATING RULE (fail-closed on shared nodes, full-trust only when unbound):
+/// GATING RULE (fail-closed on shared/managed nodes, full-trust only when unbound):
 ///   - Node UNBOUND (`registered_org() == None`): the shared `RYU_TOKEN` already
 ///     implies a single trusted operator. ALWAYS ALLOW — for both an anonymous
 ///     caller and any signed-in user (including a multi-org user with no single
 ///     resolvable org, who must NOT be forced read-only on their own machine).
+///     A node flagged managed is not considered unbound while registration is
+///     unresolved; it denies until its org binding is available.
 ///   - Node ORG-BOUND (`registered_org() == Some(org)`):
 ///       - `None` caller (no / invalid user JWT) → DENY. A tokenless caller must
 ///         not inherit full trust, or any holder of the shared node token bypasses
@@ -1410,37 +1505,56 @@ pub(crate) async fn enforce_permission(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
     perm: &str,
 ) -> Result<(), StatusCode> {
+    let managed_node = crate::sidecar::control_plane::is_managed_node();
     let node_org = crate::sidecar::control_plane::registered_org().map(|o| o.id);
 
     match caller {
         None => {
-            if node_org.is_some() {
+            if node_org.is_some() || managed_node {
                 Err(StatusCode::FORBIDDEN)
             } else {
                 Ok(())
             }
         }
-        Some(caller) => match node_org.as_deref() {
-            None => Ok(()),
-            Some(node_org) => {
-                if caller.org_id.as_deref() != Some(node_org) {
+        Some(caller) => {
+            if let Some(node) = crate::sidecar::control_plane::registered_node() {
+                // A personal node is private even when its owner belongs to an
+                // organization. Its owner keeps the local full-trust behavior;
+                // every other caller is refused before role permissions are read.
+                if node.scope == crate::sidecar::control_plane::NodeScope::Personal {
+                    return if node.owner_user_id.as_deref() == Some(caller.user_id.as_str()) {
+                        Ok(())
+                    } else {
+                        Err(StatusCode::FORBIDDEN)
+                    };
+                }
+                if node_scope_denial_reason(&node, caller).is_some() {
                     return Err(StatusCode::FORBIDDEN);
                 }
-                if crate::identity_verify::permissions::can(caller.role, perm) {
-                    return Ok(());
-                }
-                let custom = crate::sidecar::control_plane::resolve_permissions(
-                    &state.client,
-                    &caller.user_id,
-                )
-                .await;
-                if custom.contains(perm) {
-                    Ok(())
-                } else {
-                    Err(StatusCode::FORBIDDEN)
+            }
+            match node_org.as_deref() {
+                None if managed_node => Err(StatusCode::FORBIDDEN),
+                None => Ok(()),
+                Some(node_org) => {
+                    if caller.org_id.as_deref() != Some(node_org) {
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                    if crate::identity_verify::permissions::can(caller.role, perm) {
+                        return Ok(());
+                    }
+                    let custom = crate::sidecar::control_plane::resolve_permissions(
+                        &state.client,
+                        &caller.user_id,
+                    )
+                    .await;
+                    if custom.contains(perm) {
+                        Ok(())
+                    } else {
+                        Err(StatusCode::FORBIDDEN)
+                    }
                 }
             }
-        },
+        }
     }
 }
 
@@ -1476,10 +1590,12 @@ fn node_scope_denial_reason(
             if caller.org_id.as_deref() != Some(node.org.id.as_str()) {
                 return Some("organization_membership_required");
             }
-            let in_team = node
-                .team_id
-                .as_deref()
-                .is_some_and(|team_id| caller.teams.iter().any(|team| team.id == team_id));
+            let in_team = node.team_id.as_deref().is_some_and(|team_id| {
+                caller
+                    .teams
+                    .iter()
+                    .any(|team| team.id == team_id && team.org_id == node.org.id)
+            });
             let org_admin = caller
                 .role
                 .satisfies(crate::identity_verify::OrgRole::Admin);
@@ -1587,6 +1703,17 @@ mod node_scope_tests {
             Some("organization_membership_required")
         );
     }
+
+    #[test]
+    fn team_ids_from_another_org_do_not_authorize_a_node() {
+        let team_node = node(NodeScope::Team, Some("team-1"), None);
+        let mut cross_org = caller("member", Some("org-1"), OrgRole::Member, &["team-1"]);
+        cross_org.teams[0].org_id = "org-2".to_owned();
+        assert_eq!(
+            node_scope_denial_reason(&team_node, &cross_org),
+            Some("team_membership_required")
+        );
+    }
 }
 
 fn app_lifecycle_denied(
@@ -1639,8 +1766,19 @@ async fn enforce_app_lifecycle_permission(
     caller: &Option<crate::identity_verify::VerifiedCaller>,
     permission: &str,
 ) -> Result<(), axum::response::Response> {
+    let managed_node = crate::sidecar::control_plane::is_managed_node();
     let node = crate::sidecar::control_plane::registered_node();
     let Some(node) = node.as_ref() else {
+        // A managed node is not temporarily local while registration is still
+        // resolving. Fail closed here so a missing registration cannot bypass
+        // the lifecycle ACL during startup or after a rejected handshake.
+        if managed_node {
+            return Err(app_lifecycle_denied(
+                permission,
+                None,
+                "managed_node_unregistered",
+            ));
+        }
         // An unbound local node retains the existing node-token owner behavior.
         return Ok(());
     };
@@ -1662,20 +1800,22 @@ async fn enforce_app_lifecycle_permission(
 
     // Custom roles are resolved from the control plane and degrade to an empty
     // set on lookup failure, which preserves the existing fail-closed contract.
-    let mut custom =
-        crate::sidecar::control_plane::resolve_permissions(&state.client, &caller.user_id).await;
+    let mut resolved =
+        crate::sidecar::control_plane::resolve_permission_context(&state.client, &caller.user_id)
+            .await;
     // The personal owner has an implicit full lifecycle grant. Passing it through
     // the normal resolver keeps explicit node denies authoritative.
     if is_personal_owner {
-        custom.insert(permission.to_owned());
+        resolved.permissions.insert(permission.to_owned());
     }
 
-    if crate::acl::decide_with_extra(
+    if crate::acl::decide_with_context(
         caller,
         crate::acl::KIND_NODE,
         &node.node_id,
         permission,
-        &custom,
+        &resolved.permissions,
+        &resolved.role_ids,
     )
     .is_allowed()
     {
@@ -2270,6 +2410,21 @@ fn resource_access(
             ));
         }
     };
+
+    // Apply the node boundary before the resource tenancy ladder. A team or
+    // personal node is a narrower data-plane surface than its parent org; an
+    // org membership alone must never turn it into a second route around that
+    // node scope.
+    if let Some(node) = crate::sidecar::control_plane::registered_node() {
+        let in_scope =
+            caller.is_some_and(|current| node_scope_denial_reason(&node, current).is_none());
+        if !in_scope {
+            return Err(json_error(
+                StatusCode::FORBIDDEN,
+                "forbidden: caller is outside this node's scope".to_owned(),
+            ));
+        }
+    }
 
     if tenancy.owner_user_id.is_none() && tenancy.org_id.is_none() {
         return if node_org.is_none() {
@@ -3931,6 +4086,16 @@ pub fn create_router(
             get(marketplace_packages_installed),
         )
         .route(
+            "/api/language-packs/installed",
+            get(language_packs::installed),
+        )
+        .route(
+            "/api/language-packs/import",
+            post(language_packs::import).layer(DefaultBodyLimit::max(
+                language_packs::MAX_LANGUAGE_PACK_IMPORT_BODY_BYTES,
+            )),
+        )
+        .route(
             "/api/marketplace/packages/install",
             post(marketplace_package_install).layer(DefaultBodyLimit::max(16 * 1024)),
         )
@@ -4309,6 +4474,7 @@ pub fn create_router(
         // Core-owned paid-plan profile bootstrap. The route remains on the
         // protected chain so node auth and verified user identity are attached
         // before its owner/admin + entitlement checks run.
+        .merge(onboarding_state::routes())
         .merge(onboarding_profile::routes())
         .merge(continuity::router())
         // ── Danger zone: irreversible bulk "delete all X" (settings) ─────────
@@ -6391,7 +6557,17 @@ async fn update_apply(
 async fn get_preference(
     State(state): State<ServerState>,
     Path(key): Path<String>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
 ) -> axum::response::Response {
+    if key == crate::server::onboarding_state::USER_PERSONALIZATION_PREF_KEY
+        && !crate::server::onboarding_state::can_access_user_personalization(&caller)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "personalization is not available on this node" })),
+        )
+            .into_response();
+    }
     // The node-wide default selection has a built-in value (flagship agent on the
     // bundled local Gemma), served HERE rather than seeded into the store: every
     // client — the composer's seed chain, the Defaults dialog, plugins — reads the
@@ -6459,8 +6635,18 @@ struct SetPreferenceBody {
 async fn set_preference(
     State(state): State<ServerState>,
     Path(key): Path<String>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<SetPreferenceBody>,
 ) -> axum::response::Response {
+    if key == crate::server::onboarding_state::USER_PERSONALIZATION_PREF_KEY
+        && !crate::server::onboarding_state::can_access_user_personalization(&caller)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "personalization is not available on this node" })),
+        )
+            .into_response();
+    }
     match state.preferences.set(&key, &body.value).await {
         Ok(()) => {
             if key == crate::privacy::PRODUCT_ANALYTICS_ENABLED_PREF_KEY {
@@ -30626,6 +30812,14 @@ struct CallToolBody {
     /// unaffected: they resolve `Unrestricted` regardless).
     #[serde(default)]
     host_conversation_id: Option<String>,
+    /// Optional Core-injected onboarding profile scopes. These are narrowing
+    /// controls only; normal network callers cannot widen an agent's access by
+    /// supplying them.
+    #[serde(default)]
+    profile_composio_connection_scope:
+        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    #[serde(default)]
+    profile_conversation_scope: Option<Vec<String>>,
     /// Set by the Gateway's own OpenAI tool loop after it has recorded the
     /// action. Core's direct ACP/MCP callers leave this false so Core can emit
     /// the charge to the Gateway exactly once.
@@ -30705,7 +30899,7 @@ async fn call_mcp_tool(
         .unwrap_or_default();
     match state
         .mcp
-        .call_tool_with_identity(
+        .call_tool_with_identity_scoped(
             // The calling agent, so its configured `approval_tools` (policy
             // Layer A) feed the approval gate.
             Some(agent_id),
@@ -30728,6 +30922,8 @@ async fn call_mcp_tool(
             // direct/legacy caller). Unbound (personal) nodes resolve `Unrestricted`
             // regardless. This is NEVER `user_id` (client-supplied, spoofable).
             body.host_conversation_id.as_deref(),
+            body.profile_composio_connection_scope.as_deref(),
+            body.profile_conversation_scope.as_deref(),
         )
         .await
     {
@@ -30791,6 +30987,8 @@ async fn call_action(
             agent_id: body.agent_id,
             user_id: body.user_id,
             host_conversation_id: None,
+            profile_composio_connection_scope: None,
+            profile_conversation_scope: None,
             // The public Action route must never accept the Gateway's internal
             // charge-bypass marker.
             budget_already_metered: false,
@@ -50084,17 +50282,38 @@ pub(crate) async fn enforce_permission_on(
         return Ok(());
     };
 
-    if caller.org_id.as_deref() != Some(node_org) {
+    let personal_owner = if let Some(node) = crate::sidecar::control_plane::registered_node() {
+        if node_scope_denial_reason(&node, caller).is_some() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        node.scope == crate::sidecar::control_plane::NodeScope::Personal
+            && node.owner_user_id.as_deref() == Some(caller.user_id.as_str())
+    } else {
+        false
+    };
+
+    if !personal_owner && caller.org_id.as_deref() != Some(node_org) {
         return Err(StatusCode::FORBIDDEN);
     }
 
     // Custom org roles live in the control plane, not the JWT. A lookup failure
     // returns an EMPTY set, degrading to the built-in role tier rather than
     // granting anything.
-    let custom =
-        crate::sidecar::control_plane::resolve_permissions(&state.client, &caller.user_id).await;
+    let mut resolved =
+        crate::sidecar::control_plane::resolve_permission_context(&state.client, &caller.user_id)
+            .await;
+    if personal_owner {
+        resolved.permissions.insert(perm.to_owned());
+    }
 
-    match crate::acl::decide_with_extra(caller, kind, resource_id, perm, &custom) {
+    match crate::acl::decide_with_context(
+        caller,
+        kind,
+        resource_id,
+        perm,
+        &resolved.permissions,
+        &resolved.role_ids,
+    ) {
         crate::acl::Decision::Allowed => Ok(()),
         crate::acl::Decision::Denied => Err(StatusCode::FORBIDDEN),
     }
@@ -50189,6 +50408,7 @@ async fn acl_get_resource(
     headers: axum::http::HeaderMap,
     Path((kind, id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    validate_acl_resource(&kind, &id)?;
     // Reading WHO has access is itself sensitive — the rule set names every team
     // and person with an exception on this resource. Gated on the same permission
     // as writing it, so a caller who may not change the rules may not enumerate
@@ -50216,6 +50436,56 @@ struct AclPutBody {
     overwrites: Vec<crate::acl::store::StoredOverwrite>,
 }
 
+fn validate_acl_resource(kind: &str, resource_id: &str) -> Result<(), axum::response::Response> {
+    if !crate::acl::ENFORCED_KINDS.contains(&kind) {
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            format!("unknown ACL resource kind `{kind}`"),
+        ));
+    }
+    if resource_id.is_empty() || resource_id.len() > 300 {
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            "ACL resource id must be between 1 and 300 characters".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_acl_overwrites(
+    rows: &[crate::acl::store::StoredOverwrite],
+) -> Result<(), axum::response::Response> {
+    for row in rows {
+        if !matches!(row.target_type.as_str(), "org" | "team" | "role" | "member") {
+            return Err(json_error(
+                StatusCode::BAD_REQUEST,
+                format!("unknown ACL target type `{}`", row.target_type),
+            ));
+        }
+        if row.target_id.is_empty() || row.target_id.len() > 300 {
+            return Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "ACL target id must be between 1 and 300 characters".to_owned(),
+            ));
+        }
+        if row.allow.len() > 100 || row.deny.len() > 100 {
+            return Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "an ACL target may name at most 100 allowed and 100 denied permissions".to_owned(),
+            ));
+        }
+        for permission in row.allow.iter().chain(row.deny.iter()) {
+            if permission.is_empty() || permission.len() > 200 {
+                return Err(json_error(
+                    StatusCode::BAD_REQUEST,
+                    "ACL permission ids must be between 1 and 200 characters".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `PUT /api/acl/resources/:kind/:id` — replace every overwrite on a resource.
 ///
 /// Whole-set replacement rather than per-row patching, deliberately: the editing
@@ -50230,6 +50500,7 @@ async fn acl_put_resource(
     Path((kind, id)): Path<(String, String)>,
     Json(body): Json<AclPutBody>,
 ) -> Result<Json<serde_json::Value>, axum::response::Response> {
+    validate_acl_resource(&kind, &id)?;
     let caller = verified_caller_from_headers(&headers).await;
     // Editing WHO may do what is itself a permission, and it is checked ON THIS
     // RESOURCE — otherwise anyone who could read a space could grant themselves
@@ -50237,6 +50508,8 @@ async fn acl_put_resource(
     if let Err(response) = enforce_node_acl_management(&state, &caller, &kind, &id).await {
         return Err(response);
     }
+
+    validate_acl_overwrites(&body.overwrites)?;
 
     // Reject unknown permission ids at the EDGE rather than storing them and
     // letting the resolver drop them silently — a rule that never applies but
@@ -50301,18 +50574,25 @@ async fn acl_list_resources(
 fn acl_principals_payload(
     teams: Vec<crate::sidecar::control_plane::OrgTeam>,
     members: Vec<crate::sidecar::control_plane::NotifyTargetUser>,
+    custom_roles: Vec<crate::sidecar::control_plane::OrgRole>,
 ) -> serde_json::Value {
     // Roles are LOCAL — the same ids `builtin_role_catalog` keys its base sets by.
     // They must be offered even on an unbound node, where the other two lists are
     // empty: a role overwrite resolves entirely in-process, so a picker with no
     // roles would hide the one target type that always works.
-    let roles: Vec<serde_json::Value> = crate::acl::vocabulary::builtin_role_ids()
+    let mut roles: Vec<serde_json::Value> = crate::acl::vocabulary::builtin_role_ids()
         .map(|id| {
             let mut label = id.to_owned();
             label[..1].make_ascii_uppercase();
             json!({ "id": id, "label": label })
         })
         .collect();
+    roles.extend(custom_roles.into_iter().map(|role| {
+        json!({
+            "id": role.id,
+            "label": role.name.unwrap_or_else(|| role.id.clone()),
+        })
+    }));
 
     json!({
         // The kinds this node actually enforces per-resource permissions on.
@@ -50392,10 +50672,11 @@ async fn acl_principals(
     }
 
     let teams = crate::sidecar::control_plane::resolve_teams(&state.client).await;
+    let custom_roles = crate::sidecar::control_plane::resolve_roles(&state.client).await;
     let members = crate::sidecar::control_plane::resolve_notify_targets(&state.client, None)
         .await
         .unwrap_or_default();
-    Ok(Json(acl_principals_payload(teams, members)))
+    Ok(Json(acl_principals_payload(teams, members, custom_roles)))
 }
 
 #[cfg(test)]
@@ -50520,7 +50801,7 @@ mod per_resource_gate_tests {
         // An unbound personal node has no org directory, and an unreachable control
         // plane looks identical. Roles are LOCAL, so they must survive both — a
         // picker with no targets at all is an unusable editor, not a safe default.
-        let payload = acl_principals_payload(Vec::new(), Vec::new());
+        let payload = acl_principals_payload(Vec::new(), Vec::new(), Vec::new());
         assert_eq!(payload["teams"].as_array().unwrap().len(), 0);
         assert_eq!(payload["members"].as_array().unwrap().len(), 0);
         let roles = payload["roles"].as_array().unwrap();
@@ -50538,6 +50819,7 @@ mod per_resource_gate_tests {
                 member("u2", None, Some("grace@example.com")),
                 member("u3", None, None),
             ],
+            Vec::new(),
         );
         let members = payload["members"].as_array().unwrap();
         assert_eq!(members[0]["name"], "Ada");
@@ -50564,6 +50846,7 @@ mod per_resource_gate_tests {
                     name: None,
                 },
             ],
+            Vec::new(),
             Vec::new(),
         );
         let teams = payload["teams"].as_array().unwrap();

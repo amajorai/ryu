@@ -45,7 +45,7 @@ describe("searchMarketplaceCatalog", () => {
 
 		const results = await searchMarketplaceCatalog("example", 8);
 
-		expect(requestedKinds).toHaveLength(13);
+		expect(requestedKinds).toHaveLength(14);
 		expect(results).toHaveLength(1);
 		expect(results[0]).toMatchObject({
 			id: "com.example.app",

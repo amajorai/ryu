@@ -2191,6 +2191,11 @@ pub fn spawn_acp_task(
     // Per-agent bound Identity Vault profiles (epic #517), threaded into the MCP
     // bridge for the tool-call-time vault consult. Empty = no consult.
     identity_profile_ids: Vec<String>,
+    // Optional server-validated Composio connections and conversation scope
+    // used by the onboarding profile builder.
+    composio_connection_scope:
+        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    conversation_scope: Option<Vec<String>>,
     // User-chosen ACP session controls (permission mode / reasoning effort /
     // model) applied to this turn's session. All agent-reported; see
     // [`AcpTurnConfig`].
@@ -2218,6 +2223,8 @@ pub fn spawn_acp_task(
         &composio_actions,
         &agent_id,
         &identity_profile_ids,
+        &composio_connection_scope,
+        &conversation_scope,
         &permission_scope_id,
     );
     let acp_turn = AcpTurn {
@@ -2230,6 +2237,8 @@ pub fn spawn_acp_task(
         composio_actions,
         agent_id,
         identity_profile_ids,
+        composio_connection_scope,
+        conversation_scope,
         permission_scope_id: permission_scope_id.clone(),
         events: events_tx,
     };
@@ -2361,6 +2370,10 @@ fn acp_security_key(
     composio_actions: &[String],
     agent_id: &str,
     identity_profile_ids: &[String],
+    composio_connection_scope: &Option<
+        Vec<crate::sidecar::adapters::ComposioConnectionBinding>,
+    >,
+    conversation_scope: &Option<Vec<String>>,
     permission_scope_id: &Option<String>,
 ) -> String {
     let mut allowlist = allowlist.clone();
@@ -2371,12 +2384,22 @@ fn acp_security_key(
     composio_actions.sort();
     let mut identity_profile_ids = identity_profile_ids.to_vec();
     identity_profile_ids.sort();
+    let mut composio_connection_scope = composio_connection_scope.clone();
+    if let Some(values) = composio_connection_scope.as_mut() {
+        values.sort_by(|left, right| left.toolkit.cmp(&right.toolkit).then(left.id.cmp(&right.id)));
+    }
+    let mut conversation_scope = conversation_scope.clone();
+    if let Some(values) = conversation_scope.as_mut() {
+        values.sort();
+    }
     serde_json::json!({
         "mcp": mcp.as_ref().map(|registry| format!("{:p}", Arc::as_ptr(registry))),
         "allowlist": allowlist,
         "composioActions": composio_actions,
         "agentId": agent_id,
         "identityProfileIds": identity_profile_ids,
+        "composioConnectionScope": composio_connection_scope,
+        "conversationScope": conversation_scope,
         "permissionScopeId": permission_scope_id,
     })
     .to_string()
@@ -2451,6 +2474,8 @@ impl AgentAdapter for AcpAdapter {
                 vec![],
                 agent_id.clone(),
                 vec![],
+                None,
+                None,
                 AcpTurnConfig::default(),
                 None,
             );
@@ -2657,6 +2682,9 @@ struct AcpTurn {
     composio_actions: Vec<String>,
     agent_id: String,
     identity_profile_ids: Vec<String>,
+    composio_connection_scope:
+        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    conversation_scope: Option<Vec<String>>,
     permission_scope_id: Option<String>,
     events: mpsc::UnboundedSender<AcpEvent>,
 }
@@ -3035,6 +3063,8 @@ pub async fn run_acp_instance(
                                 first_turn.composio_actions.clone(),
                                 first_turn.agent_id.clone(),
                                 first_turn.identity_profile_ids.clone(),
+                                first_turn.composio_connection_scope.clone(),
+                                first_turn.conversation_scope.clone(),
                                 Some(instance_tx.clone()),
                                 first_turn.permission_scope_id.clone(),
                             )
@@ -4707,7 +4737,7 @@ pub async fn update_managed_pi() -> anyhow::Result<()> {
 /// is false) the injection is skipped so Pi talks straight to that provider — a
 /// deliberate, user-chosen egress bypass.
 pub fn ryu_pi_acp_cmd(user_jwt: Option<&str>) -> Option<String> {
-    ryu_pi_acp_cmd_for_agent(user_jwt, None)
+    ryu_pi_acp_cmd_for_agent(user_jwt, None, None, None, None)
 }
 
 /// Build the managed Pi command with an agent-scoped OpenAI base URL.
@@ -4715,7 +4745,13 @@ pub fn ryu_pi_acp_cmd(user_jwt: Option<&str>) -> Option<String> {
 /// ACP agents own their HTTP client, so the agent id is carried in the
 /// Gateway path and bound to `x-ryu-agent-id` at ingress. `None` preserves the
 /// legacy unscoped endpoint for callers without an agent identity.
-pub fn ryu_pi_acp_cmd_for_agent(user_jwt: Option<&str>, agent_id: Option<&str>) -> Option<String> {
+pub fn ryu_pi_acp_cmd_for_agent(
+    user_jwt: Option<&str>,
+    agent_id: Option<&str>,
+    composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+    conversation_scope: Option<&[String]>,
+    host_conversation_id: Option<&str>,
+) -> Option<String> {
     let bin = managed_pi_binary();
     if !bin.exists() {
         return None;
@@ -4784,7 +4820,13 @@ pub fn ryu_pi_acp_cmd_for_agent(user_jwt: Option<&str>, agent_id: Option<&str>) 
         } else {
             String::new()
         };
-        let mcp_env = pi_mcp_extension_env(true, user_jwt);
+        let mcp_env = pi_mcp_extension_env(
+            true,
+            user_jwt,
+            composio_connection_scope,
+            conversation_scope,
+            host_conversation_id,
+        );
         Some(format!(
             "cmd /c {gateway_env}{mcp_env}set PI_CODING_AGENT_DIR={config_dir}&& set PI_ACP_PI_COMMAND={pi_path}&& npx -y pi-acp"
         ))
@@ -4796,7 +4838,13 @@ pub fn ryu_pi_acp_cmd_for_agent(user_jwt: Option<&str>, agent_id: Option<&str>) 
         } else {
             String::new()
         };
-        let mcp_env = pi_mcp_extension_env(false, user_jwt);
+        let mcp_env = pi_mcp_extension_env(
+            false,
+            user_jwt,
+            composio_connection_scope,
+            conversation_scope,
+            host_conversation_id,
+        );
         Some(format!(
             "{gateway_env}{mcp_env}PI_CODING_AGENT_DIR={config_dir} PI_ACP_PI_COMMAND={pi_path} npx -y pi-acp"
         ))
@@ -4901,7 +4949,13 @@ fn codex_acp_cmd_for_agent(agent_id: Option<&str>) -> String {
 /// Keeping the rendering here, rather than the values, is deliberate: a caller that
 /// re-derives `core_url` itself is free to derive it differently, which is how the
 /// drift happened. Both callers now emit the same bytes or neither does.
-pub(crate) fn pi_mcp_extension_env(windows: bool, user_jwt: Option<&str>) -> String {
+pub(crate) fn pi_mcp_extension_env(
+    windows: bool,
+    user_jwt: Option<&str>,
+    composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+    conversation_scope: Option<&[String]>,
+    host_conversation_id: Option<&str>,
+) -> String {
     let core_url = crate::sidecar::gateway::core_self_url();
     let mcp_agent_id = crate::registry::DEFAULT_AGENT_ID;
     let core_token = crate::node_token::active_token()
@@ -4924,6 +4978,37 @@ pub(crate) fn pi_mcp_extension_env(windows: bool, user_jwt: Option<&str>) -> Str
             env.push_str(&format!("set RYU_MCP_USER_JWT={jwt}&& "));
         } else {
             env.push_str(&format!("RYU_MCP_USER_JWT={jwt} "));
+        }
+    }
+    if let Some(conversation_id) = host_conversation_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if windows {
+            env.push_str(&format!(
+                "set RYU_MCP_HOST_CONVERSATION_ID={conversation_id}&& "
+            ));
+        } else {
+            env.push_str(&format!(
+                "RYU_MCP_HOST_CONVERSATION_ID={conversation_id} "
+            ));
+        }
+    }
+    if composio_connection_scope.is_some() || conversation_scope.is_some() {
+        use base64::Engine as _;
+
+        let payload = serde_json::json!({
+            "profile_composio_connection_scope": composio_connection_scope,
+            "profile_conversation_scope": conversation_scope,
+        });
+        if let Ok(encoded) = serde_json::to_vec(&payload).map(|bytes| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        }) {
+            if windows {
+                env.push_str(&format!("set RYU_MCP_PROFILE_SCOPE={encoded}&& "));
+            } else {
+                env.push_str(&format!("RYU_MCP_PROFILE_SCOPE={encoded} "));
+            }
         }
     }
     env
@@ -8050,13 +8135,24 @@ mod tests {
 
     #[test]
     fn acp_pool_key_separates_security_contexts() {
-        let no_tools = acp_security_key(&None, &None, &[], "agent", &[], &Some("conv".into()));
+        let no_tools = acp_security_key(
+            &None,
+            &None,
+            &[],
+            "agent",
+            &[],
+            &None,
+            &None,
+            &Some("conv".into()),
+        );
         let explicit_no_tools = acp_security_key(
             &None,
             &Some(Vec::new()),
             &[],
             "agent",
             &[],
+            &None,
+            &None,
             &Some("conv".into()),
         );
         let different_action = acp_security_key(
@@ -8065,6 +8161,8 @@ mod tests {
             &["composio:write".into()],
             "agent",
             &["vault-profile".into()],
+            &None,
+            &None,
             &Some("conv".into()),
         );
         assert_ne!(no_tools, explicit_no_tools);

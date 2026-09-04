@@ -21,6 +21,7 @@ import { OrganizationInvitationPolicy } from "@ryu/db/models/organization-invita
 import { isOrganizationNotificationEnabled } from "@ryu/db/models/organization-notification.model";
 import { OrganizationSeatEntitlement } from "@ryu/db/models/organization-seat-entitlement.model";
 import { OrganizationSeatReservation } from "@ryu/db/models/organization-seat-reservation.model";
+import { isUserNotificationChannelEnabled } from "@ryu/db/models/user-notification.model";
 import {
 	AccountExistsEmail,
 	configureContactIdSaver,
@@ -66,11 +67,15 @@ import {
 } from "better-auth/plugins";
 import { admin } from "better-auth/plugins/admin";
 import { jwt } from "better-auth/plugins/jwt";
+import { createRyuAuthI18nPlugin } from "./lib/auth-i18n.ts";
 import { resolveRyuCorsOrigins } from "./lib/cors-origins.ts";
+import { ryuEmailHarmony } from "./lib/email-harmony.ts";
 import {
 	GUEST_MODE_DISABLED_MESSAGE,
 	shouldRejectGuestSignIn,
 } from "./lib/guest-mode.ts";
+import { LOGIN_APPROVAL_CLIENTS } from "./lib/login-approval-contract.ts";
+import { loginApprovalSessionPlugin } from "./lib/login-approval-session-plugin.ts";
 import {
 	assertPendingEmailMatches,
 	assertPendingPasskeyMatches,
@@ -90,8 +95,10 @@ import {
 } from "./lib/organization-invitation-policy.ts";
 import {
 	metadataWithOrganizationKind,
+	ORGANIZATION_KIND_KEY,
 	organizationKindFromMetadata,
 	PERSONAL_ORGANIZATION_KIND,
+	parseOrganizationMetadata,
 	TEAMS_ORGANIZATION_KIND,
 } from "./lib/organization-kind.ts";
 import {
@@ -220,23 +227,30 @@ async function organizationBillingEmail(
 async function activeTeamsSeatCount(
 	organizationId: string
 ): Promise<number | null> {
-	const email = await organizationBillingEmail(organizationId);
-	if (!email) {
-		return null;
-	}
-
 	try {
-		const customers = await polarClient.customers.list({
-			email,
-			limit: 1,
-			organizationId: process.env.POLAR_ORGANIZATION_ID,
-		});
-		let customerId: string | null = null;
-		for await (const page of customers) {
-			const first = polarPageItems<{ id?: string | null }>(page)[0];
-			if (first?.id) {
-				customerId = first.id;
-				break;
+		const persisted = await OrganizationSeatEntitlement.findOne({
+			organizationId,
+			status: "active",
+		})
+			.select("polarCustomerId")
+			.lean<{ polarCustomerId?: string | null }>();
+		let customerId = persisted?.polarCustomerId?.trim() || null;
+		if (!customerId) {
+			const email = await organizationBillingEmail(organizationId);
+			if (!email) {
+				return null;
+			}
+			const customers = await polarClient.customers.list({
+				email,
+				limit: 1,
+				organizationId: process.env.POLAR_ORGANIZATION_ID,
+			});
+			for await (const page of customers) {
+				const first = polarPageItems<{ id?: string | null }>(page)[0];
+				if (first?.id) {
+					customerId = first.id;
+					break;
+				}
 			}
 		}
 		if (!customerId) {
@@ -779,6 +793,56 @@ async function rejectPersonalWorkspaceInvitation(
 			message: PERSONAL_WORKSPACE_MESSAGE,
 		});
 	}
+}
+
+function boundedOrganizationHookValue(value: unknown): string | null {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		return trimmed ? trimmed.slice(0, 300) : null;
+	}
+	if (value instanceof Date) {
+		return value.toISOString();
+	}
+	return value === null || value === undefined
+		? null
+		: String(value).slice(0, 300);
+}
+
+/**
+ * Publish the non-sensitive activity projection for Better Auth organization
+ * lifecycle hooks. The generic auth after-hook records the mutation itself;
+ * this projection is the user-facing fan-out that keeps owners/admins informed
+ * without copying request bodies or credentials into notifications.
+ */
+async function notifyOrganizationHookActivity(input: {
+	body: string;
+	event: string;
+	organizationId: unknown;
+	sourceId: unknown;
+	sourceType: string;
+	target: "member" | "organization" | "team" | "team-member";
+	title: string;
+	updatedAt?: unknown;
+}): Promise<void> {
+	const organizationId = boundedOrganizationHookValue(input.organizationId);
+	const sourceId = boundedOrganizationHookValue(input.sourceId);
+	if (!(organizationId && sourceId)) {
+		return;
+	}
+	const revision =
+		boundedOrganizationHookValue(input.updatedAt) ?? String(Date.now());
+	await notifyOrganizationEvent({
+		actionLabel: "Open organization",
+		actionUrl: organizationAppUrl(`/organizations/${organizationId}`),
+		body: input.body,
+		dedupeKey: `organization-hook:${input.event}:${sourceId}:${revision}`,
+		kind: "organization-activity",
+		organizationIds: [organizationId],
+		sourceId,
+		sourceType: input.sourceType,
+		subject: input.title,
+		title: input.title,
+	});
 }
 
 // Narrow an unknown caught error to its string `code` (e.g. better-auth's
@@ -1601,6 +1665,25 @@ export const auth = betterAuth({
 			await assertPendingEmailMatches(ctx);
 		}),
 		after: createAuthMiddleware(async (ctx) => {
+			// Better Auth stores active organization and active team on the same
+			// session. A team from the previous organization must never survive an
+			// organization switch and accidentally become the next request's scope.
+			if (
+				ctx.path === "/organization/set-active" ||
+				ctx.path === "/organization/delete"
+			) {
+				const sessionToken = ctx.context.session?.session.token;
+				if (sessionToken) {
+					try {
+						await ctx.context.internalAdapter.updateSession(sessionToken, {
+							activeTeamId: null,
+							updatedAt: new Date(),
+						});
+					} catch (error) {
+						console.error("Failed to clear active organization team:", error);
+					}
+				}
+			}
 			if (ctx.path === "/organization/invite-member") {
 				const body = ctx.body as {
 					email?: unknown;
@@ -1639,6 +1722,10 @@ export const auth = betterAuth({
 				string,
 				{ action: string; target: string }
 			> = {
+				"/organization/add-member": {
+					action: "member.add",
+					target: "member",
+				},
 				"/organization/accept-invitation": {
 					action: "invitation.accept",
 					target: "invitation",
@@ -1654,6 +1741,10 @@ export const auth = betterAuth({
 				"/organization/create": {
 					action: "organization.create",
 					target: "organization",
+				},
+				"/organization/cancel-invitation": {
+					action: "invitation.cancel",
+					target: "invitation",
 				},
 				"/organization/delete": {
 					action: "organization.delete",
@@ -1683,6 +1774,14 @@ export const auth = betterAuth({
 					action: "invitation.reject",
 					target: "invitation",
 				},
+				"/organization/set-active": {
+					action: "organization.set-active",
+					target: "organization",
+				},
+				"/organization/set-active-team": {
+					action: "team.set-active",
+					target: "team",
+				},
 				"/organization/update": {
 					action: "organization.update",
 					target: "organization",
@@ -1702,6 +1801,25 @@ export const auth = betterAuth({
 				ctx.body && typeof ctx.body === "object"
 					? (ctx.body as Record<string, unknown>)
 					: {};
+			if (
+				ctx.path === "/organization/remove-team-member" &&
+				session?.session.token &&
+				session.session.activeTeamId &&
+				body.teamId === session.session.activeTeamId &&
+				body.userId === session.user.id
+			) {
+				try {
+					await ctx.context.internalAdapter.updateSession(
+						session.session.token,
+						{
+							activeTeamId: null,
+							updatedAt: new Date(),
+						}
+					);
+				} catch (error) {
+					console.error("Failed to clear removed active team:", error);
+				}
+			}
 			const returned =
 				ctx.context.returned && typeof ctx.context.returned === "object"
 					? (ctx.context.returned as Record<string, unknown>)
@@ -1710,9 +1828,24 @@ export const auth = betterAuth({
 				returned.organization && typeof returned.organization === "object"
 					? (returned.organization as Record<string, unknown>)
 					: {};
+			const returnedInvitation =
+				returned.invitation && typeof returned.invitation === "object"
+					? (returned.invitation as Record<string, unknown>)
+					: {};
+			const returnedMember =
+				returned.member && typeof returned.member === "object"
+					? (returned.member as Record<string, unknown>)
+					: {};
+			const returnedTeam =
+				returned.team && typeof returned.team === "object"
+					? (returned.team as Record<string, unknown>)
+					: {};
 			const returnedOrganizationId = [
 				returnedOrganization.id,
 				returned.organizationId,
+				returnedInvitation.organizationId,
+				returnedMember.organizationId,
+				returnedTeam.organizationId,
 				returned.id,
 			].find(
 				(value): value is string =>
@@ -1723,7 +1856,7 @@ export const auth = betterAuth({
 					? returnedOrganizationId
 					: typeof body.organizationId === "string"
 						? body.organizationId
-						: session?.session.activeOrganizationId;
+						: (returnedOrganizationId ?? session?.session.activeOrganizationId);
 			if (auditAction && organizationId && session?.user?.id) {
 				const targetId =
 					["memberId", "userId", "teamId", "invitationId"].reduce<
@@ -2063,7 +2196,21 @@ export const auth = betterAuth({
 		},
 	},
 	plugins: [
+		// Better Auth owns authentication responses, so localize its standard error
+		// codes at the server boundary. The product language-pack runtime owns UI
+		// copy; this plugin is deliberately limited to auth errors and keeps the
+		// original message in the response for support and diagnostics.
+		createRyuAuthI18nPlugin(),
 		captcha({
+			// Keep the password-recovery request protected after moving from the
+			// core reset-link endpoint to Email OTP. Better Auth's default list does
+			// not include the Email OTP endpoint.
+			endpoints: [
+				"/sign-up/email",
+				"/sign-in/email",
+				"/request-password-reset",
+				"/email-otp/request-password-reset",
+			],
 			provider: "cloudflare-turnstile",
 			secretKey: TURNSTILE_SECRET_KEY,
 		}),
@@ -2132,6 +2279,7 @@ export const auth = betterAuth({
 				storeBackupCodes: "encrypted",
 			},
 		}),
+		ryuEmailHarmony,
 		emailOTP({
 			async sendVerificationOTP({ email, otp, type }) {
 				try {
@@ -2239,10 +2387,13 @@ export const auth = betterAuth({
 		deviceAuthorization({
 			verificationUri: `${process.env.FRONTEND_URL || "http://localhost:3001"}/device`,
 			validateClient: (clientId) =>
-				["ryu-desktop", "ryu-cli", "ryu-mcp", "ryu-extension"].includes(
-					clientId
-				),
+				[
+					...Object.values(LOGIN_APPROVAL_CLIENTS),
+					"ryu-cli",
+					"ryu-mcp",
+				].includes(clientId),
 		}),
+		loginApprovalSessionPlugin(),
 		// The built-in GET /device only returns { user_code, status } — it hides the
 		// requesting clientId/scope. The approve consent screen needs to name the app
 		// asking for access ("Ryu Desktop is requesting…"), so expose a read-only
@@ -2461,6 +2612,10 @@ export const auth = betterAuth({
 			// public contract. The global after hook also refreshes this claim when
 			// Better Auth handles `resend: true` in place.
 			invitationExpiresIn: ORGANIZATION_INVITATION_EXPIRES_IN_SEC,
+			// Invitation ids are visible to organization members through the native
+			// list endpoint. Require a verified recipient session for by-id get,
+			// accept, and reject operations, in addition to Ryu's business-email gate.
+			requireEmailVerificationOnInvitation: true,
 			// Enable Better Auth's organization-role lifecycle endpoints. These
 			// roles are additive to the Ryu control-plane RBAC below; they never
 			// widen a Ryu scope without an explicit server-side permission check.
@@ -2560,6 +2715,56 @@ export const auth = betterAuth({
 						},
 					};
 				},
+				afterCreateOrganization: async ({ organization }) => {
+					await notifyOrganizationHookActivity({
+						body: `${organization.name} was created.`,
+						event: "organization.created",
+						organizationId: organization.id,
+						sourceId: organization.id,
+						sourceType: "organization",
+						target: "organization",
+						title: "Organization created",
+						updatedAt: organization.createdAt,
+					});
+				},
+				beforeUpdateOrganization: async ({ organization, member }) => {
+					// `organizationKind` is a server-owned boundary marker. Better Auth
+					// filters declared input:false fields, but arbitrary metadata remains
+					// client-writable, so preserve the durable kind explicitly.
+					const existing = await Organization.findById(member.organizationId)
+						.select("metadata")
+						.lean<{ metadata?: unknown }>();
+					const currentMetadata = parseOrganizationMetadata(existing?.metadata);
+					const requestedMetadata = parseOrganizationMetadata(
+						organization.metadata
+					);
+					const currentKind = organizationKindFromMetadata(currentMetadata);
+					if (currentKind) {
+						requestedMetadata[ORGANIZATION_KIND_KEY] = currentKind;
+					} else {
+						delete requestedMetadata[ORGANIZATION_KIND_KEY];
+					}
+					return {
+						data: {
+							...organization,
+							metadata: { ...currentMetadata, ...requestedMetadata },
+						},
+					};
+				},
+				afterUpdateOrganization: async ({ organization, member }) => {
+					if (!organization) {
+						return;
+					}
+					await notifyOrganizationHookActivity({
+						body: `${organization.name} was updated.`,
+						event: "organization.updated",
+						organizationId: member.organizationId,
+						sourceId: organization.id,
+						sourceType: "organization",
+						target: "organization",
+						title: "Organization updated",
+					});
+				},
 				beforeDeleteOrganization: async ({ organization }) => {
 					// Deleting the Better Auth organization must not strand an active
 					// Polar subscription that would keep charging its payer. Cancel the
@@ -2616,13 +2821,48 @@ export const auth = betterAuth({
 						userId: user.id,
 					});
 				},
-				afterAddMember: async ({ member }) => {
+				afterAddMember: async ({ member, organization, user }) => {
 					// The direct-add lock is needed only until Better Auth has created the
 					// member row. Invitation acceptance has its own invitation claim and
 					// does not pass through this hook.
 					await releaseSeatClaims({
 						organizationId: member.organizationId,
 						userId: String(member.userId),
+					});
+					await notifyOrganizationHookActivity({
+						body: `${user.name || user.email} joined ${organization.name}.`,
+						event: "member.added",
+						organizationId: member.organizationId,
+						sourceId: member.id,
+						sourceType: "member",
+						target: "member",
+						title: "Organization member added",
+						updatedAt: member.createdAt,
+					});
+				},
+				beforeRemoveMember: async ({ member }) => {
+					// Release any abandoned direct-add claim before the member row is
+					// removed. The after hook repeats this idempotently for normal deletes.
+					await releaseSeatClaims({
+						organizationId: member.organizationId,
+						userId: String(member.userId),
+					});
+				},
+				beforeUpdateMemberRole: async ({ user }) => {
+					// A role promotion is another shared-organization admission point.
+					// Keep a user whose email was changed or unverified from gaining a
+					// stronger organization role through the native Better Auth endpoint.
+					requireVerifiedBusinessEmail(user);
+				},
+				afterUpdateMemberRole: async ({ member, organization, user }) => {
+					await notifyOrganizationHookActivity({
+						body: `${user.name || user.email}'s organization role was updated in ${organization.name}.`,
+						event: "member.role.updated",
+						organizationId: member.organizationId,
+						sourceId: member.id,
+						sourceType: "member",
+						target: "member",
+						title: "Organization role updated",
 					});
 				},
 				beforeCreateInvitation: async ({ invitation, inviter }) => {
@@ -2753,6 +2993,9 @@ export const auth = betterAuth({
 						userId: user.id,
 					});
 				},
+				beforeRejectInvitation: async ({ invitation }) => {
+					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
+				},
 				afterRejectInvitation: async ({ invitation }) => {
 					await releaseSeatClaims({
 						email: invitation.email,
@@ -2795,6 +3038,9 @@ export const auth = betterAuth({
 						title: "Organization invitation declined",
 					});
 				},
+				beforeCancelInvitation: async ({ invitation }) => {
+					await rejectPersonalWorkspaceInvitation(invitation.organizationId);
+				},
 				afterCancelInvitation: async ({ invitation }) => {
 					await releaseSeatClaims({
 						email: invitation.email,
@@ -2823,12 +3069,136 @@ export const auth = betterAuth({
 						title: "Organization invitation cancelled",
 					});
 				},
-				afterRemoveMember: async ({ member }) => {
+				beforeCreateTeam: async ({ team }) => {
+					const name = team.name.trim();
+					if (!name) {
+						throw new APIError("BAD_REQUEST", {
+							message: "Team name is required.",
+						});
+					}
+					return { data: { ...team, name } };
+				},
+				afterCreateTeam: async ({ team, organization }) => {
+					await notifyOrganizationHookActivity({
+						body: `${team.name} was created in ${organization.name}.`,
+						event: "team.created",
+						organizationId: organization.id,
+						sourceId: team.id,
+						sourceType: "team",
+						target: "team",
+						title: "Organization team created",
+						updatedAt: team.createdAt,
+					});
+				},
+				beforeUpdateTeam: async ({ updates }) => {
+					if (typeof updates.name !== "string") {
+						return;
+					}
+					const name = updates.name.trim();
+					if (!name) {
+						throw new APIError("BAD_REQUEST", {
+							message: "Team name is required.",
+						});
+					}
+					return { data: { ...updates, name } };
+				},
+				afterUpdateTeam: async ({ team, organization }) => {
+					if (!team) {
+						return;
+					}
+					await notifyOrganizationHookActivity({
+						body: `${team.name} was updated in ${organization.name}.`,
+						event: "team.updated",
+						organizationId: organization.id,
+						sourceId: team.id,
+						sourceType: "team",
+						target: "team",
+						title: "Organization team updated",
+						updatedAt: team.updatedAt,
+					});
+				},
+				beforeDeleteTeam: async ({ team, organization }) => {
+					if (team.organizationId !== organization.id) {
+						throw new APIError("BAD_REQUEST", {
+							message: "Team does not belong to this organization.",
+						});
+					}
+				},
+				afterDeleteTeam: async ({ team, organization }) => {
+					await notifyOrganizationHookActivity({
+						body: `${team.name} was deleted from ${organization.name}.`,
+						event: "team.deleted",
+						organizationId: organization.id,
+						sourceId: team.id,
+						sourceType: "team",
+						target: "team",
+						title: "Organization team deleted",
+					});
+				},
+				beforeAddTeamMember: async ({ organization, user }) => {
+					await rejectPersonalWorkspaceInvitation(
+						organization.id,
+						organization.metadata
+					);
+					requireVerifiedBusinessEmail(user);
+				},
+				afterAddTeamMember: async ({
+					team,
+					teamMember,
+					organization,
+					user,
+				}) => {
+					await notifyOrganizationHookActivity({
+						body: `${user.name || user.email} joined ${team.name}.`,
+						event: "team.member.added",
+						organizationId: organization.id,
+						sourceId: teamMember.id,
+						sourceType: "team-member",
+						target: "team-member",
+						title: "Team member added",
+						updatedAt: teamMember.createdAt,
+					});
+				},
+				beforeRemoveTeamMember: async ({ team, teamMember }) => {
+					if (teamMember.teamId !== team.id) {
+						throw new APIError("BAD_REQUEST", {
+							message: "Team member does not belong to this team.",
+						});
+					}
+				},
+				afterRemoveTeamMember: async ({
+					team,
+					teamMember,
+					organization,
+					user,
+				}) => {
+					await notifyOrganizationHookActivity({
+						body: `${user.name || user.email} left ${team.name}.`,
+						event: "team.member.removed",
+						organizationId: organization.id,
+						sourceId: teamMember.id,
+						sourceType: "team-member",
+						target: "team-member",
+						title: "Team member removed",
+						updatedAt: teamMember.createdAt,
+					});
+				},
+				afterRemoveMember: async ({ member, organization, user }) => {
 					// Leaving/removing a member releases access capacity only. The Polar
 					// quantity stays exactly as purchased until billing explicitly changes it.
 					await releaseSeatClaims({
 						organizationId: member.organizationId,
 						userId: String(member.userId),
+					});
+					await notifyOrganizationHookActivity({
+						body: `${user.name || user.email} left ${organization.name}.`,
+						event: "member.removed",
+						organizationId: member.organizationId,
+						sourceId: member.id,
+						sourceType: "member",
+						target: "member",
+						title: "Organization member removed",
+						updatedAt: member.updatedAt,
 					});
 				},
 				afterDeleteOrganization: async ({ organization }) => {
@@ -2840,14 +3210,6 @@ export const auth = betterAuth({
 			// Providing this implementation enables member invitations. The invite
 			// link lands on the web org shell where the invitee accepts.
 			sendInvitationEmail: async (data) => {
-				const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3001";
-				const invitationPath = `/organizations/accept-invitation/${encodeURIComponent(data.id)}`;
-				const inviteUrl = `${frontendUrl}${invitationPath}`;
-				const signUpUrl = `${frontendUrl}/login?view=signup&callback=${encodeURIComponent(invitationPath)}`;
-				const referralTag = normalizeReferralTag(
-					(data.invitation as { referralTag?: unknown } | undefined)
-						?.referralTag
-				);
 				if (
 					!(await isOrganizationNotificationEnabled(
 						data.organization.id,
@@ -2856,14 +3218,21 @@ export const auth = betterAuth({
 				) {
 					return;
 				}
-				let hasRyuAccount = false;
+				const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3001";
+				const invitationPath = `/organizations/accept-invitation/${encodeURIComponent(data.id)}`;
+				const inviteUrl = `${frontendUrl}${invitationPath}`;
+				const signUpUrl = `${frontendUrl}/login?view=signup&callback=${encodeURIComponent(invitationPath)}`;
+				const referralTag = normalizeReferralTag(
+					(data.invitation as { referralTag?: unknown } | undefined)
+						?.referralTag
+				);
+				let recipientUserId: string | null = null;
 				try {
-					hasRyuAccount = Boolean(
-						await User.findOne(
-							{ email: data.email.trim().toLowerCase() },
-							"_id"
-						)
+					const recipient = await User.findOne(
+						{ email: data.email.trim().toLowerCase() },
+						"_id"
 					);
+					recipientUserId = recipient ? String(recipient._id) : null;
 				} catch (error) {
 					// A classification failure should not discard a valid invitation.
 					// The new-account flow is safe: signup returns to the invitation,
@@ -2872,6 +3241,34 @@ export const auth = betterAuth({
 						"Failed to classify organization invitation recipient:",
 						error
 					);
+				}
+				if (
+					recipientUserId &&
+					!(await isUserNotificationChannelEnabled(
+						recipientUserId,
+						"organization-invitation",
+						"email"
+					))
+				) {
+					return;
+				}
+				const hasRyuAccount = Boolean(recipientUserId);
+				let teamName: string | undefined;
+				const teamId =
+					typeof data.invitation.teamId === "string"
+						? data.invitation.teamId.split(",")[0]?.trim()
+						: undefined;
+				if (teamId) {
+					try {
+						const team = await Team.findById(teamId)
+							.select("name")
+							.lean<{ name?: string }>();
+						teamName = team?.name;
+					} catch (error) {
+						// Team context is helpful copy only; a lookup failure must not
+						// prevent the native Better Auth invitation email from sending.
+						console.error("Failed to resolve invitation team name:", error);
+					}
 				}
 				try {
 					await sendEmail({
@@ -2886,6 +3283,7 @@ export const auth = betterAuth({
 									organizationName: data.organization.name,
 									inviteUrl,
 									referralTag,
+									teamName,
 								})
 							: OrganizationInvitationNewAccountEmail({
 									invitedByName:
@@ -2893,6 +3291,7 @@ export const auth = betterAuth({
 									organizationName: data.organization.name,
 									signUpUrl,
 									referralTag,
+									teamName,
 								}),
 					});
 				} catch (error) {

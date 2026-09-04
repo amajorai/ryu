@@ -12,7 +12,11 @@
 // button. Everything degrades cleanly when not signed in, when there is no active
 // org, or when billing is not configured.
 
-import { CREDIT_POOLS, type CreditPoolTier } from "@ryu/auth/lib/credit-pools";
+import {
+	CREDIT_POOLS,
+	type CreditPoolTier,
+	isCreditPoolId,
+} from "@ryu/auth/lib/credit-pools";
 import {
 	type CreditGrantPoolView,
 	type CreditLedgerRow,
@@ -68,6 +72,12 @@ const POOL_SPENDABLE_ON: Partial<Record<CreditPoolTier, string>> = {
 	free: "Fast, everyday models",
 	frontier: "The most capable models",
 };
+
+function spendableOnForPool(poolId: string): string | undefined {
+	return isCreditPoolId(poolId)
+		? POOL_SPENDABLE_ON[CREDIT_POOLS[poolId].tier]
+		: undefined;
+}
 
 /** `null` for a missing or unparseable timestamp — a grant with no readable
  *  expiry renders as one with no expiry, never as "Invalid Date". */
@@ -198,9 +208,7 @@ export default function CreditsPage() {
 				label: pool.label,
 				remainingMicroUsd: pool.remainingMicroUsd,
 				isFreeProvider: pool.isFreeProvider,
-				spendableOn: pool.poolId
-					? POOL_SPENDABLE_ON[CREDIT_POOLS[pool.poolId].tier]
-					: undefined,
+				spendableOn: pool.poolId ? spendableOnForPool(pool.poolId) : undefined,
 				expiresAtLabel: formatExpiry(pool.expiresAt),
 			})),
 		[grantPools]
@@ -268,7 +276,19 @@ export default function CreditsPage() {
 					wallet
 						? {
 								balanceMicroUsd: wallet.balanceMicroUsd,
+								balanceBreakdownAvailable: wallet.balanceBreakdownAvailable,
 								currency: wallet.currency,
+								providerAllocations: wallet.providerAllocations?.map(
+									(allocation) => ({
+										expiresAtLabel: formatExpiry(allocation.expiresAt),
+										id: allocation.poolId,
+										isFreeProvider: allocation.isFreeProvider,
+										label: allocation.label,
+										remainingMicroUsd: allocation.remainingMicroUsd,
+										spendableOn: spendableOnForPool(allocation.poolId),
+									})
+								),
+								source: wallet.source,
 								subscriptionBalanceMicroUsd: wallet.subscriptionBalanceMicroUsd,
 								topupBalanceMicroUsd: wallet.topupBalanceMicroUsd,
 							}

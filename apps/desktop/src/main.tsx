@@ -3,6 +3,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
+import { LanguagePackBridge } from "./components/LanguagePackBridge.tsx";
 // Imported here rather than via `@import` in index.css: Tailwind v4 inlines an
 // `@import`ed package's CSS without rebasing its relative url()s, which left the
 // woff2 files unemitted and the fonts 404ing in release builds. See index.css.
@@ -36,7 +37,9 @@ installHorizontalWheelScrolling(document);
 createRoot(root).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>
-			<App hostSurface="desktop" />
+			<LanguagePackBridge>
+				<App hostSurface="desktop" />
+			</LanguagePackBridge>
 		</QueryClientProvider>
 	</StrictMode>
 );

@@ -25,6 +25,28 @@
 import { HORIZONTAL_WHEEL_SCROLL_SCRIPT } from "./horizontal-wheel-scroll-script.ts";
 import { handshakeAnnounceScript } from "./rpc.ts";
 
+const I18N_BRIDGE = `i18n: {
+  get: function () { return call("i18n.get", []); },
+  translate: function (a) { return call("i18n.translate", [a || {}]); },
+  subscribe: function (opts) {
+    opts = opts || {};
+    var h = callStream("i18n.subscribe", [{}], function (d) {
+      try {
+        if (opts.onChange) opts.onChange(JSON.parse(d));
+      } catch (e) {}
+    });
+    h.promise.catch(function () {});
+    return { dispose: h.cancel };
+  }
+}`;
+
+function indentGeneratedScript(value: string, prefix: string): string {
+	return value
+		.split("\n")
+		.map((line) => `${prefix}${line}`)
+		.join("\n");
+}
+
 /** Build a third-party plugin's sandboxed document.
  *
  *  @param nonce        Host-generated per-mount nonce (e.g. `crypto.randomUUID()`),
@@ -183,6 +205,7 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
       var plugin = {
         host: {
           capabilities: function () { return call("host.capabilities", []); },
+${indentGeneratedScript(I18N_BRIDGE, "          ")},
           node: {
             shareOrigins: function () { return call("node.shareOrigins", []); }
           },
@@ -294,6 +317,7 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
       var ryu = {
         host: {
           capabilities: function () { return call("host.capabilities", []); },
+${indentGeneratedScript(I18N_BRIDGE, "          ")},
           native: {
             haptics: function (a) { return call("native.haptics", [a || {}]); },
             notifications: {
@@ -304,6 +328,7 @@ ${HORIZONTAL_WHEEL_SCROLL_SCRIPT}
             }
           }
         },
+${indentGeneratedScript(I18N_BRIDGE, "        ")},
         listAgents: function () { return call("core.listAgents", []); },
         // Secret-free provider/model/agent/app/hook metadata for shared Ryu pickers.
         catalog: {
@@ -926,9 +951,13 @@ function htmlCompanionHeadFragment(
     // during first render queues into the outbox instead of throwing. Identical
     // surface to the Path A installWindowRyu().
     var ryu = {
+      host: {
+${indentGeneratedScript(I18N_BRIDGE, "        ")}
+      },
       node: {
         shareOrigins: function () { return call("node.shareOrigins", []); }
       },
+${indentGeneratedScript(I18N_BRIDGE, "      ")},
       listAgents: function () { return call("core.listAgents", []); },
       // Secret-free provider/model/agent/app/hook metadata for shared Ryu pickers.
       catalog: {

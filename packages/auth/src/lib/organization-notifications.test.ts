@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test";
 const sent: { subject: string; to: string }[] = [];
 const inbox: { dedupeKey: string; userId: string }[] = [];
 const claimed = new Set<string>();
+const delivered = new Set<string>();
 let enabled = true;
 
 beforeAll(() => {
@@ -35,6 +36,9 @@ beforeAll(() => {
 		roleSatisfies: (role: string, required: string) =>
 			(required === "admin" && (role === "owner" || role === "admin")) ||
 			role === required,
+		OrgRoleModel: { find: () => Promise.resolve([]) },
+		RoleAssignment: { find: () => Promise.resolve([]) },
+		resolveEffectivePermissions: () => [],
 	}));
 	mock.module("@ryu/db/models/billing-email.model", () => ({
 		BillingEmailDelivery: {
@@ -59,6 +63,29 @@ beforeAll(() => {
 	}));
 	mock.module("@ryu/db/models/organization-notification.model", () => ({
 		isOrganizationNotificationEnabled: () => Promise.resolve(enabled),
+		organizationNotificationRecipientRoles: () =>
+			Promise.resolve(["owner", "admin"]),
+	}));
+	mock.module("./user-notification-delivery.ts", () => ({
+		deliverUserNotificationEmail: async (input: {
+			dedupeKey: string;
+			email?: string;
+			organizationKind?: string;
+		}) => {
+			if (
+				input.organizationKind &&
+				enabled &&
+				!delivered.has(`${input.dedupeKey}:${input.email ?? ""}`)
+			) {
+				delivered.add(`${input.dedupeKey}:${input.email ?? ""}`);
+				sent.push({
+					subject: "organization event",
+					to: input.email ?? "",
+				});
+			}
+			return enabled;
+		},
+		shouldStoreUserNotificationInApp: () => Promise.resolve(true),
 	}));
 	mock.module("@ryu/email", () => ({
 		OrganizationActivityEmail: (props: Record<string, unknown>) => props,

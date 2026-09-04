@@ -21,6 +21,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
@@ -140,6 +141,8 @@ export function StoreSectionTabs({
 	onSelect?: (value: string) => void;
 	sections: StoreSectionTab[];
 }) {
+	const i18n = useOptionalI18n();
+	const localizedSectionsLabel = useLocalizedString("Sections");
 	return (
 		<Tabs
 			className={cn("w-full min-w-0", className)}
@@ -147,7 +150,7 @@ export function StoreSectionTabs({
 			value={active}
 		>
 			<TabsList
-				aria-label="Sections"
+				aria-label={localizedSectionsLabel}
 				className="w-full flex-nowrap"
 				data-slot="store-section-tabs-scroller"
 				manageLayout={false}
@@ -166,7 +169,10 @@ export function StoreSectionTabs({
 							) : null}
 							<TabsTrigger className="shrink-0 gap-1.5" value={s.value}>
 								<SectionTabIcon icon={s.icon} iconNode={s.iconNode} />
-								<span className="whitespace-nowrap">{s.label}</span>
+								<span className="whitespace-nowrap">
+									{i18n?.t(`marketplace.section.${s.value}`, {}, s.label) ??
+										s.label}
+								</span>
 								{s.count === undefined ? null : (
 									<span
 										className="text-muted-foreground tabular-nums"
@@ -220,6 +226,7 @@ export function StoreGlobalSearch({
 	trailing?: ReactNode;
 	value: string;
 }) {
+	const localizedPlaceholder = useLocalizedString(placeholder);
 	return (
 		<div className={cn("flex w-full min-w-0 items-center gap-2", className)}>
 			<div
@@ -234,7 +241,7 @@ export function StoreGlobalSearch({
 					icon={Search01Icon}
 				/>
 				<input
-					aria-label={placeholder}
+					aria-label={localizedPlaceholder}
 					// `type=search` for the semantics (role=searchbox), with the native
 					// WebKit clear glyph suppressed — the row already has an explicit
 					// Clear button, and two clear affordances in one field is chrome the
@@ -247,7 +254,7 @@ export function StoreGlobalSearch({
 							onChange("");
 						}
 					}}
-					placeholder={placeholder}
+					placeholder={localizedPlaceholder}
 					type="search"
 					value={value}
 				/>
@@ -289,6 +296,8 @@ export function StoreSearchButton({
 	placeholder?: string;
 	value: string;
 }) {
+	const localizedPlaceholder = useLocalizedString(placeholder);
+	const localizedSearch = useLocalizedString("Search");
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -332,7 +341,7 @@ export function StoreSearchButton({
 				variant={expanded ? "secondary" : "ghost"}
 			>
 				<HugeiconsIcon className="size-3.5" icon={Search01Icon} />
-				{expanded ? null : "Search"}
+				{expanded ? null : localizedSearch}
 			</Button>
 			<div
 				className={cn(
@@ -345,7 +354,7 @@ export function StoreSearchButton({
 						aria-hidden={!expanded}
 						className="h-8 w-56 max-w-[40vw] border-none bg-transparent shadow-none focus-visible:ring-0"
 						onChange={(e) => onChange(e.target.value)}
-						placeholder={placeholder}
+						placeholder={localizedPlaceholder}
 						ref={inputRef}
 						tabIndex={expanded ? 0 : -1}
 						value={value}
@@ -379,22 +388,37 @@ export function StoreComingSoon({
 	label: string;
 	onBrowse?: () => void;
 }) {
+	const i18n = useOptionalI18n();
 	return (
 		<Empty className="h-full">
 			<EmptyHeader>
 				<EmptyMedia variant="icon">
 					<HugeiconsIcon icon={icon} />
 				</EmptyMedia>
-				<EmptyTitle>{label} coming soon</EmptyTitle>
+				<EmptyTitle>
+					{i18n?.t(
+						"marketplace.coming-soon",
+						{ label },
+						`${label} coming soon`
+					) ?? `${label} coming soon`}
+				</EmptyTitle>
 				<EmptyDescription>
-					Browsing and installing {label.toLowerCase()} from the Store is on the
-					way.
+					{i18n?.t(
+						"marketplace.coming-soon-description",
+						{ label: label.toLowerCase() },
+						`Browsing and installing ${label.toLowerCase()} from the Store is on the way.`
+					) ??
+						`Browsing and installing ${label.toLowerCase()} from the Store is on the way.`}
 				</EmptyDescription>
 			</EmptyHeader>
 			{onBrowse ? (
 				<EmptyContent>
 					<Button onClick={onBrowse} size="sm">
-						Browse the Store home
+						{i18n?.t(
+							"marketplace.browse-home",
+							undefined,
+							"Browse the Store home"
+						) ?? "Browse the Store home"}
 					</Button>
 				</EmptyContent>
 			) : null}
@@ -423,19 +447,25 @@ export function StoreItemAction({
 	onUninstall?: () => void;
 	onRetry?: () => void;
 }) {
+	const i18n = useOptionalI18n();
 	if (state === "installing") {
 		return (
 			<span className="flex items-center gap-2 text-muted-foreground text-xs">
-				<Spinner className="size-3.5" /> {progressLabel ?? "Adding…"}
+				<Spinner className="size-3.5" />{" "}
+				{progressLabel ??
+					i18n?.t("marketplace.adding", undefined, "Adding…") ??
+					"Adding…"}
 			</span>
 		);
 	}
 	if (state === "installed") {
 		return (
 			<div className="flex items-center gap-2">
-				<Badge variant="secondary">Added</Badge>
+				<Badge variant="secondary">
+					{i18n?.t("common.added", undefined, "Added") ?? "Added"}
+				</Badge>
 				<Button onClick={onUninstall} size="sm" variant="ghost">
-					Remove
+					{i18n?.t("common.remove") ?? "Remove"}
 				</Button>
 			</div>
 		);
@@ -443,9 +473,11 @@ export function StoreItemAction({
 	if (state === "failed") {
 		return (
 			<div className="flex items-center gap-2">
-				<Badge variant="destructive">Failed</Badge>
+				<Badge variant="destructive">
+					{i18n?.t("common.failed", undefined, "Failed") ?? "Failed"}
+				</Badge>
 				<Button onClick={onRetry} size="sm" variant="ghost">
-					Retry
+					{i18n?.t("common.retry") ?? "Retry"}
 				</Button>
 			</div>
 		);
@@ -457,7 +489,7 @@ export function StoreItemAction({
 			size="sm"
 			variant="ghost"
 		>
-			Add
+			{i18n?.t("common.add") ?? "Add"}
 		</Button>
 	);
 }

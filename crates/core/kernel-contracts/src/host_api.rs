@@ -52,7 +52,7 @@ use serde::Serialize;
 /// `1.y` (y ≥ x) kernel unchanged. The `ryu-plugin-ready` handshake carries this
 /// value as `hostApiVersion`; the host accepts a missing value (legacy) this
 /// major and only annotates it (no rejection).
-pub const HOST_API_VERSION: &str = "1.10.0";
+pub const HOST_API_VERSION: &str = "1.11.0";
 
 /// One method in the host↔plugin RPC surface — the row type of the single-sourced
 /// `method → capability → grant` table.
@@ -95,13 +95,20 @@ const fn m(
 }
 
 /// The canonical host-API method table. The union of the TS app host's
-/// `METHOD_CAPABILITY` (138 methods) and the Rust bridge's `view.action`
+/// `METHOD_CAPABILITY` (141 methods) and the Rust bridge's `view.action`
 /// (Rust-only). Serialised to `schemas/host-api.json` for the TS host to consume.
 pub const HOST_API_METHODS: &[HostApiMethod] = &[
     // Local browser/native host capabilities. These rows are intentionally
     // grant-free; the host decides whether the concrete surface can provide
     // them, while the contract still keeps the method vocabulary closed.
     m("host.capabilities", "host.capabilities", None, false, true),
+    // Read-only locale and translation primitives. These are local host
+    // capabilities: a plugin can ask how the shell is speaking, translate its
+    // own namespaced messages with an explicit English fallback, and subscribe
+    // to locale changes. No user data, network, or manifest grant is involved.
+    m("i18n.get", "i18n", None, false, true),
+    m("i18n.translate", "i18n", None, false, true),
+    m("i18n.subscribe", "i18n", None, true, true),
     // Secret-free active-node origins for apps that need to create a link to
     // the node. The host filters loopback/wildcard addresses and never returns
     // node credentials, user JWTs, or cookies.

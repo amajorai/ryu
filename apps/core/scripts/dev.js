@@ -123,6 +123,18 @@ for (const name of sidecarBins) {
 	}
 }
 
+// Core starts its local Gateway as a managed child. Prefer the Gateway built in
+// the same shared target directory so `bun dev` cannot silently launch an older
+// release binary from `~/.ryu/bin` with a stale grant policy or route contract.
+const gatewayBin = path.join(sharedTarget, "debug", `ryu-gateway${binExt}`);
+if (existsSync(gatewayBin)) {
+	process.env.RYU_GATEWAY_BIN = gatewayBin;
+} else {
+	console.warn(
+		`[dev] shared ryu-gateway binary not found at ${gatewayBin}; Core will resolve it from PATH`
+	);
+}
+
 // Browser: point RYU_BROWSER_BIN at the dev launcher that runs the electron-vite
 // build. Only wire it if the build output exists — otherwise Core would spawn a
 // launcher that immediately fails. Build it with:

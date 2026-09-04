@@ -105,6 +105,7 @@ export const MARKETPLACE_BROWSE_KINDS = [
 	{ value: "stack_template", label: "Stack Templates" },
 	{ value: "workflow", label: "Workflows" },
 	{ value: "theme", label: "Themes" },
+	{ value: "language_pack", label: "Language Packs" },
 	{ value: "space", label: "Spaces" },
 	{ value: "profile", label: "Profiles" },
 	{ value: "output_style", label: "Output Styles" },

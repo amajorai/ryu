@@ -5,7 +5,11 @@
     "RYU_PROFILE",
     "RYU_KEYCHAIN",
     "RYU_DIR",
-    "RYU_MASTER_KEY"
+    "RYU_MASTER_KEY",
+    "NEXT_PUBLIC_CORE_URL",
+    "DATABASE_URL",
+    "ADMIN_EMAILS",
+    "RYU_FEATURE_FLAGS"
   ],
   "tasks": {
     "build": {

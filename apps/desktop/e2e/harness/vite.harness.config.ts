@@ -157,6 +157,14 @@ export default defineConfig({
 					harnessDir,
 					"onboarding-choose-story.html"
 				),
+				nodePersonalization: path.resolve(
+					harnessDir,
+					"node-personalization-story.html"
+				),
+				nodeOnboardingSettings: path.resolve(
+					harnessDir,
+					"node-onboarding-settings-story.html"
+				),
 				onboardingDefaultsProfile: path.resolve(
 					harnessDir,
 					"onboarding-defaults-profile-proof.html"
@@ -241,6 +249,10 @@ export default defineConfig({
 				orgBillingContext: path.resolve(
 					harnessDir,
 					"org-billing-context-proof.html"
+				),
+				polarCreditBalanceProof: path.resolve(
+					harnessDir,
+					"polar-credit-balance-proof.html"
 				),
 				buttonLabelOverflow: path.resolve(
 					harnessDir,

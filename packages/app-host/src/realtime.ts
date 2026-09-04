@@ -54,6 +54,31 @@ export type RealtimeAppConnection = TokenTableConnection;
 export type RealtimeAppConnectHandlers = TokenTableConnectHandlers;
 export type RealtimeAppApi = TokenTableApi;
 
+/** Generic app-facing locale primitive installed alongside realtime. */
+export interface RyuCompanionI18n {
+	get(): Promise<{
+		direction: "ltr" | "rtl";
+		locale: string;
+		packId: string | null;
+		packName: string | null;
+		packVersion: string | null;
+	}>;
+	subscribe(options: {
+		onChange: (snapshot: {
+			direction: "ltr" | "rtl";
+			locale: string;
+			packId: string | null;
+			packName: string | null;
+			packVersion: string | null;
+		}) => void;
+	}): { dispose(): void };
+	translate(input: {
+		defaultMessage: string;
+		id: string;
+		values?: Record<string, string | number | boolean | null>;
+	}): Promise<string>;
+}
+
 export interface RealtimeResourceChannel {
 	close(): Promise<void>;
 	publishChanged(data?: unknown): Promise<void>;
@@ -116,6 +141,7 @@ export async function openRealtimeResource(
 }
 
 export interface RyuCompanionWindowApi {
+	i18n?: RyuCompanionI18n;
 	node?: {
 		shareOrigins(): Promise<RyuNodeShareOrigin[]>;
 	};

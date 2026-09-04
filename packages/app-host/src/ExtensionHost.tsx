@@ -285,6 +285,8 @@ export function ExtensionHost({
 					bindShellStream(servicesRef.current.shellRegisterTabIcon);
 				} else if (req.method === "shell.eventsSubscribe") {
 					bindShellStream(servicesRef.current.shellEventsSubscribe);
+				} else if (req.method === "i18n.subscribe") {
+					bindShellStream(servicesRef.current.i18nSubscribe);
 				} else if (req.method === "finetune.stream") {
 					const arg = asFinetuneIdArg(req.args[0]);
 					const svc = servicesRef.current.finetuneStream;

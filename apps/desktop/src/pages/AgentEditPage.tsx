@@ -11,6 +11,14 @@ import {
 	buildAgentIntegrationSnippet,
 	buildGitHubActionsSnippet,
 } from "@ryu/blocks/desktop/agent-integration-snippets";
+import {
+	ScorecardBadge,
+	ScorecardPanel,
+} from "@ryu/marketplace/catalog/detail/scorecard-panel";
+import {
+	type AgentHealthInput,
+	runAgentScorecard,
+} from "@ryu/marketplace/catalog/scorecard";
 import { Badge } from "@ryu/ui/components/badge.tsx";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Checkbox } from "@ryu/ui/components/checkbox.tsx";
@@ -387,6 +395,16 @@ function saveBlockedMessage(
 		return "This agent is not installed yet. Add it from the agent catalog before selecting it here.";
 	}
 	return null;
+}
+
+// This is an advisory signal for the local scorecard, not an authorization
+// check. Core and Gateway remain the authorities that classify and enforce tool
+// effects; the editor only helps a person notice a broad or write-capable setup.
+const HIGH_IMPACT_TOOL_RE =
+	/(?:^|[._:-])(write|delete|remove|update|create|send|publish|execute|exec|run|post|patch|put)(?:$|[._:-])/i;
+
+function isHighImpactTool(toolName: string): boolean {
+	return HIGH_IMPACT_TOOL_RE.test(toolName);
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: legacy component
@@ -1458,6 +1476,97 @@ export default function AgentEditPage({
 		weeklyTime
 	);
 	const selectedToolsList = Array.from(selectedTools);
+	const enabledSkillCount = availableSkills.filter(
+		(skill) => skill.enabled
+	).length;
+	const runtimeStatus: AgentHealthInput["runtime"]["status"] = chatModel
+		? selectedUninstalledAgent
+			? "unavailable"
+			: chatModel === ACP_CUSTOM_ENGINE
+				? acpCommand.trim()
+					? "custom"
+					: "missing"
+				: "ready"
+		: "missing";
+	const agentHealthInput = useMemo<AgentHealthInput>(
+		() => ({
+			access: {
+				composioActionCount: selectedComposio.size,
+				highImpactCount:
+					selectedToolsList.filter(isHighImpactTool).length +
+					selectedComposio.size +
+					selectedIdentities.size +
+					(memoryWriteEnabled ? 1 : 0),
+				identityProfileCount: selectedIdentities.size,
+			},
+			automation: {
+				scheduleEnabled,
+				triggerCount: triggerSubs.length,
+			},
+			description,
+			instructions: systemPrompt,
+			lifecycleStatus,
+			memoryWriteEnabled,
+			model: {
+				configured: Boolean(agentModel.trim()),
+				required: chatModel !== ACP_CUSTOM_ENGINE,
+			},
+			name,
+			runtime: {
+				label: modelLabel,
+				status: runtimeStatus,
+			},
+			safetyProfile,
+			skills: {
+				allSelected:
+					enabledSkillCount > 0 &&
+					selectedSkills.size === enabledSkillCount &&
+					availableSkills
+						.filter((skill) => skill.enabled)
+						.every((skill) => selectedSkills.has(skill.id)),
+				availableCount: enabledSkillCount,
+				loaded: !skillsLoading,
+				selectedCount: selectedSkills.size,
+			},
+			tools: {
+				allSelected:
+					availableTools.length > 0 &&
+					selectedTools.size === availableTools.length &&
+					availableTools.every((tool) => selectedTools.has(tool)),
+				availableCount: availableTools.length,
+				loaded: !toolsLoading,
+				selectedCount: selectedTools.size,
+			},
+		}),
+		[
+			agentModel,
+			availableSkills,
+			availableTools,
+			chatModel,
+			description,
+			enabledSkillCount,
+			lifecycleStatus,
+			memoryWriteEnabled,
+			modelLabel,
+			name,
+			runtimeStatus,
+			safetyProfile,
+			selectedComposio,
+			selectedIdentities,
+			selectedSkills,
+			selectedTools,
+			selectedToolsList,
+			scheduleEnabled,
+			skillsLoading,
+			systemPrompt,
+			toolsLoading,
+			triggerSubs.length,
+		]
+	);
+	const agentHealthScorecard = useMemo(
+		() => runAgentScorecard(agentHealthInput),
+		[agentHealthInput]
+	);
 
 	// Save stays disabled until an engine exists to run the agent. Explain the
 	// dead end on-screen instead of leaving the button silently greyed out.
@@ -1634,6 +1743,22 @@ export default function AgentEditPage({
 								<AgentSmartRouteOverride agentId={agentId} />
 							</div>
 						) : null
+					}
+					healthBadge={<ScorecardBadge scorecard={agentHealthScorecard} />}
+					healthPanel={
+						<ScorecardPanel
+							dataTestId="agent-health-scorecard"
+							disclaimer={
+								<p className="text-muted-foreground text-xs leading-relaxed">
+									These checks update as you edit the agent. They inspect its
+									configuration only; they do not run the agent or replace Core
+									and Gateway authorization.
+								</p>
+							}
+							rulesetLabel="Agent ruleset"
+							scorecard={agentHealthScorecard}
+							title="Agent health"
+						/>
 					}
 					historyPanel={
 						isNew || !agentId ? null : <AgentRunHistoryView agentId={agentId} />

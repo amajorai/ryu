@@ -75,7 +75,7 @@ windows = { version = "0.59", features = [
 ] }
 
 # macOS: re-add the native titled style mask so the traffic-light buttons exist
-# before decorum positions them (see `configure_macos_titlebar` in lib.rs).
+# in the transparent shell (see `apply_macos_titlebar_mask` in lib.rs).
 # Pinned to 0.25 to share the same build decorum already links.
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.25"

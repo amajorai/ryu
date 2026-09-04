@@ -35,6 +35,7 @@ import {
 	type ChatSendResult,
 	type CryptoStatus,
 	capabilitiesFromGrants,
+	createI18nHostServices,
 	type HostServices,
 	isShellSafeRoute,
 	type MailInbox,
@@ -55,6 +56,7 @@ import {
 	createScopedToastHost,
 	createSileoToastRenderer,
 } from "@ryu/app-host/toast-host";
+import { useI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import {
 	Empty,
@@ -626,6 +628,7 @@ export function PluginHostPanel({
 }) {
 	const node = useActiveNode();
 	const getActiveNode = useActiveNodeGetter();
+	const i18n = useI18n();
 	const { distributeInstalledSkill } = useSkillDistributionFlow();
 	const [connected, setConnected] = useState(false);
 	const realtimeSessionsRef = useRef(
@@ -800,6 +803,7 @@ export function PluginHostPanel({
 	// path (anti-phishing), rejecting system/other-plugin paths.
 	const services = useMemo<HostServices>(
 		() => ({
+			...createI18nHostServices(i18n),
 			openExternal: ({ href }) => openExternal(href),
 			uiToastDismiss: (input) => toastHost.dismiss(input),
 			uiToastShow: (input) => toastHost.show(input),
@@ -2104,6 +2108,7 @@ export function PluginHostPanel({
 			currentTabId,
 			meId,
 			getActiveNode,
+			i18n,
 			toastHost,
 		]
 	);

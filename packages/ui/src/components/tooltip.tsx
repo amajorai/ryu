@@ -1,6 +1,7 @@
 "use client";
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import { useLocalizedText } from "@ryu/i18n/react";
 
 import { cn } from "@ryu/ui/lib/utils.ts";
 
@@ -38,6 +39,7 @@ function TooltipContent({
 		TooltipPrimitive.Positioner.Props,
 		"align" | "alignOffset" | "side" | "sideOffset"
 	>) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<TooltipPrimitive.Portal>
 			<TooltipPrimitive.Positioner
@@ -55,7 +57,7 @@ function TooltipContent({
 					data-slot="tooltip-content"
 					{...props}
 				>
-					{children}
+					{localizedChildren}
 				</TooltipPrimitive.Popup>
 			</TooltipPrimitive.Positioner>
 		</TooltipPrimitive.Portal>

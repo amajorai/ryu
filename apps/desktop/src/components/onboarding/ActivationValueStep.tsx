@@ -17,10 +17,23 @@ const HIRING_COSTS = [
 ] as const;
 
 export function ActivationValueStep({
+	organizationPlan = false,
 	onContinue,
 }: {
+	organizationPlan?: boolean;
 	onContinue: () => void;
 }) {
+	const offer = organizationPlan
+		? {
+				amount: "$50",
+				cadence: "first month",
+				recurring: "$250/month from month two",
+			}
+		: {
+				amount: "$49",
+				cadence: "per month for one person",
+				recurring: "Choose Max later if you need more capacity",
+			};
 	return (
 		<ActivationStepShell
 			subtitle="Ryu fits into the tools you already use, so the work can start without a new operating system."
@@ -56,13 +69,13 @@ export function ActivationValueStep({
 								Start with Ryu
 							</div>
 							<div className="font-heading font-medium text-4xl tracking-tight">
-								$50
+								{offer.amount}
 							</div>
-							<p className="text-muted-foreground text-sm">first month</p>
+							<p className="text-muted-foreground text-sm">{offer.cadence}</p>
 							<div className="my-4 h-px bg-border/70" />
 							<div className="flex items-center gap-2 font-medium text-sm">
 								<Check className="size-4 text-success" />
-								$250/month from month two
+								{offer.recurring}
 							</div>
 						</div>
 					</div>

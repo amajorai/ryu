@@ -59,6 +59,7 @@ export type GatewaySection =
 	// Its upload ceiling moved onto "storage".
 	| "updates"
 	| "health"
+	| "onboarding"
 	| "danger";
 
 interface GatewayDialogState {

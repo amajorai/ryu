@@ -1,19 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { User } from "@ryu/db/models/auth.model";
-import { BillingEmailDelivery } from "@ryu/db/models/billing-email.model";
 import {
 	Member,
 	mapBaRole,
+	OrgRoleModel,
+	type Permission,
+	RoleAssignment,
+	resolveEffectivePermissions,
 	roleSatisfies,
 } from "@ryu/db/models/control-plane.model";
 import { PlatformInboxNotification } from "@ryu/db/models/inbox-notification.model";
 import {
 	isOrganizationNotificationEnabled,
 	type OrganizationNotificationKind,
+	organizationNotificationRecipientRoles,
 } from "@ryu/db/models/organization-notification.model";
-import { OrganizationActivityEmail, sendEmail } from "@ryu/email";
+import { OrganizationActivityEmail } from "@ryu/email";
+import {
+	deliverUserNotificationEmail,
+	shouldStoreUserNotificationInApp,
+} from "./user-notification-delivery.ts";
 
-const STALE_CLAIM_MS = 15 * 60 * 1000;
 const MAX_EMAIL = 320;
 const MAX_ID = 300;
 const MAX_TEXT = 600;
@@ -64,6 +71,13 @@ interface UserLike {
 	email?: unknown;
 }
 
+interface RoleAssignmentLike {
+	organizationId?: unknown;
+	roleKey?: unknown;
+	teamId?: unknown;
+	userId?: unknown;
+}
+
 const text = (value: unknown, max: number): string =>
 	typeof value === "string" ? value.trim().slice(0, max) : "";
 
@@ -108,7 +122,11 @@ export function organizationAppUrl(path: string): string {
  * organization mail to an arbitrary address.
  */
 export async function resolveOrganizationRecipients(
-	organizationIds: readonly string[]
+	organizationIds: readonly string[],
+	options: {
+		kind?: OrganizationNotificationKind;
+		roleKeys?: readonly string[];
+	} = {}
 ): Promise<OrganizationNotificationRecipient[]> {
 	const ids = uniqueStrings(organizationIds, MAX_ID);
 	if (ids.length === 0) {
@@ -118,17 +136,110 @@ export async function resolveOrganizationRecipients(
 	const members = (await Member.find({
 		organizationId: { $in: ids },
 	}).select("organizationId role userId")) as unknown as MemberLike[];
+	const kind = options.kind;
+	const rolesByOrganization = new Map<string, string[]>();
+	if (options.roleKeys) {
+		const roleKeys = uniqueStrings(options.roleKeys, 80);
+		for (const organizationId of ids) {
+			rolesByOrganization.set(organizationId, roleKeys);
+		}
+	} else if (kind) {
+		const configured = await Promise.all(
+			ids.map(async (organizationId) => {
+				try {
+					return [
+						organizationId,
+						(await organizationNotificationRecipientRoles(
+							organizationId,
+							kind
+						)) as string[],
+					] as const;
+				} catch {
+					return [organizationId, ["owner", "admin"]] as const;
+				}
+			})
+		);
+		for (const [organizationId, roleKeys] of configured) {
+			rolesByOrganization.set(organizationId, [...roleKeys]);
+		}
+	}
+
+	const hasCustomTarget = [...rolesByOrganization.values()].some((roles) =>
+		roles.some((role) => !["owner", "admin", "member", "viewer"].includes(role))
+	);
+	const customAssignments = hasCustomTarget
+		? ((await RoleAssignment.find({
+				organizationId: { $in: ids },
+				teamId: null,
+			}).select(
+				"organizationId userId roleKey teamId"
+			)) as unknown as RoleAssignmentLike[])
+		: [];
+	const customRoles = hasCustomTarget
+		? await OrgRoleModel.find({
+				organizationId: { $in: ids },
+				key: {
+					$in: [...rolesByOrganization.values()].flat(),
+				},
+				deletedAt: null,
+			})
+		: [];
+	const validCustomRoles = new Set(
+		customRoles.map(
+			(role) => `${text(role.organizationId, MAX_ID)}:${text(role.key, 80)}`
+		)
+	);
+	const assignmentsByMember = new Map<string, Set<string>>();
+	for (const assignment of customAssignments) {
+		const organizationId = text(assignment.organizationId, MAX_ID);
+		const userId = text(assignment.userId, MAX_ID);
+		const roleKey = text(assignment.roleKey, 80).toLowerCase();
+		if (
+			organizationId &&
+			userId &&
+			roleKey &&
+			validCustomRoles.has(`${organizationId}:${roleKey}`)
+		) {
+			const key = `${organizationId}:${userId}`;
+			const roles = assignmentsByMember.get(key) ?? new Set<string>();
+			roles.add(roleKey);
+			assignmentsByMember.set(key, roles);
+		}
+	}
+
+	const matchesRole = (rawRole: unknown, target: string): boolean => {
+		const role = mapBaRole(text(rawRole, 80));
+		if (target === "owner") {
+			return role === "owner";
+		}
+		if (target === "admin") {
+			return roleSatisfies(role, "admin");
+		}
+		if (target === "member") {
+			return roleSatisfies(role, "member");
+		}
+		if (target === "viewer") {
+			return true;
+		}
+		return false;
+	};
 	const organizationIdsByUser = new Map<string, Set<string>>();
 	for (const member of members) {
 		const userId = text(member.userId, MAX_ID);
 		const organizationId = text(member.organizationId, MAX_ID);
-		if (
-			!(
-				userId &&
-				organizationId &&
-				roleSatisfies(mapBaRole(text(member.role, 80)), "admin")
-			)
-		) {
+		const roleKeys = rolesByOrganization.get(organizationId) ?? [
+			"owner",
+			"admin",
+		];
+		const memberCustomRoles = assignmentsByMember.get(
+			`${organizationId}:${userId}`
+		);
+		const receives = roleKeys.some(
+			(roleKey) =>
+				matchesRole(member.role, roleKey) ||
+				Boolean(memberCustomRoles?.has(roleKey.toLowerCase()))
+		);
+		if (!(userId && organizationId && receives)) {
 			continue;
 		}
 		const memberOrganizations =
@@ -168,17 +279,109 @@ export async function resolveOrganizationRecipients(
 	);
 }
 
+/**
+ * Resolve organization members who hold a canonical Ryu permission. This is
+ * used for resources such as org-owned Agent Mail inboxes where membership
+ * alone is not a sufficient read boundary. Team-scoped role assignments do not
+ * grant access to an organization-wide resource.
+ */
+export async function resolveOrganizationPermissionRecipients(
+	organizationId: string,
+	permission: Permission
+): Promise<OrganizationNotificationRecipient[]> {
+	const members = (await Member.find({ organizationId }).select(
+		"organizationId role userId"
+	)) as unknown as MemberLike[];
+	if (members.length === 0) {
+		return [];
+	}
+	const userIds = uniqueStrings(
+		members.map((member) => text(member.userId, MAX_ID)),
+		MAX_ID
+	);
+	const assignments = (await RoleAssignment.find({
+		organizationId,
+		userId: { $in: userIds },
+		teamId: null,
+	}).select("userId roleKey teamId")) as unknown as RoleAssignmentLike[];
+	const roleKeys = uniqueStrings(
+		assignments.map((assignment) => text(assignment.roleKey, 80)),
+		80
+	);
+	const roles =
+		roleKeys.length > 0
+			? await OrgRoleModel.find({
+					organizationId,
+					key: { $in: roleKeys },
+					deletedAt: null,
+				})
+			: [];
+	const permissionsByRole = new Map(
+		roles.map((role) => [role.key, role.permissions as string[]])
+	);
+	const assignmentKeysByUser = new Map<string, Set<string>>();
+	for (const assignment of assignments) {
+		const userId = text(assignment.userId, MAX_ID);
+		const roleKey = text(assignment.roleKey, 80);
+		if (!(userId && permissionsByRole.has(roleKey))) {
+			continue;
+		}
+		const keys = assignmentKeysByUser.get(userId) ?? new Set<string>();
+		keys.add(roleKey);
+		assignmentKeysByUser.set(userId, keys);
+	}
+	const eligibleIds = members.flatMap((member) => {
+		const userId = text(member.userId, MAX_ID);
+		const assigned = [...(assignmentKeysByUser.get(userId) ?? new Set())].map(
+			(roleKey) => ({
+				permissions: permissionsByRole.get(roleKey) ?? [],
+				teamId: null,
+			})
+		);
+		const permissions = resolveEffectivePermissions({
+			assignedRoleDocs: assigned,
+			baRole: text(member.role, 80),
+		});
+		return permissions.includes(permission) ? [userId] : [];
+	});
+	if (eligibleIds.length === 0) {
+		return [];
+	}
+	const users = (await User.find({
+		_id: { $in: eligibleIds },
+	}).select("email")) as unknown as UserLike[];
+	const emailByUserId = new Map(
+		users.flatMap((user) => {
+			const userId = text(user._id, MAX_ID);
+			const email = normalizeEmail(user.email);
+			return userId && email ? [[userId, email] as const] : [];
+		})
+	);
+	return [...new Set(eligibleIds)].flatMap((userId) => {
+		const email = emailByUserId.get(userId);
+		return email ? [{ email, organizationIds: [organizationId], userId }] : [];
+	});
+}
+
 async function resolveExtraRecipient(
 	recipient: OrganizationNotificationExtraRecipient,
 	organizationIds: readonly string[]
 ): Promise<OrganizationNotificationRecipient | null> {
-	const userId = text(recipient.userId, MAX_ID);
+	let userId = text(recipient.userId, MAX_ID);
 	let email = normalizeEmail(recipient.email);
 	if (userId && !email) {
 		const user = (await User.findById(userId).select(
 			"email"
 		)) as UserLike | null;
 		email = normalizeEmail(user?.email);
+	} else if (!userId && email) {
+		// Resolve a registered invitee by address so their personal channel
+		// preference still applies. Unregistered invitees remain email-only and
+		// continue through the required Better Auth invitation path.
+		const user = (await User.findOne({ email }).select(
+			"_id"
+		)) as UserLike | null;
+		userId = text(user?._id, MAX_ID);
 	}
 	if (!email) {
 		return null;
@@ -266,118 +469,37 @@ function actionUrlFor(
 	return safeActionUrl(input.actionUrl);
 }
 
-async function claimEmailDelivery(input: {
-	dedupeKey: string;
-	kind: string;
-	organizationId: string | null;
-	recipient: string;
-}): Promise<boolean> {
-	const now = new Date();
-	const staleBefore = new Date(now.getTime() - STALE_CLAIM_MS);
-	const reclaimed = await BillingEmailDelivery.findOneAndUpdate(
-		{
-			dedupeKey: input.dedupeKey,
-			$or: [
-				{ status: "failed" },
-				{ claimedAt: { $lt: staleBefore }, status: "sending" },
-			],
-		},
-		{
-			$inc: { attempts: 1 },
-			$set: {
-				claimedAt: now,
-				lastError: null,
-				status: "sending",
-				updatedAt: now,
-			},
-		},
-		{ new: true }
-	);
-	if (reclaimed) {
-		return true;
-	}
-
-	try {
-		await BillingEmailDelivery.create({
-			claimedAt: now,
-			dedupeKey: input.dedupeKey,
-			kind: input.kind,
-			organizationId: input.organizationId,
-			recipient: input.recipient,
-			status: "sending",
-			updatedAt: now,
-		});
-		return true;
-	} catch (error) {
-		if ((error as { code?: number }).code === 11_000) {
-			return false;
-		}
-		throw error;
-	}
-}
-
 async function sendOrganizationEmail(
 	input: OrganizationNotificationInput,
 	recipient: OrganizationNotificationRecipient,
 	enabledOrganizationIds: ReadonlySet<string>
 ): Promise<void> {
-	if (
-		recipient.organizationIds.length > 0 &&
-		!recipient.organizationIds.some((id) => enabledOrganizationIds.has(id))
-	) {
+	const organizationId = recipient.organizationIds.find((id) =>
+		enabledOrganizationIds.has(id)
+	);
+	if (!organizationId) {
 		return;
 	}
 
-	const dedupeKey = `organization:${text(input.dedupeKey, MAX_ID)}:${recipient.email}`;
-	const claimed = await claimEmailDelivery({
-		dedupeKey,
+	await deliverUserNotificationEmail({
+		actionLabel: actionLabelFor(input, recipient),
+		actionUrl: actionUrlFor(input, recipient),
+		body: text(input.body, MAX_TEXT),
+		dedupeKey: `organization:${text(input.dedupeKey, MAX_ID)}`,
+		email: recipient.email,
 		kind: input.kind,
-		organizationId: recipient.organizationIds[0] ?? null,
-		recipient: recipient.email,
+		organizationId,
+		organizationKind: input.kind,
+		react: OrganizationActivityEmail({
+			actionLabel: actionLabelFor(input, recipient),
+			actionUrl: actionUrlFor(input, recipient),
+			body: text(input.body, MAX_TEXT),
+			heading: text(input.title, 140),
+			preview: text(input.subject, 180),
+		}),
+		subject: text(input.subject, 180),
+		userId: recipient.userId || null,
 	});
-	if (!claimed) {
-		return;
-	}
-
-	const actionUrl = actionUrlFor(input, recipient);
-	try {
-		await sendEmail({
-			react: OrganizationActivityEmail({
-				actionLabel: actionLabelFor(input, recipient),
-				actionUrl,
-				body: text(input.body, MAX_TEXT),
-				heading: text(input.title, 140),
-				preview: text(input.subject, 180),
-			}),
-			skipRateLimit: true,
-			subject: text(input.subject, 180),
-			to: recipient.email,
-		});
-		await BillingEmailDelivery.updateOne(
-			{ dedupeKey },
-			{
-				$set: {
-					lastError: null,
-					sentAt: new Date(),
-					status: "sent",
-					updatedAt: new Date(),
-				},
-			}
-		);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : "send failed";
-		await BillingEmailDelivery.updateOne(
-			{ dedupeKey },
-			{
-				$set: {
-					lastError: message.slice(0, MAX_TEXT),
-					status: "failed",
-					updatedAt: new Date(),
-				},
-			}
-		);
-		console.error("[organization-notification] email failed:", message);
-	}
 }
 
 async function publishOrganizationInboxNotification(
@@ -385,6 +507,15 @@ async function publishOrganizationInboxNotification(
 	recipient: OrganizationNotificationRecipient
 ): Promise<void> {
 	if (!recipient.userId) {
+		return;
+	}
+	if (
+		!(await shouldStoreUserNotificationInApp(
+			recipient.userId,
+			input.kind,
+			"transactional"
+		))
+	) {
 		return;
 	}
 	const dedupeKey = `organization:${text(input.dedupeKey, MAX_ID)}`;
@@ -439,7 +570,9 @@ export async function notifyOrganizationEvent(
 			return;
 		}
 
-		const recipients = await resolveOrganizationRecipients(organizationIds);
+		const recipients = await resolveOrganizationRecipients(organizationIds, {
+			kind: input.kind,
+		});
 		for (const extra of input.extraRecipients ?? []) {
 			const resolved = await resolveExtraRecipient(extra, organizationIds);
 			if (resolved) {

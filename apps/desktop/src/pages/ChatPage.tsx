@@ -1010,7 +1010,7 @@ function CouncilInputBar({
 			ref={textareaWrapRef}
 		>
 			{chatWidgetTemplates.length > 0 && (
-				<div className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+				<div className="mx-auto mb-2 flex w-full max-w-[880px] flex-wrap items-center gap-1.5 px-3">
 					<span className="text-[11px] text-muted-foreground">
 						Available widgets
 					</span>

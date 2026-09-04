@@ -139,6 +139,15 @@ export const env = createEnv({
 		// Polar
 		POLAR_ORGANIZATION_ID: z.string().optional(),
 		POLAR_SERVER: z.enum(["sandbox", "production"]).default("sandbox"),
+		// Explicit migration switch. Keep legacy until the Polar meter/benefit
+		// catalog and existing balances have been reconciled.
+		POLAR_BILLING_AUTHORITY: z.enum(["local", "polar"]).default("local"),
+		POLAR_METER_MANAGED_INFERENCE: z.string().optional(),
+		POLAR_METER_MANAGED_CREDITS: z.string().optional(),
+		POLAR_METER_POOL_CLOUDFLARE: z.string().optional(),
+		POLAR_METER_POOL_BEDROCK: z.string().optional(),
+		POLAR_METER_POOL_VERTEX: z.string().optional(),
+		POLAR_METER_POOL_OPENAI_CREDITS: z.string().optional(),
 		// Plan-catalog product/price ids. All optional: each falls back to the
 		// documented default in `@ryu/auth/lib/plans`.
 		POLAR_PRODUCT_DESKTOP_LICENSE: z.string().optional(),

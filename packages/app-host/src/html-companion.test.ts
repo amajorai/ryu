@@ -35,6 +35,9 @@ describe("htmlCompanionSrcdoc", () => {
 
 	it("injects the bridge bootstrap and mount context into the frame", () => {
 		expect(out).toContain("window.ryu = ryu");
+		expect(out).toContain('call("i18n.get"');
+		expect(out).toContain('call("i18n.translate"');
+		expect(out).toContain('callStream("i18n.subscribe"');
 		expect(out).toContain("tokenTable");
 		expect(out).toContain("ryu-plugin-ready");
 		expect(out).toContain("ryu-plugin-theme");

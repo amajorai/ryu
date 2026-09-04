@@ -1,6 +1,6 @@
 // Searchable index of the agent editor's own settings.
 //
-// The editor holds eight tabs and roughly sixty settings. Before this, finding
+// The editor holds nine tabs and roughly sixty settings. Before this, finding
 // one meant knowing which tab it was filed under — the same problem the two
 // settings dialogs had before `settings-index.ts`, and solved the same way: a
 // declared list of ROWS, not tabs, so "where do I turn off memory writing" has an
@@ -22,6 +22,7 @@ export type AgentSettingsTab =
 	| "advanced"
 	| "behavior"
 	| "connections"
+	| "health"
 	| "integrations"
 	| "model"
 	| "prompt-studio"
@@ -48,6 +49,7 @@ export const AGENT_TAB_LABELS: Record<AgentSettingsTab, string> = {
 	tools: "Tools & knowledge",
 	connections: "Connections",
 	integrations: "Integrations",
+	health: "Health",
 	triggers: "Triggers",
 	activity: "Activity",
 	"prompt-studio": "Prompt Studio",

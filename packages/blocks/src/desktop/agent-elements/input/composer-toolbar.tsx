@@ -381,7 +381,7 @@ export function ComposerToolbar({
 	if (compact) {
 		return (
 			<div
-				className="flex items-end gap-1.5 px-2 py-2"
+				className="flex min-h-12 items-center gap-2 px-3 py-2.5"
 				data-composer-layout="compact"
 			>
 				{leftCluster}

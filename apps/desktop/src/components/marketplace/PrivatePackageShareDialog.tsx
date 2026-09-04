@@ -43,6 +43,7 @@ const SHAREABLE_KINDS: MarketplaceKind[] = [
 	"skill",
 	"space",
 	"theme",
+	"language_pack",
 	"workflow",
 ];
 

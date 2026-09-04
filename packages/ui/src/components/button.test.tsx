@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { I18nProvider } from "@ryu/i18n/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Button } from "./button.tsx";
 
@@ -51,5 +52,30 @@ describe("Button overflow labels", () => {
 		expect(html).toContain("overflow-hidden");
 		expect(html).toContain("whitespace-nowrap");
 		expect(html).toContain("A label that can outgrow the button");
+	});
+
+	test("localizes direct labels through the shared runtime", () => {
+		const html = renderToStaticMarkup(
+			<I18nProvider
+				initialPackId="community/test"
+				packs={[
+					{
+						baseLocale: "en",
+						direction: "ltr",
+						id: "community/test",
+						locale: "en",
+						messages: { "common.save": "Ship it" },
+						name: "Test voice",
+						schemaVersion: 1,
+						version: "1.0.0",
+					},
+				]}
+			>
+				<Button>Save</Button>
+			</I18nProvider>
+		);
+
+		expect(html).toContain("Ship it");
+		expect(html).not.toContain(">Save<");
 	});
 });

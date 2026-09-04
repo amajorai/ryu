@@ -1,3 +1,5 @@
+"use client";
+
 // Shared iOS-style settings primitives.
 //
 // These mirror the grouped "settings table" look from the previous desktop app
@@ -17,6 +19,8 @@
 //   merge into the next card.
 // - `SettingsItem` is the simple "title + control" row.
 
+import { messageIdForLiteral } from "@ryu/i18n/core";
+import { useOptionalI18n } from "@ryu/i18n/react";
 import {
 	Item,
 	ItemActions,
@@ -44,12 +48,38 @@ const toItems = (children: ReactNode): ReactNode[] =>
  * internally can opt in by accepting (and forwarding nothing for) a
  * `description` prop at their call site — the group only needs to see it here.
  */
-const childDescription = (child: ReactNode): ReactNode => {
+const localizeSettingText = (
+	i18n: ReturnType<typeof useOptionalI18n>,
+	value: ReactNode,
+	settingsId: string | undefined,
+	field: "caption" | "description" | "title"
+): ReactNode => {
+	if (!i18n || typeof value !== "string" || value.trim().length === 0) {
+		return value;
+	}
+	const id = settingsId
+		? `settings.${settingsId}.${field}`
+		: messageIdForLiteral(value);
+	return i18n.t(id, {}, value);
+};
+
+const childDescription = (
+	child: ReactNode,
+	i18n: ReturnType<typeof useOptionalI18n>
+): ReactNode => {
 	if (!isValidElement(child)) {
 		return null;
 	}
-	const props = child.props as { description?: ReactNode };
-	return props.description ?? null;
+	const props = child.props as {
+		description?: ReactNode;
+		settingsId?: string;
+	};
+	return localizeSettingText(
+		i18n,
+		props.description,
+		props.settingsId,
+		"description"
+	);
 };
 
 /**
@@ -124,6 +154,7 @@ interface SettingsGroupProps {
  * never renders inside the card.
  */
 export const SettingsGroup = ({ children, className }: SettingsGroupProps) => {
+	const i18n = useOptionalI18n();
 	const items = toItems(children);
 
 	// Partition rows into card slices: rows accumulate until one carries a
@@ -150,7 +181,7 @@ export const SettingsGroup = ({ children, className }: SettingsGroupProps) => {
 			continue;
 		}
 		pending.push(child);
-		const caption = childDescription(child);
+		const caption = childDescription(child, i18n);
 		if (caption) {
 			slices.push({ caption, rows: pending });
 			pending = [];
@@ -164,7 +195,7 @@ export const SettingsGroup = ({ children, className }: SettingsGroupProps) => {
 		<ItemGroup
 			className={cn(
 				// `ItemGroup`'s base sets a conditional `has-data-[size=sm]:gap-2.5`
-				// that a plain `gap-0` can't override (different tailwind-merge group),
+				// that a plain `gap-0` can't override (different merge group),
 				// which would wrap every row + hairline in 10px of dead space. Zero out
 				// the size-conditional gaps too so rows sit flush against the separator.
 				"gap-0 overflow-hidden shadow-none has-data-[size=sm]:gap-0 has-data-[size=xs]:gap-0",
@@ -290,8 +321,16 @@ export const SettingsItem = ({
 	description,
 	settingsId,
 	title,
-}: SettingsItemProps) =>
-	bare ? (
+}: SettingsItemProps) => {
+	const i18n = useOptionalI18n();
+	const localizedTitle = localizeSettingText(i18n, title, settingsId, "title");
+	const localizedDescription = localizeSettingText(
+		i18n,
+		description,
+		settingsId,
+		"description"
+	);
+	return bare ? (
 		// No `Item` here: its padding is what insets a row from the card edge, and
 		// a bare row has no card to be inset from. The title keeps the standard
 		// 3.5 gutter so it lines up with every section header and caption; the
@@ -306,15 +345,15 @@ export const SettingsItem = ({
 			data-setting-id={settingsId}
 		>
 			<div className="flex items-center justify-between gap-3 px-3.5">
-				<ItemTitle className="font-medium text-sm">{title}</ItemTitle>
+				<ItemTitle className="font-medium text-sm">{localizedTitle}</ItemTitle>
 				{actions ? (
 					<ItemActions className="shrink-0">{actions}</ItemActions>
 				) : null}
 			</div>
 			{children}
-			{description ? (
+			{localizedDescription ? (
 				<p className="px-3.5 text-muted-foreground text-xs leading-snug">
-					{description}
+					{localizedDescription}
 				</p>
 			) : null}
 		</div>
@@ -329,7 +368,9 @@ export const SettingsItem = ({
 		>
 			<div className="flex w-full items-center justify-between gap-3">
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<ItemTitle className="font-medium text-sm">{title}</ItemTitle>
+					<ItemTitle className="font-medium text-sm">
+						{localizedTitle}
+					</ItemTitle>
 				</div>
 				{actions && !hasFullBleedTextControl(actions) ? (
 					<ItemActions className="shrink-0">{actions}</ItemActions>
@@ -341,6 +382,7 @@ export const SettingsItem = ({
 			{renderSettingControl(children)}
 		</Item>
 	);
+};
 
 interface SettingsSectionProps {
 	/** Optional caption rendered below the group, in muted text. */
@@ -364,23 +406,35 @@ export const SettingsSection = ({
 	className,
 	headerAction,
 	title,
-}: SettingsSectionProps) => (
-	<div className={cn("space-y-1.5", className)}>
-		{title || headerAction ? (
-			<div className="flex items-center justify-between px-3.5">
-				{title ? (
-					<h3 className="font-medium text-foreground/70 text-xs">{title}</h3>
-				) : (
-					<span />
-				)}
-				{headerAction}
-			</div>
-		) : null}
-		{children}
-		{caption ? (
-			<p className="px-3.5 text-muted-foreground text-xs leading-snug">
-				{caption}
-			</p>
-		) : null}
-	</div>
-);
+}: SettingsSectionProps) => {
+	const i18n = useOptionalI18n();
+	const localizedTitle = localizeSettingText(i18n, title, undefined, "title");
+	const localizedCaption = localizeSettingText(
+		i18n,
+		caption,
+		undefined,
+		"caption"
+	);
+	return (
+		<div className={cn("space-y-1.5", className)}>
+			{localizedTitle || headerAction ? (
+				<div className="flex items-center justify-between px-3.5">
+					{localizedTitle ? (
+						<h3 className="font-medium text-foreground/70 text-xs">
+							{localizedTitle}
+						</h3>
+					) : (
+						<span />
+					)}
+					{headerAction}
+				</div>
+			) : null}
+			{children}
+			{localizedCaption ? (
+				<p className="px-3.5 text-muted-foreground text-xs leading-snug">
+					{localizedCaption}
+				</p>
+			) : null}
+		</div>
+	);
+};

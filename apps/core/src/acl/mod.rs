@@ -99,7 +99,13 @@ use std::collections::{BTreeMap, BTreeSet};
 /// one. The desktop previously kept its own list, which said only `space` while
 /// Core had grown three more kinds — so agents and workflows were uneditable and
 /// nothing failed to say so. A single exported source cannot drift.
-pub const ENFORCED_KINDS: &[&str] = &[KIND_SPACE, KIND_AGENT, KIND_WORKFLOW, KIND_NODE];
+pub const ENFORCED_KINDS: &[&str] = &[
+    KIND_SPACE,
+    KIND_CONVERSATION,
+    KIND_AGENT,
+    KIND_WORKFLOW,
+    KIND_NODE,
+];
 
 pub const KIND_SPACE: &str = "space";
 /// A conversation (the realtime/chat plane's resource).
@@ -1082,17 +1088,40 @@ pub fn decide_with_extra(
     permission: &str,
     extra_permissions: &std::collections::HashSet<String>,
 ) -> Decision {
+    decide_with_context(
+        caller,
+        kind,
+        resource_id,
+        permission,
+        extra_permissions,
+        &std::collections::HashSet::new(),
+    )
+}
+
+/// Decide one permission while carrying both the custom-role permission union
+/// and the custom role ids assigned to this caller. The permission union is
+/// what grants the capability; the ids are needed so a resource ACL can target
+/// a named custom role without making the node invent a second role catalog.
+pub fn decide_with_context(
+    caller: &crate::identity_verify::VerifiedCaller,
+    kind: &str,
+    resource_id: &str,
+    permission: &str,
+    extra_permissions: &std::collections::HashSet<String>,
+    extra_role_ids: &std::collections::HashSet<String>,
+) -> Decision {
     let vocab = cached_vocabulary();
     let mut catalog = vocabulary::builtin_role_catalog();
 
     let principal = principal_from_caller(caller);
-    if !extra_permissions.is_empty() {
+    if !extra_permissions.is_empty() || !extra_role_ids.is_empty() {
         // Fold the custom-role grant into a synthetic role the principal holds.
         // A reserved id that Better Auth can never issue, so it cannot collide
         // with a real role or be named by an overwrite.
         const CUSTOM: &str = "__custom_role";
         catalog = catalog.with_role(CUSTOM, extra_permissions.iter().cloned());
         let mut principal = principal;
+        principal.role_ids.extend(extra_role_ids.iter().cloned());
         principal.role_ids.insert(CUSTOM.to_owned());
         let acl = store::acl_for(&store::ResourceKey::new(kind, resource_id));
         return resolve(&vocab.registry, &catalog, &principal, &acl, permission);

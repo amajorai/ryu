@@ -74,6 +74,7 @@ const MUST_NEVER_SYNC = [
 	"ryu:unread-convs",
 	"ryu:auto-imported-thread-ids",
 	"ryu_picker_recents",
+	"ryu_desktop_onboarding_complete",
 	"ryu_onboarding_complete",
 ];
 

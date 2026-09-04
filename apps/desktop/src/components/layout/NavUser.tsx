@@ -120,6 +120,10 @@ export function DesktopWebAccountLinks({
 					<User className="mr-2 size-4" />
 					Account
 				</DropdownMenuItem>
+				<DropdownMenuItem onClick={() => onOpenWeb("/organizations")}>
+					<User className="mr-2 size-4" />
+					Organizations
+				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => onOpenWeb("/download")}>
 					<Laptop className="mr-2 size-4" />
 					Download Ryu Build
@@ -132,6 +136,10 @@ export function DesktopWebAccountLinks({
 			<DropdownMenuItem onClick={() => onOpenWeb(profilePath)}>
 				<User className="mr-2 size-4" />
 				Profile
+			</DropdownMenuItem>
+			<DropdownMenuItem onClick={() => onOpenWeb("/organizations")}>
+				<User className="mr-2 size-4" />
+				Organizations
 			</DropdownMenuItem>
 			<DropdownMenuItem onClick={() => onOpenWeb(INVITE_FRIEND_NAV_ITEM.path)}>
 				<Gift className="mr-2 size-4" />

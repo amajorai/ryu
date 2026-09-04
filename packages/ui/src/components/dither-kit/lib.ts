@@ -1,8 +1,2 @@
-import { type ClassValue, clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
-
-/** Tailwind-aware className combiner — local copy so the chart pack is
- * self-contained and portable as a registry. */
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+/** Tailwind-aware className combiner kept local for the registry-facing dither kit. */
+export { cn } from "cn"

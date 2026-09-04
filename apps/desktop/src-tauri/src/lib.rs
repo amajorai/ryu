@@ -1,5 +1,5 @@
-mod app_update;
 mod app_icons;
+mod app_update;
 mod core;
 mod hardware;
 mod identifier_migration;
@@ -20,43 +20,21 @@ mod window_registry;
 use std::sync::Mutex;
 
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_decorum::WebviewWindowExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 use crate::core::process::RyuCoreProcess;
 
-/// Restore the macOS native title-bar buttons so decorum can reposition them.
+/// Restore the macOS native title-bar buttons for the transparent shell.
 ///
 /// Our windows use `decorations: false` so Windows/Linux can draw decorum's
-/// custom HTML window controls. On macOS, though, a borderless window has no
-/// close/miniaturize/zoom buttons, so decorum's traffic-light positioner
-/// dereferences nil (`close.superview()`) and the process aborts with
-/// "null pointer dereference" in cocoa's appkit. We re-add the titled style
-/// mask (which brings back the native buttons) and hide the title bar's title
-/// and background, yielding the standard "transparent title bar with inset
-/// traffic lights" look — exactly what the positioner expects.
+/// custom HTML window controls. On macOS, a borderless window otherwise has no
+/// native controls, so re-add the titled style mask and hide the title bar's
+/// title/background. The native traffic lights then remain the only macOS shell
+/// layer; decorum is not loaded on this platform.
 ///
-/// This must run for every window *before* decorum's own `on_window_ready`
-/// positioner fires, so it is wired up as a plugin registered ahead of
-/// decorum (see `macos_titlebar_plugin`). `ns_window` is the raw `NSWindow`
-/// pointer from `Window::ns_window()` / `WebviewWindow::ns_window()`.
-/// Ryu's shell keeps the lights on the tab-strip centerline. A standalone app
-/// has no shell titlebar, so it uses decorum's normal macOS inset instead of
-/// placing the native controls over the app's own header.
-#[cfg(target_os = "macos")]
-const SHELL_TRAFFIC_LIGHTS_INSET: (f32, f32) = (28.0, 39.4);
-
-#[cfg(target_os = "macos")]
-const STANDALONE_TRAFFIC_LIGHTS_INSET: (f32, f32) = (12.0, 16.0);
-
-#[cfg(target_os = "macos")]
-fn traffic_lights_inset() -> (f32, f32) {
-    if standalone::enabled() {
-        STANDALONE_TRAFFIC_LIGHTS_INSET
-    } else {
-        SHELL_TRAFFIC_LIGHTS_INSET
-    }
-}
+/// `ns_window` is the raw `NSWindow` pointer from `WebviewWindow::ns_window()`.
 
 #[cfg(target_os = "macos")]
 fn apply_macos_titlebar_mask(ns_window: *mut std::ffi::c_void) {
@@ -82,10 +60,7 @@ fn apply_macos_titlebar_mask(ns_window: *mut std::ffi::c_void) {
 }
 
 /// Tauri plugin that restores the native macOS title bar mask on every window
-/// as soon as it is ready. Registered *before* `tauri_plugin_decorum` so its
-/// `on_window_ready` runs first — otherwise decorum's auto-positioner hits the
-/// borderless window's nil traffic-light buttons and aborts. See
-/// [`apply_macos_titlebar_mask`].
+/// as soon as it is ready. See [`apply_macos_titlebar_mask`].
 #[cfg(target_os = "macos")]
 fn macos_titlebar_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("ryu-macos-titlebar")
@@ -384,8 +359,8 @@ fn get_ryu_core_url() -> String {
 /// `dev` is the DEV VARIANT specifically, not `profile::is_dev()` ("any
 /// non-release profile"). Since a canary/nightly bundle activates its own profile
 /// from its version, `is_dev()` is true there too — and the frontend uses this
-/// flag to label the window "Ryu (Research Preview Dev)", which a canary build is
-/// not. `profile` carries the actual profile for anything that wants it.
+/// flag to label the native window as a dev build, which a canary build is not.
+/// `profile` carries the actual profile for anything that wants it.
 #[derive(serde::Serialize)]
 struct BuildProfile {
     dev: bool,
@@ -1619,21 +1594,18 @@ async fn open_tab_window(
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Mirror the main window's frameless overlay window controls so the tear-off
-    // is closable/minimizable like any other window.
+    // Mirror the main window's frameless overlay window controls on
+    // Windows/Linux. macOS keeps its native traffic lights and does not need a
+    // second injected titlebar layer.
+    #[cfg(not(target_os = "macos"))]
     win.create_overlay_titlebar().map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     {
-        // Must run before `set_traffic_lights_inset` — restores the native
-        // buttons a borderless macOS window otherwise lacks. The titlebar
-        // plugin also does this on window-ready, but that may land after this
-        // synchronous call for a freshly built window, so apply it here too.
+        // The titlebar plugin normally applies this on window-ready. Apply it
+        // here too for freshly-created tear-off windows.
         if let Ok(ns_window) = win.ns_window() {
             apply_macos_titlebar_mask(ns_window);
         }
-        let (x, y) = traffic_lights_inset();
-        win.set_traffic_lights_inset(x, y)
-            .map_err(|e| e.to_string())?;
     }
 
     // Claim a seeded conversation before the renderer's first React effect. The
@@ -1943,17 +1915,20 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::new().build());
 
-    // macOS only: restore native traffic-light buttons before decorum's own
-    // positioner runs. MUST be registered ahead of decorum so its
-    // `on_window_ready` fires first; otherwise decorum dereferences the
-    // borderless window's nil window buttons and the app aborts.
+    // macOS only: restore native traffic-light buttons for the transparent
+    // shell. The macOS build deliberately does not load decorum; native AppKit
+    // controls are the complete titlebar on this platform.
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(macos_titlebar_plugin());
     }
 
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.plugin(tauri_plugin_decorum::init());
+    }
+
     builder = builder
-        .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         // App updates are downloaded and signature-verified by the native
         // prepared-update cache, then installed only after an explicit frontend
@@ -1978,17 +1953,15 @@ pub fn run() {
             if startup::should_start_hidden(app) {
                 let _ = win.hide();
             }
+            #[cfg(not(target_os = "macos"))]
             win.create_overlay_titlebar().unwrap();
             #[cfg(target_os = "macos")]
             {
                 // The titlebar plugin already restored the native buttons on
-                // window-ready; re-apply defensively before positioning.
+                // window-ready; re-apply defensively for the main window too.
                 if let Ok(ns_window) = win.ns_window() {
                     apply_macos_titlebar_mask(ns_window);
                 }
-                let (x, y) = traffic_lights_inset();
-                win.set_traffic_lights_inset(x, y)
-                    .unwrap();
             }
 
             tray::setup_tray(app)?;
@@ -2232,6 +2205,7 @@ pub fn run() {
             keep_awake::set_keep_awake,
             nodes::list_nodes,
             nodes::add_node,
+            nodes::update_node_token,
             nodes::local_node_token,
             nodes::remove_node,
             nodes::set_default_node,
@@ -2260,18 +2234,6 @@ pub fn run() {
                     .app_handle()
                     .state::<window_registry::WindowRegistry>()
                     .touch_window(window.label());
-            }
-            // decorum's swizzled windowDidResize delegate re-applies its own
-            // hardcoded default pad (12, 16) on every live-resize frame,
-            // yanking the traffic lights back into the window corner and off
-            // the titlebar row. Tao emits `Resized` after that delegate runs,
-            // so re-applying our inset here always lands last in the frame.
-            #[cfg(target_os = "macos")]
-            if matches!(event, WindowEvent::Resized(_)) {
-                if let Some(win) = window.app_handle().get_webview_window(window.label()) {
-                    let (x, y) = traffic_lights_inset();
-                    let _ = win.set_traffic_lights_inset(x, y);
-                }
             }
             // "Stay in the tray on close": the main window hides instead of being
             // destroyed, so Core — and every turn running against it — survives.

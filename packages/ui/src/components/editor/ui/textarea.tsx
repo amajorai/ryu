@@ -1,7 +1,13 @@
+"use client";
+
+import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
 function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedPlaceholder = useLocalizedString(props.placeholder);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<textarea
 			className={cn(
@@ -10,6 +16,9 @@ function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
 			)}
 			data-slot="textarea"
 			{...props}
+			aria-label={localizedAriaLabel}
+			placeholder={localizedPlaceholder}
+			title={localizedTitle}
 		/>
 	);
 }

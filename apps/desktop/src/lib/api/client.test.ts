@@ -45,4 +45,22 @@ describe("managed node authentication", () => {
 		expect(headers.Authorization).toBe("Bearer node-token");
 		expect(headers["x-ryu-user-jwt"]).toBe("managed-user-jwt");
 	});
+
+	test("can skip the control-plane JWT exchange for node-local probes", async () => {
+		let captured: RequestInit | undefined;
+		globalThis.fetch = ((_url: string, init?: RequestInit) => {
+			captured = init;
+			return Promise.resolve(new Response("{}", { status: 200 }));
+		}) as unknown as typeof fetch;
+
+		await request(
+			{ token: "node-token", url: "http://127.0.0.1:8980" },
+			"/api/health",
+			{ skipUserJwt: true }
+		);
+
+		const headers = captured?.headers as Record<string, string>;
+		expect(headers.Authorization).toBe("Bearer node-token");
+		expect(headers["x-ryu-user-jwt"]).toBeUndefined();
+	});
 });

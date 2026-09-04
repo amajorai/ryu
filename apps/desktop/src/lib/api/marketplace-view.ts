@@ -19,7 +19,13 @@ import {
 export function toCardData(
 	card: MarketplaceCard,
 	owned: boolean,
-	buying: boolean
+	buying: boolean,
+	options: {
+		active?: boolean;
+		installed?: boolean;
+		installing?: boolean;
+		onInstall?: () => void;
+	} = {}
 ): MarketplaceCardData {
 	const priceLabel = card.pricing ? formatPricingLabel(card.pricing) : null;
 	return {
@@ -28,6 +34,11 @@ export function toCardData(
 		name: card.name,
 		author: card.author,
 		description: card.description,
+		languagePack: card.languagePack,
+		active: options.active,
+		installed: options.installed,
+		installing: options.installing,
+		onInstall: options.onInstall,
 		version: card.version,
 		verification: card.verification,
 		iconUrl: card.iconUrl,

@@ -25,6 +25,8 @@ export interface CreditAllocationView {
 }
 
 export interface CreditBalanceBreakdownProps {
+	/** False when the provider exposes one authoritative aggregate meter balance. */
+	balanceBreakdownAvailable?: boolean;
 	className?: string;
 	/** Use the denser settings-card presentation. */
 	compact?: boolean;
@@ -133,6 +135,7 @@ function AllocationRow({
 }
 
 export function CreditBalanceBreakdown({
+	balanceBreakdownAvailable = true,
 	currency = "usd",
 	totalMicroUsd,
 	planCreditsMicroUsd,
@@ -151,6 +154,12 @@ export function CreditBalanceBreakdown({
 	const otherAllocations = allocations.filter(
 		(allocation) => !allocation.isFreeProvider
 	);
+	const primaryAllocations = balanceBreakdownAvailable
+		? freeAllocations
+		: allocations;
+	const secondaryAllocations = balanceBreakdownAvailable
+		? otherAllocations
+		: [];
 	const freeProviderCredits = freeAllocations.reduce(
 		(total, allocation) =>
 			total + (finiteAmount(allocation.remainingMicroUsd) ?? 0),
@@ -185,10 +194,9 @@ export function CreditBalanceBreakdown({
 									Available now
 								</p>
 								<InfoTooltip label="About available credits">
-									Available now is the total of your remaining plan credits,
-									on-demand credits, and provider-specific allocations. A
-									provider-specific allocation only pays for its assigned
-									provider.
+									{balanceBreakdownAvailable
+										? "Available now is the total of your remaining plan credits, on-demand credits, and provider-specific allocations. A provider-specific allocation only pays for its assigned provider."
+										: "Available now is the total of Polar's shared meter and provider-specific meters. Each provider-specific allocation only pays for its assigned provider."}
 								</InfoTooltip>
 							</div>
 							<p className="mt-1 font-mono font-semibold text-3xl tabular-nums">
@@ -196,109 +204,126 @@ export function CreditBalanceBreakdown({
 							</p>
 						</div>
 						<span className="rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary text-xs">
-							Shared wallet
+							{balanceBreakdownAvailable ? "Shared wallet" : "Polar balance"}
 						</span>
 					</div>
-					<p className="mt-2 max-w-2xl text-muted-foreground text-xs leading-relaxed">
-						Matching provider-specific credit is spent first. Plan credit is
-						next, then on-demand credit.
-					</p>
-
-					<div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-						<BucketCard
-							amount={
-								providerDataAvailable
-									? amountLabel(freeProviderCredits, currency)
-									: "—"
-							}
-							detail={
-								providerDataAvailable
-									? freeAllocations.length > 0
-										? `${freeAllocations.length} allocation${freeAllocations.length === 1 ? "" : "s"} listed below`
-										: "No active free-provider allocation"
-									: "Allocation details are unavailable"
-							}
-							label="Free-provider credits"
-							tooltip="Free-provider credits are separate allocations. Each allocation can only be used with its assigned free provider; it cannot pay for another provider."
-						/>
-						<BucketCard
-							amount={amountLabel(planCreditsMicroUsd, currency)}
-							detail={planDetail}
-							label="Plan credits"
-							tooltip="Plan credits come from the active plan. Use them for managed provider usage beyond a free-provider allocation. They reset at the next billing period and unused plan credit does not roll over."
-						/>
-						<BucketCard
-							amount={amountLabel(onDemandCreditsMicroUsd, currency)}
-							detail="Purchased balance · rolls over between billing periods"
-							label="On-demand credits"
-							tooltip="On-demand credits are purchased by an organization owner or admin. Use them for managed provider usage beyond a free-provider allocation. They roll over and are not tied to one provider."
-						/>
-					</div>
-				</div>
-
-				<div className="space-y-3 border-t pt-4">
-					<div className="flex items-start justify-between gap-3">
-						<div>
-							<p className="font-medium text-sm">Free-provider allocations</p>
-							<p className="text-muted-foreground text-xs leading-relaxed">
-								Each row shows how much remains for that allocated free
-								provider.
+					{balanceBreakdownAvailable ? (
+						<>
+							<p className="mt-2 max-w-2xl text-muted-foreground text-xs leading-relaxed">
+								Matching provider-specific credit is spent first. Plan credit is
+								next, then on-demand credit.
 							</p>
-						</div>
-						<InfoTooltip label="How free-provider allocations work">
-							These balances stay separate because free-provider credit is
-							reserved for the allocated provider. Plan and on-demand credit are
-							the flexible managed balance for managed usage beyond that
-							allocation; matching free-provider credit is spent first when it
-							is available.
-						</InfoTooltip>
-					</div>
-					{providerDataAvailable ? (
-						freeAllocations.length > 0 ? (
-							<div className="grid gap-2 sm:grid-cols-2">
-								{freeAllocations.map((allocation) => (
-									<AllocationRow
-										allocation={allocation}
-										currency={currency}
-										key={allocation.id}
-									/>
-								))}
+
+							<div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+								<BucketCard
+									amount={
+										providerDataAvailable
+											? amountLabel(freeProviderCredits, currency)
+											: "—"
+									}
+									detail={
+										providerDataAvailable
+											? freeAllocations.length > 0
+												? `${freeAllocations.length} allocation${freeAllocations.length === 1 ? "" : "s"} listed below`
+												: "No active free-provider allocation"
+											: "Allocation details are unavailable"
+									}
+									label="Free-provider credits"
+									tooltip="Free-provider credits are separate allocations. Each allocation can only be used with its assigned free provider; it cannot pay for another provider."
+								/>
+								<BucketCard
+									amount={amountLabel(planCreditsMicroUsd, currency)}
+									detail={planDetail}
+									label="Plan credits"
+									tooltip="Plan credits come from the active plan. Use them for managed provider usage beyond a free-provider allocation. They reset at the next billing period and unused plan credit does not roll over."
+								/>
+								<BucketCard
+									amount={amountLabel(onDemandCreditsMicroUsd, currency)}
+									detail="Purchased balance · rolls over between billing periods"
+									label="On-demand credits"
+									tooltip="On-demand credits are purchased by an organization owner or admin. Use them for managed provider usage beyond a free-provider allocation. They roll over and are not tied to one provider."
+								/>
 							</div>
-						) : (
-							<p className="text-muted-foreground text-sm">
-								No free-provider credits are currently allocated.
-							</p>
-						)
+						</>
 					) : (
-						<p className="text-muted-foreground text-sm">
-							Free-provider allocations are temporarily unavailable.
+						<p className="mt-2 max-w-2xl text-muted-foreground text-xs leading-relaxed">
+							Polar maintains this aggregate credit meter. The balance above is
+							the current provider-authoritative amount; Ryu does not split it
+							into parallel local buckets.
 						</p>
 					)}
-
-					{otherAllocations.length > 0 ? (
-						<div className="space-y-2 pt-1">
-							<div className="flex items-center gap-2">
-								<p className="font-medium text-sm">
-									Other provider-specific allocations
-								</p>
-								<InfoTooltip label="About other provider-specific allocations">
-									These credits are also restricted to the provider allocation
-									named by each row. They are included in the total but cannot
-									be used by a different provider.
-								</InfoTooltip>
-							</div>
-							<div className="grid gap-2 sm:grid-cols-2">
-								{otherAllocations.map((allocation) => (
-									<AllocationRow
-										allocation={allocation}
-										currency={currency}
-										key={allocation.id}
-									/>
-								))}
-							</div>
-						</div>
-					) : null}
 				</div>
+
+				{balanceBreakdownAvailable || allocations.length > 0 ? (
+					<div className="space-y-3 border-t pt-4">
+						<div className="flex items-start justify-between gap-3">
+							<div>
+								<p className="font-medium text-sm">
+									{balanceBreakdownAvailable
+										? "Free-provider allocations"
+										: "Provider-specific allocations"}
+								</p>
+								<p className="text-muted-foreground text-xs leading-relaxed">
+									{balanceBreakdownAvailable
+										? "Each row shows how much remains for that allocated free provider."
+										: "Each row is read from its own provider-specific Polar meter."}
+								</p>
+							</div>
+							<InfoTooltip label="How free-provider allocations work">
+								These balances stay separate because free-provider credit is
+								reserved for the allocated provider. Plan and on-demand credit
+								are the flexible managed balance for managed usage beyond that
+								allocation; matching free-provider credit is spent first when it
+								is available.
+							</InfoTooltip>
+						</div>
+						{providerDataAvailable ? (
+							primaryAllocations.length > 0 ? (
+								<div className="grid gap-2 sm:grid-cols-2">
+									{primaryAllocations.map((allocation) => (
+										<AllocationRow
+											allocation={allocation}
+											currency={currency}
+											key={allocation.id}
+										/>
+									))}
+								</div>
+							) : (
+								<p className="text-muted-foreground text-sm">
+									No free-provider credits are currently allocated.
+								</p>
+							)
+						) : (
+							<p className="text-muted-foreground text-sm">
+								Free-provider allocations are temporarily unavailable.
+							</p>
+						)}
+
+						{secondaryAllocations.length > 0 ? (
+							<div className="space-y-2 pt-1">
+								<div className="flex items-center gap-2">
+									<p className="font-medium text-sm">
+										Other provider-specific allocations
+									</p>
+									<InfoTooltip label="About other provider-specific allocations">
+										These credits are also restricted to the provider allocation
+										named by each row. They are included in the total but cannot
+										be used by a different provider.
+									</InfoTooltip>
+								</div>
+								<div className="grid gap-2 sm:grid-cols-2">
+									{secondaryAllocations.map((allocation) => (
+										<AllocationRow
+											allocation={allocation}
+											currency={currency}
+											key={allocation.id}
+										/>
+									))}
+								</div>
+							</div>
+						) : null}
+					</div>
+				) : null}
 			</div>
 		</TooltipProvider>
 	);

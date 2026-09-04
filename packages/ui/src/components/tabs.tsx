@@ -11,6 +11,7 @@ import {
 	ViewOffSlashIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Command,
@@ -1454,13 +1455,20 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(function TabsList(
 	);
 });
 
-function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
+function TabsTrigger({
+	children,
+	className,
+	...props
+}: TabsPrimitive.Tab.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<TabsPrimitive.Tab
 			className={cn(tabsTriggerClassName, className)}
 			data-slot="tabs-trigger"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</TabsPrimitive.Tab>
 	);
 }
 

@@ -195,12 +195,38 @@ function bridgeSource(
     });
   }
 
+  function callStream(method, args, onChunk){
+    var id = nextId++;
+    var resolve, reject;
+    var promise = new Promise(function(res, rej){ resolve = res; reject = rej; });
+    pending[id] = { resolve: resolve, reject: reject, onChunk: onChunk };
+    if(port) port.postMessage({ kind: "ryu-plugin-rpc", id: id, method: method, args: args || [] });
+    else reject(new Error("bridge not ready"));
+    function cancel(){
+      if(!port) return;
+      port.postMessage({ kind: "ryu-plugin-rpc", id: nextId++, method: "agent.cancel", args: [id] });
+    }
+    return { promise: promise, cancel: cancel };
+  }
+
   var api = {
     serverId: SERVER_ID,
     toolInput: G.toolInput, toolOutput: G.toolOutput,
     toolResponseMetadata: G.toolResponseMetadata, widgetState: G.widgetState,
     theme: G.theme, locale: G.locale, displayMode: G.displayMode,
     maxHeight: G.maxHeight, safeArea: G.safeArea,
+    i18n: {
+      get: function(){ return call("i18n.get", []); },
+      translate: function(a){ return call("i18n.translate", [a || {}]); },
+      subscribe: function(opts){
+        opts = opts || {};
+        var h = callStream("i18n.subscribe", [{}], function(d){
+          try { if(opts.onChange) opts.onChange(JSON.parse(d)); } catch(e){}
+        });
+        h.promise.catch(function(){});
+        return { dispose: h.cancel };
+      }
+    },
     // Absent means "host did not say", which is NOT the same as off — default to the
     // host's own default (on) so an older host does not silently disable it here.
     friendly: (G.friendly !== false),
@@ -270,6 +296,11 @@ function bridgeSource(
   function onPortMessage(ev){
     var msg = ev.data;
     if(!msg) return;
+    if(msg.kind === "ryu-plugin-rpc-chunk"){
+      var chunkPending = pending[msg.id];
+      if(chunkPending && typeof chunkPending.onChunk === "function") chunkPending.onChunk(msg.delta);
+      return;
+    }
     if(msg.kind === "ryu-plugin-rpc-result"){
       var p = pending[msg.id]; if(!p) return; delete pending[msg.id];
       if(msg.error){

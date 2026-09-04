@@ -4,6 +4,7 @@ import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { SidebarLeftIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { Separator } from "@ryu/ui/components/separator.tsx";
@@ -270,6 +271,9 @@ function SidebarTrigger({
 	...props
 }: ComponentProps<typeof Button>) {
 	const { toggleSidebar } = useSidebar();
+	const localizedLabel = useLocalizedString(
+		props["aria-label"] ?? "Toggle Sidebar"
+	);
 
 	return (
 		<Button
@@ -283,19 +287,24 @@ function SidebarTrigger({
 			size="icon-sm"
 			variant="ghost"
 			{...props}
+			aria-label={localizedLabel}
 		>
 			<HugeiconsIcon icon={SidebarLeftIcon} strokeWidth={2} />
-			<span className="sr-only">Toggle Sidebar</span>
+			<span className="sr-only">{localizedLabel}</span>
 		</Button>
 	);
 }
 
-function SidebarRail({ className, ...props }: ComponentProps<"button">) {
+function SidebarRail({
+	"aria-label": ariaLabel,
+	className,
+	...props
+}: ComponentProps<"button">) {
 	const { toggleSidebar } = useSidebar();
+	const localizedLabel = useLocalizedString(ariaLabel ?? "Toggle Sidebar");
 
 	return (
 		<button
-			aria-label="Toggle Sidebar"
 			className={cn(
 				"absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
 				"in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
@@ -309,8 +318,9 @@ function SidebarRail({ className, ...props }: ComponentProps<"button">) {
 			data-slot="sidebar-rail"
 			onClick={toggleSidebar}
 			tabIndex={-1}
-			title="Toggle Sidebar"
 			{...props}
+			aria-label={localizedLabel}
+			title={localizedLabel}
 		/>
 	);
 }
@@ -404,10 +414,12 @@ function SidebarGroup({ className, ...props }: ComponentProps<"div">) {
 }
 
 function SidebarGroupLabel({
+	children,
 	className,
 	render,
 	...props
 }: useRender.ComponentProps<"div"> & ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return useRender({
 		defaultTagName: "div",
 		props: mergeProps<"div">(
@@ -417,7 +429,7 @@ function SidebarGroupLabel({
 					className
 				),
 			},
-			props
+			{ ...props, children: localizedChildren }
 		),
 		render,
 		state: {
@@ -507,6 +519,7 @@ const sidebarMenuButtonVariants = cva(
 );
 
 function SidebarMenuButton({
+	children,
 	render,
 	isActive = false,
 	variant = "default",
@@ -520,13 +533,21 @@ function SidebarMenuButton({
 		tooltip?: string | ComponentProps<typeof TooltipContent>;
 	} & VariantProps<typeof sidebarMenuButtonVariants>) {
 	const { isMobile, state } = useSidebar();
+	const localizedChildren = useLocalizedText(children, { literal: true });
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedTitle = useLocalizedString(props.title);
 	const comp = useRender({
 		defaultTagName: "button",
 		props: mergeProps<"button">(
 			{
 				className: cn(sidebarMenuButtonVariants({ variant, size }), className),
 			},
-			props
+			{
+				...props,
+				"aria-label": localizedAriaLabel,
+				children: localizedChildren,
+				title: localizedTitle,
+			}
 		),
 		render: tooltip ? <TooltipTrigger render={render} /> : render,
 		state: {

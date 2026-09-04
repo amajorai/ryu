@@ -3,6 +3,7 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { renderDropdownPopup } from "@ryu/ui/components/dropdown-menu-motion.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
@@ -20,10 +21,11 @@ function DropdownMenuTrigger({
 	children,
 	...props
 }: MenuPrimitive.Trigger.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props}>
 			<FadeOverflowTextChildren className="flex-1">
-				{children}
+				{localizedChildren}
 			</FadeOverflowTextChildren>
 		</MenuPrimitive.Trigger>
 	);
@@ -79,12 +81,14 @@ function DropdownMenuGroup({ ...props }: MenuPrimitive.Group.Props) {
 }
 
 function DropdownMenuLabel({
+	children,
 	className,
 	inset,
 	...props
 }: MenuPrimitive.GroupLabel.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<MenuPrimitive.GroupLabel
 			className={cn(
@@ -94,11 +98,14 @@ function DropdownMenuLabel({
 			data-inset={inset}
 			data-slot="dropdown-menu-label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</MenuPrimitive.GroupLabel>
 	);
 }
 
 function DropdownMenuItem({
+	children,
 	className,
 	inset,
 	variant = "default",
@@ -107,6 +114,7 @@ function DropdownMenuItem({
 	inset?: boolean;
 	variant?: "default" | "destructive";
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<MenuPrimitive.Item
 			className={cn(
@@ -117,7 +125,9 @@ function DropdownMenuItem({
 			data-slot="dropdown-menu-item"
 			data-variant={variant}
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</MenuPrimitive.Item>
 	);
 }
 
@@ -133,6 +143,7 @@ function DropdownMenuSubTrigger({
 }: MenuPrimitive.SubmenuTrigger.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<MenuPrimitive.SubmenuTrigger
 			className={cn(
@@ -144,7 +155,7 @@ function DropdownMenuSubTrigger({
 			{...props}
 		>
 			<FadeOverflowTextChildren className="flex-1">
-				{children}
+				{localizedChildren}
 			</FadeOverflowTextChildren>
 			<HugeiconsIcon
 				className="ml-auto"
@@ -189,6 +200,7 @@ function DropdownMenuCheckboxItem({
 }: MenuPrimitive.CheckboxItem.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<MenuPrimitive.CheckboxItem
 			checked={checked}
@@ -208,7 +220,7 @@ function DropdownMenuCheckboxItem({
 					<HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
 				</MenuPrimitive.CheckboxItemIndicator>
 			</span>
-			{children}
+			{localizedChildren}
 		</MenuPrimitive.CheckboxItem>
 	);
 }
@@ -230,6 +242,7 @@ function DropdownMenuRadioItem({
 }: MenuPrimitive.RadioItem.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<MenuPrimitive.RadioItem
 			className={cn(
@@ -248,7 +261,7 @@ function DropdownMenuRadioItem({
 					<HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
 				</MenuPrimitive.RadioItemIndicator>
 			</span>
-			{children}
+			{localizedChildren}
 		</MenuPrimitive.RadioItem>
 	);
 }

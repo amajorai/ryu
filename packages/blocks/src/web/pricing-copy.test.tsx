@@ -92,9 +92,16 @@ test("the public individual shelf exposes the local desktop offer", () => {
 
 test("the public Pro offer uses the current margin-safe price", () => {
 	expect(PRO_MONTHLY_USD).toBe(49);
-	expect(
-		renderToStaticMarkup(<PricingPlanGrid audience="individual" />)
-	).toContain("Pro");
+	const newBuyer = renderToStaticMarkup(
+		<PricingPlanGrid audience="individual" />
+	);
+	const existingBuyer = renderToStaticMarkup(
+		<PricingPlanGrid audience="individual" currentPlan="desktop-license" />
+	);
+
+	expect(newBuyer).toContain("Start with Pro");
+	expect(newBuyer).toContain("Start with Max");
+	expect(existingBuyer).toContain(">Upgrade<");
 });
 
 test("the hosted cards use the current included capacity ladder", () => {

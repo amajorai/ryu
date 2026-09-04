@@ -14,6 +14,7 @@ export function ActivationOfferStep({
 	checkoutOpened = false,
 	dialog,
 	error,
+	organizationPlan = false,
 	onConfirmCheckout,
 	onContinue,
 	onSkip,
@@ -29,8 +30,15 @@ export function ActivationOfferStep({
 	onSkip: () => void;
 	onStartCheckout: () => void;
 	pending?: boolean;
+	organizationPlan?: boolean;
 	subscribed: boolean;
 }) {
+	const offerDescription = organizationPlan
+		? "The first month is $50. From month two onward, the five-seat Teams floor is $250/month."
+		: "Ryu Pro is $49/month for one person. Choose Max later from Pricing if you need more capacity.";
+	const checkoutLabel = organizationPlan
+		? "Start first month for $50"
+		: "Start Pro for $49/month";
 	return (
 		<>
 			<ActivationStepShell
@@ -48,7 +56,7 @@ export function ActivationOfferStep({
 						<p className="text-muted-foreground text-sm">
 							{subscribed
 								? "Your existing subscription covers this workspace."
-								: "The first month is $50. From month two onward, the five-seat Teams floor is $250/month."}
+								: offerDescription}
 						</p>
 					</CardHeader>
 					<CardContent className="space-y-3">
@@ -82,9 +90,7 @@ export function ActivationOfferStep({
 								loading={pending}
 								onClick={checkoutOpened ? onConfirmCheckout : onStartCheckout}
 							>
-								{checkoutOpened
-									? "I finished checkout"
-									: "Start first month for $50"}
+								{checkoutOpened ? "I finished checkout" : checkoutLabel}
 								<ArrowRight className="size-4" />
 							</Button>
 						)}

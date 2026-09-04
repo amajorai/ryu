@@ -38,7 +38,13 @@ interface ResourceRef {
 const FALLBACK_KINDS = ["space"] as const;
 
 /** What each kind is called in the rest of the app. */
-const KIND_LABEL: Record<string, string> = { space: "Space" };
+const KIND_LABEL: Record<string, string> = {
+	agent: "Agent",
+	conversation: "Conversation",
+	node: "Node",
+	space: "Space",
+	workflow: "Workflow",
+};
 
 function kindLabel(kind: string): string {
 	return KIND_LABEL[kind] ?? kind;
@@ -82,7 +88,7 @@ export function NodePermissionsSettings() {
 			});
 		}
 		// `target` is rebuilt each render; depend on its fields.
-	}, [node.url, node.token]);
+	}, [node.url, node.token, node.userJwt]);
 
 	useEffect(() => {
 		void refresh();
@@ -117,8 +123,9 @@ export function NodePermissionsSettings() {
 				<h3 className="font-medium text-sm">Permissions</h3>
 				<p className="text-muted-foreground text-xs">
 					By default everyone's access follows their role. Here you can make
-					exceptions for a single space: giving one team access, or taking it
-					away from someone who would otherwise have it.
+					exceptions for a Space, Agent, Workflow, Conversation, or Node: give
+					one team access, or take it away from someone who would otherwise have
+					it.
 				</p>
 			</div>
 

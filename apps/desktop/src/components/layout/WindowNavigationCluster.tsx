@@ -4,6 +4,7 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useI18n } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	Tooltip,
@@ -43,6 +44,21 @@ export function WindowNavigationCluster({
 	onToggleSidebar,
 	sidebarShown,
 }: WindowNavigationClusterProps) {
+	const { t } = useI18n();
+	const backLabel = t("shell.go-back", undefined, "Go back");
+	const forwardLabel = t("shell.go-forward", undefined, "Go forward");
+	const navigationLabel = sidebarShown
+		? t("shell.close-navigation", undefined, "Close navigation")
+		: t("shell.open-navigation", undefined, "Open navigation");
+	const sidebarLabel = sidebarShown
+		? t("shell.hide-sidebar", undefined, "Hide sidebar")
+		: t("shell.show-sidebar", undefined, "Show sidebar");
+	const searchLabel = t("shell.search", undefined, "Search");
+	const searchShortcutLabel = t(
+		"shell.search-shortcut",
+		{ shortcut: isMac ? "⌘K" : "Ctrl K" },
+		`Search ${isMac ? "⌘K" : "Ctrl K"}`
+	);
 	return (
 		<div
 			className={cn(
@@ -58,7 +74,7 @@ export function WindowNavigationCluster({
 						<TooltipTrigger
 							render={
 								<Button
-									aria-label="Go back"
+									aria-label={backLabel}
 									className="size-8"
 									disabled={!canGoBack}
 									onClick={onGoBack}
@@ -69,13 +85,13 @@ export function WindowNavigationCluster({
 								</Button>
 							}
 						/>
-						<TooltipContent>Go back</TooltipContent>
+						<TooltipContent>{backLabel}</TooltipContent>
 					</Tooltip>
 					<Tooltip>
 						<TooltipTrigger
 							render={
 								<Button
-									aria-label="Go forward"
+									aria-label={forwardLabel}
 									className="size-8"
 									disabled={!canGoForward}
 									onClick={onGoForward}
@@ -86,7 +102,7 @@ export function WindowNavigationCluster({
 								</Button>
 							}
 						/>
-						<TooltipContent>Go forward</TooltipContent>
+						<TooltipContent>{forwardLabel}</TooltipContent>
 					</Tooltip>
 				</>
 			)}
@@ -94,7 +110,7 @@ export function WindowNavigationCluster({
 				<TooltipTrigger
 					render={
 						<Button
-							aria-label={sidebarShown ? "Close navigation" : "Open navigation"}
+							aria-label={navigationLabel}
 							className="size-8"
 							onClick={onToggleSidebar}
 							size="icon"
@@ -108,16 +124,14 @@ export function WindowNavigationCluster({
 						</Button>
 					}
 				/>
-				<TooltipContent>
-					{sidebarShown ? "Hide sidebar" : "Show sidebar"}
-				</TooltipContent>
+				<TooltipContent>{sidebarLabel}</TooltipContent>
 			</Tooltip>
 			{showSearch && (
 				<Tooltip>
 					<TooltipTrigger
 						render={
 							<Button
-								aria-label="Search"
+								aria-label={searchLabel}
 								className="size-8"
 								onClick={onSearch}
 								size="icon"
@@ -127,7 +141,7 @@ export function WindowNavigationCluster({
 							</Button>
 						}
 					/>
-					<TooltipContent>Search {isMac ? "⌘K" : "Ctrl K"}</TooltipContent>
+					<TooltipContent>{searchShortcutLabel}</TooltipContent>
 				</Tooltip>
 			)}
 		</div>

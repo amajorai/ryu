@@ -1088,7 +1088,7 @@ export function ProPlanCard({
 				<PlanCta
 					isCurrent={isCurrent}
 					isLoading={isLoading}
-					label="Upgrade"
+					label={currentPlan ? "Upgrade" : "Start with Pro"}
 					onClick={() => onCheckout(isYearly ? "pro-yearly" : "pro-monthly")}
 				/>
 			</CardFooter>
@@ -1187,7 +1187,7 @@ export function MaxPlanCard({
 				<PlanCta
 					isCurrent={isCurrent}
 					isLoading={isLoading}
-					label="Upgrade"
+					label={currentPlan ? "Upgrade" : "Start with Max"}
 					onClick={() => onCheckout(isYearly ? "max-yearly" : "max-monthly")}
 				/>
 			</CardFooter>

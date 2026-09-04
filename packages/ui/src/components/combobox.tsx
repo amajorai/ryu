@@ -7,6 +7,7 @@ import {
 	Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import {
 	InputGroup,
@@ -42,6 +43,7 @@ function ComboboxTrigger({
 	children,
 	...props
 }: ComboboxPrimitive.Trigger.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ComboboxPrimitive.Trigger
 			className={cn("min-w-0 [&_svg:not([class*='size-'])]:size-4", className)}
@@ -49,7 +51,7 @@ function ComboboxTrigger({
 			{...props}
 		>
 			<FadeOverflowTextChildren className="flex-1">
-				{children}
+				{localizedChildren}
 			</FadeOverflowTextChildren>
 			<HugeiconsIcon
 				className="pointer-events-none size-4 text-muted-foreground"
@@ -178,6 +180,7 @@ function ComboboxItem({
 	children,
 	...props
 }: ComboboxPrimitive.Item.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ComboboxPrimitive.Item
 			className={cn(
@@ -187,7 +190,7 @@ function ComboboxItem({
 			data-slot="combobox-item"
 			{...props}
 		>
-			{children}
+			{localizedChildren}
 			<ComboboxPrimitive.ItemIndicator
 				render={
 					<span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center" />
@@ -215,14 +218,18 @@ function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
 
 function ComboboxLabel({
 	className,
+	children,
 	...props
 }: ComboboxPrimitive.GroupLabel.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ComboboxPrimitive.GroupLabel
 			className={cn("px-1.5 py-1.5 text-muted-foreground text-xs", className)}
 			data-slot="combobox-label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</ComboboxPrimitive.GroupLabel>
 	);
 }
 
@@ -232,7 +239,12 @@ function ComboboxCollection({ ...props }: ComboboxPrimitive.Collection.Props) {
 	);
 }
 
-function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
+function ComboboxEmpty({
+	className,
+	children,
+	...props
+}: ComboboxPrimitive.Empty.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ComboboxPrimitive.Empty
 			className={cn(
@@ -241,7 +253,9 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
 			)}
 			data-slot="combobox-empty"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</ComboboxPrimitive.Empty>
 	);
 }
 

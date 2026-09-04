@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type ApiTarget } from "@/src/lib/api/client.ts";
 import type { MeshStatus } from "@/src/lib/api/mesh.ts";
 import {
+	fetchHealth,
 	fetchSystemStatus,
 	type SystemStatusSnapshot,
 } from "@/src/lib/api/system.ts";
@@ -23,6 +24,7 @@ import {
 	resolveConnectionPhase,
 } from "@/src/lib/connectivity.ts";
 import { triggerGlobalRefresh } from "@/src/lib/core-refresh.ts";
+import { invokeWhenReady, isTauriReady } from "@/src/lib/tauri-ready.ts";
 import { isLocalNode, useNodeStore } from "@/src/store/useNodeStore.ts";
 
 /** The Island Electron companion's loopback control server (see apps/island). */
@@ -101,6 +103,7 @@ export interface SystemStatus {
 
 const POLL_INTERVAL_MS = 5000;
 const STATUS_PROBE_TIMEOUT_MS = 3000;
+const HEALTH_FALLBACK_TIMEOUT_MS = 1500;
 
 /** Bound a black-holed node so the shell can say "offline" promptly. */
 async function fetchSystemStatusWithTimeout(
@@ -112,6 +115,48 @@ async function fetchSystemStatusWithTimeout(
 		return await fetchSystemStatus(target, controller.signal);
 	} finally {
 		clearTimeout(timeout);
+	}
+}
+
+/**
+ * `/api/system/status` is a rich snapshot and can be briefly unavailable while
+ * a local engine is starting, restarting, or under load. Confirm basic node
+ * liveness before showing the user an offline banner; a healthy Core should not
+ * look disconnected just because its optional status aggregation missed one
+ * poll.
+ */
+async function fetchHealthWithTimeout(target: ApiTarget): Promise<boolean> {
+	const controller = new AbortController();
+	const timeout = setTimeout(
+		() => controller.abort(),
+		HEALTH_FALLBACK_TIMEOUT_MS
+	);
+	try {
+		await fetchHealth(target, controller.signal);
+		return true;
+	} catch {
+		return false;
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+/**
+ * Tauri can still reach the local Core when the webview's CORS preflight is
+ * briefly delayed or rejected. Use the native probe as a local-only transport
+ * fallback so the shell does not tell a user their working node is offline.
+ */
+async function probeLocalNodeNative(name: string): Promise<boolean> {
+	if (!isTauriReady()) {
+		return false;
+	}
+	try {
+		const result = await invokeWhenReady<{ online?: unknown }>("test_node", {
+			name,
+		});
+		return result.online === true;
+	} catch {
+		return false;
 	}
 }
 
@@ -185,10 +230,17 @@ export function useSystemStatus(): SystemStatus {
 			// A typed ApiError means the node answered and rejected the status route;
 			// that is a live node with an unavailable status endpoint, not a network
 			// outage. Transport errors are the only failures that mark the node down.
-			const nodeAnswered = statusError instanceof ApiError;
+			const nodeAnswered =
+				statusError instanceof ApiError ||
+				(
+					await Promise.all([
+						fetchHealthWithTimeout(target),
+						local ? probeLocalNodeNative(node.name) : Promise.resolve(false),
+					])
+				).some(Boolean);
 			setNodeReachable(nodeAnswered);
 			setActiveNodeOnline(nodeAnswered);
-			setCoreReachable(false);
+			setCoreReachable(nodeAnswered);
 			setActiveEngine(null);
 			setEngineRunning(false);
 			setSidecars({});
@@ -196,7 +248,7 @@ export function useSystemStatus(): SystemStatus {
 			setShadowReachable(null);
 			setMeshReachable(null);
 			setMeshStatus(null);
-			setError("Core unreachable");
+			setError(nodeAnswered ? "Core status unavailable" : "Core unreachable");
 			setLoading(false);
 			wasReachableRef.current = false;
 			return;

@@ -494,7 +494,7 @@ export function AgentChat({
 				className={cn(
 					"w-full",
 					isCenteredEmptyState
-						? "my-auto flex max-w-[720px] flex-col"
+						? "my-auto flex max-w-[880px] flex-col"
 						: "flex min-h-0 flex-1 flex-col"
 				)}
 				layout={reduceMotion ? false : "position"}

@@ -51,10 +51,13 @@ export function formatMicroUsd(microUsd: number, currency = "usd"): string {
 }
 
 export interface CreditWalletView {
+	balanceBreakdownAvailable?: boolean;
 	balanceMicroUsd: number;
 	currency: string;
-	subscriptionBalanceMicroUsd: number;
-	topupBalanceMicroUsd: number;
+	providerAllocations?: CreditGrantPoolView[];
+	source?: "local" | "polar";
+	subscriptionBalanceMicroUsd: number | null;
+	topupBalanceMicroUsd: number | null;
 }
 
 export interface CreditEntitlementView {
@@ -333,13 +336,16 @@ export function CreditsView({
 					</p>
 				) : null}
 				<CreditBalanceBreakdown
+					balanceBreakdownAvailable={wallet?.balanceBreakdownAvailable}
 					currency={currency}
 					onDemandCreditsMicroUsd={wallet?.topupBalanceMicroUsd ?? null}
 					planAllowanceMicroUsd={entitlement?.monthlyCreditPoolMicroUsd ?? null}
 					planCreditsMicroUsd={wallet?.subscriptionBalanceMicroUsd ?? null}
 					providerAllocations={
-						wallet && !grantPoolsLoading
-							? grantPools.map<CreditAllocationView>((pool) => ({
+						wallet?.balanceBreakdownAvailable === false
+							? (wallet.providerAllocations ?? null)
+							: wallet && !grantPoolsLoading
+								? grantPools.map<CreditAllocationView>((pool) => ({
 									expiresAtLabel: pool.expiresAtLabel,
 									id: pool.id,
 									isFreeProvider: pool.isFreeProvider,
@@ -347,7 +353,7 @@ export function CreditsView({
 									remainingMicroUsd: pool.remainingMicroUsd,
 									spendableOn: pool.spendableOn,
 								}))
-							: null
+								: null
 					}
 					totalMicroUsd={wallet?.balanceMicroUsd ?? null}
 				/>

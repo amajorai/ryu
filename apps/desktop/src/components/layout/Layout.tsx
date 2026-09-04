@@ -69,6 +69,7 @@ import { useCreditAlertEvents } from "@/src/hooks/useCreditAlertEvents.ts";
 import { useDesktopNotificationsStream } from "@/src/hooks/useDesktopNotificationsStream.ts";
 import { useDownloadsStream } from "@/src/hooks/useDownloadsStream.ts";
 import { useEditorUploader } from "@/src/hooks/useEditorUploader.ts";
+import { LoginApprovalEvents } from "@/src/hooks/useLoginApprovalEvents.tsx";
 import { useMeetingStream } from "@/src/hooks/useMeetingStream.ts";
 import { useMonitorAlertsStream } from "@/src/hooks/useMonitorAlertsStream.ts";
 import { useNavigationEvents } from "@/src/hooks/useNavigationEvents.ts";
@@ -784,6 +785,7 @@ function LayoutContent({
 
 	return (
 		<TabDndProvider>
+			<LoginApprovalEvents />
 			{!(botProduct || osProduct) && <CommandPalette />}
 			{/* One instance for every split menu that offers "Save layout as
 			    preset" — a context menu unmounts on click, so it cannot host its

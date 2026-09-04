@@ -1,15 +1,20 @@
 // Shared scorecard contract and deterministic scoring fold.
 //
-// Rule modules only decide which checks apply to their listing type. This module
-// owns the wire shape, category metadata, and the scoring semantics shared by
-// every marketplace scorecard.
+// Rule modules only decide which checks apply to their listing or editor type.
+// This module owns the wire shape, category metadata, and scoring semantics
+// shared by marketplace listings and agent configuration.
 
 export type CheckStatus = "pass" | "warn" | "fail" | "unknown";
 
 export type ScorecardCategory =
+	| "capabilities"
+	| "configuration"
 	| "hygiene"
 	| "maintenance"
+	| "operations"
 	| "review"
+	| "runtime"
+	| "safety"
 	| "disclosures"
 	| "errors";
 
@@ -37,6 +42,7 @@ export interface CategoryScore {
 
 export type ScorecardGrade = "A" | "B" | "C" | "D" | "F";
 export type ScorecardRulesetVersion =
+	| "agent-config-1"
 	| "marketplace-plugin-1"
 	| "marketplace-skill-1";
 
@@ -56,6 +62,11 @@ export interface Scorecard {
 }
 
 const CATEGORY_ORDER: ScorecardCategory[] = [
+	"configuration",
+	"runtime",
+	"safety",
+	"capabilities",
+	"operations",
 	"review",
 	"disclosures",
 	"maintenance",
@@ -64,19 +75,29 @@ const CATEGORY_ORDER: ScorecardCategory[] = [
 ];
 
 export const CATEGORY_LABELS: Record<ScorecardCategory, string> = {
+	capabilities: "Capabilities",
+	configuration: "Configuration",
 	disclosures: "Disclosures",
 	errors: "Errors",
 	hygiene: "Hygiene",
 	maintenance: "Maintenance",
+	operations: "Operations",
 	review: "Review & provenance",
+	runtime: "Runtime",
+	safety: "Safety",
 };
 
 export const CATEGORY_DESCRIPTIONS: Record<ScorecardCategory, string> = {
+	capabilities: "Whether access, tools, skills, and memory fit the job.",
+	configuration: "Whether the agent has a clear identity and instructions.",
 	disclosures: "What it tells you about the data and access it wants.",
 	errors: "Problems found while reading the listing itself.",
 	hygiene: "Whether the listing is complete and correctly described.",
 	maintenance: "Whether anyone is still looking after it.",
+	operations: "Whether background work has the prerequisites it needs.",
 	review: "Who published it and who checked it.",
+	runtime: "Whether the selected runtime and model can start.",
+	safety: "Whether execution posture matches the access it has.",
 };
 
 const STATUS_POINTS: Record<CheckStatus, number> = {
@@ -176,13 +197,18 @@ function gradeFor(score: number): ScorecardGrade {
 function summaryFor(
 	score: number | null,
 	failures: number,
-	warnings: number
+	warnings: number,
+	rulesetVersion: ScorecardRulesetVersion
 ): string {
 	if (score === null) {
-		return "Not enough information to assess this listing.";
+		return rulesetVersion === "agent-config-1"
+			? "Not enough information to assess this agent yet."
+			: "Not enough information to assess this listing.";
 	}
 	if (failures > 0) {
-		return `${failures} failed check${failures === 1 ? "" : "s"} — read them before installing.`;
+		return rulesetVersion === "agent-config-1"
+			? `${failures} failed check${failures === 1 ? "" : "s"} — fix them before running this agent.`
+			: `${failures} failed check${failures === 1 ? "" : "s"} — read them before installing.`;
 	}
 	if (warnings > 0) {
 		return `Passes every critical check, with ${warnings} thing${warnings === 1 ? "" : "s"} worth knowing.`;
@@ -210,7 +236,8 @@ export function buildScorecard(
 		summary: summaryFor(
 			score,
 			checks.filter((c) => c.status === "fail").length,
-			checks.filter((c) => c.status === "warn").length
+			checks.filter((c) => c.status === "warn").length,
+			rulesetVersion
 		),
 	};
 }

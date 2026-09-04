@@ -691,6 +691,8 @@ export interface ProfileSettingsProps {
 	statsSlot?: ReactNode;
 	/** Support-access tab (#545), injected by the live page. */
 	supportAccessSlot?: ReactNode;
+	/** Server-event email and platform Inbox preferences. */
+	transactionalNotificationsSlot?: ReactNode;
 	twoFactorEnabled?: boolean;
 	twoFactorSlot?: ReactNode;
 	username?: string;
@@ -734,6 +736,7 @@ export default function ProfileSettings({
 	isSubscribed = true,
 	isLoadingSubscription = false,
 	onSubscriptionToggle = noop,
+	transactionalNotificationsSlot,
 	googleConnected = false,
 	connectingProvider = null,
 	onConnectGoogle = noop,
@@ -1072,6 +1075,7 @@ export default function ProfileSettings({
 							</div>
 						</CardContent>
 					</Card>
+					{transactionalNotificationsSlot}
 				</TabsContent>
 
 				<TabsContent className="mt-6 space-y-6" value="connections">

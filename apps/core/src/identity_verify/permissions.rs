@@ -34,6 +34,15 @@ pub const AGENT_DELETE: &str = "agent.delete";
 pub const CHANNEL_MANAGE: &str = "channel.manage";
 pub const CHANNEL_DELETE: &str = "channel.delete";
 pub const TOOL_EXEC: &str = "tool.exec";
+pub const NOTIFICATIONS_VIEW: &str = "notifications.view";
+pub const NOTIFICATIONS_MANAGE: &str = "notifications.manage";
+pub const MAIL_READ: &str = "mail.read";
+pub const MAIL_MANAGE: &str = "mail.manage";
+pub const TEAMS_MANAGE: &str = "teams.manage";
+pub const PROJECTS_MANAGE: &str = "projects.manage";
+pub const REGISTRY_MANAGE: &str = "registry.manage";
+pub const NODES_VIEW: &str = "nodes.view";
+pub const NODES_MANAGE: &str = "nodes.manage";
 pub const MEMBERS_MANAGE: &str = "members.manage";
 pub const ROLES_MANAGE: &str = "roles.manage";
 pub const BILLING_MANAGE: &str = "billing.manage";
@@ -67,6 +76,15 @@ pub const PERMISSIONS: &[&str] = &[
     CHANNEL_MANAGE,
     CHANNEL_DELETE,
     TOOL_EXEC,
+    NOTIFICATIONS_VIEW,
+    NOTIFICATIONS_MANAGE,
+    MAIL_READ,
+    MAIL_MANAGE,
+    TEAMS_MANAGE,
+    PROJECTS_MANAGE,
+    REGISTRY_MANAGE,
+    NODES_VIEW,
+    NODES_MANAGE,
     MEMBERS_MANAGE,
     ROLES_MANAGE,
     BILLING_MANAGE,
@@ -92,6 +110,10 @@ const MEMBER_PERMISSIONS: &[&str] = &[
     AGENT_VIEW,
     AGENT_RUN,
     TOOL_EXEC,
+    NOTIFICATIONS_VIEW,
+    MAIL_READ,
+    PROJECTS_MANAGE,
+    NODES_VIEW,
     MARKETPLACE_VIEW,
 ];
 
@@ -101,6 +123,9 @@ const VIEWER_PERMISSIONS: &[&str] = &[
     WORKFLOW_VIEW,
     SPACE_READ,
     AGENT_VIEW,
+    NOTIFICATIONS_VIEW,
+    MAIL_READ,
+    NODES_VIEW,
     MARKETPLACE_VIEW,
 ];
 
@@ -168,6 +193,10 @@ mod tests {
             "agent.view",
             "agent.run",
             "tool.exec",
+            "notifications.view",
+            "mail.read",
+            "projects.manage",
+            "nodes.view",
             "marketplace.view",
         ]
         .into_iter()
@@ -183,6 +212,9 @@ mod tests {
             "workflow.view",
             "space.read",
             "agent.view",
+            "notifications.view",
+            "mail.read",
+            "nodes.view",
             "marketplace.view",
         ]
         .into_iter()

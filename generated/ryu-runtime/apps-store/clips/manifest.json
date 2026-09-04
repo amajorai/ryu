@@ -18,7 +18,7 @@
   "version": "0.1.14",
   "stability": "experimental",
   "category": "Media & Voice",
-  "description": "A local-first video repurposing workspace for importing or capturing recordings, finding transcript-led moments, reviewing short-form formats, editing vertical previews, and preparing exports. The out-of-process ryu-clips sidecar owns the Core→Shadow capture and ingest surface.",
+  "description": "A local-first video capture and ingest surface with a bundled editor preview. The out-of-process ryu-clips sidecar owns Core→Shadow recording and URL ingest; transcript-led analysis and vertical rendering are not connected yet.",
   "tagline": "Find the moments worth sharing",
   "keywords": [
     "clips",
@@ -35,11 +35,11 @@
     "gateway": { "support": "none" },
     "core": { "support": "full" },
     "desktop": { "support": "full" },
-    "island": { "support": "full" },
-    "mobile": { "support": "full" },
-    "extension": { "support": "full" },
-    "web": { "support": "full" },
-    "cli": { "support": "full" }
+    "island": { "support": "none" },
+    "mobile": { "support": "none" },
+    "extension": { "support": "none" },
+    "web": { "support": "none" },
+    "cli": { "support": "none" }
   },
   "engines": {
     "ryu": ">=0.1.0"

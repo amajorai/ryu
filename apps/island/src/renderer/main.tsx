@@ -3,6 +3,7 @@ import { installHorizontalWheelScrolling } from "@ryu/ui/lib/horizontal-wheel-sc
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Island } from "./components/Island.tsx";
+import { IslandI18nProvider } from "./components/IslandI18nProvider.tsx";
 import "./index.css";
 
 const container = document.getElementById("root");
@@ -14,6 +15,8 @@ installHorizontalWheelScrolling(document);
 
 createRoot(container).render(
 	<StrictMode>
-		<Island />
+		<IslandI18nProvider>
+			<Island />
+		</IslandI18nProvider>
 	</StrictMode>
 );

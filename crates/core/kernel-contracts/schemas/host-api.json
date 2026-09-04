@@ -8,6 +8,27 @@
       "tsHost": true
     },
     {
+      "capability": "i18n",
+      "grant": null,
+      "method": "i18n.get",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "i18n",
+      "grant": null,
+      "method": "i18n.translate",
+      "streaming": false,
+      "tsHost": true
+    },
+    {
+      "capability": "i18n",
+      "grant": null,
+      "method": "i18n.subscribe",
+      "streaming": true,
+      "tsHost": true
+    },
+    {
       "capability": "node.shareOrigins",
       "grant": null,
       "method": "node.shareOrigins",
@@ -1450,5 +1471,5 @@
       "tsHost": false
     }
   ],
-  "version": "1.10.0"
+  "version": "1.11.0"
 }

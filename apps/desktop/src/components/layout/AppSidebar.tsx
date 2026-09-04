@@ -56,6 +56,7 @@ import {
 	sourceItemsFromResponse,
 	type ViewActionHttp,
 } from "@ryu/app-host/views";
+import { useI18n, useLocalizedString } from "@ryu/i18n/react";
 import AppIcon from "@ryu/marketplace/catalog/chrome/app-icon";
 import { iconCacheKey } from "@ryu/marketplace/catalog/icon-cache";
 import { useOptionalReport } from "@ryu/marketplace/report";
@@ -1563,12 +1564,13 @@ function SectionActionButton({
 	onClick: () => void;
 	title: string;
 }) {
+	const localizedTitle = useLocalizedString(title) ?? title;
 	return (
 		<Tooltip>
 			<TooltipTrigger
 				render={
 					<button
-						aria-label={title}
+						aria-label={localizedTitle}
 						className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100"
 						onClick={(e) => {
 							e.stopPropagation();
@@ -1580,7 +1582,7 @@ function SectionActionButton({
 					</button>
 				}
 			/>
-			<TooltipContent>{title}</TooltipContent>
+			<TooltipContent>{localizedTitle}</TooltipContent>
 		</Tooltip>
 	);
 }
@@ -1612,12 +1614,13 @@ function SubSectionActionButton({
 	onClick: () => void;
 	title: string;
 }) {
+	const localizedTitle = useLocalizedString(title) ?? title;
 	return (
 		<Tooltip>
 			<TooltipTrigger
 				render={
 					<button
-						aria-label={title}
+						aria-label={localizedTitle}
 						className="flex size-5 shrink-0 items-center justify-center rounded bg-transparent text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/subsection:opacity-100"
 						onClick={(e) => {
 							e.stopPropagation();
@@ -1629,7 +1632,7 @@ function SubSectionActionButton({
 					</button>
 				}
 			/>
-			<TooltipContent>{title}</TooltipContent>
+			<TooltipContent>{localizedTitle}</TooltipContent>
 		</Tooltip>
 	);
 }
@@ -1765,6 +1768,8 @@ function SidebarSection({
 	 *  chats" context menu. Defaults to identity (no wrapper). */
 	wrapHeader?: (header: ReactNode) => ReactNode;
 }) {
+	const localizedLabel = useLocalizedString(label) ?? label;
+	const localizedTitle = useLocalizedString(title);
 	const isDragOver =
 		dnd.dragOverKey === sectionKey &&
 		dnd.draggingKey !== null &&
@@ -1791,7 +1796,7 @@ function SidebarSection({
 		>
 			{iconNode ??
 				(icon && <HugeiconsIcon className="size-3.5 shrink-0" icon={icon} />)}
-			<span className="min-w-0 truncate">{label}</span>
+			<span className="min-w-0 truncate">{localizedLabel}</span>
 			<HugeiconsIcon
 				className={`-ml-1 size-3 shrink-0 opacity-0 transition group-hover/hdr:opacity-100 ${collapsed ? "-rotate-90" : ""}`}
 				icon={ArrowDown01Icon}
@@ -1825,7 +1830,7 @@ function SidebarSection({
 						{title ? (
 							<Tooltip>
 								<TooltipTrigger render={headerButton} />
-								<TooltipContent align="start">{title}</TooltipContent>
+								<TooltipContent align="start">{localizedTitle}</TooltipContent>
 							</Tooltip>
 						) : (
 							headerButton
@@ -6224,6 +6229,7 @@ export function SubSection({
 	 *  chats" context menu. Defaults to identity (no wrapper). */
 	wrapHeader?: (header: ReactNode) => ReactNode;
 }) {
+	const localizedLabel = useLocalizedString(label) ?? label;
 	const isDragOver =
 		dnd.dragOverKey === sectionKey &&
 		dnd.draggingKey !== null &&
@@ -6354,7 +6360,7 @@ export function SubSection({
 										icon={icon}
 									/>
 								))}
-							<span className="min-w-0 truncate">{label}</span>
+							<span className="min-w-0 truncate">{localizedLabel}</span>
 							{typeof count === "number" && (
 								<span
 									className={`shrink-0 text-muted-foreground/60 ${action ? "transition-opacity group-hover/subsection:opacity-0" : ""}`}
@@ -8225,6 +8231,7 @@ export function SidebarPanelContent({
 	onDeleteConversation,
 }: AppSidebarProps) {
 	const productMode = useProductMode();
+	const { t } = useI18n();
 	const botProduct = productMode === "bot";
 	const {
 		listConversations,
@@ -9064,7 +9071,12 @@ export function SidebarPanelContent({
 	// Labels for every section in the customize dialog: the built-in set plus each
 	// app-contributed section's own title (keyed by its `plugin:<id>:<sectionId>`
 	// key), so a contributed row reads as "Canvas", not the raw namespaced key.
-	const sectionLabels: Record<string, string> = { ...SECTION_LABELS };
+	const sectionLabels = Object.fromEntries(
+		Object.entries(SECTION_LABELS).map(([key, label]) => [
+			key,
+			t(`sidebar.section.${key}`, {}, label),
+		])
+	) as Record<string, string> & Record<SectionKey, string>;
 	for (const section of contributedSections) {
 		sectionLabels[`plugin:${section.plugin}:${section.id}`] = section.title;
 	}
@@ -9091,7 +9103,7 @@ export function SidebarPanelContent({
 							onClick={handleNewConversation}
 						>
 							<HugeiconsIcon className="size-4" icon={Add01Icon} />
-							<span>New chat</span>
+							<span>{t("sidebar.chrome.new-chat", {}, "New chat")}</span>
 						</SidebarMenuButton>
 					</ChromeHideMenu>
 				);
@@ -9105,7 +9117,7 @@ export function SidebarPanelContent({
 					<NavTabButton
 						chromeKey="library"
 						icon={LibraryIcon}
-						label="Library"
+						label={t("sidebar.chrome.library", {}, "Library")}
 						menu={chromeMenu}
 						path="/library"
 					/>
@@ -9119,7 +9131,7 @@ export function SidebarPanelContent({
 						activeIcon={PackageOpenIcon}
 						chromeKey="store"
 						icon={PackageIcon}
-						label="Customize"
+						label={t("sidebar.chrome.customize", {}, "Customize")}
 						menu={chromeMenu}
 						path="/store"
 					/>
@@ -9314,8 +9326,11 @@ export function SidebarPanelContent({
 	// vocabulary Grok/Hermes bot mode uses, and the word that reads correctly
 	// opposite "Agents". A label the user renamed in Customize wins over both.
 	const stripLabels =
-		activeMode.key === "agent" && sectionLabels.chats === SECTION_LABELS.chats
-			? { ...sectionLabels, chats: "Sessions" }
+		activeMode.key === "agent"
+			? {
+					...sectionLabels,
+					chats: t("sidebar.section.sessions", {}, "Sessions"),
+				}
 			: sectionLabels;
 
 	// The peek jump-list only makes sense in a stacked mode, where every visible
@@ -9345,10 +9360,9 @@ export function SidebarPanelContent({
 							className="flex items-center gap-2 px-2 pt-2 pb-1"
 							data-tauri-drag-region
 						>
-							{/* Back/forward/sidebar-toggle/search live pinned at the window's
-						    top-left (in Layout). The node selector is right-aligned here so
-						    it never collides with that cluster. The build badge ("Dev" /
-						    channel) sits beside the account button (see NavUser). */}
+									{/* Back/forward/sidebar-toggle/search live pinned at the window's
+									    top-left (in Layout). The node selector is right-aligned here so
+									    it never collides with that cluster. */}
 							<div
 								className="ml-auto flex items-center gap-0.5"
 								data-tauri-drag-region={false}
@@ -9513,14 +9527,22 @@ export function SidebarPanelContent({
 							FOOTER_CHROME.has(key) && (key !== "inbox" || inboxOwner !== null)
 					).map((key) => ({
 						key,
-						label: CHROME_LABELS[key as BuiltinChromeKey] ?? key,
+						label: t(
+							`sidebar.chrome.${key}`,
+							{},
+							CHROME_LABELS[key as BuiltinChromeKey] ?? key
+						),
 					}))}
 					chromeHidden={hiddenChrome}
 					fixedTopChromeItems={CHROME_ORDER.filter(
 						(key) => !(FOOTER_CHROME.has(key) || isHeaderButtonChrome(key))
 					).map((key) => ({
 						key,
-						label: CHROME_LABELS[key as BuiltinChromeKey] ?? key,
+						label: t(
+							`sidebar.chrome.${key}`,
+							{},
+							CHROME_LABELS[key as BuiltinChromeKey] ?? key
+						),
 					}))}
 					hidden={hiddenSections}
 					labels={sectionLabels}
@@ -9543,9 +9565,14 @@ export function SidebarPanelContent({
 					topButtonItems={effectiveChromeOrder.map((key) => ({
 						key,
 						label:
-							CHROME_LABELS[key as BuiltinChromeKey] ??
 							chromeButtonLabels[key] ??
-							key,
+							(CHROME_LABELS[key as BuiltinChromeKey]
+								? t(
+										`sidebar.chrome.${key}`,
+										{},
+										CHROME_LABELS[key as BuiltinChromeKey]
+									)
+								: key),
 					}))}
 				/>
 			)}

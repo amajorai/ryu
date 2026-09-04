@@ -24,6 +24,7 @@ import type {
 	ComposioToolkit,
 } from "@/src/lib/api/composio.ts";
 import type {
+	NodeSetupKind,
 	OnboardingAgentSuggestion,
 	ProfileJobStatus,
 } from "@/src/lib/api/onboarding-profile.ts";
@@ -173,6 +174,7 @@ interface OnboardingSetupStepProps {
 	importing: boolean;
 	kind: OnboardingSetupKind;
 	localSelection: AgentSelection;
+	nodeSetupKind: NodeSetupKind | null;
 	onBackgroundProfile: () => void;
 	onCancelProfile: () => void;
 	onChooseOrganization: (organizationId: string) => void;
@@ -755,7 +757,9 @@ function ImportSetup({
 				<Switch checked={autoImport} onCheckedChange={onToggle} />
 			</div>
 			<ContinueRow
-				continueLabel={total > 0 ? "Import threads" : "Continue"}
+				continueLabel={
+					importing ? "Importing…" : total > 0 ? "Import threads" : "Continue"
+				}
 				disabled={importing}
 				onContinue={total > 0 ? onImport : onSkip}
 				onSkip={onSkip}
@@ -775,6 +779,7 @@ const PROFILE_LINES = [
 function ProfileSetup({
 	alreadyBuilt,
 	job,
+	nodeSetupKind,
 	startedAt,
 	onStart,
 	onSkip,
@@ -784,6 +789,7 @@ function ProfileSetup({
 }: {
 	alreadyBuilt: boolean | null;
 	job: ProfileJobStatus | null;
+	nodeSetupKind: NodeSetupKind | null;
 	onBackground: () => void;
 	onCancel: () => void;
 	onContinueAfterBackground: () => void;
@@ -826,8 +832,12 @@ function ProfileSetup({
 			>
 				<p className="text-muted-foreground text-sm">
 					{alreadyBuilt
-						? "You already did this before. Ryu can rebuild the starting profile from your current connected sources and imported conversations."
-						: "Ryu can create a starting profile from your connected sources and imported conversations. It will only draft facts and recommendations for you to review."}
+						? nodeSetupKind === "team"
+							? "You already did this before. Ryu can rebuild shared company knowledge from your current connected sources and imported conversations."
+							: "You already did this before. Ryu can rebuild your private profile from your current connected sources and imported conversations."
+						: nodeSetupKind === "team"
+							? "Ryu can create shared company knowledge from your connected sources and imported conversations. It will only draft facts and recommendations for you to review."
+							: "Ryu can create a private starting profile from your connected sources and imported conversations. It will only draft facts and recommendations for you to review."}
 				</p>
 				{alreadyBuilt ? null : (
 					<div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-muted-foreground text-xs">
@@ -870,7 +880,9 @@ function ProfileSetup({
 						: "Your starting profile is ready"}
 				</p>
 				<p className="text-muted-foreground text-xs">
-					Ryu wrote a user profile and a shared organization profile. You can
+					{nodeSetupKind === "team"
+						? "Ryu wrote shared company knowledge. You can"
+						: "Ryu wrote a private profile. You can"}{" "}
 					review the source-backed draft in the new chat
 					{suggestionCount > 0
 						? " and choose which suggested agents to add."
@@ -1056,12 +1068,21 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 	}
 	return (
 		<Shell
-			subtitle="Give Ryu a useful starting point without changing your accounts or agents."
-			title="Build your initial profile"
+			subtitle={
+				props.nodeSetupKind === "team"
+					? "Build shared company knowledge from approved sources without changing external accounts or agents."
+					: "Build a private starting profile without changing your accounts or agents."
+			}
+			title={
+				props.nodeSetupKind === "team"
+					? "Build shared company knowledge"
+					: "Build your private profile"
+			}
 		>
 			<ProfileSetup
 				alreadyBuilt={props.alreadyBuilt}
 				job={props.profileJob}
+				nodeSetupKind={props.nodeSetupKind}
 				onBackground={props.onBackgroundProfile}
 				onCancel={props.onCancelProfile}
 				onContinueAfterBackground={props.onContinueBackgroundProfile}

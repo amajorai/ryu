@@ -1,3 +1,6 @@
+"use client";
+
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronDown } from "lucide-react";
 import type * as React from "react";
@@ -11,6 +14,8 @@ function NativeSelect({
 	size = "default",
 	...props
 }: NativeSelectProps) {
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<div
 			className={cn(
@@ -25,6 +30,8 @@ function NativeSelect({
 				data-size={size}
 				data-slot="native-select"
 				{...props}
+				aria-label={localizedAriaLabel}
+				title={localizedTitle}
 			/>
 			<ChevronDown
 				aria-hidden="true"
@@ -36,15 +43,19 @@ function NativeSelect({
 }
 
 function NativeSelectOption({
+	children,
 	className,
 	...props
 }: React.ComponentProps<"option">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<option
 			className={cn("bg-[Canvas] text-[CanvasText]", className)}
 			data-slot="native-select-option"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</option>
 	);
 }
 

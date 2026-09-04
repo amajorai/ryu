@@ -5,6 +5,7 @@ import {
 	type StoreSectionTab,
 	StoreSectionTabs,
 } from "@ryu/blocks/desktop/store.tsx";
+import { useI18n } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { ReactNode } from "react";
 
@@ -43,6 +44,7 @@ export default function MarketplaceSurface({
 	showSectionTabs?: boolean;
 	trailing?: ReactNode;
 }) {
+	const { t } = useI18n();
 	return (
 		<div
 			className={cn("relative flex min-h-0 flex-col", className)}
@@ -56,7 +58,7 @@ export default function MarketplaceSurface({
 			>
 				<StoreGlobalSearch
 					onChange={onSearch}
-					placeholder={GLOBAL_SEARCH_PLACEHOLDER}
+					placeholder={t("marketplace.search", {}, GLOBAL_SEARCH_PLACEHOLDER)}
 					trailing={trailing}
 					value={query}
 				/>

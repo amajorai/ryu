@@ -54,6 +54,38 @@ interface NodesData {
 	nodes: Node[];
 }
 
+/**
+ * Keep the frontend resilient when an older native bridge returns nodes.json
+ * before applying its local-token decoration. The token command reads the same
+ * profile-scoped file as the native list command, and the value is kept only in
+ * memory; it is never written back to nodes.json.
+ */
+async function attachLocalNodeToken(data: NodesData): Promise<NodesData> {
+	const local = data.nodes.find((node) => isLocalNode(node));
+	if (!local || local.token) {
+		return data;
+	}
+	try {
+		const result = await invokeWhenReady<{ token?: unknown }>(
+			"local_node_token"
+		);
+		const token = typeof result.token === "string" ? result.token.trim() : "";
+		if (!token) {
+			return data;
+		}
+		return {
+			...data,
+			nodes: data.nodes.map((node) =>
+				isLocalNode(node) ? { ...node, token } : node
+			),
+		};
+	} catch {
+		// Browser/story builds have no native token command; the local fallback
+		// remains usable when the target does not require authentication.
+		return data;
+	}
+}
+
 interface NodeState {
 	/**
 	 * Reachability of the *active* node. `null` until the first probe resolves, so
@@ -149,6 +181,8 @@ interface NodeState {
 	 */
 	suggestedCloudNodes: Node[];
 	tabOverrides: Record<string, string>;
+	/** Update a persisted remote node's bearer without changing its identity. */
+	updateNodeToken: (name: string, token: string | null) => Promise<void>;
 }
 
 // The local Core node URL is profile-aware via VITE_CORE_URL (DEFAULT_CORE_URL):
@@ -460,6 +494,26 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		set({ activeNodeOnline: null, defaultNode: name });
 	},
 
+	updateNodeToken: async (name, token) => {
+		try {
+			await invokeWhenReady("update_node_token", { name, token });
+		} catch (error) {
+			if (!(error instanceof TauriUnavailableError)) {
+				throw error;
+			}
+		}
+		const normalizedToken = token?.trim() || null;
+		set((state) => {
+			const localNodes = state.localNodes.map((node) =>
+				node.name === name ? { ...node, token: normalizedToken } : node
+			);
+			return {
+				localNodes,
+				nodes: mergeNodes(localNodes, state.cloudNodes),
+			};
+		});
+	},
+
 	addNode: async (name, url, token) => {
 		// Managed-path numeric cap: free tier gets local Core + 1 remote node. The
 		// local fallback never counts; only genuinely remote (LAN/mesh/cloud) nodes
@@ -598,7 +652,9 @@ export const useNodeStore = create<NodeState>((set, get) => ({
 		// propagates.
 		let data: NodesData;
 		try {
-			data = await invokeWhenReady<NodesData>("list_nodes");
+			data = await attachLocalNodeToken(
+				await invokeWhenReady<NodesData>("list_nodes")
+			);
 		} catch (error) {
 			if (error instanceof TauriUnavailableError) {
 				return;

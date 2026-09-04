@@ -2,6 +2,7 @@
 
 import { SearchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import {
 	Dialog,
 	DialogContent,
@@ -71,6 +72,7 @@ function CommandInput({
 	className,
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
+	const localizedPlaceholder = useLocalizedString(props.placeholder);
 	return (
 		<div data-slot="command-input-wrapper">
 			<InputGroup className="sticky top-0 z-20 h-9 border-0 border-b bg-transparent! shadow-none! backdrop-blur supports-backdrop-filter:bg-transparent!">
@@ -81,6 +83,7 @@ function CommandInput({
 					)}
 					data-slot="command-input"
 					{...props}
+					placeholder={localizedPlaceholder}
 				/>
 				<InputGroupAddon>
 					<HugeiconsIcon
@@ -112,21 +115,29 @@ function CommandList({
 
 function CommandEmpty({
 	className,
+	children,
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Empty>) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<CommandPrimitive.Empty
 			className={cn("py-4 text-center text-sm", className)}
 			data-slot="command-empty"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</CommandPrimitive.Empty>
 	);
 }
 
 function CommandGroup({
 	className,
+	heading,
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Group>) {
+	const localizedHeading = useLocalizedString(
+		typeof heading === "string" ? heading : undefined
+	);
 	return (
 		<CommandPrimitive.Group
 			className={cn(
@@ -136,6 +147,7 @@ function CommandGroup({
 			)}
 			data-slot="command-group"
 			{...props}
+			heading={typeof heading === "string" ? localizedHeading : heading}
 		/>
 	);
 }
@@ -158,6 +170,7 @@ function CommandItem({
 	children,
 	...props
 }: React.ComponentProps<typeof CommandPrimitive.Item>) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<CommandPrimitive.Item
 			className={cn(
@@ -167,7 +180,7 @@ function CommandItem({
 			data-slot="command-item"
 			{...props}
 		>
-			{children}
+			{localizedChildren}
 			<HugeiconsIcon
 				className="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100"
 				icon={Tick02Icon}

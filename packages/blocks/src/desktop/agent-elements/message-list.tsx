@@ -2243,7 +2243,7 @@ export const MessageList = memo(function MessageList({
 				className={cn("an-message-list flex-1", className)}
 				contentClassName={cn(
 					"w-full gap-0",
-					isCompact ? "px-0.5 py-1" : "mx-auto max-w-[744px] px-3 py-6"
+					isCompact ? "px-0.5 py-1" : "mx-auto max-w-[904px] px-3 py-6"
 				)}
 				contentProps={{ "data-slot": "message-scroller-content" }}
 				followOutput={followOutput}
@@ -2272,7 +2272,7 @@ export const MessageList = memo(function MessageList({
 					<div
 						aria-busy={loadingOlderMessages}
 						aria-live="polite"
-						className="mx-auto w-full max-w-[744px] px-3 py-2 text-center text-muted-foreground text-xs"
+						className="mx-auto w-full max-w-[904px] px-3 py-2 text-center text-muted-foreground text-xs"
 						data-older-messages-loader
 					>
 						{loadingOlderMessages
@@ -2299,7 +2299,7 @@ export const MessageList = memo(function MessageList({
 						className="sticky top-9 z-20 -mb-1"
 						data-slot="pinned-user-message-bar"
 					>
-						<div className="mx-auto w-full max-w-[744px] px-3 pt-2 pb-1">
+						<div className="mx-auto w-full max-w-[904px] px-3 pt-2 pb-1">
 							<PinnedUserMessageBar
 								message={pinnedMessage}
 								onScrollTo={scrollToPinned}
@@ -2307,13 +2307,12 @@ export const MessageList = memo(function MessageList({
 						</div>
 					</div>
 				) : null}
-				{/* 744 = the composer's own 720px column PLUS its `px-3` gutter
-				    (input-bar.tsx wraps `mx-auto max-w-[720px]` in `px-3`).
-				    Matching both numbers — not just the 720 — is what puts a
-				    message's content edges on the composer's card edges at every
-				    width. With `max-w-[720px] px-4` the transcript sat 16px inside
-				    the composer on each side, which reads as a gap to the right of
-				    the user avatar. */}
+				{/* 904 = the composer's own 880px column PLUS its `px-3` gutter
+				    (input-bar.tsx wraps `mx-auto max-w-[880px]` in `px-3`).
+				    Matching both numbers — not just the 880 — is what keeps a
+				    message's content edges aligned with the wider composer at every
+				    width. The shared envelope prevents the transcript from looking
+				    stranded inside a narrower card on wide desktop windows. */}
 				{/* `gap-0`, NOT the `gap-2` this used to carry. A uniform gap can
 				    only express one vertical rhythm, and messaging grouping needs
 				    two: ~2px between consecutive messages from the same speaker

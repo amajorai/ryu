@@ -44,6 +44,7 @@ import {
 	widgetBootstrapSrcdoc,
 } from "@ryu/app-host/widget-bootstrap";
 import { useWidgetStateStore } from "@ryu/app-host/widget-state-store";
+import { useOptionalI18n } from "@ryu/i18n/react";
 import { toast } from "@ryu/ui/components/sileo";
 import { useFriendlyMode } from "@ryu/ui/hooks/use-friendly-mode.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -125,6 +126,7 @@ const COMPACT_INLINE_HEIGHT = 220;
 
 export function AppWidget({ part }: { part: WidgetPartLike }) {
 	const host = useWidgetHost();
+	const i18n = useOptionalI18n();
 	const data = widgetData(part);
 	const stateStore = useWidgetStateStore();
 	const { density } = useChatDisplayPrefs();
@@ -196,7 +198,8 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 		initialGlobalsRef.current = {
 			displayMode: data.displayMode ?? "inline",
 			locale:
-				typeof navigator === "undefined" ? "en" : navigator.language || "en",
+				i18n?.locale ??
+				(typeof navigator === "undefined" ? "en" : navigator.language || "en"),
 			maxHeight: data.maxHeight ?? null,
 			friendly,
 			safeArea: { bottom: 0, left: 0, right: 0, top: 0 },
@@ -277,6 +280,11 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 	useEffect(() => {
 		pushGlobals({ displayMode, maxHeight: data?.maxHeight ?? null });
 	}, [displayMode, data?.maxHeight, pushGlobals]);
+	useEffect(() => {
+		if (i18n) {
+			pushGlobals({ locale: i18n.locale });
+		}
+	}, [i18n, pushGlobals]);
 
 	const services = host?.services;
 	const openExternalShell = host?.env.openExternal;
@@ -294,6 +302,49 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 			return d;
 		};
 		return {
+			i18nSnapshot: () =>
+				i18n?.getSnapshot() ?? {
+					direction: "ltr",
+					locale: "en",
+					packId: null,
+					packName: null,
+					packVersion: null,
+				},
+			i18nTranslate: (input) =>
+				i18n?.t(input.id, input.values, input.defaultMessage) ??
+				input.defaultMessage,
+			i18nSubscribe: (_input, emit, signal) =>
+				new Promise<void>((resolve) => {
+					let done = false;
+					const finish = () => {
+						if (done) {
+							return;
+						}
+						done = true;
+						unsubscribe();
+						signal.removeEventListener("abort", finish);
+						resolve();
+					};
+					const push = () =>
+						emit(
+							JSON.stringify(
+								i18n?.getSnapshot() ?? {
+									direction: "ltr",
+									locale: "en",
+									packId: null,
+									packName: null,
+									packVersion: null,
+								}
+							)
+						);
+					const unsubscribe = i18n?.subscribe(push) ?? (() => undefined);
+					push();
+					if (signal.aborted) {
+						finish();
+					} else {
+						signal.addEventListener("abort", finish, { once: true });
+					}
+				}),
 			uiToastDismiss: (input) => toastHost.dismiss(input),
 			uiToastShow: (input) => toastHost.show(input),
 			uiToastUpdate: (input) => toastHost.update(input),
@@ -400,7 +451,15 @@ export function AppWidget({ part }: { part: WidgetPartLike }) {
 				return Promise.resolve();
 			},
 		};
-	}, [services, openExternalShell, data, stateStore, pushGlobals, toastHost]);
+	}, [
+		services,
+		openExternalShell,
+		data,
+		i18n,
+		stateStore,
+		pushGlobals,
+		toastHost,
+	]);
 
 	// Key the srcdoc on STABLE primitives only (the widget HTML + server), not the
 	// whole `data` object: a streaming update recreates `part.data` (new toolOutput)

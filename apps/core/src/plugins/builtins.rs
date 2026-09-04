@@ -1756,7 +1756,10 @@ pub fn is_mandatory(manifest_id: &str) -> bool {
 /// because it is the provider behind the mandatory RAG → Spaces dependency chain,
 /// while remaining user-disableable under the existing lifecycle policy.
 pub fn is_runtime_builtin(manifest_id: &str) -> bool {
-    is_system_plugin(manifest_id) || is_mandatory(manifest_id) || manifest_id == ENGINES_PLUGIN_ID
+    is_system_plugin(manifest_id)
+        || is_mandatory(manifest_id)
+        || is_preinstalled(manifest_id)
+        || manifest_id == ENGINES_PLUGIN_ID
 }
 
 /// Whether `manifest_id` may NOT be uninstalled (it can only be disabled).

@@ -148,6 +148,8 @@ pub async fn run_chat_turn(
         Arc::clone(&deps.mcp),
         deps.skills.clone(),
         deps.traces.clone(),
+        None,
+        Vec::new(),
     )
     .await
     {

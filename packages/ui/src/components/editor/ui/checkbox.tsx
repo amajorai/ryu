@@ -3,9 +3,12 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox";
 import { Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<CheckboxPrimitive.Root
 			className={cn(
@@ -14,6 +17,8 @@ function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
 			)}
 			data-slot="checkbox"
 			{...props}
+			aria-label={localizedAriaLabel}
+			title={localizedTitle}
 		>
 			<CheckboxPrimitive.Indicator
 				className="grid place-content-center text-current transition-none [&>svg]:size-3.5"

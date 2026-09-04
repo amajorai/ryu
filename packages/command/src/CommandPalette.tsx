@@ -7,6 +7,7 @@
 // (the Electron command-bar window, which IS the panel) supplies its own frame.
 
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import {
 	Command,
 	CommandDialog,
@@ -59,6 +60,8 @@ export interface CommandPaletteProps {
 }
 
 function ActionRow({ action }: { action: CommandAction }) {
+	const localizedTitle = useLocalizedString(action.title);
+	const localizedTrailing = useLocalizedText(action.trailing);
 	return (
 		<CommandItem
 			data-checked={action.checked ? "true" : undefined}
@@ -69,10 +72,10 @@ function ActionRow({ action }: { action: CommandAction }) {
 			{action.icon ? (
 				<HugeiconsIcon className="size-4 shrink-0" icon={action.icon} />
 			) : null}
-			<span className="truncate">{action.title}</span>
+			<span className="truncate">{localizedTitle}</span>
 			{action.trailing ? (
 				<span className="ml-auto truncate text-muted-foreground text-xs">
-					{action.trailing}
+					{localizedTrailing}
 				</span>
 			) : null}
 			{action.shortcut && !action.trailing ? (
@@ -97,6 +100,10 @@ function PaletteBody({
 	activeTab,
 	onTabChange,
 }: Omit<CommandPaletteProps, "chrome" | "open" | "onOpenChange">) {
+	const localizedPlaceholder = useLocalizedString(
+		placeholder ?? "Search or run a command..."
+	);
+	const localizedEmptyLabel = useLocalizedString(emptyLabel ?? "No results.");
 	const selectedTab = activeTab ?? tabs?.[0]?.id;
 	const visibleActions =
 		selectedTab && selectedTab !== "all"
@@ -109,7 +116,7 @@ function PaletteBody({
 				autoFocus={autoFocus}
 				onKeyDown={onInputKeyDown}
 				onValueChange={onSearchChange}
-				placeholder={placeholder ?? "Search or run a command..."}
+				placeholder={localizedPlaceholder}
 				value={search}
 			/>
 			{tabs && tabs.length > 0 ? (
@@ -134,7 +141,7 @@ function PaletteBody({
 				</Tabs>
 			) : null}
 			<CommandList>
-				<CommandEmpty>{emptyLabel ?? "No results."}</CommandEmpty>
+				<CommandEmpty>{localizedEmptyLabel}</CommandEmpty>
 				{groups.map((group, index) => (
 					<Fragment key={group.heading}>
 						{index > 0 ? <CommandSeparator /> : null}

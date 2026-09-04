@@ -1,17 +1,25 @@
+"use client";
+
 import {
 	ArrowLeft01Icon,
 	ArrowRight01Icon,
 	MoreHorizontalCircle01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
-function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
+function Pagination({
+	"aria-label": ariaLabel,
+	className,
+	...props
+}: React.ComponentProps<"nav">) {
+	const localizedAriaLabel = useLocalizedString(ariaLabel ?? "pagination");
 	return (
 		<nav
-			aria-label="pagination"
+			aria-label={localizedAriaLabel}
 			className={cn("mx-auto flex w-full justify-center", className)}
 			data-slot="pagination"
 			{...props}
@@ -70,9 +78,11 @@ function PaginationPrevious({
 	text = "Previous",
 	...props
 }: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
+	const localizedText = useLocalizedText(text, { literal: true });
+	const localizedAriaLabel = useLocalizedString("Go to previous page");
 	return (
 		<PaginationLink
-			aria-label="Go to previous page"
+			aria-label={localizedAriaLabel}
 			className={cn("pl-2!", className)}
 			size="default"
 			{...props}
@@ -82,7 +92,7 @@ function PaginationPrevious({
 				icon={ArrowLeft01Icon}
 				strokeWidth={2}
 			/>
-			<span className="hidden sm:block">{text}</span>
+			<span className="hidden sm:block">{localizedText}</span>
 		</PaginationLink>
 	);
 }
@@ -92,14 +102,16 @@ function PaginationNext({
 	text = "Next",
 	...props
 }: React.ComponentProps<typeof PaginationLink> & { text?: string }) {
+	const localizedText = useLocalizedText(text, { literal: true });
+	const localizedAriaLabel = useLocalizedString("Go to next page");
 	return (
 		<PaginationLink
-			aria-label="Go to next page"
+			aria-label={localizedAriaLabel}
 			className={cn("pr-2!", className)}
 			size="default"
 			{...props}
 		>
-			<span className="hidden sm:block">{text}</span>
+			<span className="hidden sm:block">{localizedText}</span>
 			<HugeiconsIcon
 				data-icon="inline-end"
 				icon={ArrowRight01Icon}

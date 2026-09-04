@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+	fetchNodeOnboardingState,
 	type OnboardingAgentSuggestion,
+	resetNodeOnboardingState,
+	saveNodeOnboardingState,
 	startProfileJob,
 } from "./onboarding-profile.ts";
 import { EMPTY_AGENT_SELECTION } from "./preferences.ts";
@@ -12,6 +15,106 @@ const target = {
 };
 
 describe("onboarding profile job recipes", () => {
+	test("reads the node-level setup state", async () => {
+		const originalFetch = globalThis.fetch;
+		let requestedUrl = "";
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			requestedUrl = String(input);
+			return Response.json({
+				canConfigure: true,
+				completed: false,
+				completedAtMs: null,
+				personalization: {
+					companyContext: "",
+					companyKnowledgeEnabled: false,
+				},
+				setupKind: null,
+				version: 1,
+			});
+		}) as unknown as typeof globalThis.fetch;
+
+		try {
+			await expect(fetchNodeOnboardingState(target)).resolves.toMatchObject({
+				completed: false,
+				setupKind: null,
+			});
+			expect(requestedUrl).toBe(`${target.url}/api/onboarding/state`);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("saves the selected node mode without marking it complete", async () => {
+		const originalFetch = globalThis.fetch;
+		let request: RequestInit | undefined;
+		globalThis.fetch = (async (
+			_input: RequestInfo | URL,
+			init?: RequestInit
+		) => {
+			request = init;
+			return Response.json({
+				canConfigure: true,
+				completed: false,
+				completedAtMs: null,
+				personalization: {
+					companyContext: "We build reviewable tools.",
+					companyKnowledgeEnabled: true,
+				},
+				setupKind: "team",
+				version: 1,
+			});
+		}) as unknown as typeof globalThis.fetch;
+
+		try {
+			await saveNodeOnboardingState(target, {
+				companyContext: "We build reviewable tools.",
+				companyKnowledgeEnabled: true,
+				completed: false,
+				setupKind: "team",
+			});
+			expect(request?.method).toBe("PUT");
+			expect(request?.body).toBe(
+				JSON.stringify({
+					companyContext: "We build reviewable tools.",
+					companyKnowledgeEnabled: true,
+					completed: false,
+					setupKind: "team",
+				})
+			);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("resets node onboarding through the dedicated delete route", async () => {
+		const originalFetch = globalThis.fetch;
+		let request: RequestInit | undefined;
+		globalThis.fetch = (async (
+			_input: RequestInfo | URL,
+			init?: RequestInit
+		) => {
+			request = init;
+			return Response.json({
+				canConfigure: true,
+				completed: false,
+				completedAtMs: null,
+				personalization: {
+					companyContext: "",
+					companyKnowledgeEnabled: false,
+				},
+				setupKind: null,
+				version: 1,
+			});
+		}) as unknown as typeof globalThis.fetch;
+
+		try {
+			await resetNodeOnboardingState(target);
+			expect(request?.method).toBe("DELETE");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	test("keeps structured agent suggestions from Core", async () => {
 		const originalFetch = globalThis.fetch;
 		const suggestion: OnboardingAgentSuggestion = {

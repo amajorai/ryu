@@ -44,6 +44,7 @@ import {
 	type IslandStartMeetingInput,
 	type IslandSuggestion,
 	type IslandWinApi,
+	type LanguagePacksResult,
 	type MoveByPayload,
 	type PluginContributionsResult,
 	type PluginCoreHttpRequest,
@@ -170,6 +171,10 @@ const api: IslandApi = {
 		onHostStreamEnd: (
 			listener: (event: PluginHostStreamEndEvent) => void
 		): (() => void) => subscribe(IPC.plugins.hostStreamEnd, listener),
+	},
+	languagePacks: {
+		get: (): Promise<LanguagePacksResult> =>
+			ipcRenderer.invoke(IPC.languagePacks.get),
 	},
 	command: {
 		onOpen: (listener: () => void): (() => void) =>

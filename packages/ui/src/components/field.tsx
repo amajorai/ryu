@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocalizedText } from "@ryu/i18n/react";
 import { Label } from "@ryu/ui/components/label.tsx";
 import { Separator } from "@ryu/ui/components/separator.tsx";
 
@@ -22,9 +23,11 @@ function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
 
 function FieldLegend({
 	className,
+	children,
 	variant = "legend",
 	...props
 }: React.ComponentProps<"legend"> & { variant?: "legend" | "label" }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<legend
 			className={cn(
@@ -34,7 +37,9 @@ function FieldLegend({
 			data-slot="field-legend"
 			data-variant={variant}
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</legend>
 	);
 }
 
@@ -115,7 +120,12 @@ function FieldLabel({
 	);
 }
 
-function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
+function FieldTitle({
+	className,
+	children,
+	...props
+}: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
@@ -124,11 +134,18 @@ function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
 			)}
 			data-slot="field-label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 
-function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
+function FieldDescription({
+	className,
+	children,
+	...props
+}: React.ComponentProps<"p">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<p
 			className={cn(
@@ -139,7 +156,9 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
 			)}
 			data-slot="field-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</p>
 	);
 }
 
@@ -150,23 +169,24 @@ function FieldSeparator({
 }: React.ComponentProps<"div"> & {
 	children?: React.ReactNode;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
 				"relative -my-2 h-5 text-sm group-data-[variant=outline]/field-group:-mb-2",
 				className
 			)}
-			data-content={!!children}
+			data-content={!!localizedChildren}
 			data-slot="field-separator"
 			{...props}
 		>
 			<Separator className="absolute inset-0 top-1/2" />
-			{children && (
+			{localizedChildren && (
 				<span
 					className="relative mx-auto block w-fit bg-background px-2 text-muted-foreground"
 					data-slot="field-separator-content"
 				>
-					{children}
+					{localizedChildren}
 				</span>
 			)}
 		</div>

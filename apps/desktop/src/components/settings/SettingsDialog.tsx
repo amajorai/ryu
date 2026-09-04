@@ -21,6 +21,7 @@ import {
 	SettingsIconTile,
 	type SettingsTint,
 } from "@ryu/blocks/desktop/settings-nav.tsx";
+import { useI18n, useLocalizedText } from "@ryu/i18n/react";
 import { OAuthAppsTab, ReferralsTab } from "@ryu/settings";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { Dialog, DialogContent } from "@ryu/ui/components/dialog.tsx";
@@ -280,17 +281,19 @@ function KeyboardShortcutsLink({
 	description: string;
 	onOpen: () => void;
 }) {
+	const { t } = useI18n();
+	const localizedDescription = useLocalizedText(description);
 	return (
-		<SettingsSection title="Keyboard shortcuts">
+		<SettingsSection title={t("settings.keyboard.title")}>
 			<SettingsCard className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<p className="text-muted-foreground text-sm">{description}</p>
+				<p className="text-muted-foreground text-sm">{localizedDescription}</p>
 				<Button
 					className="shrink-0"
 					onClick={onOpen}
 					size="sm"
 					variant="secondary"
 				>
-					Open Keyboard Shortcuts
+					{t("settings.keyboard.open")}
 				</Button>
 			</SettingsCard>
 		</SettingsSection>
@@ -367,6 +370,7 @@ export function SettingsDialog({
 	defaultSection,
 }: SettingsDialogProps) {
 	const { isDesktop } = useAppSurface();
+	const { t } = useI18n();
 	const [activeSection, setActiveSection] = useState<string>(
 		normalizeDefaultSection(defaultSection, isDesktop)
 	);
@@ -403,7 +407,15 @@ export function SettingsDialog({
 		() => [
 			...NAV_GROUPS.map((group) => ({
 				...group,
-				items: group.items.filter((item) => isDesktop || !item.desktopOnly),
+				title: group.title
+					? t(`settings.group.${group.title.toLowerCase()}`, {}, group.title)
+					: group.title,
+				items: group.items
+					.filter((item) => isDesktop || !item.desktopOnly)
+					.map((item) => ({
+						...item,
+						label: t(`settings.nav.${item.value}`, {}, item.label),
+					})),
 			})).filter((group) => group.items.length > 0),
 			// One stand-in tile per dynamic header, in grey: a manifest contributes a
 			// settings tab, not a glyph, so the tile says "contributed" rather than
@@ -417,7 +429,7 @@ export function SettingsDialog({
 				})),
 			})),
 		],
-		[appEntities, isDesktop, pluginEntities]
+		[appEntities, isDesktop, pluginEntities, t]
 	);
 	const allItems = useMemo(
 		() => navGroups.flatMap((g) => g.items),
@@ -461,8 +473,8 @@ export function SettingsDialog({
 		openFeedbackWidget(resolvedTheme === "dark" ? "dark" : "light").catch(
 			() => {
 				toast.error({
-					title: "Couldn't open feedback",
-					description: "Please try again, or email us at support@ryu.app.",
+					title: t("settings.feedback.error"),
+					description: t("settings.feedback.error_description"),
 				});
 			}
 		);
@@ -547,10 +559,10 @@ export function SettingsDialog({
 							<>
 								<SidebarGroup className="py-1">
 									<Input
-										aria-label="Search settings"
+										aria-label={t("settings.search.label")}
 										className="h-8 text-sm"
 										onChange={(e) => setSearch(e.target.value)}
-										placeholder="Search settings…"
+										placeholder={t("settings.search.placeholder")}
 										value={search}
 									/>
 								</SidebarGroup>
@@ -558,7 +570,9 @@ export function SettingsDialog({
 									<>
 										{matchedSections.length > 0 ? (
 											<SidebarGroup className="py-1">
-												<SidebarGroupLabel>Sections</SidebarGroupLabel>
+												<SidebarGroupLabel>
+													{t("settings.search.sections")}
+												</SidebarGroupLabel>
 												<SidebarMenu>
 													{matchedSections.map((item) => (
 														<SidebarMenuItem key={item.value}>
@@ -625,14 +639,16 @@ export function SettingsDialog({
 									<SidebarMenu>
 										<SidebarMenuItem>
 											<SidebarMenuButton onClick={handleSendFeedback}>
-												Send feedback
+												{t("settings.feedback.send")}
 											</SidebarMenuButton>
 										</SidebarMenuItem>
 									</SidebarMenu>
 								</SidebarGroup>
 								<SidebarGroup className="py-1">
 									<SidebarGroupLabel>
-										{simpleInterface ? "Device" : "Node"}
+										{simpleInterface
+											? t("settings.search.device")
+											: t("settings.search.node")}
 									</SidebarGroupLabel>
 									<SidebarMenu>
 										<SidebarMenuItem>
@@ -644,8 +660,8 @@ export function SettingsDialog({
 												/>
 												<span className="truncate">
 													{simpleInterface
-														? "Device settings"
-														: "Gateway settings"}
+														? t("settings.search.device_settings")
+														: t("settings.search.gateway_settings")}
 												</span>
 											</SidebarMenuButton>
 										</SidebarMenuItem>

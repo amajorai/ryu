@@ -22,7 +22,7 @@ import { Label } from "@ryu/ui/components/label";
 import PageHeader from "@ryu/ui/components/page-header";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import { Switch } from "@ryu/ui/components/switch";
-import { Fingerprint } from "lucide-react";
+import { Fingerprint, Smartphone } from "lucide-react";
 import type { ReactNode, SVGProps } from "react";
 import { useEffect, useState } from "react";
 
@@ -67,6 +67,8 @@ export interface SignInValues {
 export interface SignInFormProps {
 	/** Captcha widget slot (the live app injects its Turnstile here). */
 	captcha?: ReactNode;
+	/** True while a passwordless device approval request is being created. */
+	deviceApprovalLoading?: boolean;
 	/** Field-level validation error message for email. */
 	emailError?: string;
 	/** Google sign-in request in flight. */
@@ -75,6 +77,8 @@ export interface SignInFormProps {
 	lastUsedMethod?: SignInLastUsedMethod;
 	/** Submit/credential request in flight. */
 	loading?: boolean;
+	/** Start a passwordless approval on another signed-in Ryu device. */
+	onDeviceApproval?: (email: string) => void | Promise<void>;
 	/** Switch to the forgot-password view. */
 	onForgotPassword?: () => void;
 	/** Continue-with-Google handler. */
@@ -119,10 +123,12 @@ export default function SignInForm({
 	googleLoading = false,
 	ssoLoading = false,
 	passkeyLoading = false,
+	deviceApprovalLoading = false,
 	lastUsedMethod = null,
 	useMagicLink = false,
 	onToggleMagicLink = noop,
 	onGoogle = noop,
+	onDeviceApproval,
 	onSSO,
 	onPasskey,
 	onSwitchToSignUp = noop,
@@ -147,7 +153,11 @@ export default function SignInForm({
 	const visibleEmailError = emailEdited ? undefined : emailError;
 	const visiblePasswordError = passwordEdited ? undefined : passwordError;
 	const submitting =
-		loading || sendingMagicLink || passkeyLoading || ssoLoading;
+		loading ||
+		sendingMagicLink ||
+		passkeyLoading ||
+		ssoLoading ||
+		deviceApprovalLoading;
 
 	return (
 		<div className="mx-auto flex w-full max-w-md flex-col gap-6">
@@ -348,6 +358,21 @@ export default function SignInForm({
 							</AccordionTrigger>
 							<AccordionContent className="p-0" panelClassName="p-0">
 								<div className="flex flex-col gap-4">
+									{onDeviceApproval ? (
+										<Button
+											className="w-full gap-3"
+											disabled={submitting}
+											onClick={() => onDeviceApproval(email)}
+											type="button"
+											variant="secondary"
+										>
+											<Smartphone className="h-5 w-5" />
+											{deviceApprovalLoading
+												? "Waiting for another device..."
+												: "Approve on another device"}
+										</Button>
+									) : null}
+
 									{onPasskey ? (
 										<div className="relative">
 											<Button

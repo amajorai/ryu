@@ -184,6 +184,13 @@ pub enum PendingAction {
         /// approval queued before this field existed ⇒ `Unresolved` ⇒ fail closed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host_conversation_id: Option<String>,
+        /// Optional selected Composio accounts for a scoped profile run.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        composio_connection_scope:
+            Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+        /// Optional conversation ids that a scoped profile run may search.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_scope: Option<Vec<String>>,
     },
 }
 
@@ -858,6 +865,8 @@ impl ApprovalEngine {
                 profile_ids,
                 session_id,
                 host_conversation_id,
+                composio_connection_scope,
+                conversation_scope,
             } => {
                 let registry = self.registry.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("no MCP registry attached; cannot run approved tool call")
@@ -865,7 +874,7 @@ impl ApprovalEngine {
                 // Re-dispatch through the NO-GATE entry so the approved call runs
                 // exactly once and does not re-raise an approval (infinite loop).
                 let result = registry
-                    .call_tool_with_identity_after_approval(
+                    .call_tool_with_identity_after_approval_scoped(
                         agent_id.as_deref(),
                         tool_id,
                         arguments.clone(),
@@ -874,6 +883,8 @@ impl ApprovalEngine {
                         profile_ids,
                         session_id.clone(),
                         host_conversation_id.as_deref(),
+                        composio_connection_scope.as_deref(),
+                        conversation_scope.as_deref(),
                     )
                     .await?;
                 // The no-gate path can still return an identity `__ryu_elicitation__`
@@ -976,6 +987,9 @@ pub async fn gate_tool_call(
     profile_ids: &[String],
     session_id: Option<String>,
     host_conversation_id: Option<&str>,
+    composio_connection_scope:
+        Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+    conversation_scope: Option<&[String]>,
 ) -> Option<anyhow::Error> {
     let engine = global_engine()?;
     let raw_pref = engine.approval_mode_pref().await;
@@ -996,6 +1010,8 @@ pub async fn gate_tool_call(
         profile_ids: profile_ids.to_vec(),
         session_id,
         host_conversation_id: host_conversation_id.map(str::to_owned),
+        composio_connection_scope: composio_connection_scope.map(<[crate::sidecar::adapters::ComposioConnectionBinding]>::to_vec),
+        conversation_scope: conversation_scope.map(<[String]>::to_vec),
     };
     let req = ApprovalRequest::for_tool_call(tool_id, tags, action);
     match engine.request(req).await {
@@ -1042,6 +1058,8 @@ mod tests {
             profile_ids: Vec::new(),
             session_id: None,
             host_conversation_id: None,
+            composio_connection_scope: None,
+            conversation_scope: None,
         };
         let req =
             ApprovalRequest::for_tool_call("gmail.send_email", vec!["send".to_owned()], action);

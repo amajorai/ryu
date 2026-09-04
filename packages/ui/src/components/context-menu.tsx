@@ -3,6 +3,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 import { FadeOverflowTextChildren } from "./fade-overflow-text.tsx";
@@ -81,12 +82,14 @@ function ContextMenuGroup({ ...props }: ContextMenuPrimitive.Group.Props) {
 }
 
 function ContextMenuLabel({
+	children,
 	className,
 	inset,
 	...props
 }: ContextMenuPrimitive.GroupLabel.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ContextMenuPrimitive.GroupLabel
 			className={cn(
@@ -96,11 +99,14 @@ function ContextMenuLabel({
 			data-inset={inset}
 			data-slot="context-menu-label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</ContextMenuPrimitive.GroupLabel>
 	);
 }
 
 function ContextMenuItem({
+	children,
 	className,
 	inset,
 	variant = "default",
@@ -109,6 +115,7 @@ function ContextMenuItem({
 	inset?: boolean;
 	variant?: "default" | "destructive";
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ContextMenuPrimitive.Item
 			className={cn(
@@ -119,7 +126,9 @@ function ContextMenuItem({
 			data-slot="context-menu-item"
 			data-variant={variant}
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</ContextMenuPrimitive.Item>
 	);
 }
 
@@ -137,6 +146,7 @@ function ContextMenuSubTrigger({
 }: ContextMenuPrimitive.SubmenuTrigger.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ContextMenuPrimitive.SubmenuTrigger
 			className={cn(
@@ -148,7 +158,7 @@ function ContextMenuSubTrigger({
 			{...props}
 		>
 			<FadeOverflowTextChildren className="flex-1">
-				{children}
+				{localizedChildren}
 			</FadeOverflowTextChildren>
 			<HugeiconsIcon
 				className="ml-auto"
@@ -183,6 +193,7 @@ function ContextMenuCheckboxItem({
 }: ContextMenuPrimitive.CheckboxItem.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ContextMenuPrimitive.CheckboxItem
 			checked={checked}
@@ -200,7 +211,7 @@ function ContextMenuCheckboxItem({
 					<HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
 				</ContextMenuPrimitive.CheckboxItemIndicator>
 			</span>
-			{children}
+			{localizedChildren}
 		</ContextMenuPrimitive.CheckboxItem>
 	);
 }
@@ -224,6 +235,7 @@ function ContextMenuRadioItem({
 }: ContextMenuPrimitive.RadioItem.Props & {
 	inset?: boolean;
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<ContextMenuPrimitive.RadioItem
 			className={cn(
@@ -239,7 +251,7 @@ function ContextMenuRadioItem({
 					<HugeiconsIcon icon={Tick02Icon} strokeWidth={2} />
 				</ContextMenuPrimitive.RadioItemIndicator>
 			</span>
-			{children}
+			{localizedChildren}
 		</ContextMenuPrimitive.RadioItem>
 	);
 }

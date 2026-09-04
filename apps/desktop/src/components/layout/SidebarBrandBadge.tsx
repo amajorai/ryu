@@ -1,6 +1,5 @@
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { BorderBeam } from "@ryu/ui/components/border-beam.tsx";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -9,9 +8,7 @@ import {
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
 import { Logo } from "@ryu/ui/components/logo.tsx";
-import { useTheme } from "next-themes";
-import { useBuildProfile } from "@/src/lib/build-profile.ts";
-import { channelLabel } from "@/src/lib/channel-brand.ts";
+import { useState } from "react";
 import { setInterfaceLevel } from "@/src/lib/interface-level.ts";
 import { isRyuBot } from "@/src/lib/product.ts";
 import {
@@ -19,7 +16,6 @@ import {
 	useProductMode,
 	useProductModeStore,
 } from "@/src/lib/product-mode.ts";
-import { useReleaseChannel } from "@/src/lib/release-channel.ts";
 
 interface SidebarBrandBadgeProps {
 	/** Only org owners/admins of a managed node should see the switcher. */
@@ -51,52 +47,6 @@ function setModeAndInterface(mode: "bot" | "console" | "os") {
 	setInterfaceLevel(mode === "bot" ? "simple" : "expert");
 }
 
-function releaseBadgeLabel(dev: boolean, channel: string): string {
-	const base = channelLabel("stable");
-	if (dev) {
-		return `${base} (${channelLabel("dev")})`;
-	}
-	if (channel === "stable") {
-		return base;
-	}
-	return `${base} (${channelLabel(channel)})`;
-}
-
-function ReleaseChannelBadge() {
-	const { resolvedTheme } = useTheme();
-	const { dev } = useBuildProfile();
-	const [channel] = useReleaseChannel();
-	const beamTheme = resolvedTheme === "light" ? "light" : "dark";
-
-	return (
-		<BorderBeam
-			borderRadius={999}
-			className="beam-notch-bl inline-flex shrink-0"
-			colorVariant="colorful"
-			size="sm"
-			strength={0.85}
-			theme={beamTheme}
-		>
-			<div
-				aria-label={`Release: ${releaseBadgeLabel(dev, channel)}`}
-				className="beam-notch-bl inline-flex h-5 items-center bg-muted px-2 font-medium text-xs leading-none"
-				data-testid="release-channel-badge"
-			>
-				{releaseBadgeLabel(dev, channel)}
-			</div>
-		</BorderBeam>
-	);
-}
-
-function ReleaseChannelFooter() {
-	return (
-		<div className="flex items-center justify-between gap-3 border-border/60 border-t px-3 py-2">
-			<span className="text-muted-foreground text-xs">Release</span>
-			<ReleaseChannelBadge />
-		</div>
-	);
-}
-
 /** The shared sidebar product lockup and the gated Bot/Console switcher. */
 export function SidebarBrandBadge({
 	canSwitchToConsole = false,
@@ -105,6 +55,7 @@ export function SidebarBrandBadge({
 	compact = false,
 }: SidebarBrandBadgeProps = {}) {
 	const mode = useProductMode();
+	const [menuOpen, setMenuOpen] = useState(false);
 	const showSwitcher = !isRyuBot() && (canSwitchToConsole || canSwitchToOs);
 	const lockup = (
 		<div
@@ -126,11 +77,6 @@ export function SidebarBrandBadge({
 			<div
 				className={`${compact ? "w-auto px-0 py-0" : "w-full px-3 py-2"} ${className ?? ""}`}
 			>
-				{compact ? null : (
-					<div className="mt-1.5 flex items-center px-1.5">
-						<ReleaseChannelBadge />
-					</div>
-				)}
 				{lockup}
 			</div>
 		);
@@ -140,12 +86,7 @@ export function SidebarBrandBadge({
 		<div
 			className={`${compact ? "w-auto px-0 py-0" : "w-full px-2 py-1.5"} ${className ?? ""}`}
 		>
-			{compact ? null : (
-				<div className="mb-1 flex items-center px-1.5">
-					<ReleaseChannelBadge />
-				</div>
-			)}
-			<DropdownMenu>
+			<DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
 				<DropdownMenuTrigger
 					aria-label={`Change Ryu product mode, currently ${mode}`}
 					render={
@@ -163,10 +104,16 @@ export function SidebarBrandBadge({
 						size={16}
 					/>
 				</DropdownMenuTrigger>
-				<DropdownMenuContent align="start" className="min-w-64" sideOffset={6}>
+				<DropdownMenuContent
+					align="start"
+					className="min-w-64"
+					sideOffset={6}
+					withBackdrop={false}
+				>
 					<DropdownMenuRadioGroup
 						onValueChange={(value) => {
 							if (value === "bot" || value === "console" || value === "os") {
+								setMenuOpen(false);
 								setModeAndInterface(value);
 							}
 						}}
@@ -204,7 +151,6 @@ export function SidebarBrandBadge({
 							</DropdownMenuRadioItem>
 						)}
 					</DropdownMenuRadioGroup>
-					<ReleaseChannelFooter />
 				</DropdownMenuContent>
 			</DropdownMenu>
 		</div>

@@ -322,13 +322,26 @@ export function openBillingPortalUrl(): Promise<{ url: string }> {
 
 /** The pooled org wallet. */
 export interface WalletView {
+	balanceBreakdownAvailable?: boolean;
 	balanceMicroUsd: number;
 	currency: string;
 	id: string;
+	providerAllocations?: CreditProviderAllocation[];
+	source?: "local" | "polar";
 	/** Remaining included plan credit for the current billing period. */
-	subscriptionBalanceMicroUsd: number;
+	subscriptionBalanceMicroUsd: number | null;
 	/** Remaining purchased credit; this balance rolls over. */
-	topupBalanceMicroUsd: number;
+	topupBalanceMicroUsd: number | null;
+	/** Polar aggregate meter balance available for any provider. */
+	unrestrictedBalanceMicroUsd?: number;
+}
+
+export interface CreditProviderAllocation {
+	expiresAt: string | null;
+	isFreeProvider: boolean;
+	label: string;
+	poolId: string;
+	remainingMicroUsd: number;
 }
 
 export function fetchWallet(): Promise<{ wallet: WalletView }> {

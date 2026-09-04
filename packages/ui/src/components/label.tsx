@@ -1,9 +1,15 @@
 "use client";
 
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
-function Label({ className, ...props }: React.ComponentProps<"label">) {
+function Label({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"label">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<label
 			className={cn(
@@ -12,7 +18,9 @@ function Label({ className, ...props }: React.ComponentProps<"label">) {
 			)}
 			data-slot="label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</label>
 	);
 }
 

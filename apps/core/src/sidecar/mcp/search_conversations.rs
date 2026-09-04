@@ -94,6 +94,19 @@ pub async fn dispatch(
     store: &ConversationStore,
     principal: &ToolPrincipal,
 ) -> Result<Value> {
+    dispatch_scoped(tool, arguments, store, principal, None).await
+}
+
+/// Dispatch with an optional server-owned conversation scope. The profile
+/// bootstrap uses this to make its imported conversation selection a hard
+/// ceiling rather than a prompt-only suggestion.
+pub async fn dispatch_scoped(
+    tool: &str,
+    arguments: Value,
+    store: &ConversationStore,
+    principal: &ToolPrincipal,
+    conversation_scope: Option<&[String]>,
+) -> Result<Value> {
     match tool {
         "search" => {
             let query = arguments
@@ -136,19 +149,30 @@ pub async fn dispatch(
             // as supplied, so behaviour there is byte-identical to before.
             let conversation_ids: Option<Vec<String>> =
                 if matches!(principal, ToolPrincipal::Unrestricted) {
-                    requested_ids
+                    match (requested_ids, conversation_scope) {
+                        (Some(requested), Some(scope)) => Some(
+                            requested
+                                .into_iter()
+                                .filter(|id| scope.iter().any(|allowed| allowed == id))
+                                .collect(),
+                        ),
+                        (None, Some(scope)) => Some(scope.to_vec()),
+                        (requested, None) => requested,
+                    }
                 } else {
                     let (uid, org, bound) = principal.filter_args();
                     let visible = store.visible_conversation_ids(uid, org, bound).await?;
-                    Some(match requested_ids {
-                        // INTERSECTION: a caller-supplied id that is not visible to
-                        // this principal is dropped, never honoured.
-                        Some(requested) => requested
+                    Some(
+                        requested_ids
+                            .unwrap_or(visible.clone())
                             .into_iter()
-                            .filter(|id| visible.contains(id))
+                            .filter(|id| {
+                                visible.contains(id)
+                                    && conversation_scope
+                                        .is_none_or(|scope| scope.iter().any(|allowed| allowed == id))
+                            })
                             .collect(),
-                        None => visible,
-                    })
+                    )
                 };
 
             // An empty visible set must return NOTHING, not everything: `None` means

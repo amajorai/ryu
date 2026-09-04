@@ -7,8 +7,8 @@
 //
 // Persisted in localStorage (like the other desktop toggles in
 // `usePersistedToggle`) and synced across every consumer via an external store so
-// the Settings picker and the sidebar build badge always agree the instant either
-// changes. Default is "stable" — an unset/legacy install behaves exactly as before
+// the Settings picker and native window title stay current when either changes.
+// Default is "stable" — an unset/legacy install behaves exactly as before
 // (the stable feed, the pre-existing JS updater path).
 
 import { useCallback, useSyncExternalStore } from "react";
@@ -26,8 +26,8 @@ export const DEFAULT_RELEASE_CHANNEL: ReleaseChannel = "stable";
  * Labels come from the SAME table that names the shipped bundle
  * (`release-channels.json`, read at build time by
  * `scripts/release/channel-brand.mjs`), so the row a user picks here reads
- * exactly like the app they end up running — "Research Preview", not "Stable",
- * for the current stable train.
+ * exactly like the app metadata they end up running — including the active
+ * prerelease label when one exists.
  */
 export const RELEASE_CHANNELS: {
 	channel: ReleaseChannel;

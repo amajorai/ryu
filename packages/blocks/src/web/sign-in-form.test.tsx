@@ -5,6 +5,7 @@ import SignInForm from "./sign-in-form.tsx";
 test("secondary sign-in methods live under More options", () => {
 	const html = renderToStaticMarkup(
 		<SignInForm
+			onDeviceApproval={() => undefined}
 			onForgotPassword={() => undefined}
 			onGoogle={() => undefined}
 			onPasskey={() => undefined}

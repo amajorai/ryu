@@ -53,6 +53,7 @@ export async function fetchSystemStatus(
 ): Promise<SystemStatusSnapshot> {
 	const w = await request<SystemStatusWire>(target, "/api/system/status", {
 		signal,
+		skipUserJwt: true,
 	});
 	const sidecars: Record<string, boolean> = {};
 	for (const s of w.sidecars ?? []) {
@@ -73,12 +74,15 @@ export async function fetchSystemStatus(
 }
 
 /** Probe Core liveness via `/api/health`. Throws if Core is unreachable. */
-export async function fetchHealth(target: ApiTarget): Promise<HealthResult> {
+export async function fetchHealth(
+	target: ApiTarget,
+	signal?: AbortSignal
+): Promise<HealthResult> {
 	const json = await request<{
 		status?: string;
 		version?: string;
 		capabilities?: string[];
-	}>(target, "/api/health");
+	}>(target, "/api/health", { signal, skipUserJwt: true });
 	return {
 		status: json.status ?? "ok",
 		version: json.version ?? null,

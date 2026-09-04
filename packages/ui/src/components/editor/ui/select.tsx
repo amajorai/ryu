@@ -8,6 +8,7 @@ import {
 	UnfoldMoreIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
@@ -65,6 +66,7 @@ function SelectTrigger({
 }: SelectPrimitive.Trigger.Props & {
 	size?: "sm" | "default";
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<SelectPrimitive.Trigger
 			className={cn(
@@ -75,7 +77,7 @@ function SelectTrigger({
 			data-slot="select-trigger"
 			{...props}
 		>
-			{children}
+			{localizedChildren}
 			<SelectPrimitive.Icon
 				render={
 					<HugeiconsIcon
@@ -137,14 +139,18 @@ function SelectContent({
 
 function SelectLabel({
 	className,
+	children,
 	...props
 }: SelectPrimitive.GroupLabel.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<SelectPrimitive.GroupLabel
 			className={cn("px-1.5 py-1.5 text-muted-foreground text-xs", className)}
 			data-slot="select-label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</SelectPrimitive.GroupLabel>
 	);
 }
 
@@ -153,6 +159,7 @@ function SelectItem({
 	children,
 	...props
 }: SelectPrimitive.Item.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<SelectPrimitive.Item
 			className={cn(
@@ -163,7 +170,7 @@ function SelectItem({
 			{...props}
 		>
 			<SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
-				{children}
+				{localizedChildren}
 			</SelectPrimitive.ItemText>
 			<SelectPrimitive.ItemIndicator
 				render={

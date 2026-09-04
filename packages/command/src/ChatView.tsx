@@ -7,6 +7,7 @@
 
 import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils";
 import {
 	type KeyboardEvent,
@@ -65,6 +66,11 @@ export function ChatView({
 	const [input, setInput] = useState("");
 	const [sending, setSending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const localizedGreeting = useLocalizedText(greeting);
+	const localizedPlaceholder = useLocalizedString(
+		placeholder ?? "Ask Ryu anything..."
+	);
+	const localizedSendLabel = useLocalizedString(sending ? "Stop" : "Send");
 	const handleRef = useRef<ChatStreamHandle | null>(null);
 	const listRef = useRef<HTMLDivElement | null>(null);
 	const seededRef = useRef(false);
@@ -165,7 +171,7 @@ export function ChatView({
 			>
 				{messages.length === 0 && greeting ? (
 					<div className="px-1 py-6 text-center text-muted-foreground text-sm">
-						{greeting}
+						{localizedGreeting}
 					</div>
 				) : null}
 				{messages.map((msg) => (
@@ -204,12 +210,12 @@ export function ChatView({
 					className="max-h-32 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
 					onChange={(event) => setInput(event.target.value)}
 					onKeyDown={onKeyDown}
-					placeholder={placeholder ?? "Ask Ryu anything..."}
+					placeholder={localizedPlaceholder}
 					rows={1}
 					value={input}
 				/>
 				<button
-					aria-label={sending ? "Stop" : "Send"}
+					aria-label={localizedSendLabel}
 					className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40"
 					disabled={!sending && input.trim().length === 0}
 					onClick={() => (sending ? stop() : send(input))}

@@ -72,4 +72,32 @@ describe("CreditBalanceBreakdown", () => {
 
 		expect(html.match(/-\$0\.08/g)?.length).toBe(2);
 	});
+
+	it("renders Polar's aggregate balance without inventing local buckets", () => {
+		const html = renderToStaticMarkup(
+			<CreditBalanceBreakdown
+				balanceBreakdownAvailable={false}
+				onDemandCreditsMicroUsd={null}
+				planCreditsMicroUsd={null}
+				providerAllocations={[
+					{
+						id: "cloudflare",
+						isFreeProvider: true,
+						label: "Ryu Fast",
+						remainingMicroUsd: 2_500_000,
+					},
+				]}
+				totalMicroUsd={12_500_000}
+			/>
+		);
+
+		expect(html).toContain("Polar balance");
+		expect(html).toContain("$12.50");
+		expect(html).toContain("Polar maintains this aggregate credit meter");
+		expect(html).toContain("Provider-specific allocations");
+		expect(html).toContain("Ryu Fast");
+		expect(html).toContain("$2.50");
+		expect(html).not.toContain("Plan credits");
+		expect(html).not.toContain("On-demand credits");
+	});
 });

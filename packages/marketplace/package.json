@@ -56,6 +56,7 @@
     "./catalog/detail/support-extension-panel": "./src/catalog/detail/support-extension-panel.tsx",
     "./catalog/detail/publisher-health": "./src/catalog/detail/publisher-health.ts",
     "./catalog/detail/publisher-health-card": "./src/catalog/detail/publisher-health-card.tsx",
+    "./catalog/detail/scorecard-panel": "./src/catalog/detail/scorecard-panel.tsx",
     "./catalog/chrome/dither-banner": "./src/catalog/chrome/dither-banner.tsx",
     "./catalog/chrome/marketplace-prompt-banner": "./src/catalog/chrome/marketplace-prompt-banner.tsx",
     "./catalog/detail/dependency-graph": "./src/catalog/detail/dependency-graph.tsx",

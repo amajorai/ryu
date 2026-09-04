@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { ActiveTeamControl } from "../../../../apps/web/src/components/organizations/active-team-control.tsx";
 import MembersDialog from "../../../../apps/web/src/components/organizations/members-dialog.tsx";
+import { teams } from "./stubs/org-seat-auth-client.ts";
 import "../../../../apps/web/src/index.css";
 
 function Proof() {
@@ -45,6 +47,12 @@ function Proof() {
 					>
 						VERIFIED
 					</p>
+				</section>
+				<section
+					aria-label="Active team proof"
+					className="rounded-xl border bg-card p-5 shadow-sm"
+				>
+					<ActiveTeamControl activeTeamId="team-platform" teams={teams} />
 				</section>
 				<MembersDialog
 					onOpenChange={setOpen}

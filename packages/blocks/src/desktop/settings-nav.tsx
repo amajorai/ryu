@@ -29,6 +29,7 @@
 
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useLocalizedString } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button";
 import { cn } from "@ryu/ui/lib/utils";
 import { type ReactNode, useEffect, useState } from "react";
@@ -229,6 +230,8 @@ export const SettingsSubpages = ({
 	const controlled = openId !== undefined;
 	const currentId = controlled ? openId : internalId;
 	const current = pages.find((p) => p.id === currentId) ?? null;
+	const localizedCurrentTitle = useLocalizedString(current?.title);
+	const localizedCurrentHint = useLocalizedString(current?.hint);
 
 	const setPage = (id: string | null) => {
 		if (!controlled) {
@@ -272,11 +275,11 @@ export const SettingsSubpages = ({
 						{current.icon ? (
 							<SettingsIconTile icon={current.icon} tint={current.tint} />
 						) : null}
-						<h3 className="font-semibold text-base">{current.title}</h3>
+						<h3 className="font-semibold text-base">{localizedCurrentTitle}</h3>
 					</div>
-					{current.hint ? (
+					{localizedCurrentHint ? (
 						<p className="px-0.5 text-muted-foreground text-sm leading-snug">
-							{current.hint}
+							{localizedCurrentHint}
 						</p>
 					) : null}
 				</div>

@@ -97,16 +97,31 @@ export const LEDGER_REASON_LABELS: Record<LedgerReason, string> = {
 
 /** The materialized prepaid balance for the caller's active org. */
 export interface CreditWallet {
+	/** False when Polar returns only the aggregate meter balance. */
+	balanceBreakdownAvailable?: boolean;
 	balanceMicroUsd: number;
 	currency: string;
 	id: string;
 	ownerId: string;
 	ownerType: string;
+	providerAllocations?: CreditProviderAllocation[];
+	/** `polar` means Polar owns the provider balance; `local` is legacy mode. */
+	source?: "local" | "polar";
 	/** Remaining included plan credit for the current billing period. */
-	subscriptionBalanceMicroUsd: number;
+	subscriptionBalanceMicroUsd: number | null;
 	/** Remaining purchased credit; this balance rolls over. */
-	topupBalanceMicroUsd: number;
+	topupBalanceMicroUsd: number | null;
+	/** Polar aggregate meter balance available for any provider. */
+	unrestrictedBalanceMicroUsd?: number;
 	updatedAt: string;
+}
+
+export interface CreditProviderAllocation {
+	expiresAt: string | null;
+	isFreeProvider: boolean;
+	label: string;
+	poolId: string;
+	remainingMicroUsd: number;
 }
 
 /** One append-only ledger entry (credit or debit). */

@@ -1,4 +1,7 @@
+"use client";
+
 import { Button as ButtonPrimitive } from "@base-ui/react/button";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -39,16 +42,24 @@ const buttonVariants = cva(
 
 function Button({
 	className,
+	children,
 	variant = "default",
 	size = "default",
 	...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<ButtonPrimitive
 			className={cn(buttonVariants({ variant, size, className }))}
 			data-slot="button"
 			{...props}
-		/>
+			aria-label={localizedAriaLabel}
+			title={localizedTitle}
+		>
+			{localizedChildren}
+		</ButtonPrimitive>
 	);
 }
 

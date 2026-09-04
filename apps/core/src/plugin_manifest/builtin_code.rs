@@ -429,6 +429,41 @@ pub(crate) const BUILTIN_CODE_FILES: &[(&str, &str, &str)] = &[
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/agentbrowser/adapters/browser.type.js"),
     ),
     (
+        "@ryu/chat-title",
+        "hooks/rename.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/chat-title/hooks/rename.js"),
+    ),
+    (
+        "@ryu/double-check",
+        "hooks/review.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/double-check/hooks/review.js"),
+    ),
+    (
+        "@ryu/exa",
+        "adapters/web.search.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/exa/adapters/web.search.js"),
+    ),
+    (
+        "@ryu/goal",
+        "hooks/loop.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/goal/hooks/loop.js"),
+    ),
+    (
+        "@ryu/proof",
+        "hooks/loop.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/proof/hooks/loop.js"),
+    ),
+    (
+        "@ryu/receipts",
+        "hooks/loop.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/receipts/hooks/loop.js"),
+    ),
+    (
+        "@ryu/rules",
+        "hooks/inject.js",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/rules/hooks/inject.js"),
+    ),
+    (
         "@ryu/ego-browser",
         "adapters/browser.click.js",
         include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ego-browser/adapters/browser.click.js"),
@@ -521,7 +556,23 @@ pub(crate) const BUILTIN_PI_EXTENSIONS: &[(&str, &str, &str)] = &[
 ];
 
 #[cfg(not(test))]
-pub(crate) const BUILTIN_PI_EXTENSIONS: &[(&str, &str, &str)] = &[];
+pub(crate) const BUILTIN_PI_EXTENSIONS: &[(&str, &str, &str)] = &[
+    (
+        "@ryu/pi-shell",
+        "pi-extensions/ryu-shell.ts",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-shell/pi-extensions/ryu-shell.ts"),
+    ),
+    (
+        "@ryu/pi-subagent",
+        "pi-extensions/ryu-subagent.ts",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-subagent/pi-extensions/ryu-subagent.ts"),
+    ),
+    (
+        "@ryu/pi-monitor",
+        "pi-extensions/ryu-monitor.ts",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/pi-monitor/pi-extensions/ryu-monitor.ts"),
+    ),
+];
 
 /// The embedded contents of `rel` for built-in plugin `plugin_id`, or `None` when
 /// nothing in [`BUILTIN_PI_EXTENSIONS`] matches.
@@ -649,11 +700,68 @@ pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[
 ];
 
 #[cfg(not(test))]
-pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[(
-    "@ryu/blueprint",
-    "output-styles/visual-planning.md",
-    include_str!("../../../../generated/ryu-runtime/apps-store/blueprint/output-styles/visual-planning.md"),
-)];
+pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[
+    (
+        "@ryu/blueprint",
+        "output-styles/visual-planning.md",
+        include_str!("../../../../generated/ryu-runtime/apps-store/blueprint/output-styles/visual-planning.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/bro.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/bro.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/eli5.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/eli5.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/gen-z.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/gen-z.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/explanatory.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/explanatory.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/i-have-adhd.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/i-have-adhd.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/learning.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/learning.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/no-ai-slop.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/no-ai-slop.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/no-hype.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/no-hype.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/plain-text.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/plain-text.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/plain-technical.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/plain-technical.md"),
+    ),
+    (
+        "@ryu/output-styles",
+        "output-styles/proactive.md",
+        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/proactive.md"),
+    ),
+];
 
 /// The embedded contents of `rel` for built-in plugin `plugin_id`, or `None` when
 /// nothing in [`BUILTIN_OUTPUT_STYLES`] matches.

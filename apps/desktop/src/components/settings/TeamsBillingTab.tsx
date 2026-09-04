@@ -490,6 +490,9 @@ function TeamsBillingTabForOrg({
 				) : (
 					<SettingsCard>
 						<CreditBalanceBreakdown
+							balanceBreakdownAvailable={
+								walletQuery.data?.wallet.balanceBreakdownAvailable
+							}
 							compact
 							currency={walletQuery.data?.wallet.currency}
 							onDemandCreditsMicroUsd={
@@ -498,10 +501,24 @@ function TeamsBillingTabForOrg({
 							planAllowanceMicroUsd={
 								subQuery.data?.entitlement.monthlyCreditPoolMicroUsd ?? null
 							}
-							planCreditsMicroUsd={
-								walletQuery.data?.wallet.subscriptionBalanceMicroUsd ?? null
-							}
-							providerAllocations={providerAllocations}
+								planCreditsMicroUsd={
+									walletQuery.data?.wallet.subscriptionBalanceMicroUsd ?? null
+								}
+								providerAllocations={
+									walletQuery.data?.wallet.balanceBreakdownAvailable === false
+										? (walletQuery.data.wallet.providerAllocations?.map(
+												(allocation) => ({
+													expiresAtLabel: formatCreditExpiry(
+														allocation.expiresAt
+													),
+													id: allocation.poolId,
+													isFreeProvider: allocation.isFreeProvider,
+													label: allocation.label,
+													remainingMicroUsd: allocation.remainingMicroUsd,
+												})
+											) ?? null)
+										: providerAllocations
+								}
 							totalMicroUsd={walletQuery.data?.wallet.balanceMicroUsd ?? null}
 						/>
 					</SettingsCard>

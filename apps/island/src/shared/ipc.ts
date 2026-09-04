@@ -11,6 +11,7 @@
 // each side.
 
 import type { ViewContribution } from "@ryu/app-host/views";
+import type { LanguagePack } from "@ryu/i18n/core";
 
 // ── Window control (U1) ──────────────────────────────────────────────────────
 
@@ -369,6 +370,11 @@ export interface SidecarStatus {
 /** Result of a sidecar status probe. */
 export type SidecarStatusResult =
 	| { available: true; sidecars: SidecarStatus[] }
+	| { available: false; reason: string };
+
+/** Result of the main-process installed language-pack read. */
+export type LanguagePacksResult =
+	| { available: true; packs: LanguagePack[] }
 	| { available: false; reason: string };
 
 // ── Core: agents + conversations (command palette data) ──────────────────────
@@ -971,6 +977,9 @@ export const IPC = {
 		engineModels: "core:engineModels",
 		conversations: "core:conversations",
 	},
+	languagePacks: {
+		get: "language-packs:get",
+	},
 	// Plugin (Ryu App / Companion) host bridge. All Core HTTP runs in the main
 	// process (CORS); the renderer's sandboxed-iframe host reaches Core only via
 	// these channels. `hostStreamChunk`/`hostStreamEnd` are main → renderer events.
@@ -1412,6 +1421,9 @@ export interface IslandApi {
 	core: IslandCoreApi;
 	dictation: IslandDictationApi;
 	keybindings: IslandKeybindingsApi;
+	languagePacks: {
+		get(): Promise<LanguagePacksResult>;
+	};
 	meetings: IslandMeetingsApi;
 	plugins: IslandPluginsApi;
 	quests: IslandQuestsApi;

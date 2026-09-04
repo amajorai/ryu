@@ -30,6 +30,12 @@ export function SplitPresetSettings() {
 	const [draft, setDraft] = useState("");
 	const [confirmId, setConfirmId] = useState<string | null>(null);
 
+	const beginRename = (id: string, name: string) => {
+		setConfirmId(null);
+		setDraft(name);
+		setEditingId(id);
+	};
+
 	// Settings sync writes the collection straight into localStorage without
 	// announcing it, so re-read on mount — otherwise presets that arrived from
 	// another machine would not show up until the window is restarted.
@@ -67,11 +73,7 @@ export function SplitPresetSettings() {
 									<Button
 										aria-label={`Rename ${preset.name}`}
 										className="size-8"
-										onClick={() => {
-											setConfirmId(null);
-											setDraft(preset.name);
-											setEditingId(preset.id);
-										}}
+										onClick={() => beginRename(preset.id, preset.name)}
 										size="icon"
 										title={`Rename ${preset.name}`}
 										variant="ghost"
@@ -96,7 +98,15 @@ export function SplitPresetSettings() {
 						}
 						key={preset.id}
 						title={
-							<span className="flex min-w-0 flex-col">
+							/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/noNoninteractiveElementInteractions: the adjacent rename button remains keyboard accessible; double-click is the pointer shortcut for the same inline editor */
+							<span
+								className="flex min-w-0 cursor-text flex-col"
+								onDoubleClick={(event) => {
+									event.preventDefault();
+									event.stopPropagation();
+									beginRename(preset.id, preset.name);
+								}}
+							>
 								<span className="truncate">{preset.name}</span>
 								<span className="font-normal text-muted-foreground text-xs">
 									{presetSummary(preset)}

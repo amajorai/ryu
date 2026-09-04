@@ -1,3 +1,4 @@
+import { ryuOrganizationClient } from "@ryu/auth/organization-client";
 import { configureSettingsApi } from "@ryu/settings";
 import {
 	anonymousClient,
@@ -408,6 +409,7 @@ export const authClient = createAuthClient({
 		twoFactorClient(),
 		magicLinkClient(),
 		usernameClient(),
+		ryuOrganizationClient,
 		inferAdditionalFields({
 			user: {
 				avatarId: { type: "string", required: false },

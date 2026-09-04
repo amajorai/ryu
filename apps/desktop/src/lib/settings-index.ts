@@ -77,6 +77,7 @@ export interface SettingsEntry {
  */
 const SUBPAGE_BY_GROUP: Record<string, Record<string, string>> = {
 	appearance: {
+		"Language & vibe": "language",
 		"Layout & sizing": "layout",
 		Typography: "layout",
 		Motion: "motion",
@@ -386,6 +387,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
 		group: "Theme",
 		label: "Color theme",
 		keywords: "dark light mode preset accent palette scheme",
+	},
+	{
+		id: "appearance.language",
+		dialog: "app",
+		section: "appearance",
+		group: "Language & vibe",
+		label: "Language & vibe",
+		keywords: "locale translation language pack dialect vibe",
+		subpage: "language",
 	},
 	{
 		id: "appearance.custom-color",

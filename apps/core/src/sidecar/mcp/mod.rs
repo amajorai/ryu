@@ -85,6 +85,20 @@ pub enum ToolPrincipal {
     Unresolved,
 }
 
+/// Whether a registry tool is valid during the onboarding profile read job.
+/// Profile scope is represented as optional fields so ordinary calls remain
+/// unchanged; once either ceiling is present, only conversation search and
+/// explicitly selected Composio actions may reach the dispatch core.
+pub(crate) fn profile_scope_allows_registry_tool(
+    tool_id: &str,
+    has_composio_scope: bool,
+    has_conversation_scope: bool,
+) -> bool {
+    !(has_composio_scope || has_conversation_scope)
+        || tool_id == "search_conversations.search"
+        || (has_composio_scope && tool_id.starts_with("composio."))
+}
+
 impl ToolPrincipal {
     /// Resolve the principal for one tool call, **fresh at dispatch time** — never
     /// cached when the MCP bridge is built (the bridge is built once per ACP
@@ -4231,7 +4245,6 @@ impl McpRegistry {
     /// runs on behalf of (the ACP bridge's `permission_scope_id`). It is lowered to a
     /// [`ToolPrincipal`] at dispatch time and is the ONLY authorization principal on
     /// the agent plane — never `user_id`, which is client-supplied and spoofable.
-    #[allow(clippy::too_many_arguments)]
     pub async fn call_tool_with_identity(
         &self,
         agent_id: Option<&str>,
@@ -4243,8 +4256,53 @@ impl McpRegistry {
         session_id: Option<String>,
         host_conversation_id: Option<&str>,
     ) -> Result<Value> {
+        self.call_tool_with_identity_scoped(
+            agent_id,
+            tool_id,
+            arguments,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id,
+            host_conversation_id,
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// Governed tool dispatch with optional onboarding source scopes. `None`
+    /// preserves ordinary agent behavior; `Some` narrows Composio accounts and
+    /// conversation search to the server-validated profile selection.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn call_tool_with_identity_scoped(
+        &self,
+        agent_id: Option<&str>,
+        tool_id: &str,
+        arguments: Value,
+        allowlist: Option<&[String]>,
+        user_id: Option<&str>,
+        profile_ids: &[String],
+        session_id: Option<String>,
+        host_conversation_id: Option<&str>,
+        composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+        conversation_scope: Option<&[String]>,
+    ) -> Result<Value> {
         let normalized_tool_id = self.canonical_tool_id_for_registry(tool_id);
         let tool_id = normalized_tool_id.as_str();
+        // Profile bootstrap is a scoped read job, not a general agent turn. Keep
+        // its source ceiling at the registry chokepoint so prompt injection cannot
+        // switch to another MCP server, PTC, delegation, or a Core API tool that
+        // would bypass the selected Composio accounts/imported chats.
+        if !profile_scope_allows_registry_tool(
+            tool_id,
+            composio_connection_scope.is_some(),
+            conversation_scope.is_some(),
+        ) {
+            return Err(anyhow!(
+                "profile bootstrap may access only selected connected sources and imported conversations"
+            ));
+        }
         let normalized_allowlist = allowlist.map(|list| {
             list.iter()
                 .map(|entry| self.canonical_tool_id_for_registry(entry))
@@ -4370,6 +4428,8 @@ impl McpRegistry {
                 profile_ids,
                 session_id.clone(),
                 host_conversation_id,
+                composio_connection_scope,
+                conversation_scope,
             )
             .await
             {
@@ -4380,7 +4440,7 @@ impl McpRegistry {
             }
         }
 
-        self.call_tool_with_identity_after_approval(
+        self.call_tool_with_identity_after_approval_scoped(
             agent_id,
             tool_id,
             arguments,
@@ -4389,6 +4449,8 @@ impl McpRegistry {
             profile_ids,
             session_id,
             host_conversation_id,
+            composio_connection_scope,
+            conversation_scope,
         )
         .await
     }
@@ -4398,7 +4460,6 @@ impl McpRegistry {
     /// engine use this entry so they skip only the duplicate human-approval gate;
     /// they still run pre-tool firewalls, result redaction, and post-tool audit
     /// hooks exactly like a direct governed call.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn call_tool_with_identity_after_approval(
         &self,
         agent_id: Option<&str>,
@@ -4409,6 +4470,35 @@ impl McpRegistry {
         profile_ids: &[String],
         session_id: Option<String>,
         host_conversation_id: Option<&str>,
+    ) -> Result<Value> {
+        self.call_tool_with_identity_after_approval_scoped(
+            agent_id,
+            tool_id,
+            arguments,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id,
+            host_conversation_id,
+            None,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn call_tool_with_identity_after_approval_scoped(
+        &self,
+        agent_id: Option<&str>,
+        tool_id: &str,
+        arguments: Value,
+        allowlist: Option<&[String]>,
+        user_id: Option<&str>,
+        profile_ids: &[String],
+        session_id: Option<String>,
+        host_conversation_id: Option<&str>,
+        composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+        conversation_scope: Option<&[String]>,
     ) -> Result<Value> {
         let normalized_tool_id = self.canonical_tool_id_for_registry(tool_id);
         let tool_id = normalized_tool_id.as_str();
@@ -4437,7 +4527,7 @@ impl McpRegistry {
         let hook_session_id = session_id.clone();
 
         let result = self
-            .call_tool_with_identity_no_gate(
+            .call_tool_with_identity_no_gate_scoped(
                 agent_id,
                 tool_id,
                 arguments,
@@ -4446,6 +4536,8 @@ impl McpRegistry {
                 profile_ids,
                 session_id,
                 host_conversation_id,
+                composio_connection_scope,
+                conversation_scope,
             )
             .await;
 
@@ -4486,7 +4578,6 @@ impl McpRegistry {
     /// `skills` provider. `None` for the agent-less callers (workflows, monitors,
     /// recipes, capability adapters, the approval engine), which degrade to the
     /// unscoped behaviour they had before.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn call_tool_with_identity_no_gate(
         &self,
         agent_id: Option<&str>,
@@ -4497,6 +4588,35 @@ impl McpRegistry {
         profile_ids: &[String],
         session_id: Option<String>,
         host_conversation_id: Option<&str>,
+    ) -> Result<Value> {
+        self.call_tool_with_identity_no_gate_scoped(
+            agent_id,
+            tool_id,
+            arguments,
+            allowlist,
+            user_id,
+            profile_ids,
+            session_id,
+            host_conversation_id,
+            None,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn call_tool_with_identity_no_gate_scoped(
+        &self,
+        agent_id: Option<&str>,
+        tool_id: &str,
+        arguments: Value,
+        allowlist: Option<&[String]>,
+        user_id: Option<&str>,
+        profile_ids: &[String],
+        session_id: Option<String>,
+        host_conversation_id: Option<&str>,
+        composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+        conversation_scope: Option<&[String]>,
     ) -> Result<Value> {
         let normalized_tool_id = self.canonical_tool_id_for_registry(tool_id);
         let tool_id = normalized_tool_id.as_str();
@@ -4634,8 +4754,32 @@ impl McpRegistry {
                     connection_action,
                 )));
             }
-            let output =
-                composio::dispatch(&self.http, slug, arguments, composio_entity.as_deref()).await?;
+            let selected_connection_id = match composio_connection_scope {
+                None => None,
+                Some(scope) => {
+                    let toolkit = crate::connection_policy::composio_toolkit_for_action(tool_id)
+                        .ok_or_else(|| anyhow!("Composio action '{tool_id}' has no toolkit"))?;
+                    Some(
+                        scope
+                            .iter()
+                            .find(|binding| binding.toolkit.eq_ignore_ascii_case(&toolkit))
+                            .map(|binding| binding.id.as_str())
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "Composio action '{tool_id}' is outside the selected source scope"
+                                )
+                            })?,
+                    )
+                }
+            };
+            let output = composio::dispatch_with_connection(
+                &self.http,
+                slug,
+                arguments,
+                composio_entity.as_deref(),
+                selected_connection_id,
+            )
+            .await?;
             // Native ACP sessions execute Composio inside this in-process MCP
             // bridge, so the Gateway's OpenAI tool loop never sees the call.
             // A non-empty session id is the bridge marker; the HTTP Gateway
@@ -5295,7 +5439,14 @@ impl McpRegistry {
                     "count": 0
                 }));
             }
-            return search_conversations::dispatch(tool, arguments, store, &principal).await;
+            return search_conversations::dispatch_scoped(
+                tool,
+                arguments,
+                store,
+                &principal,
+                conversation_scope,
+            )
+            .await;
         }
 
         // Built-in agent-level control. The bridge supplies the calling agent and
@@ -6762,6 +6913,28 @@ mod tests {
 
     fn sample_tool() -> RegistryTool {
         RegistryTool::candidate("fs.read_file", "fs", "read_file")
+    }
+
+    #[test]
+    fn profile_scope_allows_only_selected_source_planes() {
+        assert!(profile_scope_allows_registry_tool(
+            "search_conversations.search",
+            true,
+            true,
+        ));
+        assert!(profile_scope_allows_registry_tool(
+            "composio.GITHUB_SEARCH_ISSUES",
+            true,
+            true,
+        ));
+        assert!(!profile_scope_allows_registry_tool(
+            "composio.GITHUB_SEARCH_ISSUES",
+            false,
+            true,
+        ));
+        assert!(!profile_scope_allows_registry_tool("composio_connect.search", true, true));
+        assert!(!profile_scope_allows_registry_tool("tools.exec", true, true));
+        assert!(profile_scope_allows_registry_tool("spaces.search", false, false));
     }
 
     #[tokio::test]

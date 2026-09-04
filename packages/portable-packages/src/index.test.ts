@@ -2,11 +2,14 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { languagePackArchive } from "@ryu/i18n/core";
 import {
 	canonicalJson,
 	decryptSecrets,
 	diffPackageTrees,
 	hasEncryptedSecrets,
+	languagePackFromTree,
+	languagePackPackageTree,
 	PACKAGE_MANIFEST_FILE,
 	type PackageTree,
 	packageDigest,
@@ -63,6 +66,67 @@ test("validates and canonicalizes the package envelope", () => {
 	expect(() =>
 		validatePackageManifest({ ...manifest, id: "../unsafe" })
 	).toThrow("unsupported characters");
+});
+
+test("language-pack trees validate, pack, and round-trip as data-only packages", () => {
+	const tree = languagePackPackageTree({
+		baseLocale: "en",
+		direction: "ltr",
+		id: "example-online",
+		locale: "en",
+		messages: { "common.install": "Yeet it in" },
+		name: "Example Online",
+		schemaVersion: 1,
+		version: "1.0.0",
+	});
+	expect(tree.manifest.kind).toBe("language_pack");
+	expect(tree.manifest.artifacts).toEqual(["language-pack.json"]);
+	expect(languagePackFromTree(tree).messages["common.install"]).toBe(
+		"Yeet it in"
+	);
+	const roundTripped = languagePackFromTree(unpackPackage(packPackage(tree)));
+	expect(roundTripped.id).toBe("example-online");
+	expect(roundTripped.locale).toBe("en");
+	const browserTree = unpackPackage(languagePackArchive(roundTripped));
+	expect(browserTree.manifest).toMatchObject({
+		artifacts: ["language-pack.json"],
+		id: "example-online",
+		kind: "language_pack",
+	});
+	expect(Object.keys(browserTree.files)).toEqual(["language-pack.json"]);
+	expect(languagePackFromTree(browserTree)).toEqual(roundTripped);
+	expect(() =>
+		validatePackageManifest({
+			...manifest,
+			artifacts: ["language-pack.json"],
+			kind: "language_pack",
+		})
+	).not.toThrow();
+	expect(() =>
+		validatePackageTree({
+			...tree,
+			files: {
+				...tree.files,
+				"extra.txt": new TextEncoder().encode("not allowed"),
+			},
+		})
+	).toThrow("only language-pack.json");
+	expect(() =>
+		validatePackageTree({
+			...tree,
+			manifest: validatePackageManifest({
+				...tree.manifest,
+				capabilities: ["tool:execute"],
+			}),
+		})
+	).toThrow("cannot declare capabilities");
+	const mismatched = {
+		...tree,
+		manifest: { ...tree.manifest, id: "other-pack" },
+	};
+	expect(() => languagePackFromTree(mismatched)).toThrow(
+		"id must match the package manifest"
+	);
 });
 
 test("validates declared artifacts and preserves safe metadata", () => {

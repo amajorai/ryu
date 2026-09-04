@@ -137,6 +137,9 @@ pub async fn build_ryu_mcp_server(
     composio_actions: Vec<String>,
     agent_id: String,
     identity_profile_ids: Vec<String>,
+    composio_connection_scope:
+        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    conversation_scope: Option<Vec<String>>,
     permission_tx: Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
     permission_scope_id: Option<String>,
 ) -> Option<McpServer<Agent, NullRun>> {
@@ -174,6 +177,8 @@ pub async fn build_ryu_mcp_server(
         composio_actions,
         agent_id,
         identity_profile_ids,
+        composio_connection_scope,
+        conversation_scope,
         caps,
         permission_tx,
         permission_scope_id,
@@ -195,6 +200,11 @@ struct RyuMcpServer {
     /// tool call targeting a NEEDS_AUTH bound domain elicits, and an AUTHENTICATED
     /// one reads the credential under the gateway grant. Empty = no vault consult.
     identity_profile_ids: Vec<String>,
+    /// Optional server-validated connected accounts for a profile run.
+    composio_connection_scope:
+        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    /// Optional server-validated conversation ids for a profile run.
+    conversation_scope: Option<Vec<String>>,
     /// This agent's orchestration capabilities, enforced again at dispatch time
     /// (defense in depth) so a model cannot call a gated tool it was not offered.
     caps: crate::sidecar::mcp::AgentCapabilities,
@@ -219,6 +229,8 @@ impl McpServerConnect<Agent> for RyuMcpServer {
             composio_actions: self.composio_actions.clone(),
             agent_id: self.agent_id.clone(),
             identity_profile_ids: self.identity_profile_ids.clone(),
+            composio_connection_scope: self.composio_connection_scope.clone(),
+            conversation_scope: self.conversation_scope.clone(),
             caps: self.caps,
             permission_tx: self.permission_tx.clone(),
             permission_scope_id: self.permission_scope_id.clone(),
@@ -394,6 +406,11 @@ struct RyuMcpHandler {
     agent_id: String,
     /// Bound Identity Vault profiles (epic #517); see [`RyuMcpServer`].
     identity_profile_ids: Vec<String>,
+    /// Optional server-validated connected accounts for a profile run.
+    composio_connection_scope:
+        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    /// Optional server-validated conversation ids for a profile run.
+    conversation_scope: Option<Vec<String>>,
     /// This agent's orchestration capabilities; gated tools are refused here even
     /// if a model emits a call to one that was never advertised (defense in depth).
     caps: crate::sidecar::mcp::AgentCapabilities,
@@ -614,6 +631,19 @@ impl RyuMcpHandler {
             ));
         }
 
+        // The profile builder carries an explicit source ceiling. Do not let a
+        // model route around it by embedding another registry call in PTC code;
+        // the PTC invoker has no profile-scope channel of its own.
+        if (self.composio_connection_scope.is_some() || self.conversation_scope.is_some())
+            && matches!(tool_id, "execute" | "resume")
+        {
+            return Err(McpError::new(
+                rmcp::model::ErrorCode::INVALID_REQUEST,
+                "programmatic tool execution is unavailable during profile bootstrap",
+                None,
+            ));
+        }
+
         // Capability gate (defense in depth): these tools are filtered out of the
         // advertised set for an agent that lacks the capability, but a model can
         // still emit a call to a tool it was never offered — refuse it here too.
@@ -715,7 +745,7 @@ impl RyuMcpHandler {
             // `call_tool_with_identity` for the agent's bound profiles.
             _ => self
                 .mcp
-                .call_tool_with_identity(
+                .call_tool_with_identity_scoped(
                     // The calling agent, so its configured `approval_tools`
                     // (policy Layer A) feed the approval gate.
                     Some(&self.agent_id),
@@ -744,6 +774,8 @@ impl RyuMcpHandler {
                     // See [`serve_http_jsonrpc`] for why a client-supplied id must
                     // never be threaded in here to "fix" that.
                     self.permission_scope_id.as_deref(),
+                    self.composio_connection_scope.as_deref(),
+                    self.conversation_scope.as_deref(),
                 )
                 .await
                 .map_err(|e| {
@@ -1050,6 +1082,8 @@ pub(crate) async fn serve_http_jsonrpc(
         composio_actions: Vec::new(),
         agent_id,
         identity_profile_ids,
+        composio_connection_scope: None,
+        conversation_scope: None,
         caps,
         permission_tx: None,
         permission_scope_id: None,
@@ -1393,6 +1427,8 @@ mod tests {
             composio_actions,
             agent_id: "ryu".to_owned(),
             identity_profile_ids: Vec::new(),
+            composio_connection_scope: None,
+            conversation_scope: None,
             caps: crate::sidecar::mcp::AgentCapabilities::default(),
             permission_tx: None,
             permission_scope_id: None,
@@ -1435,6 +1471,8 @@ mod tests {
             vec![],
             "ryu".to_owned(),
             vec![],
+            None,
+            None,
             None,
             None,
         )
@@ -1625,6 +1663,8 @@ mod tests {
             vec![],
             None,
             None,
+            None,
+            None,
         )
         .await;
         assert!(result.is_some(), "meta-tools are always offered");
@@ -1636,6 +1676,8 @@ mod tests {
             vec![],
             "ryu".to_owned(),
             vec![],
+            None,
+            None,
             None,
             None,
         )
@@ -1653,7 +1695,18 @@ mod tests {
         // meta-tools are offered on top.
         let mcp = empty_registry();
         let result =
-            build_ryu_mcp_server(mcp, None, vec![], "ryu".to_owned(), vec![], None, None).await;
+            build_ryu_mcp_server(
+                mcp,
+                None,
+                vec![],
+                "ryu".to_owned(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+            )
+            .await;
         assert!(
             result.is_some(),
             "None allowlist should offer Shadow built-in tools + meta-tools"

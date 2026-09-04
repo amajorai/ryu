@@ -34,6 +34,9 @@ test("registers targeted Inbox notifications as a separate capability", () => {
 
 const OLD_METHOD_CAPABILITY: Record<string, Capability> = {
 	"host.capabilities": "host.capabilities",
+	"i18n.get": "i18n",
+	"i18n.translate": "i18n",
+	"i18n.subscribe": "i18n",
 	"node.shareOrigins": "node.shareOrigins",
 	"native.haptics": "native.haptics",
 	"native.notifications.create": "native.notifications",
@@ -314,6 +317,7 @@ const OLD_GRANT_CAPABILITY: Record<string, Capability> = {
 const OLD_STREAMING_METHODS: readonly string[] = [
 	"agent.run.stream",
 	"finetune.stream",
+	"i18n.subscribe",
 	"shell.themeSubscribe",
 	"shell.prefsSubscribe",
 	"shell.registerCommand",
@@ -425,4 +429,71 @@ describe("skills.distribute RPC", () => {
 			expect(called).toBe(false);
 		});
 	}
+});
+
+describe("i18n RPC", () => {
+	const granted = new Set<Capability>();
+
+	test("translates with the host runtime and an explicit fallback", async () => {
+		const received: unknown[] = [];
+		const services: HostServices = {
+			i18nTranslate: (input) => {
+				received.push(input);
+				return "localized";
+			},
+			listAgents: () => Promise.resolve([]),
+			registerRoute: () => Promise.resolve(null),
+		};
+
+		await expect(
+			dispatchRpc(
+				"i18n.translate",
+				[
+					{
+						defaultMessage: "Hello {name}",
+						id: "example.greeting",
+						values: { name: "Ryu" },
+					},
+				],
+				granted,
+				services
+			)
+		).resolves.toBe("localized");
+		expect(received).toEqual([
+			{
+				defaultMessage: "Hello {name}",
+				id: "example.greeting",
+				values: { name: "Ryu" },
+			},
+		]);
+	});
+
+	test("rejects non-primitive interpolation values before the host runs", async () => {
+		let called = false;
+		const services: HostServices = {
+			i18nTranslate: () => {
+				called = true;
+				return "should not run";
+			},
+			listAgents: () => Promise.resolve([]),
+			registerRoute: () => Promise.resolve(null),
+		};
+
+		const error = await dispatchRpc(
+			"i18n.translate",
+			[
+				{
+					defaultMessage: "Hello",
+					id: "example.greeting",
+					values: { name: { secret: "no" } },
+				},
+			],
+			granted,
+			services
+		).catch((reason: unknown) => reason);
+
+		expect(error).toBeInstanceOf(CodedRpcError);
+		expect((error as CodedRpcError).code).toBe("invalid_args");
+		expect(called).toBe(false);
+	});
 });

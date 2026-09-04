@@ -7,9 +7,33 @@ export type GatewayOnboardingReason =
 	| "personal_node"
 	| "managed_node"
 	| "shared_acl_node"
+	| "shared_node_admin"
 	| "not_node_owner"
 	| "profile_not_eligible"
 	| "ready";
+
+/** The node-level setup mode selected during first-run onboarding. */
+export type NodeSetupKind = "personal" | "team";
+
+/** Shared company context stored on a team node. */
+export interface NodeOnboardingPersonalization {
+	companyContext: string;
+	companyKnowledgeEnabled: boolean;
+}
+
+/** Durable onboarding state returned by the active Core node. */
+export interface NodeOnboardingState {
+	completed: boolean;
+	completedAtMs: number | null;
+	personalization: NodeOnboardingPersonalization;
+	setupKind: NodeSetupKind | null;
+	version: number;
+}
+
+/** Node state plus the live permission used by Gateway settings. */
+export interface NodeOnboardingSnapshot extends NodeOnboardingState {
+	canConfigure: boolean;
+}
 
 export interface GatewayOnboardingAccess {
 	allowed: boolean;
@@ -78,6 +102,44 @@ export async function fetchGatewayOnboardingAccess(
 	target: ApiTarget
 ): Promise<GatewayOnboardingAccess> {
 	return request<GatewayOnboardingAccess>(target, "/api/onboarding/access");
+}
+
+/** Read node onboarding state; a missing/old route is handled by the caller. */
+export async function fetchNodeOnboardingState(
+	target: ApiTarget
+): Promise<NodeOnboardingSnapshot> {
+	return request<NodeOnboardingSnapshot>(target, "/api/onboarding/state", {
+		signal: AbortSignal.timeout(10_000),
+	});
+}
+
+export interface SaveNodeOnboardingStateInput {
+	companyContext: string;
+	companyKnowledgeEnabled: boolean;
+	completed: boolean;
+	setupKind: NodeSetupKind;
+}
+
+/** Persist the selected node mode/context or mark node onboarding complete. */
+export async function saveNodeOnboardingState(
+	target: ApiTarget,
+	input: SaveNodeOnboardingStateInput
+): Promise<NodeOnboardingSnapshot> {
+	return request<NodeOnboardingSnapshot>(target, "/api/onboarding/state", {
+		body: input,
+		method: "PUT",
+		signal: AbortSignal.timeout(10_000),
+	});
+}
+
+/** Clear only the node's onboarding state; durable chats and memories remain. */
+export async function resetNodeOnboardingState(
+	target: ApiTarget
+): Promise<NodeOnboardingSnapshot> {
+	return request<NodeOnboardingSnapshot>(target, "/api/onboarding/state", {
+		method: "DELETE",
+		signal: AbortSignal.timeout(10_000),
+	});
 }
 
 export async function fetchProfileAvailability(

@@ -1,5 +1,8 @@
+"use client";
+
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -30,15 +33,17 @@ function Badge({
 	className,
 	variant = "default",
 	render,
+	children,
 	...props
 }: useRender.ComponentProps<"span"> & VariantProps<typeof badgeVariants>) {
+	const localizedChildren = useLocalizedText(children);
 	return useRender({
 		defaultTagName: "span",
 		props: mergeProps<"span">(
 			{
 				className: cn(badgeVariants({ variant }), className),
 			},
-			props
+			{ ...props, children: localizedChildren }
 		),
 		render,
 		state: {

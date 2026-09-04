@@ -37,6 +37,7 @@ const baseProps = {
 	onToggleAutoImport: () => undefined,
 	organizations: [],
 	piProviders: [],
+	nodeSetupKind: null,
 	profileStartedAt: Date.now() - 30_000,
 	providerBusyId: null,
 	selectedOrganizationId: null,

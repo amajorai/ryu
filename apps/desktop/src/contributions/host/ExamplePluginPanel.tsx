@@ -9,7 +9,12 @@
 
 import { ExtensionHost } from "@ryu/app-host/ExtensionHost";
 import { examplePluginSrcdoc } from "@ryu/app-host/example-plugin";
-import type { Capability, HostServices } from "@ryu/app-host/rpc";
+import {
+	type Capability,
+	createI18nHostServices,
+	type HostServices,
+} from "@ryu/app-host/rpc";
+import { useI18n } from "@ryu/i18n/react";
 import { useMemo, useState } from "react";
 import { fetchAgents } from "@/src/lib/api/agents.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
@@ -17,6 +22,7 @@ import { useNodeStore } from "@/src/store/useNodeStore.ts";
 
 export function ExamplePluginPanel() {
 	const getActiveNode = useNodeStore((s) => s.getActiveNode);
+	const i18n = useI18n();
 	const [connected, setConnected] = useState(false);
 
 	// One nonce per mount. Host-generated, never plugin/user input.
@@ -39,6 +45,7 @@ export function ExamplePluginPanel() {
 	// The privileged service: the host holds the token and does the fetch.
 	const services = useMemo<HostServices>(
 		() => ({
+			...createI18nHostServices(i18n),
 			listAgents: async () => {
 				const node = getActiveNode();
 				const agents = await fetchAgents(toTarget(node));
@@ -50,7 +57,7 @@ export function ExamplePluginPanel() {
 			registerRoute: () =>
 				Promise.reject(new Error("example plugin does not register routes")),
 		}),
-		[getActiveNode]
+		[getActiveNode, i18n]
 	);
 
 	return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	AnimatePresence,
@@ -95,6 +96,7 @@ export function Dock({
 	panelHeight = DEFAULT_PANEL_HEIGHT,
 	spring = { damping: 12, mass: 0.1, stiffness: 150 },
 }: DockProps) {
+	const localizedDockLabel = useLocalizedString("Application dock");
 	const mouseX = useMotionValue(Number.POSITIVE_INFINITY);
 	const isHovered = useMotionValue(0);
 	const maxHeight = useMemo(
@@ -110,7 +112,7 @@ export function Dock({
 			style={{ height, scrollbarWidth: "none" }}
 		>
 			<motion.div
-				aria-label="Application dock"
+				aria-label={localizedDockLabel}
 				className={cn(
 					"mx-auto flex w-fit gap-2 rounded-2xl border border-white/15 bg-black/25 px-3 shadow-2xl backdrop-blur-2xl",
 					className
@@ -145,6 +147,8 @@ export function DockItem({
 	onClick,
 	title,
 }: DockItemProps) {
+	const localizedAriaLabel = useLocalizedString(ariaLabel);
+	const localizedTitle = useLocalizedString(title);
 	const ref = useRef<HTMLDivElement>(null);
 	const { distance, magnification, mouseX, spring } = useDock();
 	const isHovered = useMotionValue(0);
@@ -161,7 +165,7 @@ export function DockItem({
 
 	return (
 		<motion.div
-			aria-label={ariaLabel}
+			aria-label={localizedAriaLabel}
 			className={cn(
 				"relative inline-flex aspect-square shrink-0 items-center justify-center rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/80",
 				className
@@ -183,7 +187,7 @@ export function DockItem({
 			role="button"
 			style={{ width }}
 			tabIndex={0}
-			title={title}
+			title={localizedTitle}
 		>
 			{Children.map(children, (child) => {
 				if (!isValidElement<DockChildProps>(child)) {

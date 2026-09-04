@@ -234,6 +234,24 @@ pub fn add_node(name: String, url: String, token: Option<String>) -> Result<(), 
     save(&config).map_err(|e| e.to_string())
 }
 
+/// Replace the bearer for an existing remote node without changing its name or
+/// URL. Re-entering onboarding with a refreshed token must not keep sending the
+/// stale credential that was captured when the node was first added.
+#[tauri::command]
+pub fn update_node_token(name: String, token: Option<String>) -> Result<(), String> {
+	let mut config = load();
+	let node = config
+		.nodes
+		.iter_mut()
+		.find(|node| node.name == name)
+		.ok_or_else(|| format!("node '{}' not found", name))?;
+	node.token = token.and_then(|value| {
+		let trimmed = value.trim().to_owned();
+		(!trimmed.is_empty()).then_some(trimmed)
+	});
+	save(&config).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn remove_node(name: String) -> Result<(), String> {
     if name == "local" {

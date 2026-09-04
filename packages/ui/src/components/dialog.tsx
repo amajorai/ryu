@@ -3,6 +3,7 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { I18nText, useLocalizedText } from "@ryu/i18n/react";
 import { Button } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
@@ -128,27 +129,36 @@ function DialogFooter({
 			{children}
 			{showCloseButton && (
 				<DialogPrimitive.Close render={<Button variant="ghost" />}>
-					Close
+					<I18nText id="common.close" />
 				</DialogPrimitive.Close>
 			)}
 		</div>
 	);
 }
 
-function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+function DialogTitle({
+	children,
+	className,
+	...props
+}: DialogPrimitive.Title.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<DialogPrimitive.Title
 			className={cn("font-heading font-medium text-xl leading-none", className)}
 			data-slot="dialog-title"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</DialogPrimitive.Title>
 	);
 }
 
 function DialogDescription({
+	children,
 	className,
 	...props
 }: DialogPrimitive.Description.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<DialogPrimitive.Description
 			className={cn(
@@ -157,7 +167,9 @@ function DialogDescription({
 			)}
 			data-slot="dialog-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</DialogPrimitive.Description>
 	);
 }
 

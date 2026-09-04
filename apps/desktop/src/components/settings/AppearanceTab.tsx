@@ -193,6 +193,7 @@ import {
 	toolDetailStepIndex,
 } from "@/src/lib/tool-detail-ladder.ts";
 import { BackgroundCustomizationSettings } from "./BackgroundCustomizationSettings.tsx";
+import { LanguageSettings } from "./LanguageSettings.tsx";
 import {
 	SettingsCard,
 	SettingsGroup,
@@ -3024,6 +3025,14 @@ export function AppearanceTab() {
 			intro={themeIntro}
 			label="Customize"
 			pages={[
+				{
+					id: "language",
+					title: "Language & vibe",
+					hint: "Choose an official locale or a community-created voice pack.",
+					icon: TextFontIcon,
+					tint: "purple",
+					content: <LanguageSettings />,
+				},
 				{
 					id: "layout",
 					title: "Layout & text",

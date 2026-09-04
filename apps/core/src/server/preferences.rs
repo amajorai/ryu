@@ -34,6 +34,7 @@ const SECRET_PREFERENCE_KEYS: &[&str] = &[
     "replicate-api-key",
     "smithery-api-key",
     "smtp-password",
+    "node-onboarding-state",
 ];
 
 /// Whether a preference value must be sealed before it is written to SQLite.
@@ -151,7 +152,15 @@ impl PreferencesStore {
         // A send error just means no live subscribers — not a failure.
         let _ = self.tx.send(PreferenceEvent {
             key: key.to_string(),
-            value: value.to_string(),
+            // Secret preferences are useful to the owner but must never be
+            // echoed into an SSE subscriber or companion process. Consumers
+            // can reread through the authenticated preference route when they
+            // actually need the value.
+            value: if is_secret_preference_key(key) {
+                String::new()
+            } else {
+                value.to_string()
+            },
         });
         Ok(())
     }
@@ -320,10 +329,30 @@ mod tests {
         assert!(event.value.is_empty());
     }
 
+    #[tokio::test]
+    async fn secret_preferences_are_not_echoed_to_subscribers() {
+        let store = in_memory_store();
+        let mut events = store.subscribe();
+
+        store
+            .set("node-onboarding-state", "company context")
+            .await
+            .unwrap();
+
+        let event = events.recv().await.unwrap();
+        assert_eq!(event.key, "node-onboarding-state");
+        assert!(event.value.is_empty());
+        assert_eq!(
+            store.get("node-onboarding-state").await.unwrap().as_deref(),
+            Some("company context")
+        );
+    }
+
     #[test]
     fn secret_key_allowlist_is_explicit() {
         assert!(is_secret_preference_key("composio-api-key"));
         assert!(is_secret_preference_key("smtp-password"));
+        assert!(is_secret_preference_key("node-onboarding-state"));
         assert!(!is_secret_preference_key("context.max-tokens"));
         assert!(!is_secret_preference_key("theme"));
     }

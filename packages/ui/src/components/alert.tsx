@@ -1,5 +1,8 @@
+"use client";
+
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { cva, type VariantProps } from "class-variance-authority";
 import type * as React from "react";
@@ -44,7 +47,12 @@ function Alert({
 	);
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+function AlertTitle({
+	className,
+	children,
+	...props
+}: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
@@ -53,14 +61,18 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
 			)}
 			data-slot="alert-title"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 
 function AlertDescription({
 	className,
+	children,
 	...props
 }: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn(
@@ -69,7 +81,9 @@ function AlertDescription({
 			)}
 			data-slot="alert-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 
@@ -93,9 +107,10 @@ function AlertDismiss({
 	label = "Dismiss",
 	...props
 }: React.ComponentProps<"button"> & { label?: string }) {
+	const localizedLabel = useLocalizedString(label);
 	return (
 		<button
-			aria-label={label}
+			aria-label={localizedLabel}
 			className={cn(
 				"absolute top-2.5 right-3 inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30",
 				className

@@ -1,6 +1,7 @@
 "use client";
 
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
+import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 
 function Switch({
@@ -11,6 +12,8 @@ function Switch({
 }: SwitchPrimitive.Root.Props & {
 	size?: "sm" | "default";
 }) {
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<SwitchPrimitive.Root
 			className={cn(
@@ -21,6 +24,8 @@ function Switch({
 			data-slot="switch"
 			onCheckedChange={onCheckedChange}
 			{...props}
+			aria-label={localizedAriaLabel}
+			title={localizedTitle}
 		>
 			<SwitchPrimitive.Thumb
 				className="t-toggle-thumb pointer-events-none block rounded-full bg-background not-dark:bg-clip-padding shadow-sm ring-0 group-data-[size=default]/switch:h-4 group-data-[size=sm]/switch:h-3 group-data-[size=default]/switch:w-6 group-data-[size=sm]/switch:w-4 dark:data-checked:bg-primary-foreground dark:data-unchecked:bg-foreground"

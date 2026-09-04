@@ -1,8 +1,14 @@
+"use client";
+
 import { Input as InputPrimitive } from "@base-ui/react/input";
+import { useLocalizedString } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedPlaceholder = useLocalizedString(props.placeholder);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<InputPrimitive
 			className={cn(
@@ -12,6 +18,9 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 			data-slot="input"
 			type={type}
 			{...props}
+			aria-label={localizedAriaLabel}
+			placeholder={localizedPlaceholder}
+			title={localizedTitle}
 		/>
 	);
 }

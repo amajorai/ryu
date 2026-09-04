@@ -7,7 +7,7 @@
 // The single lever for every composer picker's trigger size (agent/team, model,
 // permission "approval preset", and each ACP option). Tightened from px-2/gap-1.5
 // to px-1.5/gap-1 so the controls read compact; the className overrides the
-// Button `size="sm"` defaults via tailwind-merge.
+// Button `size="sm"` defaults via the shared cn merge engine.
 export const COMPOSER_SELECT_TRIGGER =
 	"h-7 gap-1 rounded-md px-1.5 text-[12px] leading-4 text-muted-foreground";
 

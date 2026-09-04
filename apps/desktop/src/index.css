@@ -531,32 +531,3 @@ div[data-tauri-decorum-tb] .decorum-tb-btn {
 		display: none;
 	}
 }
-
-/*
- * The sidebar's "Research Preview" pill is a speech-bubble shape: fully rounded
- * on three corners, square on the bottom-left. `BorderBeam` only accepts a
- * single scalar radius — it emits `border-radius: Npx` plus
- * `clip-path: inset(0 round Npx)` on its ::before (inner glow), ::after
- * (traveling stroke) and `[data-beam-bloom]` layers — so the gradient traced a
- * fully rounded outline around a notched shell, and the notch read as a bug.
- * Re-cut all four layers to the same per-corner radius here.
- *
- * `!important` is load-bearing, not lazy: the generated rules are
- * `[data-beam="<id>"][data-active]::after` (specificity 0,2,0), which a bare
- * class selector loses to no matter where the injected <style> lands. Both the
- * beam wrapper and the shell inside it take this class so the radius has one
- * definition rather than three inline copies.
- */
-.beam-notch-bl,
-.beam-notch-bl::before,
-.beam-notch-bl::after,
-.beam-notch-bl [data-beam-bloom] {
-	border-radius: 999px 999px 999px 0 !important;
-}
-.beam-notch-bl::before,
-.beam-notch-bl::after,
-.beam-notch-bl [data-beam-bloom] {
-	/* Without this the parent's `overflow: hidden` still leaves the layer's own
-	   rounded clip behind, so the corner stays soft even with the radius fixed. */
-	clip-path: inset(0 round 999px 999px 999px 0) !important;
-}

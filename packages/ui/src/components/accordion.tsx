@@ -1,6 +1,9 @@
+"use client";
+
 import { Accordion as AccordionPrimitive } from "@base-ui/react/accordion";
 import { ArrowDown01Icon, ArrowUp01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { FadeOverflowTextChildren } from "./fade-overflow-text.tsx";
 
@@ -32,6 +35,7 @@ function AccordionTrigger({
 	children,
 	...props
 }: AccordionPrimitive.Trigger.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<AccordionPrimitive.Header className="flex">
 			<AccordionPrimitive.Trigger
@@ -43,7 +47,7 @@ function AccordionTrigger({
 				{...props}
 			>
 				<FadeOverflowTextChildren className="flex-1">
-					{children}
+					{localizedChildren}
 				</FadeOverflowTextChildren>
 				<HugeiconsIcon
 					className="pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden"

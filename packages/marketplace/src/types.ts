@@ -26,6 +26,7 @@ export type MarketplaceKind =
 	| "stack_template"
 	| "workflow"
 	| "theme"
+	| "language_pack"
 	| "space"
 	| "profile"
 	| "output_style"

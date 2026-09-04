@@ -7,9 +7,9 @@
 //
 //  1. The user avatar's right edge lands on the COMPOSER's right edge. The
 //     transcript and the composer are two independently-padded columns
-//     (`max-w-[744px] px-3` vs the input bar's `px-3` around `max-w-[720px]`);
+//     (`max-w-[904px] px-3` vs the input bar's `px-3` around `max-w-[880px]`);
 //     they only agree because those numbers were matched on purpose. When the
-//     transcript was `max-w-[720px] px-4` it sat 16px inside the composer on
+//     transcript was narrower than the composer it sat inside the composer on
 //     each side, which reads as a gap to the right of the avatar.
 //  2. The user turn's hover toolbar sits just to the LEFT of the BUBBLE, not at
 //     the left edge of the transcript column. The bubble is right-aligned and

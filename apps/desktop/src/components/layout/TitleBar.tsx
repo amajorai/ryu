@@ -46,6 +46,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useHotkey } from "@ryu/hotkeys/react";
+import { useI18n, useLocalizedString } from "@ryu/i18n/react";
 import {
 	ContextMenu,
 	ContextMenuCheckboxItem,
@@ -352,6 +353,7 @@ export function TabGlyph({
 	className?: string;
 	logoSize: string;
 }) {
+	const inProgressLabel = useLocalizedString("In progress");
 	// Re-render when apps register/unregister default path icons.
 	useSyncExternalStore(
 		subscribeTabIcons,
@@ -371,7 +373,7 @@ export function TabGlyph({
 	if (busy && !unloaded) {
 		return (
 			<Spinner
-				aria-label="In progress"
+				aria-label={inProgressLabel}
 				className={className}
 				speed={busySpeed}
 			/>
@@ -432,6 +434,7 @@ export function useTabBusy(tab: Tab): boolean {
 
 // Per-tab "Connect to node" submenu, shared by pinned and regular tabs.
 function NodeSubmenu({ tabId }: { tabId: string }) {
+	const { t } = useI18n();
 	const nodes = useNodeStore((s) => s.nodes);
 	const defaultNode = useNodeStore((s) => s.defaultNode);
 	const overrideName = useNodeStore((s) => s.tabOverrides[tabId]);
@@ -456,7 +459,11 @@ function NodeSubmenu({ tabId }: { tabId: string }) {
 					value={overrideName ?? DEFAULT_NODE_VALUE}
 				>
 					<ContextMenuRadioItem value={DEFAULT_NODE_VALUE}>
-						Default ({capitalize(defaultNode)})
+						{t(
+							"shell.default-node",
+							{ node: capitalize(defaultNode) },
+							`Default (${capitalize(defaultNode)})`
+						)}
 					</ContextMenuRadioItem>
 					{nodes.map((node) => (
 						<ContextMenuRadioItem key={node.name} value={node.name}>
@@ -519,6 +526,7 @@ function GroupSubmenu({ tab }: { tab: Tab }) {
 // tab), or — when the tab is already split — flip orientation, drop this pane, or
 // dissolve the whole split. Pinned tabs are excluded as split partners.
 function SplitSubmenu({ tab }: { tab: Tab }) {
+	const { t } = useI18n();
 	const {
 		tabs,
 		splits,
@@ -567,13 +575,13 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 							}}
 						>
 							<HugeiconsIcon className="size-4" icon={Add01Icon} />
-							Add new chat to split
+							{t("shell.add-chat-to-split", undefined, "Add new chat to split")}
 						</ContextMenuItem>
 						{candidates.length > 0 && (
 							<ContextMenuSub>
 								<ContextMenuSubTrigger>
 									<HugeiconsIcon className="size-4" icon={GridIcon} />
-									Add tab to split
+									{t("shell.add-tab-to-split", undefined, "Add tab to split")}
 								</ContextMenuSubTrigger>
 								<ContextMenuSubContent>
 									{candidates.map((c) => (
@@ -590,11 +598,11 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 						<ContextMenuSeparator />
 						<ContextMenuItem onClick={() => removeFromSplit(tab.id)}>
 							<HugeiconsIcon className="size-4" icon={Cancel01Icon} />
-							Remove from split
+							{t("shell.remove-from-split", undefined, "Remove from split")}
 						</ContextMenuItem>
 						<ContextMenuItem onClick={() => unsplit(tab.id)}>
 							<HugeiconsIcon className="size-4" icon={ArrowShrinkIcon} />
-							Unsplit
+							{t("shell.unsplit", undefined, "Unsplit")}
 						</ContextMenuItem>
 					</>
 				) : (
@@ -606,7 +614,7 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 							}}
 						>
 							<HugeiconsIcon className="size-4" icon={Add01Icon} />
-							Split with new chat
+							{t("shell.split-with-new-chat", undefined, "Split with new chat")}
 						</ContextMenuItem>
 						{candidates.length > 0 && <ContextMenuSeparator />}
 						{candidates.map((c) => (
@@ -615,7 +623,11 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
 								onClick={() => splitTabs([tab.id, c.id])}
 							>
 								<span className="max-w-[160px] truncate">
-									Split with {c.title}
+									{t(
+										"shell.split-with",
+										{ title: c.title },
+										`Split with ${c.title}`
+									)}
 								</span>
 							</ContextMenuItem>
 						))}
@@ -643,6 +655,7 @@ function SplitSubmenu({ tab }: { tab: Tab }) {
  * allowlist instead — see `useSidePanelRouteStore`.
  */
 function OpenInSidePanelItem({ tab }: { tab: Tab }) {
+	const { t } = useI18n();
 	const openPath = useSidePanelRouteStore((s) => s.openPath);
 	const { tabs, activeTabId } = useTabsContext();
 	if (!isDockableRoutePath(tab.path)) {
@@ -659,9 +672,20 @@ function OpenInSidePanelItem({ tab }: { tab: Tab }) {
 			onClick={() => {
 				openPath(tab.path, tab.title);
 				if (!dockIsLive) {
-					toast.info("Queued for the side panel", {
-						description: "It opens when you switch to a chat tab.",
-					});
+					toast.info(
+						t(
+							"shell.side-panel-queued",
+							undefined,
+							"Queued for the side panel"
+						),
+						{
+							description: t(
+								"shell.side-panel-queued-description",
+								undefined,
+								"It opens when you switch to a chat tab."
+							),
+						}
+					);
 				}
 			}}
 		>
@@ -869,6 +893,7 @@ function RegularTab({
 	isActive: boolean;
 	inGroup: boolean;
 }) {
+	const { t } = useI18n();
 	const {
 		tabs,
 		splits,
@@ -941,7 +966,13 @@ function RegularTab({
 				shimmer={busy && !tab.unloaded}
 				text={tab.title}
 				tooltip={
-					tab.unloaded ? `${tab.title} (unloaded — click to reload)` : undefined
+					tab.unloaded
+						? t(
+								"shell.tab-unloaded",
+								{ title: tab.title },
+								`${tab.title} (unloaded — click to reload)`
+							)
+						: undefined
 				}
 			/>
 		</>
@@ -991,7 +1022,11 @@ function RegularTab({
 					<MorphingTabSurface floatingTabs={floatingTabs} isActive={isActive} />
 					{/* Icon zone — page icon morphs to close X on tab hover */}
 					<button
-						aria-label={`Close ${tab.title}`}
+						aria-label={t(
+							"shell.close-tab",
+							{ title: tab.title },
+							`Close ${tab.title}`
+						)}
 						className={cn(
 							"relative z-10 ml-2 flex size-4 shrink-0 items-center justify-center rounded-full",
 							isActive ? "text-foreground/60" : "text-muted-foreground/50"
@@ -1107,9 +1142,9 @@ function RegularTab({
 	);
 }
 
-// The colored pill that brackets a group — click to collapse/expand, right-click
-// for rename/color/ungroup/close.
-function GroupHeaderPill({ group }: { group: TabGroup }) {
+// The colored pill that brackets a group — click to collapse/expand, double-click
+// or right-click for rename, and right-click for color/ungroup/close.
+export function GroupHeaderPill({ group }: { group: TabGroup }) {
 	const {
 		tabs,
 		toggleGroupCollapsed,
@@ -1122,6 +1157,10 @@ function GroupHeaderPill({ group }: { group: TabGroup }) {
 	const [draft, setDraft] = useState(group.name);
 	const memberCount = tabs.filter((t) => t.groupId === group.id).length;
 	const colors = GROUP_COLOR_CLASSES[group.color];
+	const startEditing = () => {
+		setDraft(group.name);
+		setEditing(true);
+	};
 
 	const commit = () => {
 		setEditing(false);
@@ -1170,7 +1209,13 @@ function GroupHeaderPill({ group }: { group: TabGroup }) {
 										"flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-medium text-xs transition-colors",
 										colors.pill
 									)}
+									data-testid="tab-group-header"
 									onClick={() => toggleGroupCollapsed(group.id)}
+									onDoubleClick={(event) => {
+										event.preventDefault();
+										event.stopPropagation();
+										startEditing();
+									}}
 									type="button"
 								>
 									{group.name ? (
@@ -1194,12 +1239,7 @@ function GroupHeaderPill({ group }: { group: TabGroup }) {
 				</TooltipContent>
 			</Tooltip>
 			<ContextMenuContent>
-				<ContextMenuItem
-					onClick={() => {
-						setDraft(group.name);
-						setEditing(true);
-					}}
-				>
+				<ContextMenuItem onClick={startEditing}>
 					<HugeiconsIcon className="size-4" icon={PencilEdit01Icon} />
 					Rename group
 				</ContextMenuItem>
@@ -1403,6 +1443,7 @@ export function TitleBar({
 	navClusterReserve,
 	pageActionsMargin,
 }: TitleBarProps) {
+	const { t } = useI18n();
 	const { open } = useSidebar();
 	const activeSeason = useActiveSeason();
 	// At phone widths the sidebar is never docked, so the strip always has to
@@ -1450,7 +1491,13 @@ export function TitleBar({
 	const effectiveAutoHide = (autoHideTitleBar || isFullscreen) && !isMobile;
 	const handleToggleFullscreen = () => {
 		toggleFullscreen().catch(() => {
-			toast.error("Couldn't toggle full screen in this window.");
+			toast.error(
+				t(
+					"shell.fullscreen-error",
+					undefined,
+					"Couldn't toggle full screen in this window."
+				)
+			);
 		});
 	};
 	const [titleBarPeeked, setTitleBarPeeked] = useState(false);
@@ -1797,7 +1844,11 @@ export function TitleBar({
 												tabs={tabs}
 											/>
 											<button
-												aria-label="New chat tab"
+												aria-label={t(
+													"shell.new-chat-tab",
+													undefined,
+													"New chat tab"
+												)}
 												className={cn(
 													"ml-0.5 flex size-7 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground",
 													floatingTabs ? "rounded-full" : "rounded-t-[10px]"
@@ -1922,7 +1973,11 @@ export function TitleBar({
 
 												{/* New tab button — outside the scroll container, always visible */}
 												<button
-													aria-label="New chat tab"
+													aria-label={t(
+														"shell.new-chat-tab",
+														undefined,
+														"New chat tab"
+													)}
 													className={cn(
 														"ml-0.5 flex size-7 shrink-0 items-center justify-center text-muted-foreground/50 transition-colors hover:bg-background/50 hover:text-muted-foreground",
 														floatingTabs ? "rounded-full" : "rounded-t-[10px]"

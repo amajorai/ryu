@@ -76,6 +76,7 @@ import {
 	useTabSwitchBehavior,
 } from "@/src/hooks/useTabSwitchBehavior.ts";
 import type { DefaultFileOpener } from "@/src/lib/default-file-opener.ts";
+import { resetDesktopOnboarding } from "@/src/lib/desktop-onboarding-state.ts";
 import {
 	isStartupRealm,
 	STARTUP_REALM_OPTIONS,
@@ -343,8 +344,8 @@ export function GeneralTab() {
 	};
 
 	const resetOnboarding = () => {
+		resetDesktopOnboarding();
 		for (const key of [
-			"ryu_onboarding_complete",
 			"ryu_setup_seen",
 			"ryu_default_agent",
 			STORAGE_KEYS.lightPreset,

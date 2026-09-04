@@ -27,6 +27,7 @@
 
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useLocalizedString } from "@ryu/i18n/react";
 import {
 	type CSSProperties,
 	type ReactNode,
@@ -178,9 +179,12 @@ function EdgeChevron({
 	onPress: () => void;
 	side: "end" | "start";
 }) {
+	const localizedLabel = useLocalizedString(
+		side === "start" ? "Scroll left" : "Scroll right"
+	);
 	return (
 		<button
-			aria-label={side === "start" ? "Scroll left" : "Scroll right"}
+			aria-label={localizedLabel}
 			className={cn(
 				"pointer-events-auto absolute inset-y-0 z-10 flex w-6 items-center justify-center",
 				"text-muted-foreground opacity-0 transition-opacity duration-150",

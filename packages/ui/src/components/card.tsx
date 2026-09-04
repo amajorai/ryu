@@ -1,3 +1,6 @@
+"use client";
+
+import { useLocalizedText } from "@ryu/i18n/react";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type * as React from "react";
 
@@ -32,23 +35,37 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
 	);
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+function CardTitle({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn("font-heading font-medium text-base", className)}
 			data-slot="card-title"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 
-function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
+function CardDescription({
+	children,
+	className,
+	...props
+}: React.ComponentProps<"div">) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<div
 			className={cn("text-muted-foreground text-sm", className)}
 			data-slot="card-description"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</div>
 	);
 }
 

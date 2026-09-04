@@ -25,6 +25,13 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@ryu/ui/components/popover";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@ryu/ui/components/select";
 import { Spinner } from "@ryu/ui/components/spinner";
 import {
 	Table,
@@ -64,7 +71,12 @@ import {
 } from "@/src/lib/api/org.ts";
 // A different module from `org.ts` above: `orgs.ts` owns the SESSION's active
 // org, which `org.ts` (the org list + RBAC routes) has no accessor for.
-import { useActiveOrgId } from "@/src/lib/api/orgs.ts";
+import {
+	listMyOrganizationTeams,
+	setActiveTeam,
+	useActiveOrgId,
+	useActiveTeamId,
+} from "@/src/lib/api/orgs.ts";
 import { NodeOrganizationBindingCard } from "./NodeOrganizationBindingCard.tsx";
 
 /** Where members are invited / roles changed (Better Auth owns those mutations). */
@@ -72,6 +84,7 @@ const ORGANIZATIONS_URL = `${FRONTEND_URL.replace(/\/$/, "")}/organizations`;
 
 /** The RBAC permission that authorizes managing custom roles + assignments. */
 const ROLES_MANAGE: Permission = "roles.manage";
+const NO_ACTIVE_TEAM = "__no_active_team__";
 
 /** Rank so the roster reads owner → admin → member → viewer. */
 const ROLE_RANK: Record<Exclude<OrgRole, null>, number> = {
@@ -555,6 +568,7 @@ export function WorkspaceSection() {
 	const activeOrg =
 		orgs.find((org) => org.id === activeOrgId) ?? orgs[0] ?? null;
 	const orgId = activeOrg?.id ?? null;
+	const activeTeamId = useActiveTeamId();
 	// Everything except the one shown above. Computed here so the section's own
 	// visibility test is the list it renders: `orgs.length > 1` was equivalent
 	// only while the org above was always `orgs[0]`, and would otherwise be able
@@ -579,6 +593,20 @@ export function WorkspaceSection() {
 		queryFn: () => fetchMyPermissions(orgId as string),
 	});
 
+	const teamsQuery = useQuery({
+		enabled: authed && Boolean(orgId),
+		queryKey: ["workspace-org-teams", orgId],
+		queryFn: () => listMyOrganizationTeams(orgId as string),
+	});
+
+	const activeTeamMutation = useMutation({
+		mutationFn: setActiveTeam,
+		onError: (error: unknown) =>
+			sileo.error({
+				title: error instanceof Error ? error.message : "Couldn't switch team",
+			}),
+	});
+
 	const canManageRoles = (permissionsQuery.data ?? []).includes(ROLES_MANAGE);
 	const roles = rolesQuery.data ?? [];
 	const customRoles = roles.filter((r) => !r.builtin);
@@ -586,6 +614,10 @@ export function WorkspaceSection() {
 	const members = [...(membersQuery.data ?? [])].sort(
 		(a, b) => ROLE_RANK[a.role ?? "member"] - ROLE_RANK[b.role ?? "member"]
 	);
+	const teams = teamsQuery.data ?? [];
+	const selectedTeamId = teams.some((team) => team.id === activeTeamId)
+		? activeTeamId
+		: NO_ACTIVE_TEAM;
 
 	if (!authed) {
 		return (
@@ -638,6 +670,51 @@ export function WorkspaceSection() {
 							}
 							description="Identifies this workspace across surfaces and in support requests."
 							title="Organization ID"
+						/>
+					) : null}
+					{activeOrg ? (
+						<SettingsItem
+							actions={
+								<Select
+									disabled={
+										teamsQuery.isLoading ||
+										teams.length === 0 ||
+										activeTeamMutation.isPending
+									}
+									items={[
+										{ label: "No active team", value: NO_ACTIVE_TEAM },
+										...teams.map((team) => ({
+											label: team.name,
+											value: team.id,
+										})),
+									]}
+									onValueChange={(value) => {
+										activeTeamMutation.mutate(
+											value === NO_ACTIVE_TEAM ? null : value
+										);
+									}}
+									value={selectedTeamId}
+								>
+									<SelectTrigger
+										aria-label="Active team"
+										className="h-8 w-48 text-sm"
+									>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value={NO_ACTIVE_TEAM}>
+											No active team
+										</SelectItem>
+										{teams.map((team) => (
+											<SelectItem key={team.id} value={team.id}>
+												{team.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							}
+							description="Persisted by Better Auth for team-aware organization requests."
+							title="Active team"
 						/>
 					) : null}
 					{userId ? (

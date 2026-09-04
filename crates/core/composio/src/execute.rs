@@ -121,6 +121,19 @@ pub async fn dispatch(
     arguments: Value,
     user_id: Option<&str>,
 ) -> Result<ExecOutcome> {
+    dispatch_with_connection(http, tool, arguments, user_id, None).await
+}
+
+/// Execute an action against a specific connected account when a caller has
+/// selected one. The account id is still sent only to Composio; it never enters
+/// the model-visible arguments or an Ryu credential surface.
+pub async fn dispatch_with_connection(
+    http: &Client,
+    tool: &str,
+    arguments: Value,
+    user_id: Option<&str>,
+    connected_account_id: Option<&str>,
+) -> Result<ExecOutcome> {
     let key = crate::auth::key()
         .ok_or_else(|| anyhow!("Composio API key not set (Settings → Integrations)"))?;
     let entity = resolve_entity(user_id);
@@ -135,16 +148,21 @@ pub async fn dispatch(
         .build();
     let client = no_redirect.as_ref().unwrap_or(http);
 
+    let mut payload = json!({
+        "arguments": arguments,
+        "user_id": entity,
+        "entity_id": entity,
+    });
+    if let Some(connection_id) = connected_account_id {
+        payload["connectedAccountId"] = Value::String(connection_id.to_owned());
+    }
+
     let resp = client
         .post(&url)
         .header("x-api-key", key)
         .header("Content-Type", "application/json")
         .header("accept", "application/json")
-        .json(&json!({
-            "arguments": arguments,
-            "user_id": entity,
-            "entity_id": entity,
-        }))
+        .json(&payload)
         .timeout(Duration::from_secs(30))
         .send()
         .await

@@ -8,6 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
+import { useLocalizedString, useLocalizedText } from "@ryu/i18n/react";
 import { Input } from "@ryu/ui/components/input.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import { ChevronDown, Search } from "lucide-react";
@@ -79,6 +80,9 @@ function SelectTrigger({
 	variant?: "default" | "ghost";
 	size?: "sm" | "default";
 }) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
+	const localizedAriaLabel = useLocalizedString(props["aria-label"]);
+	const localizedTitle = useLocalizedString(props.title);
 	return (
 		<SelectPrimitive.Trigger
 			className={cn(
@@ -91,9 +95,11 @@ function SelectTrigger({
 			data-size={size}
 			data-slot="select-trigger"
 			{...props}
+			aria-label={localizedAriaLabel}
+			title={localizedTitle}
 		>
 			<FadeOverflowTextChildren className="flex-1">
-				{children}
+				{localizedChildren}
 			</FadeOverflowTextChildren>
 			<SelectPrimitive.Icon
 				render={
@@ -219,15 +225,19 @@ function SelectSearch({
 }
 
 function SelectLabel({
+	children,
 	className,
 	...props
 }: SelectPrimitive.GroupLabel.Props) {
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	return (
 		<SelectPrimitive.GroupLabel
 			className={cn("px-1.5 py-1.5 text-muted-foreground text-xs", className)}
 			data-slot="select-label"
 			{...props}
-		/>
+		>
+			{localizedChildren}
+		</SelectPrimitive.GroupLabel>
 	);
 }
 
@@ -241,10 +251,17 @@ function SelectItem({
 	textValue?: string;
 }) {
 	const query = React.useContext(SelectFilterContext);
+	const localizedChildren = useLocalizedText(children, { literal: true });
 	// Only hide when there is an active query AND we have text to match against;
 	// items with non-string children and no textValue stay visible (unfilterable).
-	const haystack =
-		textValue ?? (typeof children === "string" ? children : undefined);
+	const haystack = [
+		textValue,
+		typeof children === "string" ? children : undefined,
+		typeof localizedChildren === "string" ? localizedChildren : undefined,
+	]
+		.filter((value): value is string => Boolean(value))
+		.join("\n")
+		.toLowerCase();
 	const hidden = Boolean(
 		query && haystack && !haystack.toLowerCase().includes(query)
 	);
@@ -259,7 +276,7 @@ function SelectItem({
 			{...props}
 		>
 			<SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
-				{children}
+				{localizedChildren}
 			</SelectPrimitive.ItemText>
 			<SelectPrimitive.ItemIndicator
 				render={

@@ -1,7 +1,7 @@
 // packages/marketplace/src/catalog/detail/scorecard-panel.tsx
 //
-// The Health tab and its header badge — the rendered form of the automated trust
-// scan in `../scorecard.ts`.
+// The Health tab and its header badge — the rendered form of a deterministic
+// scorecard in `../scorecard.ts`.
 //
 // The design intent is that a reader can disagree with the grade. So the panel
 // never shows a bare score: every check is listed with its verdict AND the
@@ -151,14 +151,22 @@ function CheckRow({ check }: { check: ScorecardCheck }) {
 /** The Health tab: the score, then every check grouped by family. */
 export function ScorecardPanel({
 	agentScan,
+	disclaimer,
+	dataTestId,
 	developerDoctor,
 	developerCommand,
 	scorecard,
+	rulesetLabel = "Catalog ruleset",
+	title = "Automated checks",
 }: {
 	agentScan?: () => Promise<CatalogScanResult>;
+	disclaimer?: ReactNode;
+	dataTestId?: string;
 	developerCommand?: string;
 	developerDoctor?: ReactNode;
+	rulesetLabel?: string;
 	scorecard: Scorecard;
+	title?: string;
 }) {
 	const unknownCount = scorecard.checks.length - scorecard.evaluated;
 	const [scanError, setScanError] = useState<string | null>(null);
@@ -184,7 +192,7 @@ export function ScorecardPanel({
 	};
 
 	return (
-		<div className="flex flex-col gap-6">
+		<div className="flex flex-col gap-6" data-testid={dataTestId}>
 			<section className="flex items-start gap-4 rounded-lg bg-muted p-4">
 				<div className="flex flex-col items-center gap-0.5">
 					<span
@@ -201,7 +209,7 @@ export function ScorecardPanel({
 				</div>
 				<div className="min-w-0 flex-1">
 					<div className="flex flex-wrap items-center justify-between gap-2">
-						<h3 className="font-medium text-sm">Automated checks</h3>
+						<h3 className="font-medium text-sm">{title}</h3>
 						{agentScan ? (
 							<Button
 								data-testid="catalog-scan-button"
@@ -231,7 +239,7 @@ export function ScorecardPanel({
 						className="mt-1 text-[11px] text-muted-foreground"
 						data-scorecard-ruleset={scorecard.rulesetVersion}
 					>
-						Catalog ruleset {scorecard.rulesetVersion}
+						{rulesetLabel} {scorecard.rulesetVersion}
 					</p>
 				</div>
 			</section>
@@ -321,12 +329,14 @@ export function ScorecardPanel({
 					</section>
 				) : null)}
 
-			<p className="text-muted-foreground text-xs leading-relaxed">
-				These checks are automated and read only what the listing publishes.
-				They are a starting point for judgement, not a security audit — a
-				passing grade is not a guarantee, and a failing one is not proof of bad
-				intent.
-			</p>
+			{disclaimer ?? (
+				<p className="text-muted-foreground text-xs leading-relaxed">
+					These checks are automated and read only what the listing publishes.
+					They are a starting point for judgement, not a security audit — a
+					passing grade is not a guarantee, and a failing one is not proof of
+					bad intent.
+				</p>
+			)}
 		</div>
 	);
 }

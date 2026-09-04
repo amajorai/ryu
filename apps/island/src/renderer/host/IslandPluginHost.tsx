@@ -27,10 +27,12 @@ import {
 	type Capability,
 	type CryptoStatus,
 	capabilitiesFromGrants,
+	createI18nHostServices,
 	type HostServices,
 	validatePluginRoute,
 } from "@ryu/app-host/rpc";
 import { thirdPartyPluginSrcdoc } from "@ryu/app-host/third-party-plugin";
+import { useI18n } from "@ryu/i18n/react";
 import { useEffect, useMemo, useState } from "react";
 import type { PluginCompanion } from "../../shared/ipc.ts";
 import {
@@ -60,6 +62,7 @@ export function IslandPluginHost({
 }: {
 	companion: PluginCompanion;
 }) {
+	const i18n = useI18n();
 	const [connected, setConnected] = useState(false);
 	const [bundle, setBundle] = useState<BundleState>({ status: "loading" });
 
@@ -112,6 +115,7 @@ export function IslandPluginHost({
 	// keyed by the OWNING plugin id (`companion.pluginId`, NOT `companion.id`).
 	const services = useMemo<HostServices>(
 		() => ({
+			...createI18nHostServices(i18n),
 			listAgents: async () => {
 				const result = await window.island.core.agents();
 				if (!result.available) {
@@ -207,7 +211,7 @@ export function IslandPluginHost({
 					signal,
 				}),
 		}),
-		[companion.id, companion.pluginId]
+		[companion.id, companion.pluginId, i18n]
 	);
 
 	const srcdoc = useMemo(

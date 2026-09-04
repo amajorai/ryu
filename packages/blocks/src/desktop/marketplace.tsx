@@ -26,6 +26,7 @@ import {
 	UnavailableIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useOptionalI18n } from "@ryu/i18n/react";
 import { Badge } from "@ryu/ui/components/badge";
 import { Button } from "@ryu/ui/components/button";
 import {
@@ -59,6 +60,7 @@ export type MarketplaceItemKind =
 	| "stack_template"
 	| "workflow"
 	| "theme"
+	| "language_pack"
 	| "space"
 	| "profile"
 	| "output_style"
@@ -75,6 +77,8 @@ export type MarketplaceVerification =
  *  is null for free items. A price is commerce metadata, not a runtime access
  *  decision; every catalog item keeps the same add/open affordance. */
 export interface MarketplaceCardData {
+	/** True when the installed language pack is the selected runtime pack. */
+	active?: boolean;
 	author: string | null;
 	/** True while a checkout for this card is in flight. */
 	buying?: boolean;
@@ -84,10 +88,22 @@ export interface MarketplaceCardData {
 	/** Resolvable logo URL; falls back to the item's initial when null/absent. */
 	iconUrl?: string | null;
 	id: string;
+	/** True when a language pack is present on the active node. */
+	installed?: boolean;
+	/** True while a language pack install/enable request is running. */
+	installing?: boolean;
 	kind: MarketplaceItemKind;
+	languagePack?: {
+		baseLocale: string;
+		direction: "ltr" | "rtl";
+		locale: string;
+		messageCount: number;
+	} | null;
 	/** The listing is covered by the A Major Pass eligibility pool. */
 	membershipIncluded?: boolean;
 	name: string;
+	/** Install or enable a language pack. */
+	onInstall?: () => void;
 	/** Whether the active org already owns this paid item. */
 	owned: boolean;
 	/** Pre-formatted price (e.g. "$4" or "$9/mo"), or null when the item is free. */
@@ -221,7 +237,10 @@ export function MarketplaceItemCard({
 	/** When provided, the card's logo/title becomes a button that opens detail. */
 	onOpenDetail?: () => void;
 }) {
+	const i18n = useOptionalI18n();
 	const isPaid = card.priceLabel !== null;
+	const isLanguagePack =
+		card.kind === "language_pack" && Boolean(card.onInstall);
 
 	const heading = (
 		<div className="flex min-w-0 items-center gap-3 text-left">
@@ -274,19 +293,51 @@ export function MarketplaceItemCard({
 					{card.description}
 				</p>
 			) : null}
+			{card.languagePack ? (
+				<p className="text-[11px] text-muted-foreground">
+					{card.languagePack.locale} ·{" "}
+					{card.languagePack.direction === "rtl"
+						? (i18n?.t("language.direction_rtl") ?? "Right to left")
+						: (i18n?.t("language.direction_ltr") ?? "Left to right")}{" "}
+					·{" "}
+					{i18n?.t("language.translation_count", {
+						count: card.languagePack.messageCount,
+					}) ?? `${card.languagePack.messageCount} translated strings`}
+				</p>
+			) : null}
 
 			<div className="mt-auto flex items-center justify-between gap-2">
 				<Badge className="text-[10px]" variant="outline">
 					v{card.version}
 				</Badge>
-				{isPaid ? (
+				{isLanguagePack ? (
+					card.active ? (
+						<Badge className="gap-1" variant="secondary">
+							<HugeiconsIcon
+								className="size-3.5 text-emerald-500"
+								icon={CheckmarkBadge04Icon}
+							/>
+							{i18n?.t("common.active") ?? "Active"}
+						</Badge>
+					) : (
+						<Button
+							loading={card.installing}
+							onClick={card.onInstall}
+							size="sm"
+						>
+							{card.installed
+								? (i18n?.t("common.enable") ?? "Enable")
+								: (i18n?.t("common.install") ?? "Install")}
+						</Button>
+					)
+				) : isPaid ? (
 					card.owned ? (
 						<Badge className="gap-1" variant="secondary">
 							<HugeiconsIcon
 								className="size-3.5 text-emerald-500"
 								icon={CheckmarkBadge04Icon}
 							/>
-							Owned
+							{i18n?.t("common.owned") ?? "Owned"}
 						</Badge>
 					) : (
 						<Button loading={card.buying} onClick={onBuy} size="sm">
@@ -296,11 +347,13 @@ export function MarketplaceItemCard({
 									icon={DollarCircleIcon}
 								/>
 							)}
-							Buy
+							{i18n?.t("common.buy") ?? "Buy"}
 						</Button>
 					)
 				) : (
-					<span className="text-muted-foreground text-xs">Free</span>
+					<span className="text-muted-foreground text-xs">
+						{i18n?.t("common.free") ?? "Free"}
+					</span>
 				)}
 			</div>
 		</div>
@@ -334,6 +387,7 @@ export function MarketplaceBrowseView({
 	/** When provided, cards become clickable and invoke this with the card. */
 	onOpenDetail?: (card: MarketplaceCardData) => void;
 }) {
+	const i18n = useOptionalI18n();
 	let body: ReactNode;
 	if (loading && cards.length === 0) {
 		body = (
@@ -348,12 +402,18 @@ export function MarketplaceBrowseView({
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Alert02Icon} />
 					</EmptyMedia>
-					<EmptyTitle>Couldn&apos;t load the marketplace</EmptyTitle>
+					<EmptyTitle>
+						{i18n?.t(
+							"marketplace.load-error",
+							undefined,
+							"Couldn't load the marketplace"
+						) ?? "Couldn't load the marketplace"}
+					</EmptyTitle>
 					<EmptyDescription>{error}</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
 					<Button onClick={onRefresh} size="sm" variant="ghost">
-						Try again
+						{i18n?.t("common.try-again", undefined, "Try again") ?? "Try again"}
 					</Button>
 				</EmptyContent>
 			</Empty>
@@ -365,10 +425,20 @@ export function MarketplaceBrowseView({
 					<EmptyMedia variant="icon">
 						<HugeiconsIcon icon={Store01Icon} />
 					</EmptyMedia>
-					<EmptyTitle>Nothing here yet</EmptyTitle>
+					<EmptyTitle>
+						{i18n?.t(
+							"marketplace.nothing-here",
+							undefined,
+							"Nothing here yet"
+						) ?? "Nothing here yet"}
+					</EmptyTitle>
 					<EmptyDescription>
-						No published {activeKind} items match. Try another category or
-						search.
+						{i18n?.t(
+							"marketplace.no-kind-match",
+							{ kind: activeKind },
+							`No published ${activeKind} items match. Try another category or search.`
+						) ??
+							`No published ${activeKind} items match. Try another category or search.`}
 					</EmptyDescription>
 				</EmptyHeader>
 				<EmptyContent>
@@ -377,7 +447,14 @@ export function MarketplaceBrowseView({
 						size="sm"
 						variant="ghost"
 					>
-						{query.trim() ? "Clear search" : "Refresh marketplace"}
+						{query.trim()
+							? (i18n?.t("common.clear-search", undefined, "Clear search") ??
+								"Clear search")
+							: (i18n?.t(
+									"marketplace.refresh",
+									undefined,
+									"Refresh marketplace"
+								) ?? "Refresh marketplace")}
 					</Button>
 				</EmptyContent>
 			</Empty>
@@ -431,7 +508,7 @@ export function MarketplaceBrowseView({
 			<div className="flex justify-end">
 				<Button onClick={onRefresh} size="sm" variant="ghost">
 					<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
-					Refresh
+					{i18n?.t("common.refresh", undefined, "Refresh") ?? "Refresh"}
 				</Button>
 			</div>
 		</div>
@@ -448,13 +525,16 @@ export function MarketplaceHeader({
 	activeTab: string;
 	onSelectTab?: (value: string) => void;
 }) {
+	const i18n = useOptionalI18n();
 	return (
 		<div className="flex shrink-0 items-center gap-1 border-b px-4 py-3">
 			<HugeiconsIcon
 				className="mr-2 size-5 text-muted-foreground"
 				icon={Store01Icon}
 			/>
-			<h1 className="mr-4 font-semibold text-base">Marketplace</h1>
+			<h1 className="mr-4 font-semibold text-base">
+				{i18n?.t("common.marketplace") ?? "Marketplace"}
+			</h1>
 			{tabs.map((t) => (
 				<Button
 					key={t.value}

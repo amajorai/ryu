@@ -1825,6 +1825,10 @@ export interface AgentSettingsFormProps {
 	formError?: string | null;
 	/** Injected: generic GatewayRoutingConfig for BYO/other ACP agents. */
 	gatewayRoutingConfig?: ReactNode;
+	/** Compact health grade shown in the agent profile header. */
+	healthBadge?: ReactNode;
+	/** Injected deterministic configuration health scorecard. */
+	healthPanel?: ReactNode;
 	/** Injected: the per-agent run-history view (chats + automated runs),
 	 *  rendered as its own tab. Omit to hide the tab. */
 	historyPanel?: ReactNode;
@@ -2043,6 +2047,7 @@ function ProfileHeader({
 	bannerDirection,
 	builtIn,
 	description,
+	healthBadge,
 	isNew,
 	isLocked,
 	modelLabel,
@@ -2066,6 +2071,7 @@ function ProfileHeader({
 	builtIn: boolean;
 	agentTitle: string;
 	description?: string;
+	healthBadge?: ReactNode;
 	isNew: boolean;
 	isLocked: boolean;
 	modelLabel: string;
@@ -2213,6 +2219,7 @@ function ProfileHeader({
 						<ProfileStat label="tools" value={selectedTools.size} />
 						<ProfileStat label="skills" value={selectedSkills.size} />
 						<ProfileStat label="status" value={builtIn ? "Core" : "Custom"} />
+						{healthBadge}
 						{isLocked ? (
 							<Badge className="gap-1" variant="secondary">
 								<HugeiconsIcon className="size-3" icon={LockedIcon} />
@@ -2248,6 +2255,8 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		evalsPanel,
 		calendarPanel,
 		historyPanel,
+		healthPanel,
+		healthBadge,
 		passportPanel,
 		routinesPanel,
 		systemPrompt,
@@ -2352,7 +2361,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	const [activeTab, setActiveTab] = useState<AgentSettingsTab>(
 		initialTab ?? "behavior"
 	);
-	// Sixty-odd settings behind eight pills: the same "which tab is it under"
+	// Sixty-odd settings behind nine pills: the same "which tab is it under"
 	// problem the settings dialogs already solved with a row-level index. Same
 	// answer here — `agent-settings-search.ts` indexes the ROWS, and picking a hit
 	// switches to its tab and flashes it.
@@ -2386,6 +2395,9 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 		engineOptions.find((option) => option.id === chatModel)?.label ?? chatModel;
 	const hasMergedSetup = Boolean(agentSetupComposer);
 	const showStandaloneModelPanel = showModelPanel && !hasMergedSetup;
+	const guidedStepCount =
+		(hasMergedSetup ? 3 : showStandaloneModelPanel ? 4 : 3) +
+		(healthPanel ? 1 : 0);
 
 	// ── Panels ───────────────────────────────────────────────────────────────────
 	// Each panel is built once and then placed twice: into the tab strip below
@@ -3361,10 +3373,10 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			</Tabs>
 		) : null;
 
-	// Eight groups, each answering one question a person actually has, with the
+	// Nine groups, each answering one question a person actually has, with the
 	// answer spelled out under the strip. This replaces an eleven-pill row whose
-	// labels (Model · Trigger · Tools · Connections · Integrations · Rules · Instructions ·
-	// Advanced · Prompt Studio · Evals · Calendar · History) gave no hint which
+	// labels (Behavior · Health · Model · Tools & knowledge · Connections · Integrations ·
+	// Triggers · Activity · Advanced) gave no hint which
 	// one held the setting you were looking for.
 	const editorTabs: {
 		content: ReactNode;
@@ -3378,6 +3390,16 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 			id: "behavior",
 			label: "Behavior",
 		},
+		...(healthPanel
+			? [
+					{
+						content: healthPanel,
+						hint: "Common setup checks that update as you edit this agent.",
+						id: "health",
+						label: "Health",
+					},
+				]
+			: []),
 		...(showStandaloneModelPanel
 			? [
 					{
@@ -3512,7 +3534,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 	);
 
 	// A brand-new agent starts in the guided flow: four named steps over the same
-	// panels, so nobody has to guess which of seven tabs is mandatory. "Set it up
+	// panels, so nobody has to guess which setup step is mandatory. "Set it up
 	// myself" drops straight into the full editor for anyone who'd rather browse.
 	if (isNew && guided) {
 		return (
@@ -3531,8 +3553,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 					<div className="flex flex-col gap-1">
 						<h1 className="font-semibold text-xl">Create an agent</h1>
 						<p className="text-muted-foreground text-sm">
-							{hasMergedSetup ? "Three" : showModelPanel ? "Four" : "Three"}{" "}
-							steps. Nothing here is permanent.
+							{guidedStepCount} steps. Nothing here is permanent.
 						</p>
 					</div>
 				}
@@ -3583,6 +3604,17 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 						label: "Abilities",
 						title: "Choose what it can use",
 					},
+					...(healthPanel
+						? [
+								{
+									content: healthPanel,
+									hint: "Review common setup checks before you create the agent.",
+									id: "health",
+									label: "Health",
+									title: "Check the setup",
+								},
+							]
+						: []),
 				]}
 			/>
 		);
@@ -3654,6 +3686,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 					badge={employeeBadge}
 					builtIn={isBuiltIn}
 					description={description}
+					healthBadge={healthBadge}
 					isLocked={isLocked}
 					isNew={isNew}
 					modelLabel={modelLabel}

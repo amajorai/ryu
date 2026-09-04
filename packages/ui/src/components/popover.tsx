@@ -1,6 +1,7 @@
 "use client";
 
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { useLocalizedText } from "@ryu/i18n/react";
 import { composeRefs } from "@ryu/ui/lib/compose-refs.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
@@ -51,7 +52,12 @@ function Popover({ ...props }: PopoverPrimitive.Root.Props) {
 }
 
 function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
-	return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />;
+	const localizedChildren = useLocalizedText(props.children, { literal: true });
+	return (
+		<PopoverPrimitive.Trigger data-slot="popover-trigger" {...props}>
+			{localizedChildren}
+		</PopoverPrimitive.Trigger>
+	);
 }
 
 function PopoverAnchor({
@@ -86,6 +92,7 @@ function PopoverContent({
 		"align" | "alignOffset" | "side" | "sideOffset"
 	>) {
 	const ctx = useContext(PopoverAnchorContext);
+	const localizedChildren = useLocalizedText(props.children, { literal: true });
 	return (
 		<PopoverPrimitive.Portal>
 			<PopoverPrimitive.Backdrop
@@ -107,7 +114,9 @@ function PopoverContent({
 					)}
 					data-slot="popover-content"
 					{...props}
-				/>
+				>
+					{localizedChildren}
+				</PopoverPrimitive.Popup>
 			</PopoverPrimitive.Positioner>
 		</PopoverPrimitive.Portal>
 	);

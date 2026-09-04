@@ -1,4 +1,5 @@
 import { HotkeysProvider, useHotkey } from "@ryu/hotkeys/react";
+import { I18nProvider } from "@ryu/i18n/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useState } from "react";
@@ -166,9 +167,11 @@ const root = document.getElementById("root");
 if (root) {
 	createRoot(root).render(
 		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<ProofSurface />
-			</MemoryRouter>
+			<I18nProvider>
+				<MemoryRouter>
+					<ProofSurface />
+				</MemoryRouter>
+			</I18nProvider>
 		</QueryClientProvider>
 	);
 }

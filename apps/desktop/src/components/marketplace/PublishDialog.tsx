@@ -296,9 +296,10 @@ export function PublishDialog({
 
 						<div className="rounded-xl bg-secondary/50 p-3 text-muted-foreground text-sm">
 							The repository must use the <code>ryu-app</code>,{" "}
-							<code>ryu-plugin</code>, or <code>ryu-marketplace</code> topic and
-							contain a <code>ryu.package.json</code>. Buyers install through
-							Ryu; they do not need GitHub access.
+							<code>ryu-plugin</code>, <code>ryu-language-pack</code>, or{" "}
+							<code>ryu-marketplace</code> topic and contain a{" "}
+							<code>ryu.package.json</code>. Buyers install through Ryu; they do
+							not need GitHub access.
 						</div>
 
 						{disclosure ? (

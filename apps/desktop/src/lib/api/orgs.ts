@@ -117,6 +117,11 @@ export interface OrgListEntry {
 	slug: string;
 }
 
+export interface OrgTeamEntry {
+	id: string;
+	name: string;
+}
+
 export type OrganizationAuditActorType = "gateway" | "system" | "user";
 
 /** One bounded, redacted event returned by the organization audit projections. */
@@ -227,11 +232,54 @@ export async function getActiveOrgId(): Promise<string | null> {
 	return body?.session?.activeOrganizationId ?? null;
 }
 
+/** The Better Auth teams the current user belongs to in one organization. */
+export async function listMyOrganizationTeams(
+	organizationId: string
+): Promise<OrgTeamEntry[]> {
+	const response = await fetch(
+		`${BASE}/api/auth/organization/list-user-teams?organizationId=${encodeURIComponent(organizationId)}`,
+		{ headers: authHeaders() }
+	);
+	if (!response.ok) {
+		throw new Error(await readError(response));
+	}
+	const body = (await response.json()) as unknown;
+	return Array.isArray(body)
+		? (body as unknown[]).flatMap((team) => {
+				if (!team || typeof team !== "object") {
+					return [];
+				}
+				const record = team as { id?: unknown; name?: unknown };
+				return typeof record.id === "string" && typeof record.name === "string"
+					? [{ id: record.id, name: record.name }]
+					: [];
+			})
+		: [];
+}
+
+/** The Better Auth active team stored on this session, or null when unset. */
+export async function getActiveTeamId(): Promise<string | null> {
+	if (!authToken()) {
+		return null;
+	}
+	const response = await fetch(`${BASE}/api/auth/get-session`, {
+		headers: authHeaders(),
+	});
+	if (!response.ok) {
+		return null;
+	}
+	const body = (await response.json().catch(() => null)) as {
+		session?: { activeTeamId?: string | null };
+	} | null;
+	return body?.session?.activeTeamId ?? null;
+}
+
 /**
  * Where {@link getActiveOrgId}'s answer is cached. Exported so the switcher can
  * name it, and so nobody re-derives a second key for the same fact.
  */
 export const ACTIVE_ORG_KEY = ["settings", "orgs", "active"] as const;
+export const ACTIVE_TEAM_KEY = ["settings", "orgs", "active-team"] as const;
 
 /**
  * The org THIS session is scoped to, as a hook.
@@ -269,6 +317,21 @@ export function useActiveOrgId(): string | null {
 	return data ?? null;
 }
 
+/** The current Better Auth active team, scoped to the current active org. */
+export function useActiveTeamId(): string | null {
+	const activeOrgId = useActiveOrgId();
+	const { data } = useQuery(
+		{
+			enabled: hasOrgAuth() && Boolean(activeOrgId),
+			queryFn: getActiveTeamId,
+			queryKey: [...ACTIVE_TEAM_KEY, activeOrgId],
+			staleTime: 0,
+		},
+		appQueryClient
+	);
+	return data ?? null;
+}
+
 /** Rescope this session to `organizationId`. */
 export async function setActiveOrg(organizationId: string): Promise<void> {
 	const response = await fetch(`${BASE}/api/auth/organization/set-active`, {
@@ -279,6 +342,23 @@ export async function setActiveOrg(organizationId: string): Promise<void> {
 	if (!response.ok) {
 		throw new Error(await readError(response));
 	}
+	await appQueryClient.invalidateQueries({ queryKey: ACTIVE_TEAM_KEY });
+}
+
+/** Rescope this session to a Better Auth team in its active organization. */
+export async function setActiveTeam(teamId: string | null): Promise<void> {
+	const response = await fetch(
+		`${BASE}/api/auth/organization/set-active-team`,
+		{
+			body: JSON.stringify({ teamId }),
+			headers: authHeaders(),
+			method: "POST",
+		}
+	);
+	if (!response.ok) {
+		throw new Error(await readError(response));
+	}
+	await appQueryClient.invalidateQueries({ queryKey: ACTIVE_TEAM_KEY });
 }
 
 /** What the caller can move, and the orgs they can move it between. */

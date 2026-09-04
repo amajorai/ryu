@@ -24,6 +24,7 @@
 // granted asynchronously by the server webhook, so the UI re-fetches licenses on
 // window focus (mirrors useCreditsWallet).
 
+import type { LanguagePackSummary } from "@ryu/i18n/core";
 import { MARKETPLACE_BROWSE_KINDS } from "@ryu/marketplace/catalog/chrome/marketplace-sections";
 import type { CatalogBanner } from "@ryu/marketplace/catalog/types";
 import type { VerificationDetails } from "@ryu/ui/components/verification-popover.tsx";
@@ -55,6 +56,7 @@ export type MarketplaceKind =
 	| "stack_template"
 	| "workflow"
 	| "theme"
+	| "language_pack"
 	| "space"
 	| "profile"
 	| "output_style"
@@ -119,6 +121,7 @@ export interface MarketplaceCard {
 	installedVersion: string | null;
 	installSource: string | null;
 	kind: MarketplaceKind;
+	languagePack: LanguagePackSummary | null;
 	latestVersion: string | null;
 	/** True when the publisher's supported paid offer is covered by A Major Pass. */
 	membershipIncluded: boolean;
@@ -165,6 +168,7 @@ interface MarketplaceCardWire
 		| "packageChecksum"
 		| "packageSecurity"
 		| "githubSource"
+		| "languagePack"
 		| "downloadUrl"
 		| "targets"
 		| "scopes"
@@ -178,6 +182,7 @@ interface MarketplaceCardWire
 	downloadUrl?: string | null;
 	githubSource?: Record<string, unknown> | null;
 	installedVersion?: string | null;
+	languagePack?: LanguagePackSummary | null;
 	latestVersion?: string | null;
 	membershipIncluded?: boolean | null;
 	orgVerified?: boolean | null;
@@ -253,6 +258,7 @@ function toMarketplaceCard(card: MarketplaceCardWire): MarketplaceCard {
 		packageChecksum: rest.packageChecksum ?? null,
 		packageSecurity: rest.packageSecurity ?? null,
 		githubSource: rest.githubSource ?? null,
+		languagePack: rest.languagePack ?? null,
 		downloadUrl: rest.downloadUrl ?? null,
 		pricing: rest.pricing
 			? {
@@ -1152,6 +1158,7 @@ export interface MarketplaceDetail {
 	iconUrl: string | null;
 	id: string;
 	kind: MarketplaceKind;
+	languagePack: LanguagePackSummary | null;
 	name: string;
 	orgVerified: boolean;
 	orgVerifiedTier: string | null;
@@ -1397,6 +1404,7 @@ export async function fetchDetail(
 		banner: resolveCatalogBanner(json.banner),
 		id: json.id ?? id,
 		kind: (json.kind as MarketplaceKind) ?? kind,
+		languagePack: json.languagePack ?? null,
 		name: json.name ?? "",
 		firstParty: Boolean(json.firstParty),
 		version: json.version ?? "",
