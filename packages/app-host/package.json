@@ -23,6 +23,7 @@
     "test": "bun test src"
   },
   "dependencies": {
+    "@ryu/i18n": "workspace:*",
     "@ryuhq/core-client": "workspace:*",
     "zustand": "^5"
   },

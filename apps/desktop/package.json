@@ -51,6 +51,7 @@
     "@ryu/blocks": "workspace:*",
     "@ryu/command": "workspace:*",
     "@ryu/hotkeys": "workspace:*",
+    "@ryu/i18n": "workspace:*",
     "@ryu/marketplace": "workspace:*",
     "@ryu/settings": "workspace:*",
     "@ryu/step-up": "workspace:*",

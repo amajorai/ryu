@@ -11,6 +11,7 @@
     "test": "bun test src"
   },
   "dependencies": {
+    "@ryu/i18n": "workspace:*",
     "fflate": "^0.8.3"
   },
   "devDependencies": {

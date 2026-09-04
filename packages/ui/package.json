@@ -125,6 +125,7 @@
     "test": "bun test src"
   },
   "dependencies": {
+    "@ryu/i18n": "workspace:*",
     "@ryu/app-host": "workspace:*",
     "@ryuhq/protocol": "workspace:*",
     "@ai-sdk/openai-compatible": "^3.0.0",

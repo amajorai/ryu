@@ -91,6 +91,7 @@
         "@ryu/blocks": "workspace:*",
         "@ryu/command": "workspace:*",
         "@ryu/hotkeys": "workspace:*",
+        "@ryu/i18n": "workspace:*",
         "@ryu/marketplace": "workspace:*",
         "@ryu/settings": "workspace:*",
         "@ryu/step-up": "workspace:*",
@@ -178,6 +179,7 @@
         "@ryu/app-host": "workspace:*",
         "@ryu/blocks": "workspace:*",
         "@ryu/command": "workspace:*",
+        "@ryu/i18n": "workspace:*",
         "@ryu/ui": "workspace:*",
         "@ryuhq/core-client": "workspace:*",
         "@ryuhq/protocol": "workspace:*",
@@ -234,6 +236,7 @@
       "name": "@ryu/app-host",
       "version": "0.0.0",
       "dependencies": {
+        "@ryu/i18n": "workspace:*",
         "@ryuhq/core-client": "workspace:*",
         "zustand": "^5",
       },
@@ -318,6 +321,7 @@
         "@ryu/auth": "workspace:*",
         "@ryu/command": "workspace:*",
         "@ryu/hotkeys": "workspace:*",
+        "@ryu/i18n": "workspace:*",
         "@ryu/step-up": "workspace:*",
         "@ryu/ui": "workspace:*",
         "@ryuhq/core-client": "workspace:*",
@@ -369,6 +373,7 @@
       "dependencies": {
         "@hugeicons/core-free-icons": "^4.2.0",
         "@hugeicons/react": "^1.1.6",
+        "@ryu/i18n": "workspace:*",
         "@ryu/ui": "workspace:*",
       },
       "devDependencies": {
@@ -390,6 +395,7 @@
       "name": "@ryuhq/core-client",
       "version": "0.2.7",
       "dependencies": {
+        "@ryu/i18n": "workspace:*",
         "@ryuhq/protocol": "workspace:*",
       },
       "devDependencies": {
@@ -437,6 +443,21 @@
         "react-dom": "^19",
       },
     },
+    "packages/i18n": {
+      "name": "@ryu/i18n",
+      "version": "0.2.6",
+      "dependencies": {
+        "fflate": "^0.8.3",
+      },
+      "devDependencies": {
+        "@ryu/config": "workspace:*",
+        "@types/react": "^19.2.10",
+        "typescript": "^5.9.3",
+      },
+      "peerDependencies": {
+        "react": "^19",
+      },
+    },
     "packages/marketplace": {
       "name": "@ryu/marketplace",
       "version": "0.0.0",
@@ -445,6 +466,7 @@
         "@hugeicons/react": "^1.1.6",
         "@pierre/trees": "^1.0.0-beta.4",
         "@ryu/blocks": "workspace:*",
+        "@ryu/i18n": "workspace:*",
         "@ryu/ui": "workspace:*",
         "@ryuhq/protocol": "workspace:*",
         "lucide-react": "catalog:",
@@ -466,6 +488,7 @@
       "name": "@ryu/portable-packages",
       "version": "0.2.7",
       "dependencies": {
+        "@ryu/i18n": "workspace:*",
         "fflate": "^0.8.3",
       },
       "devDependencies": {
@@ -574,6 +597,7 @@
         "@react-three/fiber": "^9.0.0",
         "@react-three/rapier": "^2.1.0",
         "@ryu/app-host": "workspace:*",
+        "@ryu/i18n": "workspace:*",
         "@ryuhq/protocol": "workspace:*",
         "@shadcn/react": "^0.1.0",
         "@slate-yjs/react": "^1.1.0",
@@ -1994,6 +2018,8 @@
     "@ryu/env": ["@ryu/env@workspace:packages/env"],
 
     "@ryu/hotkeys": ["@ryu/hotkeys@workspace:packages/hotkeys"],
+
+    "@ryu/i18n": ["@ryu/i18n@workspace:packages/i18n"],
 
     "@ryu/marketplace": ["@ryu/marketplace@workspace:packages/marketplace"],
 

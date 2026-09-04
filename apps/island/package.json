@@ -22,6 +22,7 @@
     "@ryu/app-host": "workspace:*",
     "@ryu/blocks": "workspace:*",
     "@ryu/command": "workspace:*",
+    "@ryu/i18n": "workspace:*",
     "@ryu/ui": "workspace:*",
     "@ryuhq/core-client": "workspace:*",
     "@ryuhq/protocol": "workspace:*",

@@ -12,6 +12,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@ryu/i18n": "workspace:*",
     "@ryuhq/protocol": "workspace:*"
   },
   "devDependencies": {
