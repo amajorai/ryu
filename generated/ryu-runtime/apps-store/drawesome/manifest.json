@@ -1,0 +1,63 @@
+{
+  "tags": ["drawing", "sketching", "annotation", "canvas"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-drawesome",
+  "homepage": "https://github.com/amajorai/ryu-drawesome",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "id": "@ryu/drawesome",
+  "name": "Drawesome",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "description": "A lightweight sketching studio for Ryu with seven natural-feeling pens, area erasing, and SVG or PNG export. Sketches persist in app storage and stay local to the node.",
+  "tagline": "Put a real pen in your workspace",
+  "keywords": [
+    "drawing",
+    "sketching",
+    "annotation",
+    "canvas",
+    "markup",
+    "whiteboard"
+  ],
+  "category": "Creative",
+  "icon": "pencil-edit-02",
+  "iconDither": { "from": 24, "to": "transparent", "direction": "down" },
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "none" },
+    "web": { "support": "full" },
+    "cli": { "support": "list" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "drawesome-companion",
+      "name": "Drawesome",
+      "kind": "companion",
+      "config": {
+        "label": "Drawesome",
+        "ui_entry": "./dist/index.html",
+        "ui_format": "html"
+      }
+    }
+  ],
+  "permission_grants": ["storage:kv", "ui:toast"],
+  "permission_levels": [
+    {
+      "id": "drawesome.view",
+      "label": "Can view",
+      "description": "Open the current Drawesome sketch and export a copy."
+    },
+    {
+      "id": "drawesome.edit",
+      "label": "Can edit",
+      "description": "Draw, erase, clear, and save changes to the current sketch.",
+      "implies": ["drawesome.view"]
+    }
+  ],
+  "companion": { "label": "Drawesome", "icon": "pencil-edit-02" }
+}

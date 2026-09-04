@@ -6,6 +6,7 @@
     "ghost",
     "shadow",
     "spider",
+    "ripgrep",
     "exa",
     "tavily",
     "brave",
@@ -15,6 +16,7 @@
     "mem0",
     "spidercloud",
     "scrapling",
+    "zvec-grep",
     "honcho",
     "bytebot"
   ]

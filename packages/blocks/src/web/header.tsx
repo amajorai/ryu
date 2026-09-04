@@ -426,7 +426,7 @@ export default function Header({
 
 				<nav className="hidden items-center font-medium md:flex">
 					{showCatalogMenus && (
-						<MotionNavigationMenu viewportClassName="shadow-none">
+						<MotionNavigationMenu viewportClassName="bg-background shadow-none backdrop-blur-none backdrop-saturate-100">
 							<MotionNavigationMenuList>
 								<MotionNavigationMenuItem value="products">
 									<ProductsMenu pathname={pathname} />

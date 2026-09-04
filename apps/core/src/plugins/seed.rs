@@ -79,11 +79,12 @@ pub struct SeedSpec {
 /// pre-installed set: the explicit install path derives opt-in companion bundles from
 /// this same table. Adding a 16th companion to a second list is what caused the
 /// original carriage bug; there is no second list.
-fn seed_overrides() -> [SeedSpec; 37] {
+fn seed_overrides() -> [SeedSpec; 38] {
     use crate::plugin_manifest::{
         ACTIVITY_UI_HTML, APPROVALS_UI_HTML, AUTOPILOT_UI_HTML, BLUEPRINT_UI_HTML,
         CALENDAR_UI_HTML, CANVAS_PLUGIN_ID, CANVAS_UI_HTML, CHAT_BROADCAST_UI_HTML, CLIPS_UI_HTML,
-        EXPENSES_UI_HTML, FINETUNE_PLUGIN_ID, FINETUNE_UI_HTML, HELP_CENTER_UI_HTML,
+        DRAWSOME_PLUGIN_ID, DRAWSOME_UI_HTML, EXPENSES_UI_HTML, FINETUNE_PLUGIN_ID,
+        FINETUNE_UI_HTML, HELP_CENTER_UI_HTML,
         INVOICES_UI_HTML, LEARNING_UI_HTML, MAIL_UI_HTML, MEETINGS_UI_HTML, MONITORS_UI_HTML,
         NEWS_UI_HTML, OUTREACH_UI_HTML, PEOPLE_UI_HTML, PROJECTS_UI_HTML, PULL_REQUESTS_UI_HTML,
         QUESTS_UI_HTML, REASONING_PLUGIN_ID, REASONING_UI_HTML, RLM_UI_HTML, SITES_UI_HTML,
@@ -119,6 +120,13 @@ fn seed_overrides() -> [SeedSpec; 37] {
                 "ui:declarative-http",
             ],
             ui_code: Some(CANVAS_UI_HTML),
+        },
+        SeedSpec {
+            id: DRAWSOME_PLUGIN_ID,
+            // Drawesome's Companion persists only its own title + stroke data through
+            // the generic app-scoped KV bridge; it has no provider or sidecar access.
+            grants: &["storage:kv", "ui:toast"],
+            ui_code: Some(DRAWSOME_UI_HTML),
         },
         SeedSpec {
             id: SLIDES_PLUGIN_ID,

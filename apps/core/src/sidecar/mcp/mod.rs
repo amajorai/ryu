@@ -2117,8 +2117,8 @@ pub(crate) fn approval_gate_applies(tool_id: &str) -> bool {
 /// Reading `approved_grants` turns both `tool:*` families back into *approved*
 /// capabilities — the Gateway's default allowlist admits exactly
 /// `tool:http-egress:api.exa.ai`, `tool:http-egress:127.0.0.1`,
-/// `tool:command:spider` and `tool:command:rtk`, and `tool` is a reserved namespace
-/// there so nothing else can be owner-scope self-approved.
+/// `tool:command:spider`, `tool:command:rtk`, and `tool:command:rg`, and `tool` is
+/// a reserved namespace there so nothing else can be owner-scope self-approved.
 ///
 /// Core-tier keeps reading the manifest because a Core-tier manifest IS trusted
 /// input (compiled-in fixtures; the loader parses built-ins first and

@@ -322,11 +322,13 @@ fn default_grant_allowlist() -> Vec<String> {
         // Platform), carrying `/v3/workspaces/{ws}/peers/{peer}/chat` and
         // `/v3/workspaces/{ws}/peers/{peer}/search`.
         "tool:http-egress:api.honcho.dev",
-        // `spider` and `rtk` were decoupled from Core into declarative `command`
-        // tool plugins, so each declares a `tool:command:<bin>` grant instead of
-        // its old in-Core provider. Same re-enable rationale as the scopes above.
+        // `spider`, `rtk`, and `ripgrep` were decoupled from Core into declarative
+        // `command` tool plugins, so each declares a `tool:command:<bin>` grant
+        // instead of an in-Core provider. Same re-enable rationale as the scopes
+        // above.
         "tool:command:spider",
         "tool:command:rtk",
+        "tool:command:rg",
         "tool:command:bws",
         // Ship-code-in-a-manifest, for BOTH an `inline_deno` tool and a capability
         // ADAPTER (the JS a layer provider ships when its shape — an async job API,
@@ -364,6 +366,7 @@ fn default_grant_allowlist() -> Vec<String> {
         "mcp:agentation",
         "mcp:docs",
         "mcp:expect",
+        "mcp:zvec_grep",
         // Same rule, same reason: `@ryu/reasoning` declares `mcp:reasoning` and shipped
         // without this row, so `every_builtin_fixture_grant_is_allowlisted` has been red
         // and a disable→re-enable of that app fails with GrantsDenied. Every sidecar app

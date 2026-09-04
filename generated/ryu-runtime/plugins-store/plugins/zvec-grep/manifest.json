@@ -1,0 +1,39 @@
+{
+  "tags": ["search", "semantic", "code", "local"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/zvec-grep",
+  "homepage": "https://github.com/zvec-ai/zvec-grep",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "license": "Apache-2.0",
+  "id": "@ryu/zvec-grep",
+  "name": "zvec-grep",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "description": "Local-first hybrid workspace search through zvec-grep's `zg` MCP bridge. Use semantic and ranked retrieval over an explicitly indexed workspace, with local models by default and source-linked results. Requires Node.js 22+; no Ryu API key.",
+  "icon": "book-search",
+  "iconDither": { "from": 276, "to": "transparent", "direction": "down" },
+  "tagline": "Semantic and exact workspace search for agents",
+  "keywords": ["search", "semantic", "vector", "bm25", "workspace"],
+  "category": "Search",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [],
+  "permission_grants": ["mcp:zvec_grep"],
+  "mcp_servers": {
+    "zvec_grep": {
+      "command": "npx",
+      "args": ["-y", "@zvec/zvec-grep@0.2.1", "server", "--stdio"],
+      "description": "zvec-grep's pinned stdio bootstrap bridge. It starts or reuses the local zvec-grep daemon and proxies the default indexed-search MCP toolset over stdin/stdout; Node.js 22+ is required."
+    }
+  }
+}

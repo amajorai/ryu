@@ -310,6 +310,82 @@
       "stability": "experimental"
     },
     {
+      "id": "@ryu/ripgrep",
+      "name": "ripgrep",
+      "version": "0.1.14",
+      "description": "Fast local regular-expression search through ripgrep's `rg` binary, exposed as Ryu command tools. Respects .gitignore, skips hidden and binary files by default, and returns line-aware JSON Lines output. BYO install; no API key.",
+      "source": "builtin",
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "tool:command:rg"
+      ],
+      "built_in": true,
+      "tags": [
+        "search",
+        "code",
+        "cli",
+        "local"
+      ],
+      "type": "plugin",
+      "surface_support": [
+        {
+          "surface": "core",
+          "support": "full"
+        },
+        {
+          "surface": "desktop",
+          "support": "full"
+        },
+        {
+          "surface": "island",
+          "support": "limited"
+        },
+        {
+          "surface": "mobile",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "extension",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "web",
+          "support": "full",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "cli",
+          "support": "full"
+        }
+      ],
+      "icon": "code-browser",
+      "icon_dither": {
+        "from": 188,
+        "to": "transparent",
+        "direction": "down"
+      },
+      "tagline": "Fast, ignore-aware code search for agents",
+      "category": "Search",
+      "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/ripgrep",
+      "homepage": "https://github.com/BurntSushi/ripgrep",
+      "keywords": [
+        "search",
+        "code",
+        "regex",
+        "grep",
+        "pattern"
+      ],
+      "license": "Unlicense OR MIT",
+      "privacy_policy_url": "https://ryuhq.com/privacy",
+      "terms_of_service_url": "https://ryuhq.com/terms",
+      "developer": "Ryu",
+      "stability": "experimental"
+    },
+    {
       "id": "@ryu/exa",
       "name": "Exa Search",
       "version": "0.1.14",
@@ -1089,6 +1165,82 @@
           ]
         }
       ],
+      "developer": "Ryu",
+      "stability": "experimental"
+    },
+    {
+      "id": "@ryu/zvec-grep",
+      "name": "zvec-grep",
+      "version": "0.1.14",
+      "description": "Local-first hybrid workspace search through zvec-grep's `zg` MCP bridge. Use semantic and ranked retrieval over an explicitly indexed workspace, with local models by default and source-linked results. Requires Node.js 22+; no Ryu API key.",
+      "source": "builtin",
+      "kinds": [
+        "tool"
+      ],
+      "permission_grants": [
+        "mcp:zvec_grep"
+      ],
+      "built_in": true,
+      "tags": [
+        "search",
+        "semantic",
+        "code",
+        "local"
+      ],
+      "type": "plugin",
+      "surface_support": [
+        {
+          "surface": "core",
+          "support": "full"
+        },
+        {
+          "surface": "desktop",
+          "support": "full"
+        },
+        {
+          "surface": "island",
+          "support": "limited"
+        },
+        {
+          "surface": "mobile",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "extension",
+          "support": "limited",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "web",
+          "support": "full",
+          "inheritedFrom": "desktop"
+        },
+        {
+          "surface": "cli",
+          "support": "full"
+        }
+      ],
+      "icon": "book-search",
+      "icon_dither": {
+        "from": 276,
+        "to": "transparent",
+        "direction": "down"
+      },
+      "tagline": "Semantic and exact workspace search for agents",
+      "category": "Search",
+      "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/zvec-grep",
+      "homepage": "https://github.com/zvec-ai/zvec-grep",
+      "keywords": [
+        "search",
+        "semantic",
+        "vector",
+        "bm25",
+        "workspace"
+      ],
+      "license": "Apache-2.0",
+      "privacy_policy_url": "https://ryuhq.com/privacy",
+      "terms_of_service_url": "https://ryuhq.com/terms",
       "developer": "Ryu",
       "stability": "experimental"
     },

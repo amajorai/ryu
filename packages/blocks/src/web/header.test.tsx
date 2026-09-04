@@ -14,6 +14,9 @@ test("marketing header renders product/resource controls and Marketplace", () =>
 	expect(html.match(/data-slot="navigation-menu-trigger"/g)).toHaveLength(2);
 	expect(html).toContain("Products");
 	expect(html).toContain("Resources");
+	expect(html).toContain("bg-background");
+	expect(html).toContain("backdrop-blur-none");
+	expect(html).toContain("backdrop-saturate-100");
 	expect(html).toContain('href="/marketplace"');
 	expect(html).toContain('aria-current="page"');
 });

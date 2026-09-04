@@ -1,0 +1,95 @@
+{
+  "tags": ["search", "code", "cli", "local"],
+  "author": { "name": "Ryu", "url": "https://ryuhq.com" },
+  "repository": "https://github.com/amajorai/ryu-marketplace/tree/main/plugins/plugins/ripgrep",
+  "homepage": "https://github.com/BurntSushi/ripgrep",
+  "privacyPolicyUrl": "https://ryuhq.com/privacy",
+  "termsOfServiceUrl": "https://ryuhq.com/terms",
+  "license": "Unlicense OR MIT",
+  "id": "@ryu/ripgrep",
+  "name": "ripgrep",
+  "version": "0.1.14",
+  "stability": "experimental",
+  "description": "Fast local regular-expression search through ripgrep's `rg` binary, exposed as Ryu command tools. Respects .gitignore, skips hidden and binary files by default, and returns line-aware JSON Lines output. BYO install; no API key.",
+  "icon": "code-browser",
+  "iconDither": { "from": 188, "to": "transparent", "direction": "down" },
+  "tagline": "Fast, ignore-aware code search for agents",
+  "keywords": ["search", "code", "regex", "grep", "pattern"],
+  "category": "Search",
+  "surfaces": {
+    "gateway": { "support": "none" },
+    "core": { "support": "full" },
+    "desktop": { "support": "full" },
+    "island": { "support": "limited" },
+    "mobile": { "support": "limited" },
+    "extension": { "support": "limited" },
+    "web": { "support": "full" },
+    "cli": { "support": "full" }
+  },
+  "engines": { "ryu": ">=0.1.0" },
+  "runnables": [
+    {
+      "id": "tool-ripgrep-search",
+      "name": "ripgrep Search",
+      "kind": "tool",
+      "config": {
+        "slug": "ripgrep.search",
+        "backend": "command",
+        "bin": "rg",
+        "command_args": [
+          "--json",
+          "--color",
+          "never",
+          "--",
+          "{pattern}",
+          "{path}"
+        ],
+        "timeout_secs": 60,
+        "description": "Search a file or directory with ripgrep. The result is bounded by the command runner and returned as JSON Lines; exit_code 1 means no matches.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Regular-expression pattern to search for. Use a literal pattern when exact text is enough."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "File or directory to search. Use an absolute workspace path when the Ryu node is not already running in that workspace."
+            }
+          },
+          "required": ["pattern", "path"]
+        }
+      }
+    },
+    {
+      "id": "tool-ripgrep-files",
+      "name": "ripgrep Files",
+      "kind": "tool",
+      "config": {
+        "slug": "ripgrep.files",
+        "backend": "command",
+        "bin": "rg",
+        "command_args": ["--files", "--color", "never", "--", "{path}"],
+        "timeout_secs": 60,
+        "description": "List files visible to ripgrep under a file or directory, respecting the same ignore, hidden-file, and binary-file defaults.",
+        "input_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "File or directory whose visible files should be listed."
+            }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  ],
+  "permission_grants": ["tool:command:rg"]
+}

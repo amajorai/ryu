@@ -689,6 +689,12 @@ pub const CORE_PLUGINS: &[&str] = &[
     // the user must perform, so shipping it on would put a permanently unavailable
     // tool on every fresh install — the same reason the BYOK providers stay opt-in.
     "@ryu/scrapling",
+    // zvec-grep is the semantic sibling of the exact-search `ripgrep` plugin.
+    // Core-tier is required because its manifest-owned MCP server is a local
+    // process; it remains opt-in because it needs Node.js 22+ and a user-created
+    // workspace index. The pinned npx stdio bridge starts/reuses zvec-grep's
+    // loopback daemon and exposes the default search-only toolset.
+    "@ryu/zvec-grep",
     // The default `web.search` provider. Core-tier for the same reason `spider` is:
     // it is a default TOOL app that must exist out of the box, and pre-installed
     // requires Core-tier. The other five search providers (tavily, brave, serper,
@@ -838,6 +844,10 @@ pub const CORE_PLUGINS: &[&str] = &[
     // `ui_code` HTML blob when the user installs one from the Store. `enable_app`
     // then gets its grants approved through the Gateway like any other app.
     "@ryu/whiteboard",
+    // Drawesome is a lightweight, storage-backed creative Companion. It is Core-tier
+    // so its reviewed storage grant can be enabled as a first-party app, but it stays
+    // opt-in and does not seed a lifecycle record on a fresh install.
+    "@ryu/drawesome",
     // The Canvas app — a full-page Companion (`ui_format:"html"`) that owns its Space
     // documents via `spaces:docs` and drives generation nodes through the window.ryu
     // media/agent bridge. Same posture as Whiteboard above: opt-in and absent from a
@@ -2737,6 +2747,55 @@ mod tests {
                 .any(|g| g == crate::tool_exec::GRANT_TOOL_EXECUTE),
             "an adapter-mapped provider must hold tool:execute or every web.extract \
              call through it fails"
+        );
+    }
+
+    /// zvec-grep is the semantic search companion to the exact-search ripgrep
+    /// plugin. It must stay Core-tier because its manifest-owned MCP server is a
+    /// local process, but opt-in because Node.js and a user-created workspace
+    /// index are prerequisites. The stdio bridge is upstream-owned and must stay
+    /// pinned so the package executed by `npx` is part of the reviewed contract.
+    #[test]
+    fn zvec_grep_is_core_tier_and_opt_in_with_a_pinned_stdio_mcp_manifest() {
+        assert_eq!(
+            tier_for("@ryu/zvec-grep"),
+            crate::plugin_manifest::PluginTier::Core,
+            "zvec-grep must be Core-tier or its manifest MCP server is never registered"
+        );
+        assert!(
+            !is_preinstalled("@ryu/zvec-grep"),
+            "zvec-grep must stay opt-in: it requires Node.js and an explicit index"
+        );
+
+        let manifests = crate::plugin_manifest::PluginManifestLoader::load_builtins();
+        let manifest = manifests
+            .iter()
+            .find(|m| m.id == "@ryu/zvec-grep")
+            .expect("zvec-grep fixture did not load");
+
+        assert!(manifest.runnables.is_empty());
+        assert_eq!(
+            manifest
+                .permission_grants
+                .iter()
+                .find(|grant| grant.starts_with("mcp:"))
+                .map(String::as_str),
+            Some("mcp:zvec_grep")
+        );
+
+        let server = manifest
+            .mcp_servers
+            .get("zvec_grep")
+            .expect("zvec-grep must declare its MCP server");
+        assert_eq!(server.command.as_deref(), Some("npx"));
+        assert_eq!(
+            server.args,
+            vec![
+                "-y",
+                "@zvec/zvec-grep@0.2.1",
+                "server",
+                "--stdio"
+            ]
         );
     }
 

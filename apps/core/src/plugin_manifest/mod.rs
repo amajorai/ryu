@@ -196,6 +196,10 @@ pub const MANIFEST_FILE_NAME: &str = MANIFEST_FILE_NAMES[0];
 ///   tool, backed by a BYO `spider` CLI reached through the command-tool
 ///   allowlist. The native `sidecar/mcp/spider.rs` provider was deleted, so the
 ///   fixture is the SOLE owner of the tool (see the exception note below).
+/// - `ripgrep.manifest.json` — the exact local-search sibling of `spider` and
+///   `rtk`: two fixed `command` tools backed by the BYO `rg` binary, with no
+///   bundled MCP server or Core Rust provider. Its arguments are paths and
+///   regular expressions only; the command tool passes them as an argv array.
 /// - `scrapling.manifest.json` — Scrapling adaptive page extraction (BYO local
 ///   install, no API key). The THIRD `web.extract` provider, `selectable` and
 ///   claiming no `default` (`spider` keeps it). Three things about it are
@@ -228,6 +232,9 @@ pub const MANIFEST_FILE_NAME: &str = MANIFEST_FILE_NAMES[0];
 ///   list you already have). Same reasoning as `firecrawl`'s absent crawl entry — a
 ///   partial `tools` map would join resolution and could win the pick away from
 ///   `spider`, silently killing a layer that works. Absent, not empty.
+/// - `zvec-grep.manifest.json` — zvec-grep's local-first hybrid workspace search.
+///   It is an opt-in Core-tier MCP plugin whose pinned `npx` stdio bridge starts
+///   or reuses the upstream daemon and exposes its default indexed-search tool.
 /// - `agentbrowser.manifest.json` — Agent Browser web-browsing tool (system plugin, npx MCP-backed).
 /// - `exa.manifest.json` — Exa neural search tool plugin (U040, BYOK). Provides the
 ///   selectable `web.search` capability and is its declared default.
@@ -290,11 +297,11 @@ pub const MANIFEST_FILE_NAME: &str = MANIFEST_FILE_NAMES[0];
 /// (`fire_activation_event` → the Tool handler in `server/mod.rs`). Do not
 /// re-add tool runnables to these fixtures.
 ///
-/// EXCEPTION: `spider`, `rtk`, `advisor` and `shadow` CARRY their tool runnables,
+/// EXCEPTION: `spider`, `rtk`, `ripgrep`, `advisor` and `shadow` CARRY their tool runnables,
 /// because their Rust providers were deleted — the fixture is the only owner, so
 /// there is nothing to double-list. The "no runnables" rule above exists solely to
 /// avoid double-listing a provider-owned tool; it does not apply once the provider
-/// is gone. `spider`/`rtk` are declarative `command`-backend tools; `advisor`
+/// is gone. `spider`/`rtk`/`ripgrep` are declarative `command`-backend tools; `advisor`
 /// (`advisor.consult`) and `shadow` (`shadow.search`/`semantic_search`/`timeline`/
 /// `recent_context`) are declarative `http`-backend tools reaching Core loopback
 /// bridges (`/api/advisor/consult` and the `/api/shadow/*` proxy). `spider`/`rtk`
@@ -456,6 +463,7 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../generated/ryu-runtime/apps-store/backstage/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/spider/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/scrapling/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/zvec-grep/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/agentbrowser/manifest.json"),
     // Ego Browser is the opt-in inline-Deno browser.control provider. Its
     // manifest is compiled into test catalogs so the Core tier and capability
@@ -669,6 +677,11 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // auto-wrap settings that drive `crate::rtk_config` (NOT a tool). Community-tier,
     // opt-in.
     include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/rtk/manifest.json"),
+    // `ripgrep` exposes the upstream `rg` binary as fixed, read-only command
+    // tools (`ripgrep.search` and `ripgrep.files`). It is BYO and Community-tier:
+    // the Gateway approves the reviewed `tool:command:rg` grant, while the node
+    // owner supplies the absolute binary path through the command allowlist.
+    include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/ripgrep/manifest.json"),
     // `security-guidance` ports Anthropic's security-guidance Claude Code plugin
     // onto Ryu's turn-hook substrate: a flag-gated `post_assistant_turn` hook that
     // (1) runs a ~22-rule regex pattern scan over the last answer and (2) does a
@@ -824,6 +837,10 @@ const BUILTIN_MANIFESTS: &[&str] = &[
     // Ships pre-installed with a UI bundle + those grants seeded in `main.rs`. Replaces
     // the built-in creative-canvas board.
     include_str!("../../../../generated/ryu-runtime/apps-store/canvas/manifest.json"),
+    // Drawesome is a lightweight sketching Companion over the generic app-scoped
+    // storage bridge. It is opt-in like the other creative editors and carries a
+    // compiled UI so Install → Enable can work without a remote bundle fetch.
+    include_str!("../../../../generated/ryu-runtime/apps-store/drawesome/manifest.json"),
     // Slides — an opt-in full-page Companion for local visual slide and thumbnail
     // editing. It has no sidecar: persistence, upload, model, and media work use
     // the generic host bridges, and the bundled UI is seeded on explicit install.
@@ -1345,6 +1362,7 @@ const CORE_RUNTIME_BUILTIN_MANIFESTS: &[&str] = &[
     include_str!("../../../../generated/ryu-runtime/apps-store/docling/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/apps-store/drafts/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/apps-store/desktop/manifest.json"),
+    include_str!("../../../../generated/ryu-runtime/apps-store/drawesome/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/apps-store/expenses/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/apps-store/feedback-board/manifest.json"),
     include_str!("../../../../generated/ryu-runtime/apps-store/finetune/manifest.json"),
@@ -1438,6 +1456,12 @@ pub const CANVAS_PLUGIN_ID: &str = "@ryu/canvas";
 /// `ui_code` on a fresh install. Rebuild with `bun run --cwd packages/canvas-app
 /// build` and copy `dist/index.html` to `fixtures/canvas.ui.html` to refresh it.
 pub const CANVAS_UI_HTML: &str = include_str!("fixtures/canvas.ui.html");
+
+/// The Drawesome app's plugin id and prebuilt Companion bundle. The bundle is
+/// sourced from `apps-store/drawesome/ui` and attached by the normal explicit
+/// install path, just like the other opt-in Companion apps.
+pub const DRAWSOME_PLUGIN_ID: &str = "@ryu/drawesome";
+pub const DRAWSOME_UI_HTML: &str = include_str!("fixtures/drawesome.ui.html");
 
 /// The Slides app's prebuilt, self-contained UI bundle. Seeded for explicit app
 /// installs through the same compiled-in companion table as the other Path B apps.
