@@ -22,6 +22,7 @@ test("switches languages, copies the sample, and wires docs", async ({
 	await page.goto("/agent-integrations-proof.html", {
 		waitUntil: "domcontentloaded",
 	});
+	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 	await expect(
 		page.getByRole("heading", { name: "Call your agent from code" })
 	).toBeVisible();

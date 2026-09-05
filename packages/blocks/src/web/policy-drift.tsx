@@ -86,7 +86,7 @@ export default function PolicyDrift() {
 								className="size-5 text-foreground"
 								strokeWidth={1.75}
 							/>
-							<p className="mt-6 font-semibold text-muted-foreground/60 text-xs uppercase tracking-widest">
+							<p className="mt-6 font-medium text-muted-foreground/60 text-xs uppercase tracking-widest">
 								Everyday reality
 							</p>
 							<h3 className="mt-2 font-medium text-foreground text-xl tracking-tight md:text-2xl">
@@ -116,7 +116,7 @@ export default function PolicyDrift() {
 							/>
 							<p
 								className={cn(
-									"mt-6 font-semibold text-xs uppercase tracking-widest",
+									"mt-6 font-medium text-xs uppercase tracking-widest",
 									tone.eyebrow
 								)}
 							>

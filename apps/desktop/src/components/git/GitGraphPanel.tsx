@@ -170,7 +170,7 @@ export function GitGraphPanel({ compact = false, folder }: GitGraphPanelProps) {
 							<HugeiconsIcon className="size-3.5" icon={GitBranchIcon} />
 							<span>Workspace / Git</span>
 						</div>
-						<h1 className="truncate font-semibold text-lg tracking-tight">
+						<h1 className="truncate font-medium text-lg tracking-tight">
 							Git graph
 						</h1>
 						<p className="mt-1 truncate text-muted-foreground text-xs">

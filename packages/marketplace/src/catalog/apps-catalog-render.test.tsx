@@ -201,12 +201,12 @@ describe("AppsCatalogSection — list states", () => {
 		expect(html).toContain("Second one.");
 	});
 
-	test("with an install layer, list cards expose the Add action", () => {
+	test("with an install layer, list cards expose the Get action", () => {
 		const html = render(makeAppsState({ items: [makeItem()] }));
-		expect(html).toContain("Add");
+		expect(html).toContain("Get");
 	});
 
-	test("a paid listing keeps its price disclosure and Add action", () => {
+	test("a paid listing keeps its price disclosure and Get action", () => {
 		const html = render(
 			makeAppsState({
 				items: [
@@ -219,11 +219,11 @@ describe("AppsCatalogSection — list states", () => {
 			})
 		);
 		expect(html).toContain("9.00");
-		expect(html).toContain("Add");
+		expect(html).toContain("Get");
 		expect(html).not.toContain("Upgrade to use");
 	});
 
-	test("read-only host (install:null) shows Details, not Add, on cards", () => {
+	test("read-only host (install:null) shows Details, not Get, on cards", () => {
 		const html = render(makeAppsState({ items: [makeItem()] }), {
 			install: null,
 		});

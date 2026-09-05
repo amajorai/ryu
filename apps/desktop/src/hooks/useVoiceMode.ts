@@ -31,6 +31,8 @@ export interface VoiceModeOptions {
 	agentName?: string;
 	/** Bind turns to the active conversation (so history persists). */
 	conversationId?: string;
+	/** Voice Recognition engine (from the shared voice-input preference). */
+	sttEngine?: string;
 	/** Audio engine + voice (from the user's Audio preferences). */
 	ttsEngine?: string;
 	ttsVoice?: string;
@@ -146,6 +148,7 @@ export function useVoiceMode(
 		const conn = new VoiceSessionConnection(targetRef.current, {
 			conversationId: optionsRef.current.conversationId,
 			agentId: optionsRef.current.agentId,
+			sttEngine: optionsRef.current.sttEngine,
 			ttsEngine: optionsRef.current.ttsEngine,
 			ttsVoice: optionsRef.current.ttsVoice,
 			handlers: {

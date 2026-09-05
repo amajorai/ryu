@@ -94,7 +94,7 @@ export function AgentsGrid({
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
 			<div className="px-6 pt-6 pb-2">
-				<h1 className="font-semibold text-xl">Agents</h1>
+				<h1 className="font-medium text-xl">Agents</h1>
 				<p className="mt-0.5 text-muted-foreground text-sm">
 					Your installed agents, each a swappable card.
 				</p>
@@ -117,7 +117,7 @@ export function AgentsGrid({
 							<Bot className="size-6" />
 						</span>
 						<div className="space-y-1">
-							<h2 className="font-semibold text-base">No agents yet</h2>
+							<h2 className="font-medium text-base">No agents yet</h2>
 							<p className="max-w-xs text-muted-foreground text-sm">
 								Only the built-in Ryu agent ships by default. Install more from
 								the catalog.
@@ -133,7 +133,7 @@ export function AgentsGrid({
 							!
 						</span>
 						<div className="space-y-1">
-							<h2 className="font-semibold text-base">Could not load agents</h2>
+							<h2 className="font-medium text-base">Could not load agents</h2>
 							<p className="max-w-xs text-muted-foreground text-sm">
 								{errorMessage}
 							</p>

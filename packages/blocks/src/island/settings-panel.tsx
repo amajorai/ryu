@@ -123,7 +123,7 @@ export function SettingsPanelView({
 	return (
 		<div className="flex flex-col gap-4">
 			<section className="flex flex-col gap-2 rounded-2xl bg-white/5 p-3">
-				<h3 className="font-semibold text-neutral-100 text-xs">Permissions</h3>
+				<h3 className="font-medium text-neutral-100 text-xs">Permissions</h3>
 				{CAPABILITIES.map((capability) => (
 					<ConsentToggle
 						capability={capability}
@@ -135,7 +135,7 @@ export function SettingsPanelView({
 			</section>
 
 			<section className="flex flex-col gap-2 rounded-2xl bg-white/5 p-3">
-				<h3 className="font-semibold text-neutral-100 text-xs">Connections</h3>
+				<h3 className="font-medium text-neutral-100 text-xs">Connections</h3>
 				<label
 					className="flex flex-col gap-1 text-[11px] text-neutral-400"
 					htmlFor="island-core-url"
@@ -178,7 +178,7 @@ export function SettingsPanelView({
 			</section>
 
 			<section className="flex flex-col gap-2 rounded-2xl bg-white/5 p-3">
-				<h3 className="font-semibold text-neutral-100 text-xs">
+				<h3 className="font-medium text-neutral-100 text-xs">
 					Suggestion engine
 				</h3>
 				<label
@@ -214,7 +214,7 @@ export function SettingsPanelView({
 			</section>
 
 			<section className="flex flex-col gap-2 rounded-2xl bg-white/5 p-3">
-				<h3 className="font-semibold text-neutral-100 text-xs">Updates</h3>
+				<h3 className="font-medium text-neutral-100 text-xs">Updates</h3>
 				<p className="text-[11px] text-neutral-400">Version {version ?? "…"}</p>
 				<label
 					className="flex items-center justify-between gap-3 text-neutral-200 text-xs"

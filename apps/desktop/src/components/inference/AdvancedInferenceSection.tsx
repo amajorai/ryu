@@ -165,7 +165,7 @@ export function AdvancedInferenceSection({
 				onClick={() => setOpen((o) => !o)}
 				type="button"
 			>
-				<span className="font-semibold text-sm">Advanced inference</span>
+				<span className="font-medium text-sm">Advanced inference</span>
 				<span className="ml-auto text-muted-foreground">
 					<HugeiconsIcon
 						className="size-4"

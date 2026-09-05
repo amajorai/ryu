@@ -24,6 +24,8 @@ const BRUSH_RADIUS = 24; // scratch brush radius in CSS pixels
 const COPIED_RESET_MS = 2000;
 
 interface ScratchCardProps {
+	ariaLabel?: string;
+	brushSize?: number;
 	/** Small print under the code, e.g. "Use at checkout — expires soon." */
 	caption?: string;
 	className?: string;
@@ -33,9 +35,26 @@ interface ScratchCardProps {
 	/** The teaser line above the card. */
 	headline?: string;
 	onNeverShowAgain?: () => void;
+	onProgress?: (progress: number) => void;
+	onReveal?: () => void;
+	overlayColor?: string;
+	overlayLabel?: string;
+	overlayLabelColor?: string;
+	revealAnnouncement?: string;
+	revealThreshold?: number;
 }
 
-const paintFoil = (canvas: HTMLCanvasElement) => {
+const paintFoil = (
+	canvas: HTMLCanvasElement,
+	{
+		overlayColor,
+		overlayLabel,
+		overlayLabelColor,
+	}: Pick<
+		ScratchCardProps,
+		"overlayColor" | "overlayLabel" | "overlayLabelColor"
+	>
+) => {
 	const ctx = canvas.getContext("2d");
 	if (!ctx) {
 		return;
@@ -47,21 +66,29 @@ const paintFoil = (canvas: HTMLCanvasElement) => {
 	ctx.scale(ratio, ratio);
 
 	// Foil base.
-	const gradient = ctx.createLinearGradient(0, 0, width, height);
-	gradient.addColorStop(0, "#9ca3af");
-	gradient.addColorStop(0.45, "#e5e7eb");
-	gradient.addColorStop(0.55, "#f3f4f6");
-	gradient.addColorStop(1, "#6b7280");
-	ctx.fillStyle = gradient;
+	if (overlayColor) {
+		ctx.fillStyle = overlayColor;
+	} else {
+		const gradient = ctx.createLinearGradient(0, 0, width, height);
+		gradient.addColorStop(0, "#9ca3af");
+		gradient.addColorStop(0.45, "#e5e7eb");
+		gradient.addColorStop(0.55, "#f3f4f6");
+		gradient.addColorStop(1, "#6b7280");
+		ctx.fillStyle = gradient;
+	}
 	ctx.fillRect(0, 0, width, height);
 
 	// Instructional text on the foil.
-	ctx.fillStyle = "rgba(17, 24, 39, 0.55)";
+	ctx.fillStyle = overlayLabelColor ?? "rgba(17, 24, 39, 0.55)";
 	ctx.font =
 		"600 15px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
 	ctx.textAlign = "center";
 	ctx.textBaseline = "middle";
-	ctx.fillText("Scratch here to reveal", width / 2, height / 2 - 10);
+	ctx.fillText(
+		overlayLabel ?? "Scratch here to reveal",
+		width / 2,
+		height / 2 - 10
+	);
 	ctx.font =
 		"400 13px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
 	ctx.fillText("🪙 drag across the card", width / 2, height / 2 + 12);
@@ -73,19 +100,36 @@ export default function ScratchCard({
 	headline = "I have a 30% discount. Just scratch this card!",
 	caption,
 	className,
+	ariaLabel = "Scratch card. Drag across the foil to reveal the offer.",
+	brushSize = 28,
+	onProgress,
+	onReveal,
 	onNeverShowAgain,
+	overlayColor,
+	overlayLabel,
+	overlayLabelColor,
+	revealAnnouncement = "Your offer is revealed.",
+	revealThreshold = REVEAL_THRESHOLD,
 }: ScratchCardProps) {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const scratchingRef = useRef(false);
 	// Once the user has scratched, stop auto-repainting the foil on resize so we
 	// never wipe their progress (the card can mount mid-animation and grow).
 	const dirtyRef = useRef(false);
+	const revealedRef = useRef(false);
+	const onProgressRef = useRef(onProgress);
+	const onRevealRef = useRef(onReveal);
 	const [revealed, setRevealed] = useState(false);
 	const [copied, setCopied] = useState(false);
 
+	useEffect(() => {
+		onProgressRef.current = onProgress;
+		onRevealRef.current = onReveal;
+	}, [onProgress, onReveal]);
+
 	const clearFoil = useCallback(() => {
 		const canvas = canvasRef.current;
-		if (!canvas) {
+		if (!canvas || revealedRef.current) {
 			return;
 		}
 		const ctx = canvas.getContext("2d");
@@ -93,7 +137,9 @@ export default function ScratchCard({
 			return;
 		}
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
+		revealedRef.current = true;
 		setRevealed(true);
+		onRevealRef.current?.();
 	}, []);
 
 	useEffect(() => {
@@ -101,17 +147,17 @@ export default function ScratchCard({
 		if (!canvas) {
 			return;
 		}
-		paintFoil(canvas);
+		paintFoil(canvas, { overlayColor, overlayLabel, overlayLabelColor });
 		// The card can mount while its container is still animating open, so
 		// repaint the foil to the real box until the user starts scratching.
 		const observer = new ResizeObserver(() => {
 			if (!(revealed || dirtyRef.current)) {
-				paintFoil(canvas);
+				paintFoil(canvas, { overlayColor, overlayLabel, overlayLabelColor });
 			}
 		});
 		observer.observe(canvas);
 		return () => observer.disconnect();
-	}, [revealed]);
+	}, [overlayColor, overlayLabel, overlayLabelColor, revealed]);
 
 	const measureProgress = useCallback((canvas: HTMLCanvasElement) => {
 		const ctx = canvas.getContext("2d");
@@ -146,14 +192,16 @@ export default function ScratchCard({
 			const y = event.clientY - rect.top;
 			ctx.globalCompositeOperation = "destination-out";
 			ctx.beginPath();
-			ctx.arc(x, y, BRUSH_RADIUS, 0, Math.PI * 2);
+			ctx.arc(x, y, brushSize / 2 || BRUSH_RADIUS, 0, Math.PI * 2);
 			ctx.fill();
 
-			if (measureProgress(canvas) >= REVEAL_THRESHOLD) {
+			const progress = measureProgress(canvas);
+			onProgressRef.current?.(progress);
+			if (progress >= revealThreshold) {
 				clearFoil();
 			}
 		},
-		[clearFoil, measureProgress, revealed]
+		[brushSize, clearFoil, measureProgress, revealThreshold, revealed]
 	);
 
 	const handlePointerDown = useCallback(
@@ -212,7 +260,7 @@ export default function ScratchCard({
 						animate={
 							revealed ? { scale: 1, opacity: 1 } : { scale: 0.9, opacity: 0.8 }
 						}
-						className="mt-1 font-bold font-mono text-3xl text-foreground tracking-widest md:text-4xl"
+						className="mt-1 font-medium font-mono text-3xl text-foreground tracking-widest md:text-4xl"
 						transition={{ type: "spring", stiffness: 260, damping: 18 }}
 					>
 						{code}
@@ -224,6 +272,7 @@ export default function ScratchCard({
 
 				{/* The scratchable foil overlay. */}
 				<canvas
+					aria-label={ariaLabel}
 					className={cn(
 						"absolute inset-0 size-full rounded-xl transition-opacity duration-500",
 						revealed
@@ -236,8 +285,12 @@ export default function ScratchCard({
 					onPointerMove={handlePointerMove}
 					onPointerUp={stopScratching}
 					ref={canvasRef}
+					role="img"
 				/>
 			</div>
+			<span aria-live="polite" className="sr-only">
+				{revealed ? revealAnnouncement : ""}
+			</span>
 
 			<div className="mt-5 flex flex-wrap items-center justify-center gap-2">
 				{revealed ? (

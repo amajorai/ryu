@@ -7,9 +7,7 @@ const PROOF_SCREENSHOT = "e2e/artifacts/onboarding-agent-suggestions-proof.png";
 const PROOF_LOG = "e2e/artifacts/onboarding-agent-suggestions-proof.log.json";
 
 test.describe("onboarding agent suggestions proof", () => {
-	test("shows the agent name, description, and connected apps", async ({
-		page,
-	}) => {
+	test("shows the draft fields before it can be added", async ({ page }) => {
 		await page.goto(STORY_URL);
 		await expect(
 			page.getByRole("heading", { name: "Suggested agents for your work" })
@@ -20,7 +18,7 @@ test.describe("onboarding agent suggestions proof", () => {
 			)
 		).toBeVisible();
 		await expect(page.getByText("Connected apps", { exact: true })).toHaveCount(
-			0
+			2
 		);
 		await expect(page.getByText("Gmail", { exact: true })).toHaveCount(2);
 		await expect(page.getByText("Notion", { exact: true })).toHaveCount(2);
@@ -61,13 +59,27 @@ test.describe("onboarding agent suggestions proof", () => {
 			page.getByRole("button", { name: "Select an agent" })
 		).toBeDisabled();
 
-		await expect(page.getByText("Why this showed up")).toHaveCount(0);
+		await expect(
+			page.getByText("Why this showed up", { exact: true })
+		).toHaveCount(2);
 		await expect(
 			page.getByText("Search past chats", { exact: true })
-		).toHaveCount(0);
+		).toHaveCount(2);
 		await expect(
-			page.getByText("View prompt setup", { exact: true })
-		).toHaveCount(0);
+			page.getByText("Review prompt setup", { exact: true })
+		).toHaveCount(2);
+		await expect(
+			page.getByText(
+				"Help me verify releases with an evidence-backed checklist. Ask before any external change.",
+				{ exact: true }
+			)
+		).toBeVisible();
+		await expect(
+			page.getByRole("checkbox", { name: "I reviewed Release Desk" })
+		).toBeVisible();
+		await expect(page.getByRole("button", { name: "Add 1 agent" })).toHaveCount(
+			0
+		);
 	});
 
 	test("adds only the selected drafts with one confirmation", async ({
@@ -90,6 +102,9 @@ test.describe("onboarding agent suggestions proof", () => {
 		await page.setViewportSize({ width: 1280, height: 1000 });
 		await page.goto(STORY_URL);
 		await page.getByRole("button", { name: "Select Release Desk" }).click();
+		await page
+			.getByRole("checkbox", { name: "I reviewed Release Desk" })
+			.click();
 		await expect(
 			page.getByRole("button", { name: "Add 1 agent" })
 		).toBeVisible();

@@ -93,7 +93,7 @@ export function ScorecardBadge({
 	const content = (
 		<>
 			<HugeiconsIcon className="size-3.5" icon={ShieldKeyIcon} />
-			<span className="font-semibold">{scorecard.grade}</span>
+			<span className="font-medium">{scorecard.grade}</span>
 			<span className="text-muted-foreground">{scorecard.score}/100</span>
 		</>
 	);
@@ -197,7 +197,7 @@ export function ScorecardPanel({
 				<div className="flex flex-col items-center gap-0.5">
 					<span
 						className={cn(
-							"font-semibold text-3xl leading-none",
+							"font-medium text-3xl leading-none",
 							scorecard.grade ? GRADE_STYLE[scorecard.grade] : ""
 						)}
 					>

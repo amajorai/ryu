@@ -4,6 +4,12 @@
 @source "../../../apps/**/*.{ts,tsx}";
 @source "../**/*.{ts,tsx}";
 
+/* Keep interface emphasis readable without allowing browser-default bold to
+   reintroduce a heavier weight where a surface omits an explicit utility. */
+:where(h1, h2, h3, h4, h5, h6, strong, b) {
+	font-weight: 500;
+}
+
 /* Sileo's bundled title rule capitalizes every word. Toast titles are sentence
    copy, so the shared toaster opts into this more-specific rule to preserve the
    casing supplied by each caller across web and desktop. */
@@ -34,7 +40,7 @@
 .ryu-welcome-wordmark {
 	position: relative;
 	display: inline-block;
-	font-weight: 650;
+	font-weight: 500;
 }
 
 .ryu-welcome-wordmark__sweep {
@@ -1840,7 +1846,7 @@ html {
 	display: block;
 	margin-bottom: 0.5rem;
 	font-size: 0.75rem;
-	font-weight: 600;
+	font-weight: 500;
 	line-height: 1rem;
 	color: var(--primary);
 	text-align: center;

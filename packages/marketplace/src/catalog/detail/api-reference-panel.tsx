@@ -186,7 +186,7 @@ function SidecarList({ sidecars }: { sidecars: CatalogSidecar[] }) {
 									className="flex items-baseline gap-2 text-xs"
 									key={`${sidecar.name}:${route.path}`}
 								>
-									<span className="shrink-0 font-mono font-semibold text-muted-foreground">
+									<span className="shrink-0 font-medium font-mono text-muted-foreground">
 										{(route.methods ?? ["ANY"]).join("/")}
 									</span>
 									<code className="min-w-0 flex-1 truncate font-mono">

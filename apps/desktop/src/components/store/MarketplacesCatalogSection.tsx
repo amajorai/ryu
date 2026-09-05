@@ -135,7 +135,7 @@ export default function MarketplacesCatalogSection() {
 	if (sourcesQuery.error) {
 		return (
 			<div className="mx-auto flex max-w-2xl flex-col gap-3 px-4 py-8">
-				<h2 className="font-semibold text-lg">Could not load marketplaces</h2>
+				<h2 className="font-medium text-lg">Could not load marketplaces</h2>
 				<p className="text-muted-foreground text-sm">
 					{sourcesQuery.error instanceof Error
 						? sourcesQuery.error.message
@@ -161,7 +161,7 @@ export default function MarketplacesCatalogSection() {
 							className="size-5 text-muted-foreground"
 							icon={Settings01Icon}
 						/>
-						<h2 className="font-semibold text-lg">Marketplaces</h2>
+						<h2 className="font-medium text-lg">Marketplaces</h2>
 					</div>
 					<p className="mt-1 max-w-2xl text-muted-foreground text-sm">
 						One place to review every catalog source. Ryu-hosted registries stay

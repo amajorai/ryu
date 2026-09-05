@@ -122,9 +122,7 @@ export function GuidedSetup({
 
 			<div className="flex flex-col gap-5">
 				<div className="flex flex-col gap-1">
-					<h2 className="font-semibold text-base">
-						{step.title ?? step.label}
-					</h2>
+					<h2 className="font-medium text-base">{step.title ?? step.label}</h2>
 					{step.hint ? (
 						<p className="text-muted-foreground text-sm leading-snug">
 							{step.hint}

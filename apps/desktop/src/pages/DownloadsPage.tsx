@@ -124,7 +124,7 @@ export default function DownloadsPage() {
 			<div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
 				<header className="flex items-center justify-between gap-3">
 					<div>
-						<h1 className="font-semibold text-xl">Downloads</h1>
+						<h1 className="font-medium text-xl">Downloads</h1>
 						<p className="text-muted-foreground text-sm">
 							Updates, active downloads, and everything you've downloaded
 							before.

@@ -148,7 +148,7 @@ function CanvasRegionNodeView({ data }: NodeProps<RegionCanvasNode>) {
 		>
 			<div className="flex items-center justify-between gap-3">
 				<div className="min-w-0">
-					<p className="truncate font-semibold text-sm">{data.label}</p>
+					<p className="truncate font-medium text-sm">{data.label}</p>
 					<p className="mt-0.5 text-[10px] text-muted-foreground uppercase tracking-[0.14em]">
 						Pane group
 					</p>

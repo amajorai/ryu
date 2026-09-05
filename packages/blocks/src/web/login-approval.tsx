@@ -75,7 +75,7 @@ export function LoginApprovalPrompt({
 						<p className="text-muted-foreground text-xs uppercase tracking-[0.16em]">
 							Matching code
 						</p>
-						<p className="mt-1 font-bold font-mono text-2xl tracking-[0.18em]">
+						<p className="mt-1 font-medium font-mono text-2xl tracking-[0.18em]">
 							{request.userCode}
 						</p>
 						<p className="mt-1 text-muted-foreground text-xs">
@@ -146,7 +146,7 @@ export function LoginApprovalWait({
 					<p className="text-muted-foreground text-xs uppercase tracking-[0.16em]">
 						Sign-in code
 					</p>
-					<p className="mt-2 font-bold font-mono text-3xl tracking-[0.2em]">
+					<p className="mt-2 font-medium font-mono text-3xl tracking-[0.2em]">
 						{userCode ?? "••••••••"}
 					</p>
 					<div className="mt-4 flex items-center justify-center gap-2 text-muted-foreground text-sm">

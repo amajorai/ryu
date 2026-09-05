@@ -9,7 +9,7 @@
 //
 // Capture mirrors the voice hook: raw Float32 PCM via the Web Audio graph (not
 // MediaRecorder), downsampled to 16 kHz mono and encoded as WAV — the format
-// Core's transcribe endpoint expects. The shared encode helpers live in
+// Core's local STT runtimes expect. The shared encode helpers live in
 // `renderer/lib/wav.ts`.
 
 import { useCallback, useEffect, useRef } from "react";
@@ -25,6 +25,7 @@ import { useIslandState } from "../store/island-state.ts";
 const ENGINE_SIDECARS: Record<string, string> = {
 	whisper: "whispercpp",
 	parakeet: "parakeet",
+	audiocpp: "audiocpp",
 };
 
 /**

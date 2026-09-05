@@ -530,7 +530,7 @@ export function SettingsDialog({
 								}
 								ref={contentRef}
 							>
-								<h2 className="mb-6 shrink-0 font-semibold text-base">
+								<h2 className="mb-6 shrink-0 font-medium text-base">
 									{activeLabel}
 								</h2>
 								{activeEntity ? (

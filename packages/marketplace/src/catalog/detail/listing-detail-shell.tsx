@@ -278,7 +278,7 @@ export function ListingHero({
 					    The CTA cluster shares this line and is `shrink-0`, so a long name
 					    truncates and the button the dialog exists for never does. */}
 					<div className="flex min-w-0 items-center gap-3">
-						<h2 className="flex min-w-0 flex-1 items-center gap-2 font-semibold text-white text-xl drop-shadow-md sm:text-2xl">
+						<h2 className="flex min-w-0 flex-1 items-center gap-2 font-medium text-white text-xl drop-shadow-md sm:text-2xl">
 							<span className="truncate">{name}</span>
 							{nameBadge}
 						</h2>
@@ -361,7 +361,7 @@ export function ListingStatStrip({ items }: { items: ListingStat[] }) {
 							    min-content width, so `truncate` on the row clipped nothing
 							    and a long value ("Desktop, Island, Mobile") ran straight past
 							    the dialog edge. */}
-							<span className="flex w-full min-w-0 items-center justify-center gap-1 font-semibold text-foreground text-sm">
+							<span className="flex w-full min-w-0 items-center justify-center gap-1 font-medium text-foreground text-sm">
 								{stat.icon ? (
 									<HugeiconsIcon
 										className="size-3.5 shrink-0"

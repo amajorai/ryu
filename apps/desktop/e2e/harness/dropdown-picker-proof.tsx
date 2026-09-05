@@ -6,6 +6,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@ryu/ui/components/dropdown-menu.tsx";
+import { FadeOverflowText } from "@ryu/ui/components/fade-overflow-text.tsx";
 import { Tabs, TabsList, TabsTrigger } from "@ryu/ui/components/tabs.tsx";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -157,9 +158,12 @@ function DropdownProof() {
 									<span className="shrink-0 font-mono text-muted-foreground text-xs">
 										{String(index + 1).padStart(2, "0")}
 									</span>
-									<span className="min-w-0 flex-1 truncate">
+									<FadeOverflowText
+										className="min-w-0 flex-1"
+										data-slot="dropdown-proof-label"
+									>
 										{LONG_LABEL} #{index + 1}
-									</span>
+									</FadeOverflowText>
 								</DropdownMenuItem>
 							)}
 						/>
@@ -227,14 +231,14 @@ function PinnedSummaryProof() {
 				description: (
 					<div className="flex gap-2">
 						<button
-							className="rounded-lg px-2 py-1 text-xs hover:bg-accent"
+							className="rounded-lg px-2 py-1 text-xs"
 							data-testid="pinned-summary-action"
 							type="button"
 						>
 							Commit
 						</button>
 						<button
-							className="rounded-lg px-2 py-1 text-xs hover:bg-accent"
+							className="rounded-lg px-2 py-1 text-xs"
 							data-testid="pinned-summary-action-secondary"
 							type="button"
 						>

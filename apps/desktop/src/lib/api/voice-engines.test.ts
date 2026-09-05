@@ -9,6 +9,15 @@ describe("voice engines", () => {
 		expect(VOICE_ENGINES.map((e) => e.engine)).toContain("gateway");
 	});
 
+	test("audio.cpp is selectable as a local runtime", () => {
+		const engine = VOICE_ENGINES.find((entry) => entry.engine === "audiocpp");
+		expect(engine).toMatchObject({
+			label: "audio.cpp",
+			model: "parakeet-tdt-0.6b-v3-q8_0",
+			sidecar: "audiocpp",
+		});
+	});
+
 	test("only the cloud engine has no sidecar", () => {
 		// The install/run row keys off `sidecar`; a local engine without one would
 		// render as permanently stopped.

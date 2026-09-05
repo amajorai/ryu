@@ -199,7 +199,7 @@ function DeviceCode({ userCode }: { userCode: string }) {
 			onClick={copy}
 			type="button"
 		>
-			<span className="font-bold font-mono text-3xl tracking-[0.2em]">
+			<span className="font-medium font-mono text-3xl tracking-[0.2em]">
 				{userCode}
 			</span>
 			<span className="relative inline-flex size-5 shrink-0 items-center justify-center">

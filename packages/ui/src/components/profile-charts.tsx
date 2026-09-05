@@ -130,7 +130,7 @@ export function TransportDonut({
 					})}
 				</svg>
 				<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-					<span className="font-semibold text-foreground text-xl tabular-nums">
+					<span className="font-medium text-foreground text-xl tabular-nums">
 						{formatCount(total)}
 					</span>
 					<span className="text-muted-foreground text-xs">observed runs</span>

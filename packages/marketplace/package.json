@@ -23,6 +23,7 @@
     "./catalog/chrome/marketplace-sections": "./src/catalog/chrome/marketplace-sections.ts",
     "./catalog/chrome/marketplace-surface": "./src/catalog/chrome/marketplace-surface.tsx",
     "./catalog/types": "./src/catalog/types.ts",
+    "./catalog/bundle-types": "./src/catalog/bundle-types.ts",
     "./catalog/pack-types": "./src/catalog/pack-types.ts",
     "./catalog/grant-labels": "./src/catalog/grant-labels.ts",
     "./catalog/realm-icons": "./src/catalog/realm-icons.ts",
@@ -77,6 +78,7 @@
     "@ryu/ui": "workspace:*",
     "@ryuhq/protocol": "workspace:*",
     "lucide-react": "catalog:",
+    "motion": "^12.40.0",
     "sileo": "catalog:"
   },
   "peerDependencies": {

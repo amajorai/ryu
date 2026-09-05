@@ -193,7 +193,7 @@ export async function listMeetingTemplates(
 }
 
 export interface ImportMeetingInput {
-	/** Optional transcription engine (`whisper` | `parakeet`). */
+	/** Optional transcription engine (`whisper` | `audiocpp` | `parakeet`). */
 	engine?: string;
 	/** Optional title; blank auto-names from the summary. */
 	title?: string;

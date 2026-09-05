@@ -119,7 +119,7 @@ export function EquationElementDocx(
 		<SlateElement {...props}>
 			<p
 				style={{
-					fontFamily: "Cambria Math, Consolas, monospace",
+					fontFamily: "Cambria Math, Arial, sans-serif",
 					fontSize: "12pt",
 					margin: "8pt 0",
 					textAlign: "center",
@@ -154,7 +154,7 @@ export function InlineEquationElementDocx(
 		<SlateElement {...props} as="span">
 			<span
 				style={{
-					fontFamily: "Cambria Math, Consolas, monospace",
+					fontFamily: "Cambria Math, Arial, sans-serif",
 				}}
 			>
 				{element.texExpression}

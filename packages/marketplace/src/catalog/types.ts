@@ -736,6 +736,11 @@ export interface CatalogEntry {
 	privacy_policy_url?: string | null;
 	/** Which discovery source produced the listing (e.g. `"github-topic"`). */
 	provenance?: string | null;
+	/** Public publisher identity, when this card came from the hosted Marketplace. */
+	publisher_org_id?: string | null;
+	publisher_org_logo?: string | null;
+	publisher_org_name?: string | null;
+	publisher_org_slug?: string | null;
 	/** Complete publisher identity mark when the serving catalog knows it.
 	 *  `dotted` is explicit disclosure; absence preserves compatibility with
 	 *  older Core catalog payloads that only carry `org_verified`. */

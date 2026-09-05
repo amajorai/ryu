@@ -24,7 +24,7 @@ use tracing::{debug, info, warn};
 use crate::error::GatewayError;
 use crate::providers::Provider;
 
-pub use catalog_client::{CoreCatalog, ToolSearchClient, COMPOSIO_TOOL_PREFIX};
+pub use catalog_client::{CoreCatalog, ToolSearchClient};
 
 /// The `tool_search` meta-tool name. Always permitted; never allowlist-gated
 /// (Contract 3: search ≠ grant).
@@ -36,7 +36,7 @@ pub const TOOL_SEARCH_NAME: &str = "tool_search";
 
 /// FQ id of Core's Agent-Skill loader. Mirrors `skills_tool::LOAD_TOOL_ID`
 /// (`apps/core/src/sidecar/mcp/skills_tool.rs`) the same way
-/// [`COMPOSIO_TOOL_PREFIX`] mirrors Core's Composio id shape — the gateway does not
+/// [`catalog_client::COMPOSIO_TOOL_PREFIX`] mirrors Core's Composio id shape — the gateway does not
 /// link Core, so this is a hand-kept string.
 ///
 /// It cannot be checked at compile time, so [`handle_search`] fails **loudly**: if
@@ -183,11 +183,9 @@ pub fn inject_search_tool(body: &mut Value, always_on: &[Value]) {
 ///        an execution); allowed ids execute via Core `call_tool`.
 ///   4. Loop until no tool calls or `max_rounds` is reached.
 ///
-/// Returns the final assistant turn plus the number of billable (Composio) tool
-/// executions dispatched across all rounds, so the caller can debit them (#496
-/// managed-plan tool-call cost). Only `composio.*` ids that pass the allowlist
-/// gate and reach Core are counted; `tool_search`, denied calls, and free
-/// builtin/MCP/app tools never increment it.
+/// Returns the final assistant turn plus a legacy billing counter. Unified tool
+/// execution is charged by Core, the execution authority, so this counter is
+/// always zero and callers cannot double-debit the same Composio action (#496).
 ///
 pub async fn run_tool_loop(
     body: &mut Value,
@@ -210,7 +208,6 @@ pub async fn run_tool_loop(
     }
 
     let mut response = provider.complete(model, body).await?;
-    let mut billable_tool_calls: u64 = 0;
 
     for round in 0..max_rounds {
         let tool_calls = match response["choices"][0]["message"]["tool_calls"].as_array() {
@@ -241,17 +238,6 @@ pub async fn run_tool_loop(
             let result: Value = if name == TOOL_SEARCH_NAME {
                 handle_search(body, catalog, ctx, input, describe_top_n).await
             } else if ctx.is_allowed(&name) {
-                // Bill Composio executions at dispatch (Composio charges per
-                // action). Counted whether the call succeeds or errors, since
-                // both reach Core; free builtin/MCP/app tools are not counted.
-                //
-                // CLASSIFIED HERE BECAUSE THIS IS THE LAST PLACE THE NAME EXISTS.
-                // Composio bills premium tools at 3x base, and the debit site
-                // downstream sees only counts — so a class decided anywhere later
-                // would have to be guessed. See `BillableToolCalls`.
-                if name.starts_with(COMPOSIO_TOOL_PREFIX) {
-                    billable_tool_calls = billable_tool_calls.saturating_add(1);
-                }
                 match catalog
                     // The chat-completion tool loop carries no server-derived host
                     // conversation (ctx has only agent_id/user_id), so the principal
@@ -262,6 +248,7 @@ pub async fn run_tool_loop(
                         input,
                         ctx.agent_id.as_deref(),
                         ctx.user_id.as_deref(),
+                        None,
                         None,
                     )
                     .await
@@ -314,7 +301,9 @@ pub async fn run_tool_loop(
         }
     }
 
-    Ok((response, billable_tool_calls))
+    // Core owns both execution and the charge notification. Keep the tuple's
+    // second field for the existing pipeline contract, but never debit here.
+    Ok((response, 0))
 }
 
 /// Handle a `tool_search` call: query Core's catalog, describe the top *callable*
@@ -625,6 +614,7 @@ mod tests {
             _agent_id: Option<&str>,
             _user_id: Option<&str>,
             _host_conversation_id: Option<&str>,
+            _host_conversation_proof: Option<&str>,
         ) -> Result<Value, String> {
             self.executed.lock().unwrap().push(tool_id.to_string());
             Ok(json!({ "ran": tool_id }))
@@ -959,7 +949,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(out["choices"][0]["message"]["content"], "done");
-        assert_eq!(billable, 1);
+        // Core charges the action after it executes; the Gateway-side counter
+        // stays zero so this path cannot double-debit it.
+        assert_eq!(billable, 0);
         assert_eq!(catalog.executed.lock().unwrap().as_slice(), &[canonical]);
         let names: Vec<&str> = body["tools"]
             .as_array()
@@ -972,10 +964,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn counts_only_billable_composio_executions() {
-        // #496: the loop bills only executed `composio.*` calls. Three rounds
-        // each execute one allowed tool — two Composio actions and one free
-        // builtin — so the billable count is 2, not 3.
+    async fn unified_loop_does_not_duplicate_core_billing() {
+        // #496: all three calls execute, but Core owns the charge event for
+        // unified catalog dispatch. The Gateway must report no second debit.
         let catalog = MockCatalog::default();
         let provider = ScriptedProvider::new(vec![
             tool_call("c1", "composio__SLACK_SEND_MESSAGE", "{}"),
@@ -997,9 +988,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out["choices"][0]["message"]["content"], "done");
-        // All three executed; only the two Composio calls are billable.
+        // All three executed; Core is the sole billing authority for Composio.
         assert_eq!(catalog.executed.lock().unwrap().len(), 3);
-        assert_eq!(billable, 2);
+        assert_eq!(billable, 0);
     }
 
     #[tokio::test]

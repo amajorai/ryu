@@ -186,8 +186,7 @@ pub enum PendingAction {
         host_conversation_id: Option<String>,
         /// Optional selected Composio accounts for a scoped profile run.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        composio_connection_scope:
-            Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+        composio_connection_scope: Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
         /// Optional conversation ids that a scoped profile run may search.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         conversation_scope: Option<Vec<String>>,
@@ -987,8 +986,7 @@ pub async fn gate_tool_call(
     profile_ids: &[String],
     session_id: Option<String>,
     host_conversation_id: Option<&str>,
-    composio_connection_scope:
-        Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
+    composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
     conversation_scope: Option<&[String]>,
 ) -> Option<anyhow::Error> {
     let engine = global_engine()?;
@@ -1010,7 +1008,8 @@ pub async fn gate_tool_call(
         profile_ids: profile_ids.to_vec(),
         session_id,
         host_conversation_id: host_conversation_id.map(str::to_owned),
-        composio_connection_scope: composio_connection_scope.map(<[crate::sidecar::adapters::ComposioConnectionBinding]>::to_vec),
+        composio_connection_scope: composio_connection_scope
+            .map(<[crate::sidecar::adapters::ComposioConnectionBinding]>::to_vec),
         conversation_scope: conversation_scope.map(<[String]>::to_vec),
     };
     let req = ApprovalRequest::for_tool_call(tool_id, tags, action);

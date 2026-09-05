@@ -118,10 +118,10 @@ describe("built-in modes", () => {
 		const agent = BUILTIN_SIDEBAR_MODES.find((m) => m.key === "agent");
 		expect(agent?.title).toBe("Agents view");
 		expect(agent?.sections).toEqual(["agents", "chats"]);
-		// Agents is primary, Sessions is secondary, and the mode opens on the
-		// roster — the opinion that makes it a mode rather than a filter.
+		// Agents are primary, direct threads live under each bot, and other chats
+		// stay reachable below the roster.
 		expect(agent?.defaultSection).toBe("agents");
-		expect(agent?.layout).toBe("strip");
+		expect(agent?.layout).toBe("stacked");
 	});
 
 	it("keeps Bot mode Agents first despite global sidebar ordering", () => {

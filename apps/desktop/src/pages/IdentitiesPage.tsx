@@ -180,7 +180,7 @@ export default function IdentitiesPage({
 					<div className="mx-auto max-w-xl space-y-4">
 						<div className="flex items-center justify-between gap-3">
 							<div>
-								<h2 className="font-semibold text-lg">
+								<h2 className="font-medium text-lg">
 									{focusedProfile.profile_id}
 								</h2>
 								<p className="text-muted-foreground text-sm">
@@ -339,7 +339,7 @@ function CreateConnectionForm({
 
 	return (
 		<div className="mx-auto max-w-xl space-y-4">
-			<h2 className="font-semibold text-lg">New connection</h2>
+			<h2 className="font-medium text-lg">New connection</h2>
 			<p className="text-muted-foreground text-sm">
 				A profile groups every domain an agent should be logged in to. Reuse an
 				existing profile name or create a new one.
@@ -418,9 +418,7 @@ function ConnectionDetail({
 		<div className="mx-auto max-w-xl space-y-5">
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0 space-y-1">
-					<h2 className="truncate font-semibold text-lg">
-						{connection.domain}
-					</h2>
+					<h2 className="truncate font-medium text-lg">{connection.domain}</h2>
 					<p className="text-muted-foreground text-sm">
 						Profile{" "}
 						<span className="font-medium text-foreground">

@@ -93,14 +93,14 @@ const TEXT_SIZE_CLASS: Record<string, string> = {
 const TEXT_WEIGHT_CLASS: Record<string, string> = {
 	normal: "font-normal",
 	medium: "font-medium",
-	semibold: "font-semibold",
-	bold: "font-bold",
+	semibold: "font-medium",
+	bold: "font-medium",
 };
 
 const HEADING_CLASS: Record<number, string> = {
-	1: "text-xl font-semibold",
-	2: "text-lg font-semibold",
-	3: "text-base font-semibold",
+	1: "text-xl font-medium",
+	2: "text-lg font-medium",
+	3: "text-base font-medium",
 	4: "text-sm font-medium",
 };
 

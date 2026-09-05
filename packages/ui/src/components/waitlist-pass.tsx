@@ -366,7 +366,7 @@ export function WaitlistPass({
 						/>
 					) : null}
 					<AutoFitText
-						className="font-semibold leading-[1.02] tracking-tight"
+						className="font-medium leading-[1.02] tracking-tight"
 						maxPx={NAME_MAX_PX}
 						minPx={NAME_MIN_PX}
 					>

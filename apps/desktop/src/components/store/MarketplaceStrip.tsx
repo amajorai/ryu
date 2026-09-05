@@ -15,6 +15,7 @@ import { MarketplaceItemCard } from "@ryu/blocks/desktop/marketplace";
 import { LANGUAGE_PACKS_CHANGED_EVENT } from "@ryu/i18n/core";
 import { useOptionalI18n } from "@ryu/i18n/react";
 import { StoreCardGrid } from "@ryu/marketplace/catalog/chrome/store-catalog-layout";
+import ItemLikeButton from "@ryu/marketplace/likes/like-button";
 import { toast } from "@ryu/ui/components/sileo";
 import { Spinner } from "@ryu/ui/components/spinner";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,10 +27,15 @@ import { toTarget } from "@/src/lib/api/client.ts";
 import { setLanguagePackEnabled } from "@/src/lib/api/language-packs.ts";
 import type { MarketplaceKind } from "@/src/lib/api/marketplace.ts";
 import {
+	fetchDetail,
 	fetchInstalledPortablePackages,
 	installPortablePackage,
 	type PortablePackageState,
 } from "@/src/lib/api/marketplace.ts";
+import {
+	installMarketplaceBundle,
+	type MarketplaceBundleInstallResult,
+} from "@/src/lib/api/marketplace-bundles.ts";
 import { toCardData } from "@/src/lib/api/marketplace-view.ts";
 
 export default function MarketplaceStrip({
@@ -41,7 +47,10 @@ export default function MarketplaceStrip({
 	initialSelectedId?: string;
 	kind: MarketplaceKind;
 }) {
-	const { items, loading, error } = useMarketplaceCatalog(kind, initialQuery);
+	const { items, loading, error, refresh } = useMarketplaceCatalog(
+		kind,
+		initialQuery
+	);
 	const node = useActiveNode();
 	const i18n = useOptionalI18n();
 	const target = useMemo(
@@ -58,6 +67,48 @@ export default function MarketplaceStrip({
 	const [pendingLanguagePackId, setPendingLanguagePackId] = useState<
 		string | null
 	>(null);
+	const [bundleBusy, setBundleBusy] = useState<string | null>(null);
+	const [bundleProgress, setBundleProgress] = useState<{
+		completed: number;
+		total: number;
+	} | null>(null);
+
+	const installBundle = useCallback(
+		async (id: string) => {
+			setBundleBusy(id);
+			try {
+				const bundle = await fetchDetail("bundle", id);
+				const result: MarketplaceBundleInstallResult =
+					await installMarketplaceBundle(
+						target,
+						id,
+						bundle.bundleMembers,
+						({ completed, total }) => setBundleProgress({ completed, total })
+					);
+				const requiredFailures = result.failures.filter(
+					({ member }) => member.required
+				);
+				if (requiredFailures.length > 0) {
+					toast.error("Bundle installed with required items missing", {
+						description: `${result.completed.length} installed, ${result.skipped.length} already present, ${requiredFailures.length} required failed. ${requiredFailures[0]?.error ?? "Retry from the bundle details."}`,
+					});
+				} else {
+					toast.success("Bundle installed", {
+						description: `${result.completed.length} installed, ${result.skipped.length} already present${result.failures.length > 0 ? `, ${result.failures.length} optional skipped` : ""}.`,
+					});
+				}
+				await refresh();
+			} catch (cause) {
+				toast.error("Couldn't install bundle", {
+					description: cause instanceof Error ? cause.message : String(cause),
+				});
+			} finally {
+				setBundleBusy(null);
+				setBundleProgress(null);
+			}
+		},
+		[refresh, target]
+	);
 
 	useEffect(() => {
 		if (kind !== "language_pack") {
@@ -164,6 +215,11 @@ export default function MarketplaceStrip({
 				<h3 className="font-medium text-sm">
 					{i18n?.t("marketplace.from") ?? "From the Marketplace"}
 				</h3>
+				{bundleBusy && bundleProgress ? (
+					<span aria-live="polite" className="text-muted-foreground text-xs">
+						Installing {bundleProgress.completed}/{bundleProgress.total}
+					</span>
+				) : null}
 				{loading && items.length === 0 ? (
 					<Spinner className="size-3.5 text-muted-foreground" />
 				) : null}
@@ -172,27 +228,44 @@ export default function MarketplaceStrip({
 			{items.length > 0 ? (
 				<StoreCardGrid>
 					{items.map((card) => {
+						const like = (
+							<ItemLikeButton
+								namespace={card.id}
+								seed={{ count: card.likeCount, liked: card.likedByMe }}
+							/>
+						);
 						const packageState = portablePackages.find(
 							(candidate) =>
 								candidate.kind === "language_pack" && candidate.id === card.id
 						);
+						const installOptions =
+							card.kind === "bundle"
+								? {
+										installing: bundleBusy === card.id,
+										like,
+										onInstall: () => {
+											void installBundle(card.id);
+										},
+									}
+								: card.kind === "language_pack" &&
+										(!card.pricing || isLicensed(card.kind, card.id))
+									? {
+											active:
+												packageState?.enabled === true &&
+												i18n?.selectedPack?.id === card.id,
+											installed: packageState !== undefined,
+											installing: languagePackBusy === card.id,
+											like,
+											onInstall: () => {
+												void installLanguagePack(card.id);
+											},
+										}
+									: { like };
 						const data = toCardData(
 							card,
 							isLicensed(card.kind, card.id),
 							buying === card.id,
-							card.kind === "language_pack" &&
-								(!card.pricing || isLicensed(card.kind, card.id))
-								? {
-										active:
-											packageState?.enabled === true &&
-											i18n?.selectedPack?.id === card.id,
-										installed: packageState !== undefined,
-										installing: languagePackBusy === card.id,
-										onInstall: () => {
-											void installLanguagePack(card.id);
-										},
-									}
-								: {}
+							installOptions
 						);
 						return (
 							<MarketplaceItemCard
@@ -215,11 +288,19 @@ export default function MarketplaceStrip({
 
 			{detail ? (
 				<MarketplaceDetailDialog
+					bundleInstalling={bundleBusy === detail.id}
 					id={detail.id}
 					initialIconUrl={detail.iconUrl}
 					initialName={detail.name}
 					kind={detail.kind}
 					onClose={closeDetail}
+					onInstallBundle={
+						detail.kind === "bundle"
+							? () => {
+									void installBundle(detail.id);
+								}
+							: undefined
+					}
 					open={true}
 				/>
 			) : null}

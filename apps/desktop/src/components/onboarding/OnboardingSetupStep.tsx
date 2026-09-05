@@ -158,6 +158,7 @@ function connectedAppDetails(
 interface OnboardingSetupStepProps {
 	agentSuggestions: OnboardingAgentSuggestion[];
 	agentSuggestionsError: string | null;
+	agentSuggestionsReviewed: ReadonlySet<string>;
 	agentSuggestionsSelected: ReadonlySet<string>;
 	agentSuggestionsSubmitting: boolean;
 	allowedAgentIds: readonly string[];
@@ -189,6 +190,7 @@ interface OnboardingSetupStepProps {
 	onCreateAgentSuggestions: () => void;
 	onImportThreads: () => void;
 	onLocalSelectionChange: (selection: AgentSelection) => void;
+	onReviewAgentSuggestion: (id: string, reviewed: boolean) => void;
 	onSearchConnections: (query: string) => void;
 	onSkip: () => void;
 	onToggleAgentSuggestion: (id: string) => void;
@@ -1050,7 +1052,7 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 	if (kind === "agent-suggestions") {
 		return (
 			<Shell
-				subtitle="Choose the helpers you want to add."
+				subtitle="Review each draft's prompt and tools, then confirm the helpers you want to add."
 				title="Suggested agents for your work"
 			>
 				<AgentSuggestionsStep
@@ -1058,8 +1060,10 @@ export function OnboardingSetupStep(props: OnboardingSetupStepProps) {
 					connectedApps={connectedAppDetails(props.connections, props.toolkits)}
 					error={props.agentSuggestionsError}
 					onCreate={props.onCreateAgentSuggestions}
+					onReview={props.onReviewAgentSuggestion}
 					onSkip={props.onSkip}
 					onToggle={props.onToggleAgentSuggestion}
+					reviewed={props.agentSuggestionsReviewed}
 					selected={props.agentSuggestionsSelected}
 					suggestions={props.agentSuggestions}
 				/>

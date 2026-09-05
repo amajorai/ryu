@@ -210,10 +210,10 @@ export function AwardBadge({ className, href, place, type }: AwardBadgeProps) {
 						x="4"
 						y="4"
 					/>
-					<text fill="#666666" fontSize="9" fontWeight="bold" x="53" y="20">
+					<text fill="#666666" fontSize="9" fontWeight={500} x="53" y="20">
 						PRODUCT HUNT
 					</text>
-					<text fill="#666666" fontSize="16" fontWeight="bold" x="52" y="40">
+					<text fill="#666666" fontSize="16" fontWeight={500} x="52" y="40">
 						{label}
 					</text>
 					<g transform="translate(8, 9)">

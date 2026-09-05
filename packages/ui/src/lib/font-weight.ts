@@ -13,6 +13,9 @@
 export const fontWeights = {
 	normal: "'wght' 400, 'opsz' 14",
 	medium: "'wght' 450, 'opsz' 15",
-	semibold: "'wght' 550, 'opsz' 20",
-	bold: "'wght' 700, 'opsz' 25",
+	// Keep the legacy names as medium aliases for callers that still reference
+	// them while the product's interface typography stays at one deliberate
+	// emphasis level.
+	semibold: "'wght' 450, 'opsz' 15",
+	bold: "'wght' 450, 'opsz' 15",
 } as const;

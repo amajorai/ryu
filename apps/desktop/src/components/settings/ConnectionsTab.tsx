@@ -943,7 +943,7 @@ export function ConnectionsTab() {
 				<p className="font-mono text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
 					Connections
 				</p>
-				<h2 className="mt-2 font-semibold text-2xl tracking-tight">
+				<h2 className="mt-2 font-medium text-2xl tracking-tight">
 					One place for every machine
 				</h2>
 				<p className="mt-1 max-w-xl text-muted-foreground text-sm">

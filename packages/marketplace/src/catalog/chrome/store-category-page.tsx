@@ -49,9 +49,7 @@ export default function StoreCategoryPage<T>({
 				</span>
 			</nav>
 
-			<h2 className="px-1 font-semibold text-base tracking-tight">
-				{category}
-			</h2>
+			<h2 className="px-1 font-medium text-base tracking-tight">{category}</h2>
 			<StoreCardGrid>
 				{Children.toArray(items.map((item) => renderItem(item)))}
 			</StoreCardGrid>

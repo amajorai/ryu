@@ -429,7 +429,7 @@ function PriceBlock({
 			<div className="mb-1 flex items-baseline">
 				{priceAmount(
 					perMonth,
-					"font-heading font-semibold text-4xl tabular-nums"
+					"font-heading font-medium text-4xl tabular-nums"
 				)}
 				<span className="ml-1 text-muted-foreground">{`${seat}/mo`}</span>
 			</div>
@@ -667,7 +667,7 @@ function CloudUpgradePanel({
 													{specs}
 												</span>
 											</span>
-											<span className="shrink-0 font-semibold text-primary text-sm">
+											<span className="shrink-0 font-medium text-primary text-sm">
 												Included
 											</span>
 										</div>
@@ -696,7 +696,7 @@ function CloudUpgradePanel({
 											{isLoading ? (
 												<Loader2 className="size-4 animate-spin" />
 											) : (
-												<span className="font-heading font-semibold text-sm tabular-nums">
+												<span className="font-heading font-medium text-sm tabular-nums">
 													${tier.monthlyAddUsd} per month
 												</span>
 											)}
@@ -856,7 +856,7 @@ export function LifetimePlanCard({
 			<CardContent className="flex-1">
 				<div className="mb-1 flex items-baseline gap-2">
 					<NumberTicker
-						className="font-heading font-semibold text-4xl text-primary tabular-nums"
+						className="font-heading font-medium text-4xl text-primary tabular-nums"
 						prefix="$"
 						value={129}
 					/>
@@ -1530,7 +1530,7 @@ export function EnterprisePlanCard({
 			<CardContent className="flex-1">
 				{/* No NumberTicker here on purpose: "Custom" is not a number, and the
 				    absence of one is the point of the tier. */}
-				<div className="mb-1 font-semibold text-4xl">Custom</div>
+				<div className="mb-1 font-medium text-4xl">Custom</div>
 				<p className="mb-6 text-muted-foreground text-xs">
 					This is a tailored annual contract for your organization
 				</p>
@@ -1612,7 +1612,7 @@ export function SelfHostedOssCard() {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
-				<div className="mb-1 font-heading font-semibold text-4xl tabular-nums">
+				<div className="mb-1 font-heading font-medium text-4xl tabular-nums">
 					$0
 				</div>
 				<p className="mb-6 text-muted-foreground text-xs">
@@ -1676,7 +1676,7 @@ export function SelfHostedLicensedCard() {
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="flex-1">
-				<div className="mb-1 font-semibold text-4xl">Custom</div>
+				<div className="mb-1 font-medium text-4xl">Custom</div>
 				<p className="mb-6 text-muted-foreground text-xs">
 					You pay a flat annual fee with no per-seat or per-token metering
 				</p>
@@ -1904,7 +1904,7 @@ export function PricingInstancePicker({
 	return (
 		<div className="mx-auto mb-12 max-w-7xl">
 			<div className="mb-6 text-center">
-				<h2 className="flex items-center justify-center gap-2 font-semibold text-2xl">
+				<h2 className="flex items-center justify-center gap-2 font-medium text-2xl">
 					<Server className="size-5" />
 					Ryu Cloud
 				</h2>
@@ -1985,7 +1985,7 @@ export function PricingInstancePicker({
 							<CardContent className="flex-1">
 								{isIncluded ? (
 									<div className="mb-6 flex items-baseline">
-										<span className="font-semibold text-4xl">Included</span>
+										<span className="font-medium text-4xl">Included</span>
 										<span className="ml-2 text-muted-foreground">
 											with your plan
 										</span>
@@ -1993,7 +1993,7 @@ export function PricingInstancePicker({
 								) : (
 									<div className="mb-6 flex items-baseline">
 										<NumberTicker
-											className="font-heading font-semibold text-4xl tabular-nums"
+											className="font-heading font-medium text-4xl tabular-nums"
 											prefix="$"
 											value={instance.monthlyUsd}
 										/>

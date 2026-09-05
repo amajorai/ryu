@@ -62,7 +62,7 @@ export default function GrantFunding() {
 									className="size-5 text-foreground"
 									strokeWidth={1.75}
 								/>
-								<h3 className="mt-6 inline-flex items-center gap-1 font-semibold text-base text-foreground">
+								<h3 className="mt-6 inline-flex items-center gap-1 font-medium text-base text-foreground">
 									{scheme.name}
 									<ArrowUpRight
 										aria-hidden="true"

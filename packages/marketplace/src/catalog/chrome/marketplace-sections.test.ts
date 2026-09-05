@@ -11,6 +11,7 @@ describe("Marketplace surface contract", () => {
 	test("owns one ordered built-in tab list", () => {
 		expect(MARKETPLACE_SECTION_TABS.map((tab) => tab.value)).toEqual([
 			"home",
+			"bundles",
 			"integrations",
 			"apps",
 			"plugins",

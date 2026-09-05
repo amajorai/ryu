@@ -65,7 +65,7 @@ export function PaneChooserPage() {
 		<div className="scroll-fade flex min-h-0 flex-1 flex-col overflow-y-auto">
 			<div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-10">
 				<header className="flex flex-col gap-1">
-					<h1 className="font-semibold text-xl">
+					<h1 className="font-medium text-xl">
 						{split ? "Fill this pane" : "Choose a page"}
 					</h1>
 					<p className="text-muted-foreground text-sm">

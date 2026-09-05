@@ -17,6 +17,7 @@ import {
 	type DownloadArch,
 	type DownloadOS,
 	detectDownloadArch,
+	detectDownloadArchAsync,
 	detectDownloadOS,
 	loadReleases,
 	osName,
@@ -49,14 +50,19 @@ export function DownloadMenu({
 	variant?: "default" | "ghost" | "outline";
 }) {
 	const [os, setOs] = useState<DownloadOS>("macos");
-	const [arch, setArch] = useState<DownloadArch>("intel");
+	const [arch, setArch] = useState<DownloadArch | null>(null);
 	const [releases, setReleases] = useState<Release[]>([]);
 
 	useEffect(() => {
 		setOs(detectDownloadOS());
-		setArch(detectDownloadArch());
+		const synchronousArch = detectDownloadArch();
 
 		let active = true;
+		void detectDownloadArchAsync().then((detectedArch) => {
+			if (active) {
+				setArch(detectedArch ?? synchronousArch);
+			}
+		});
 		loadReleases()
 			.then((data) => {
 				if (active) {
@@ -71,11 +77,14 @@ export function DownloadMenu({
 		};
 	}, []);
 
-	const state = resolveDownloadState(releases, os, arch);
-	const ready = state.kind === "ready";
+	const resolvedArch = arch ?? "intel";
+	const state = resolveDownloadState(releases, os, resolvedArch);
+	const ready = arch !== null && state.kind === "ready";
 	const href = ready ? state.asset.browser_download_url : RELEASES_PAGE;
 	const primaryLabel = showPlatform
-		? `Download for ${osName(os)} (${archLabel(os, arch)})`
+		? arch
+			? `Download for ${osName(os)} (${archLabel(os, arch)})`
+			: "Download"
 		: label;
 	const iconSize = size === "lg" ? 18 : 16;
 	const triggerClassName =

@@ -322,7 +322,7 @@ export function IslandSettings() {
 
 	// Audio: whether the island speaks replies aloud, and which engine + voice.
 	// The default engine is the auto-downloaded built-in OuteTTS. The engine list
-	// is whatever Core serves (built-in + Ryu Audio sidecar) — nothing hardcoded.
+	// is whatever Core serves (built-in, native audio.cpp, and Ryu Audio sidecar).
 	const [tts, setTtsState] = useState<IslandTtsPrefs>(DEFAULT_ISLAND_TTS_PREFS);
 	const [ttsEngines, setTtsEngines] = useState<TtsEngine[]>([]);
 	useEffect(() => {
@@ -657,7 +657,16 @@ export function IslandSettings() {
 			</SettingsSection>
 
 			<SettingsSection
-				caption="Audio and Voice Recognition for the island. Voice Recognition transcribes what you say (whisper is the bundled, auto-downloaded engine). Read-back speaks assistant replies aloud using the auto-downloaded Kokoro 82M by default (OuteTTS is the fallback). Read-back is automatically disabled while a meeting is recording."
+				caption={
+					<>
+						Audio and Voice Recognition for the island. Voice Recognition
+						transcribes what you say using the selected whisper, audio.cpp,
+						Parakeet, or cloud runtime. Read-back speaks assistant replies aloud
+						using the auto-downloaded Kokoro 82M by default (OuteTTS is the
+						fallback). Read-back is automatically disabled while a meeting is
+						recording.
+					</>
+				}
 				title="Audio & Voice Recognition"
 			>
 				<SettingsGroup>

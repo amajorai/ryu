@@ -793,7 +793,7 @@ export function OsDesktopSurface({
 								keep your workspace moving.
 							</p>
 							<button
-								className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 font-medium text-background text-sm transition-colors hover:bg-white/90"
+								className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 font-medium text-[#121126] text-sm transition-colors hover:bg-white/90"
 								onClick={() => setAppLauncherOpen(true)}
 								type="button"
 							>

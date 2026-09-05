@@ -114,6 +114,7 @@ function BlockedState() {
 function ProofApp() {
 	const params = new URLSearchParams(window.location.search);
 	const paid = params.get("paid") === "true";
+	const organizationPlan = params.get("organization") === "true";
 	const owner = params.get("role") !== "member";
 	const [stage, setStage] = useState<Stage>(paid ? "offer" : "source");
 	const [checkoutOpened, setCheckoutOpened] = useState(false);
@@ -206,6 +207,7 @@ function ProofApp() {
 						onContinue={() => setStage("task")}
 						onSkip={() => setStage("task")}
 						onStartCheckout={() => setCheckoutOpened(true)}
+						organizationPlan={organizationPlan}
 						subscribed={subscribed}
 					/>
 				) : null}

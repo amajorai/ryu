@@ -369,7 +369,7 @@ export function ToolbarMenuGroup({
 				)}
 			>
 				{label && (
-					<DropdownMenuLabel className="select-none font-semibold text-muted-foreground text-xs">
+					<DropdownMenuLabel className="select-none font-medium text-muted-foreground text-xs">
 						{label}
 					</DropdownMenuLabel>
 				)}

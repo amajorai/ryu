@@ -53,7 +53,7 @@ export default function ReviewPage() {
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
 				<div>
-					<h1 className="font-semibold text-base">Weekly review</h1>
+					<h1 className="font-medium text-base">Weekly review</h1>
 					<p className="text-muted-foreground text-xs">
 						Your focus, time, and highlights — derived on-device.
 					</p>
@@ -143,7 +143,7 @@ function DailyBars(props: { days: DailyRollup[] }) {
 
 	return (
 		<div className="rounded-lg bg-muted/30 p-3">
-			<div className="mb-3 font-semibold text-xs">Daily focus</div>
+			<div className="mb-3 font-medium text-xs">Daily focus</div>
 			<div className="flex items-end justify-between gap-2">
 				{days.map((day) => {
 					const totalMin = day.focus_minutes + day.distraction_minutes;
@@ -190,7 +190,7 @@ function AllocationList(props: { stats: JournalStat[]; title: string }) {
 
 	return (
 		<div className="min-w-0 rounded-lg bg-muted/30 p-3">
-			<div className="mb-2 font-semibold text-xs">{title}</div>
+			<div className="mb-2 font-medium text-xs">{title}</div>
 			{top.length === 0 ? (
 				<p className="text-muted-foreground text-xs">Nothing tracked yet.</p>
 			) : (
@@ -221,7 +221,7 @@ function Highlights(props: { items: string[] }) {
 	const { items } = props;
 	return (
 		<div className="rounded-lg bg-muted/30 p-3">
-			<div className="mb-2 font-semibold text-xs">Highlights</div>
+			<div className="mb-2 font-medium text-xs">Highlights</div>
 			<ul className="space-y-1.5">
 				{items.map((item) => (
 					<li className="flex gap-2 text-muted-foreground text-xs" key={item}>

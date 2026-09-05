@@ -39,10 +39,18 @@ test("Slides fixture mounts in the real Path-B Companion host", async ({
 		.toBe(true);
 
 	const companion = page.frameLocator("iframe");
-	await expect(
-		companion.getByRole("heading", { name: "Make the frame clear." })
-	).toBeVisible({ timeout: 15_000 });
-	await companion.getByRole("button", { name: /New project/ }).click();
+	// A real fresh install has no host-backed project yet. The gallery owns that
+	// first-run decision, so create the project through its empty-state CTA before
+	// asserting the editor content; expecting an editor immediately made this
+	// proof disagree with the shipped onboarding path.
+	const makeProject = companion.getByRole("button", { name: "Make a project" });
+	if (await makeProject.count()) {
+		await makeProject.click();
+	}
+	await expect(companion.getByRole("textbox", { name: "Text" })).toHaveValue(
+		"Make the frame clear.",
+		{ timeout: 15_000 }
+	);
 	await expect(
 		companion.getByRole("heading", { name: "Layers" })
 	).toBeVisible();

@@ -128,6 +128,8 @@ export function DeepLinkController() {
 					openTab("/skills");
 				} else if (intent.kind === "app") {
 					openTab("/apps");
+				} else if (intent.kind === "bundle") {
+					openTab("/marketplace");
 				}
 				request(intent);
 			}

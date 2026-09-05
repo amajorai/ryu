@@ -55,10 +55,12 @@ test("proves the shared dropdown, text tabs, summary hover, and recent picker UI
 		.poll(() =>
 			menu
 				.getByTestId("dropdown-proof-row-0")
-				.locator(".dropdown-menu-auto-scroll")
-				.count()
+				.locator('[data-slot="dropdown-proof-label"]')
+				.evaluate(
+					(element) => element.firstElementChild?.getAnimations().length ?? 0
+				)
 		)
-		.toBe(1);
+		.toBeGreaterThan(0);
 
 	for (let attempt = 0; attempt < 12; attempt++) {
 		if ((await menu.getByTestId("dropdown-proof-row-64").count()) > 0) {

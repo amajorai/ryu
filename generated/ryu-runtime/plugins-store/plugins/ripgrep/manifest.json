@@ -58,11 +58,12 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "description": "File or directory to search. Use an absolute workspace path when the Ryu node is not already running in that workspace."
+              "description": "Existing file or directory inside the active Ryu workspace. Relative paths resolve from that workspace; absolute paths must still stay inside it."
             }
           },
           "required": ["pattern", "path"]
-        }
+        },
+        "workspace_path_args": ["path"]
       }
     },
     {
@@ -83,11 +84,12 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "description": "File or directory whose visible files should be listed."
+              "description": "Existing file or directory inside the active Ryu workspace. Relative paths resolve from that workspace; absolute paths must still stay inside it."
             }
           },
           "required": ["path"]
-        }
+        },
+        "workspace_path_args": ["path"]
       }
     }
   ],

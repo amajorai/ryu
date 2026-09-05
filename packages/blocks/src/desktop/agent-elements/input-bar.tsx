@@ -1287,10 +1287,7 @@ export const InputBar = memo(function InputBar({
 						{mention.item.label}
 					</MentionToken>
 				) : (
-					<span
-						className="font-semibold text-primary"
-						key={`${index}-${token}`}
-					>
+					<span className="font-medium text-primary" key={`${index}-${token}`}>
 						<IconWorld
 							aria-hidden="true"
 							className="mr-1 inline-flex size-3.5 align-[-2px]"

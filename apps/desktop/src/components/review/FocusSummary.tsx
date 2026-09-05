@@ -30,7 +30,7 @@ export function FocusSummary(props: {
 	return (
 		<div className={`min-w-0 rounded-lg bg-muted/30 p-3 ${className ?? ""}`}>
 			<div className="mb-2 flex items-baseline justify-between gap-2">
-				<span className="font-semibold text-xs">{title}</span>
+				<span className="font-medium text-xs">{title}</span>
 				<span className="font-mono text-lg tabular-nums leading-none">
 					{ratioPct}
 					<span className="text-muted-foreground text-xs">%</span>

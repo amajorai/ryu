@@ -4,6 +4,7 @@ import {
 	Home01Icon,
 	LayerIcon,
 	Link01Icon,
+	PackageIcon,
 	PlugSocketIcon,
 	Settings01Icon,
 	Store01Icon,
@@ -20,6 +21,12 @@ import type { StoreSectionTab } from "./store-chrome.ts";
  */
 export const MARKETPLACE_SECTION_TABS = [
 	{ value: "home", label: "Home", icon: Home01Icon, group: "discover" },
+	{
+		value: "bundles",
+		label: "Bundles",
+		icon: PackageIcon,
+		group: "discover",
+	},
 	{
 		value: "integrations",
 		label: "Integrations",

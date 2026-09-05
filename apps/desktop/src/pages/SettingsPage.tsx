@@ -127,7 +127,7 @@ export default function SettingsPage() {
 
 	return (
 		<div className="mx-auto max-w-2xl px-6 py-8">
-			<h1 className="mb-8 font-semibold text-xl">
+			<h1 className="mb-8 font-medium text-xl">
 				{t("settings.page.title", {}, "Settings")}
 			</h1>
 

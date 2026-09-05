@@ -82,7 +82,7 @@ export default function OrganizationsList({
 	return (
 		<div className="mx-auto w-full max-w-3xl">
 			<div className="mb-8">
-				<h1 className="font-bold text-2xl">Your organizations</h1>
+				<h1 className="font-medium text-2xl">Your organizations</h1>
 				<p className="text-muted-foreground text-sm">
 					Switch between organizations or create a new one from the switcher
 					above.

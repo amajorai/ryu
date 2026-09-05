@@ -69,7 +69,7 @@ const OVERLAY_HTML = `<!doctype html>
     padding: 5px 9px 5px 7px; border: 1px solid rgba(255,255,255,.16);
     border-radius: 999px;
     color: #fff; white-space: nowrap; overflow: hidden;
-    font-size: 11px; font-weight: 600; line-height: 1.25;
+    font-size: 11px; font-weight: 500; line-height: 1.25;
     text-overflow: ellipsis;
     background: rgba(15, 23, 42, .88);
     box-shadow: 0 3px 12px rgba(0,0,0,.28);

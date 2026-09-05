@@ -10,6 +10,8 @@ import { NotificationStack } from "@ryu/ui/components/notification-stack";
 import { cn } from "@ryu/ui/lib/utils";
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { NotificationBell } from "../../components/ui/notification-bell.tsx";
+import { TrayMorph } from "../../src/components/shell/TrayPopover.tsx";
 import "../../src/index.css";
 
 type Layout = "split" | "grouped" | "unified";
@@ -72,20 +74,32 @@ const ITEMS = [
 		icon: "notification",
 		title: "Sync complete",
 	},
+	{
+		category: "Notification",
+		description: "A new alert just arrived in the inbox.",
+		id: "new-notification",
+		icon: "notification",
+		title: "New inbox alert",
+	},
 ] as const;
 
+type DemoItem = (typeof ITEMS)[number];
+
 function DemoItems({
+	itemCount = ITEMS.length,
 	onActivate,
 	onMarkRead,
 	readIds,
 	showCategory,
 }: {
+	itemCount?: number;
 	onActivate: (title: string) => void;
 	onMarkRead: (id: string) => void;
 	readIds: Set<string>;
 	showCategory?: boolean;
 }) {
-	return ITEMS.map((item) => ({
+	const visibleItems: readonly DemoItem[] = ITEMS.slice(0, itemCount);
+	return visibleItems.map((item) => ({
 		actions: (
 			<button
 				aria-label={`Mark ${item.title} read`}
@@ -122,32 +136,36 @@ function DemoItems({
 
 function NotificationLayoutProof() {
 	const [layout, setLayout] = useState<Layout>("unified");
+	const [visibleItemCount, setVisibleItemCount] = useState(4);
 	const [readIds, setReadIds] = useState<Set<string>>(new Set());
+	const [trayOpen, setTrayOpen] = useState(false);
 	const [lastAction, setLastAction] = useState("Ready to preview");
 	const step = LAYOUTS.findIndex((item) => item.id === layout);
 	const active = LAYOUTS[step] ?? LAYOUTS[2];
 	const items = useMemo(
 		() =>
 			DemoItems({
+				itemCount: visibleItemCount,
 				onActivate: (title) => setLastAction(`Opened ${title}`),
 				onMarkRead: (id) => {
 					const item = ITEMS.find((candidate) => candidate.id === id);
-					if (item) {
+					if (item && !readIds.has(id)) {
 						setReadIds((current) => new Set(current).add(id));
 						setLastAction(`Marked ${item.title} read`);
 					}
 				},
 				readIds,
 			}),
-		[readIds]
+		[readIds, visibleItemCount]
 	);
 	const groupedItems = useMemo(
 		() =>
 			DemoItems({
+				itemCount: visibleItemCount,
 				onActivate: (title) => setLastAction(`Opened ${title}`),
 				onMarkRead: (id) => {
 					const item = ITEMS.find((candidate) => candidate.id === id);
-					if (item) {
+					if (item && !readIds.has(id)) {
 						setReadIds((current) => new Set(current).add(id));
 						setLastAction(`Marked ${item.title} read`);
 					}
@@ -155,10 +173,11 @@ function NotificationLayoutProof() {
 				readIds,
 				showCategory: true,
 			}),
-		[readIds]
+		[readIds, visibleItemCount]
 	);
 	const announcements = items.filter((item) => item.id === "announcement");
 	const inbox = items.filter((item) => item.id !== "announcement");
+	const bellCount = Math.max(0, visibleItemCount - readIds.size);
 
 	return (
 		<main
@@ -274,6 +293,56 @@ function NotificationLayoutProof() {
 								/>
 							</div>
 						)}
+						<div
+							className="mt-4 flex items-center gap-2 border-white/10 border-t pt-3"
+							data-testid="notification-bell-footer"
+						>
+							<div className="min-w-0 flex-1 px-1">
+								<p className="font-medium text-xs text-zinc-200">Inbox</p>
+								<p
+									className="mt-0.5 text-[10px] text-zinc-500"
+									data-testid="bell-count-label"
+								>
+									{bellCount} unread
+								</p>
+							</div>
+							<TrayMorph
+								icon={Notification01Icon}
+								label="Notifications"
+								onOpenChange={setTrayOpen}
+								open={trayOpen}
+								renderTrigger={(triggerProps) => (
+									<NotificationBell
+										{...triggerProps}
+										className="rounded-xl! bg-transparent! text-zinc-300! hover:bg-white/10! hover:text-white!"
+										color="red"
+										count={bellCount}
+										data-testid="notification-bell"
+										max={99}
+										size={40}
+										style={{ height: 28, width: 28 }}
+									/>
+								)}
+							>
+								<div
+									className="w-[23rem] space-y-3 p-3 text-zinc-100"
+									data-testid="notification-tray-panel"
+								>
+									<div className="flex items-center justify-between px-1">
+										<span className="font-semibold text-sm">Inbox</span>
+										<span className="text-xs text-zinc-500">
+											{bellCount} unread
+										</span>
+									</div>
+									<NotificationStack
+										className="max-w-none"
+										defaultExpanded
+										items={items}
+										maxVisible={3}
+									/>
+								</div>
+							</TrayMorph>
+						</div>
 					</aside>
 
 					<div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.02] p-5">
@@ -306,10 +375,23 @@ function NotificationLayoutProof() {
 						<div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-zinc-400">
 							<p className="font-medium text-zinc-200">Interaction check</p>
 							<p className="mt-1 leading-5">
-								The orange count bubble stays visible while the stack expands,
-								and read actions remain in the card action slot instead of
-								competing with the row click.
+								The bell rings when a new item arrives, the count rolls to its
+								new value, and read actions remain in the card action slot
+								instead of competing with the row click.
 							</p>
+							<button
+								aria-label="Simulate new notification"
+								className="mt-3 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 font-medium text-[11px] text-zinc-200 transition-colors hover:bg-white/10"
+								onClick={() => {
+									setVisibleItemCount((current) =>
+										Math.min(ITEMS.length, current + 1)
+									);
+									setLastAction("Received new notification");
+								}}
+								type="button"
+							>
+								Simulate new notification
+							</button>
 						</div>
 					</div>
 				</section>

@@ -514,18 +514,10 @@ pub struct ChatStreamRequest {
     /// onboarding profile builder. `None` preserves normal agent behavior;
     /// `Some(empty)` deliberately denies every Composio action for a profile
     /// that selected no connected accounts.
-    #[serde(
-        default,
-        skip_deserializing,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub composio_connection_scope: Option<Vec<ComposioConnectionBinding>>,
     /// Optional server-owned conversation search ceiling for profile bootstrap.
-    #[serde(
-        default,
-        skip_deserializing,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub profile_conversation_scope: Option<Vec<String>>,
     /// Opt-in long-term (cross-session) memory (spec unit U11). When `true`,
     /// prior durable facts for this user/agent are injected as context and the
@@ -2076,12 +2068,14 @@ fn ryu_agent_route_with_user_jwt(
     acp_registry: &AcpAgentRegistry,
     provider_reg: &ProviderRegistry,
     user_jwt: Option<&str>,
-    composio_connection_scope: Option<
-        &[crate::sidecar::adapters::ComposioConnectionBinding],
-    >,
+    composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
     conversation_scope: Option<&[String]>,
     host_conversation_id: Option<&str>,
 ) -> Option<AgentRoute> {
+    if host_conversation_id.is_some_and(|id| !acp::is_safe_host_conversation_id(id)) {
+        tracing::warn!("ryu agent route refused an invalid host conversation id");
+        return None;
+    }
     // Prefer Core's own managed Pi binary (~/.ryu/bin/pi). This is a separate
     // install from any Pi the user has on PATH — same relationship as OpenClaw to Pi.
     if let Some(cmd) = acp::ryu_pi_acp_cmd_for_agent(
@@ -2129,48 +2123,27 @@ fn ryu_agent_route_with_user_jwt(
             // `mcpCapabilities {http:false, sse:false}` and drops `session/new`'s
             // `mcpServers` on the floor), so its ONLY road to Ryu's tools is the
             // `ryu-mcp` extension in the isolated config dir, which dials Core over
-            // HTTP. These vars are how it finds/authenticates to Core and retains
-            // the verified caller's conversation scope.
-            //
-            // Omitting them does not disable the extension — it makes it guess. Its
-            // defaults are `http://127.0.0.1:7980` and an EMPTY token
-            // (`assets/pi-extensions/ryu-mcp.ts`), so under any non-release
-            // `RYU_PROFILE` it dials the wrong port, and on a token-guarded node it
-            // presents no bearer. Either way the user sees an agent that silently has
-            // no Ryu tools. The managed-binary path (`acp::ryu_pi_acp_cmd`) has always
-            // injected them; this PATH fallback did not, which made the two roads to
-            // the same agent behave differently.
-            let gated_cmd = if cfg!(target_os = "windows") {
-                let gateway_env = if gateway {
-                    format!("set OPENAI_BASE_URL={gateway_v1}&& set OPENAI_API_KEY={token}&& ")
-                } else {
-                    String::new()
-                };
-                let mcp_env = acp::pi_mcp_extension_env(
-                    true,
-                    user_jwt,
-                    composio_connection_scope,
-                    conversation_scope,
-                    host_conversation_id,
-                );
-                format!(
-                    "cmd /c {gateway_env}{mcp_env}set PI_CODING_AGENT_DIR={config_dir}&& {}",
-                    spawn_cmd.trim_start_matches("cmd /c ")
-                )
-            } else {
-                let gateway_env = if gateway {
-                    format!("OPENAI_BASE_URL={gateway_v1} OPENAI_API_KEY={token} ")
-                } else {
-                    String::new()
-                };
-                let mcp_env = acp::pi_mcp_extension_env(
-                    false,
-                    user_jwt,
-                    composio_connection_scope,
-                    conversation_scope,
-                    host_conversation_id,
-                );
-                format!("{gateway_env}{mcp_env}PI_CODING_AGENT_DIR={config_dir} {spawn_cmd}")
+            // HTTP. Add every value through ACP's structured environment field so
+            // the fallback has the same scope without interpolating user data into
+            // a shell command.
+            let mut env = Vec::new();
+            if gateway {
+                env.push(("OPENAI_BASE_URL".to_owned(), gateway_v1));
+                env.push(("OPENAI_API_KEY".to_owned(), token));
+            }
+            env.push(("PI_CODING_AGENT_DIR".to_owned(), config_dir));
+            env.extend(acp::pi_mcp_extension_env(
+                user_jwt,
+                composio_connection_scope,
+                conversation_scope,
+                host_conversation_id,
+            ));
+            let gated_cmd = match acp::acp_spawn_with_env(spawn_cmd, env) {
+                Ok(command) => command,
+                Err(error) => {
+                    tracing::warn!(error = %error, "ryu fallback: invalid ACP spawn declaration");
+                    return None;
+                }
             };
             return Some(AgentRoute::Acp {
                 spawn_cmd: gated_cmd,
@@ -2226,9 +2199,7 @@ fn agent_route_with_user_jwt(
     acp_registry: &AcpAgentRegistry,
     provider_reg: &ProviderRegistry,
     user_jwt: Option<&str>,
-    composio_connection_scope: Option<
-        &[crate::sidecar::adapters::ComposioConnectionBinding],
-    >,
+    composio_connection_scope: Option<&[crate::sidecar::adapters::ComposioConnectionBinding]>,
     conversation_scope: Option<&[String]>,
     host_conversation_id: Option<&str>,
 ) -> Option<AgentRoute> {
@@ -11405,6 +11376,9 @@ pub trait AgentAdapter: Send + Sync {
 mod tests {
     use super::*;
     use crate::server::memory::DEFAULT_LONG_TERM_LIMIT;
+    use agent_client_protocol::schema::McpServer;
+    use agent_client_protocol_tokio::AcpAgent;
+    use std::str::FromStr;
 
     /// The prompt-cache preference is forwarded verbatim as a header, so an
     /// unvalidated value would reach the gateway (and the provider) mid-turn.
@@ -13014,83 +12988,60 @@ mod tests {
         // one was installed. A first version of this test passed unchanged after the
         // fallback's injection was deleted. So pin the property that removes the drift
         // instead: exactly one renderer, both roads calling it.
-        for windows in [true, false] {
-            let env = acp::pi_mcp_extension_env(windows, None, None, None, None);
-            for var in ["RYU_MCP_CORE_URL", "RYU_MCP_AGENT_ID"] {
-                assert!(env.contains(var), "{var} missing from rendered env: {env}");
-            }
-            assert!(
-                env.contains(&crate::sidecar::gateway::core_self_url()),
-                "must carry THIS node's Core URL, not the extension's default: {env}"
-            );
-            // Shell rendering is the half a second caller would most plausibly get
-            // wrong on its own — POSIX inline vs `set VAR=…&&` chaining.
-            assert_eq!(
-                env.contains("set RYU_MCP_CORE_URL="),
-                windows,
-                "wrong shell form for windows={windows}: {env}"
-            );
-        }
-
-        // And neither road may re-derive the values itself. `RYU_MCP_CORE_URL=` should
-        // appear ONLY inside the renderer; a call site formatting its own is exactly
-        // how the two drifted apart, and it would not be a compile error.
-        let acp_rs = include_str!("acp.rs");
-        let mod_rs = include_str!("mod.rs");
-        // The renderer formats the var once per shell, so two occurrences — both
-        // inside it. What must never grow is a THIRD, which would be a call site
-        // rendering its own and is precisely how the two roads drifted.
-        // Built at runtime, never written as one literal: this test reads its OWN
-        // file, so a contiguous needle would match the assertion below and the check
-        // would be about itself rather than about the call sites.
-        let needle = format!("{}{}", "RYU_MCP_CORE_URL=", "{core_url}");
-        assert_eq!(
-            acp_rs.matches(needle.as_str()).count(),
-            2,
-            "only pi_mcp_extension_env's two shell branches may format this var"
-        );
-        assert!(
-            !mod_rs.contains(needle.as_str()),
-            "the PATH fallback must call pi_mcp_extension_env, not re-render the env"
-        );
-        // Both roads reach the renderer, in both shell forms.
-        assert!(
-            acp_rs.contains("pi_mcp_extension_env(")
-                && acp_rs.contains("composio_connection_scope")
-                && acp_rs.contains("conversation_scope"),
-            "acp.rs must call the shared renderer with profile scope"
-        );
-        assert!(
-            mod_rs.contains("acp::pi_mcp_extension_env(")
-                && mod_rs.contains("composio_connection_scope")
-                && mod_rs.contains("conversation_scope"),
-            "mod.rs must call the shared renderer with profile scope"
-        );
-
-        // Calling it is not enough — the result must reach the command. Deleting the
-        // interpolation leaves the call in place and compiles cleanly, so nothing but
-        // this assertion catches it. Needles built at runtime for the same
-        // self-reference reason as above.
-        let used_posix = format!("{}{}", "{gateway_env}{mcp_env}", "PI_CODING_AGENT_DIR");
-        let used_win = format!("{}{}", "{gateway_env}{mcp_env}", "set PI_CODING_AGENT_DIR");
-        assert!(
-            mod_rs.contains(used_posix.as_str()),
-            "the PATH fallback renders mcp_env but never interpolates it (posix)"
-        );
-        assert!(
-            mod_rs.contains(used_win.as_str()),
-            "the PATH fallback renders mcp_env but never interpolates it (windows)"
-        );
-
-        let identity_env = acp::pi_mcp_extension_env(
-            false,
+        let env = acp::pi_mcp_extension_env(
             Some("verified-user-jwt"),
             None,
             None,
             Some("profile-conversation"),
         );
-        assert!(identity_env.contains("RYU_MCP_USER_JWT=verified-user-jwt"));
-        assert!(identity_env.contains("RYU_MCP_HOST_CONVERSATION_ID=profile-conversation"));
+        assert!(env.iter().any(|(name, value)| {
+            name == "RYU_MCP_CORE_URL" && value == &crate::sidecar::gateway::core_self_url()
+        }));
+        assert!(env
+            .iter()
+            .any(|(name, value)| { name == "RYU_MCP_USER_JWT" && value == "verified-user-jwt" }));
+        assert!(env.iter().any(|(name, value)| {
+            name == "RYU_MCP_HOST_CONVERSATION_ID" && value == "profile-conversation"
+        }));
+
+        // A shell metacharacter is rejected before it can become an environment
+        // value. Valid values are serialized through ACP's structured stdio
+        // transport for both platform launch shapes.
+        let malicious =
+            acp::pi_mcp_extension_env(None, None, None, Some("x&whoami>%TEMP%/ryu-pwned&rem"));
+        assert!(!malicious
+            .iter()
+            .any(|(name, _)| name == "RYU_MCP_HOST_CONVERSATION_ID"));
+        let posix = acp::acp_stdio_spawn_json(
+            "ryu-pi",
+            PathBuf::from("npx"),
+            vec!["-y".to_owned(), "pi-acp".to_owned()],
+            env.clone(),
+        )
+        .expect("POSIX ACP config serializes");
+        let windows = acp::acp_stdio_spawn_json(
+            "ryu-pi",
+            PathBuf::from("cmd"),
+            vec![
+                "/d".to_owned(),
+                "/s".to_owned(),
+                "/c".to_owned(),
+                "npx -y pi-acp".to_owned(),
+            ],
+            env,
+        )
+        .expect("Windows ACP config serializes");
+        for serialized in [posix, windows] {
+            let parsed = AcpAgent::from_str(&serialized).expect("structured ACP parses");
+            let McpServer::Stdio(stdio) = parsed.into_server() else {
+                panic!("expected stdio ACP config")
+            };
+            assert!(stdio.args.iter().all(|arg| !arg.contains("whoami")));
+            assert!(stdio.env.iter().any(|entry| {
+                entry.name == "RYU_MCP_HOST_CONVERSATION_ID"
+                    && entry.value == "profile-conversation"
+            }));
+        }
         let extension = include_str!("../../../../core/assets/pi-extensions/ryu-mcp.ts");
         assert!(extension.contains("x-ryu-user-jwt"));
         assert!(extension.contains("host_conversation_id"));

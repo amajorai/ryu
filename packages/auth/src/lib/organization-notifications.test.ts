@@ -61,6 +61,11 @@ beforeAll(() => {
 			},
 		},
 	}));
+	mock.module("@ryu/db/models/organization-feature-control.model", () => ({
+		OrganizationFeatureControl: {
+			find: () => ({ limit: async () => [] }),
+		},
+	}));
 	mock.module("@ryu/db/models/organization-notification.model", () => ({
 		isOrganizationNotificationEnabled: () => Promise.resolve(enabled),
 		organizationNotificationRecipientRoles: () =>

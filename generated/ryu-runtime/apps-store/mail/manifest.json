@@ -115,14 +115,12 @@
     {
       "id": "mail.send",
       "label": "Can send",
-      "description": "Compose and send mail from an agent inbox, which leaves this node and reaches real recipients.",
-      "implies": ["mail.read"]
+      "description": "Compose and send mail from an agent inbox, which leaves this node and reaches real recipients. Grant this level separately from read access."
     },
     {
       "id": "mail.manage",
       "label": "Can manage inboxes",
-      "description": "Create and remove agent inboxes, which decides what addresses agents can be reached at.",
-      "implies": ["mail.send"]
+      "description": "Create and remove agent inboxes, which decides what addresses agents can be reached at. Grant send access separately."
     }
   ],
   "companion": {

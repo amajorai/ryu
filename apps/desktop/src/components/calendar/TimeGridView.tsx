@@ -162,7 +162,7 @@ export function TimeGridView({
 								className={cn(
 									"mx-auto flex size-6 items-center justify-center rounded-full text-sm",
 									today
-										? "bg-primary font-semibold text-primary-foreground"
+										? "bg-primary font-medium text-primary-foreground"
 										: "text-foreground"
 								)}
 							>

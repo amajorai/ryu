@@ -12,7 +12,7 @@ export default function ProfilePage() {
 		<div className="mx-auto flex h-full w-full max-w-4xl flex-col overflow-hidden px-8 py-6">
 			<div className="mb-6 flex shrink-0 items-center justify-between gap-4">
 				<div>
-					<h1 className="font-semibold text-xl">Profile</h1>
+					<h1 className="font-medium text-xl">Profile</h1>
 				</div>
 				<Tabs
 					onValueChange={(value: string) => setSection(value as ProfileSection)}

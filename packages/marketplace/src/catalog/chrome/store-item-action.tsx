@@ -4,14 +4,14 @@
 // affordance is identical across Apps, Plugins, Models, Skills, MCP, and Agents.
 // It is the generalization of the models page's morph button:
 //
-//   • not installed          → an "Add" button (with live download %), wrapped
+//   • not installed          → a "Get" button (with live download %), wrapped
 //                              in a right-click ContextMenu.
 //   • installed, un-removable → the shared "built in" status glyph (+ the menu).
 //   • installed, no enable    → 3-dot menu with Remove (+ Report).
 //   • installed + enabled     → 3-dot menu with Disable, Report, Remove.
 //   • installed + disabled    → 3-dot menu with Enable, Report, Remove.
 //
-// The user-facing verb is Add / Adding… / Added / Remove. The PROPS keep the
+// The user-facing verb is Get / Installing… / Installed / Remove. The PROPS keep the
 // install vocabulary (`installed`, `onInstall`, `onUninstall`) deliberately:
 // that is what the lifecycle is called everywhere from Core outwards, and
 // renaming the wire to match the copy would make the two halves harder to trace,
@@ -35,6 +35,7 @@
 
 import {
 	Alert02Icon,
+	CheckmarkCircle02Icon,
 	Delete01Icon,
 	Download04Icon,
 	MoreHorizontalIcon,
@@ -85,7 +86,7 @@ export interface StoreItemActionProps {
 	/** Overrides the "Disable" menu label (e.g. Engines' "Stop"). */
 	disableLabel?: string;
 	/** Public release-asset download total. While an item is not installed, the
-	 * primary CTA shows this social proof and reveals the Add verb on hover/focus. */
+	 * primary CTA shows this social proof and reveals the Get verb on hover/focus. */
 	downloadCount?: number | null;
 	/** `undefined` = the item has no enable/disable concept (install/uninstall only). */
 	enabled?: boolean;
@@ -299,7 +300,7 @@ export default function StoreItemAction({
 	}
 
 	// Host floors are unmet on this node. Checked BEFORE every lifecycle branch
-	// below, because each of them offers a verb Core will refuse: Add and Enable
+	// below, because each of them offers a verb Core will refuse: Get and Enable
 	// both 409, and Enable in particular would read as "this is one click from
 	// working" when it is not. Remove stays available for an item already on disk.
 	if (incompatible) {
@@ -385,7 +386,7 @@ export default function StoreItemAction({
 					render={<div className="flex items-center" />}
 				>
 					<InstallProgressButton
-						aria-label={idleLabel ? `Add — ${idleLabel} downloads` : "Add"}
+						aria-label={idleLabel ? `Get — ${idleLabel} downloads` : "Get"}
 						className={idleLabel ? "group" : undefined}
 						idleVariant="default"
 						installing={busy}
@@ -399,18 +400,18 @@ export default function StoreItemAction({
 									{idleLabel}
 								</span>
 								<span className="hidden group-hover:inline group-focus-visible:inline">
-									Add
+									Get
 								</span>
 							</>
 						) : (
-							"Add"
+							"Get"
 						)}
 					</InstallProgressButton>
 				</ContextMenuTrigger>
 				<ContextMenuContent align="end">
 					<ContextMenuItem onClick={handleInstall}>
 						<HugeiconsIcon className="size-4" icon={Download04Icon} />
-						Add
+						Get
 					</ContextMenuItem>
 					{canReport ? (
 						<>
@@ -448,9 +449,8 @@ export default function StoreItemAction({
 		);
 	}
 
-	// Installed items collapse to a single 3-dot menu instead of a morphing pill,
-	// so the row stays quiet at rest and the lifecycle actions (enable/disable +
-	// uninstall) live behind one deliberate click. `enabled === undefined` means
+	// Installed items keep a visible completion state, while the lifecycle actions
+	// (enable/disable + uninstall) live behind one deliberate click. `enabled === undefined` means
 	// the item has no enable/disable concept (Models per-file, Agents, MCP, and
 	// Skills whose CLI can't toggle) — the menu then holds only Uninstall (+ Report).
 	const hasEnableConcept = enabled !== undefined;
@@ -471,35 +471,50 @@ export default function StoreItemAction({
 	}
 
 	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						aria-label="Manage"
-						className={className}
-						size="icon-sm"
-						variant="ghost"
-					>
-						<HugeiconsIcon className="size-4" icon={MoreHorizontalIcon} />
-					</Button>
-				}
-			/>
-			<DropdownMenuContent align="end">
-				<StoreItemMenuItems
-					canReport={canReport}
-					disableLabel={disableLabel}
-					enableLabel={enableLabel}
-					hasEnableConcept={hasEnableConcept}
-					isEnabled={isEnabled}
-					onDisable={onDisable}
-					onEnable={onEnable}
-					onOpenSettings={onOpenSettings}
-					onReport={handleReport}
-					onUninstall={onUninstall}
+		<div className="flex items-center gap-0.5">
+			<Button
+				aria-label="Installed"
+				className={className}
+				disabled
+				size="sm"
+				variant="secondary"
+			>
+				<HugeiconsIcon
+					className="size-3.5 text-emerald-500"
+					icon={CheckmarkCircle02Icon}
 				/>
-				{extra}
-			</DropdownMenuContent>
-		</DropdownMenu>
+				Installed
+			</Button>
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					render={
+						<Button
+							aria-label="Manage"
+							className={className}
+							size="icon-sm"
+							variant="ghost"
+						>
+							<HugeiconsIcon className="size-4" icon={MoreHorizontalIcon} />
+						</Button>
+					}
+				/>
+				<DropdownMenuContent align="end">
+					<StoreItemMenuItems
+						canReport={canReport}
+						disableLabel={disableLabel}
+						enableLabel={enableLabel}
+						hasEnableConcept={hasEnableConcept}
+						isEnabled={isEnabled}
+						onDisable={onDisable}
+						onEnable={onEnable}
+						onOpenSettings={onOpenSettings}
+						onReport={handleReport}
+						onUninstall={onUninstall}
+					/>
+					{extra}
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</div>
 	);
 }
 
@@ -627,7 +642,7 @@ export function storeItemContextMenu({
 	enableLabel?: string;
 	/** Extra rows, already `ContextMenuItem`s. Appended last. */
 	extra?: React.ReactNode;
-	/** Non-null when host floors are unmet — Add and Enable are withheld, since
+	/** Non-null when host floors are unmet — Get and Enable are withheld, since
 	 *  Core refuses both, but Remove for an on-disk copy stays. */
 	incompatible?: string | null;
 	installed?: boolean;
@@ -648,7 +663,7 @@ export function storeItemContextMenu({
 			rows.push(
 				<ContextMenuItem key="add" onClick={onInstall}>
 					<HugeiconsIcon className="size-4" icon={Download04Icon} />
-					Add
+					Get
 				</ContextMenuItem>
 			);
 		}

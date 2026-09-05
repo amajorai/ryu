@@ -77,7 +77,7 @@ export default function AiPlayground({
 							}`}
 							key={message.id}
 						>
-							<p className="mb-1 font-semibold text-sm">
+							<p className="mb-1 font-medium text-sm">
 								{message.role === "user" ? "You" : "AI Assistant"}
 							</p>
 							{message.parts?.map((part) => {

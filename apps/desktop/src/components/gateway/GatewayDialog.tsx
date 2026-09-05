@@ -286,7 +286,7 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="rounded-lg bg-muted/40 p-3">
 			<div className="text-muted-foreground text-xs">{label}</div>
-			<div className="mt-1 font-semibold text-lg tabular-nums">{value}</div>
+			<div className="mt-1 font-medium text-lg tabular-nums">{value}</div>
 		</div>
 	);
 }
@@ -7455,7 +7455,7 @@ export function GatewayDialog({
 					content={
 						<div className="px-4 py-4 md:px-8 md:py-6" ref={contentRef}>
 							<div className="mb-6 flex flex-col gap-1">
-								<h2 className="font-semibold text-base">{activeLabel}</h2>
+								<h2 className="font-medium text-base">{activeLabel}</h2>
 								{/* One plain sentence saying what this pane is for. Cheap, and
 								    it removes most of the "what even is this tab" tax. */}
 								{activeHint ? (

@@ -98,9 +98,11 @@ function ProductLinkGroup({
 					<MotionNavigationMenuLink
 						className="px-3 py-1"
 						key={product.label}
-						render={<Link href={product.href as Route} />}
+						render={
+							<Link data-cuelume-hover="tick" href={product.href as Route} />
+						}
 					>
-						<span className="font-semibold text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
+						<span className="font-medium text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
 							{product.label}
 						</span>
 					</MotionNavigationMenuLink>
@@ -121,7 +123,7 @@ function PrimaryProductLinks() {
 			<div className="mt-1 border-border/60 border-t px-3 pt-2.5">
 				<MotionNavigationMenuLink
 					className="px-3"
-					render={<Link href="/platform" />}
+					render={<Link data-cuelume-hover="tick" href="/platform" />}
 				>
 					<span className="font-medium text-foreground text-sm">
 						Explore the platform →
@@ -191,6 +193,7 @@ function HeaderLinkList({
 					return (
 						<a
 							className={className}
+							data-cuelume-hover="tick"
 							href={link.to}
 							key={link.to}
 							rel="noopener noreferrer"
@@ -204,6 +207,7 @@ function HeaderLinkList({
 					<Link
 						aria-current={active ? "page" : undefined}
 						className={className}
+						data-cuelume-hover="tick"
 						href={link.to as Route}
 						key={link.to}
 					>
@@ -364,6 +368,7 @@ export default function Header({
 											? "text-background/70 hover:bg-background/10 hover:text-background focus-visible:ring-background"
 											: "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring"
 									)}
+									data-cuelume-hover="tick"
 									href="/dashboard"
 								>
 									<ArrowLeft aria-hidden="true" className="size-4" />
@@ -405,7 +410,11 @@ export default function Header({
 
 			<div className="relative z-10 flex flex-row items-center justify-between p-4 px-10">
 				<div className="flex flex-1 items-center gap-3">
-					<Link className="flex items-center gap-4" href={homeHref as Route}>
+					<Link
+						className="flex items-center gap-4"
+						data-cuelume-hover="tick"
+						href={homeHref as Route}
+					>
 						<Logo size="28px" variant="outline" />
 						<Badge className="rounded-bl-lg" variant="secondary">
 							Research Preview
@@ -460,7 +469,7 @@ export default function Header({
 																	/>
 																}
 															>
-																<span className="font-semibold text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
+																<span className="font-medium text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
 																	{solution.navLabel}
 																</span>
 															</MotionNavigationMenuLink>
@@ -533,6 +542,7 @@ export default function Header({
 																key={resource.href}
 																render={
 																	<Link
+																		data-cuelume-hover="tick"
 																		href={resource.href as Route}
 																		rel={
 																			resource.external
@@ -545,7 +555,7 @@ export default function Header({
 																	/>
 																}
 															>
-																<span className="font-semibold text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
+																<span className="font-medium text-foreground text-xl tracking-tight transition-colors hover:text-accent-foreground">
 																	{resource.label}
 																</span>
 															</MotionNavigationMenuLink>
@@ -559,6 +569,7 @@ export default function Header({
 												className="px-3"
 												render={
 													<Link
+														data-cuelume-hover="tick"
 														href={DOCS_URL as Route}
 														rel="noopener noreferrer"
 														target="_blank"

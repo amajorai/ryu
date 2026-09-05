@@ -27,7 +27,7 @@ export interface RvpStart {
 	conversation_id?: string;
 	/** Sample rate (Hz) of the PCM16 BINARY frames the client will stream. */
 	sample_rate: number;
-	/** STT engine hint (`"whisper"` default | `"parakeet"`). */
+	/** STT engine hint (`"whisper"` | `"audiocpp"` | `"parakeet"`). */
 	stt_engine?: string;
 	/** TTS engine hint (`"outetts"` | a RyuTTS engine id). */
 	tts_engine?: string;

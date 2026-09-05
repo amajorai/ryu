@@ -619,7 +619,7 @@ export function paintFrontType(
 		trackingEm: NAME_TRACKING_EM,
 		weight: 600,
 	});
-	ctx.font = font(family, 600, nameSize, scale);
+	ctx.font = font(family, 500, nameSize, scale);
 	setTracking(ctx, nameSize * NAME_TRACKING_EM * scale);
 	ctx.fillStyle = palette.cardForeground;
 	const lines = wrapped

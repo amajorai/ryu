@@ -71,6 +71,7 @@ const CONV = {
 	folderPath: "D:\\Code\\ryu",
 	worktreePath: null,
 	branch: null,
+	messages: [],
 	participants: [],
 	agentId: null,
 	messageCount: 6,

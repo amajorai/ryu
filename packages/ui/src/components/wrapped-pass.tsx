@@ -168,7 +168,7 @@ export function WrappedPass({
 						/>
 					) : null}
 					<AutoFitText
-						className="font-semibold leading-[1.02] tracking-tight"
+						className="font-medium leading-[1.02] tracking-tight"
 						maxPx={WRAPPED_NAME_MAX_PX}
 						minPx={WRAPPED_NAME_MIN_PX}
 						stepPx={WRAPPED_FIT_STEP_PX}

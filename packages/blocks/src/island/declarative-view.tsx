@@ -475,7 +475,7 @@ export function IslandDeclarativeView({
 					{spec.stats.map((stat) => (
 						<div className="rounded-lg bg-white/5 px-2 py-1.5" key={stat.id}>
 							<div className="text-[10px] text-white/45">{stat.label}</div>
-							<div className="font-semibold text-sm text-white/90">
+							<div className="font-medium text-sm text-white/90">
 								{stat.value}
 							</div>
 							{stat.delta ? (

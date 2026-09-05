@@ -137,8 +137,7 @@ pub async fn build_ryu_mcp_server(
     composio_actions: Vec<String>,
     agent_id: String,
     identity_profile_ids: Vec<String>,
-    composio_connection_scope:
-        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    composio_connection_scope: Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
     conversation_scope: Option<Vec<String>>,
     permission_tx: Option<tokio::sync::mpsc::UnboundedSender<AcpEvent>>,
     permission_scope_id: Option<String>,
@@ -201,8 +200,7 @@ struct RyuMcpServer {
     /// one reads the credential under the gateway grant. Empty = no vault consult.
     identity_profile_ids: Vec<String>,
     /// Optional server-validated connected accounts for a profile run.
-    composio_connection_scope:
-        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    composio_connection_scope: Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
     /// Optional server-validated conversation ids for a profile run.
     conversation_scope: Option<Vec<String>>,
     /// This agent's orchestration capabilities, enforced again at dispatch time
@@ -407,8 +405,7 @@ struct RyuMcpHandler {
     /// Bound Identity Vault profiles (epic #517); see [`RyuMcpServer`].
     identity_profile_ids: Vec<String>,
     /// Optional server-validated connected accounts for a profile run.
-    composio_connection_scope:
-        Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
+    composio_connection_scope: Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
     /// Optional server-validated conversation ids for a profile run.
     conversation_scope: Option<Vec<String>>,
     /// This agent's orchestration capabilities; gated tools are refused here even
@@ -707,14 +704,16 @@ impl RyuMcpHandler {
                     .unwrap_or_default()
                     .to_owned();
                 let caller: Arc<dyn tool_exec::ToolCaller> = self.mcp.clone();
-                let invoker =
-                    std::sync::Arc::new(tool_exec::SandboxToolInvoker::registry_with_identity(
+                let invoker = std::sync::Arc::new(
+                    tool_exec::SandboxToolInvoker::registry_with_identity_and_conversation(
                         caller,
                         self.agent_id.clone(),
                         self.allowlist.clone(),
                         None,
                         self.identity_profile_ids.clone(),
-                    ));
+                        self.permission_scope_id.clone(),
+                    ),
+                );
                 let outcome = tool_exec::execute_code(code, invoker, &self.agent_id).await;
                 serde_json::to_value(outcome).map_err(|e| {
                     McpError::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
@@ -1694,19 +1693,18 @@ mod tests {
         // available (built-in HTTP provider, no binary required), and the
         // meta-tools are offered on top.
         let mcp = empty_registry();
-        let result =
-            build_ryu_mcp_server(
-                mcp,
-                None,
-                vec![],
-                "ryu".to_owned(),
-                vec![],
-                None,
-                None,
-                None,
-                None,
-            )
-            .await;
+        let result = build_ryu_mcp_server(
+            mcp,
+            None,
+            vec![],
+            "ryu".to_owned(),
+            vec![],
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
         assert!(
             result.is_some(),
             "None allowlist should offer Shadow built-in tools + meta-tools"

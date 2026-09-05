@@ -484,6 +484,8 @@ function MotionNavigationMenuTrigger({
 			<button
 				aria-expanded={isOpen}
 				className={cn(motionNavigationMenuTriggerStyle(), "group", className)}
+				data-cuelume-hover="tick"
+				data-cuelume-toggle=""
 				data-slot="navigation-menu-trigger"
 				data-state={isOpen ? "open" : "closed"}
 				onClick={(event) => {

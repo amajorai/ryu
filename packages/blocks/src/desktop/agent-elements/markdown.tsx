@@ -604,17 +604,17 @@ export function Markdown({
 	);
 	const components: Components = {
 		h1: ({ children, ...props }) => (
-			<h1 className="an-md-h1 mt-3 mb-1.5 font-semibold text-base" {...props}>
+			<h1 className="an-md-h1 mt-3 mb-1.5 font-medium text-base" {...props}>
 				{children}
 			</h1>
 		),
 		h2: ({ children, ...props }) => (
-			<h2 className="an-md-h2 mt-3 mb-1.5 font-semibold text-base" {...props}>
+			<h2 className="an-md-h2 mt-3 mb-1.5 font-medium text-base" {...props}>
 				{children}
 			</h2>
 		),
 		h3: ({ children, ...props }) => (
-			<h3 className="an-md-h3 mt-2 mb-1 font-semibold text-sm" {...props}>
+			<h3 className="an-md-h3 mt-2 mb-1 font-medium text-sm" {...props}>
 				{children}
 			</h3>
 		),
@@ -707,7 +707,7 @@ export function Markdown({
 					return (
 						<button
 							aria-label={`Open ${item.kind} ${item.label}`}
-							className="an-md-mention inline-flex max-w-full cursor-pointer rounded p-0 font-semibold outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+							className="an-md-mention inline-flex max-w-full cursor-pointer rounded p-0 font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
 							data-mention-id={item.id}
 							data-mention-kind={item.kind}
 							onClick={(event) => {
@@ -723,7 +723,7 @@ export function Markdown({
 				}
 				return (
 					<strong
-						className="inline-flex items-center gap-1 font-semibold text-primary"
+						className="inline-flex items-center gap-1 font-medium text-primary"
 						data-mention-id={item?.id}
 						data-mention-kind={item?.kind}
 						{...props}

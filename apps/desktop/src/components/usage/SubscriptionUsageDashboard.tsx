@@ -302,7 +302,7 @@ function ProviderMark({ account }: { account: SubscriptionUsageAccount }) {
 	return (
 		<span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-muted">
 			{logo ?? (
-				<span className="font-semibold text-muted-foreground text-xs uppercase">
+				<span className="font-medium text-muted-foreground text-xs uppercase">
 					{account.category.slice(0, 1)}
 				</span>
 			)}
@@ -316,7 +316,7 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
 			<div className="text-[11px] text-muted-foreground uppercase tracking-wide">
 				{label}
 			</div>
-			<div className="mt-1 font-semibold text-lg tabular-nums">{value}</div>
+			<div className="mt-1 font-medium text-lg tabular-nums">{value}</div>
 		</div>
 	);
 }
@@ -368,7 +368,7 @@ export function SubscriptionUsageDashboard({
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 				<div className="flex min-w-0 flex-col gap-1">
 					<div className="flex flex-wrap items-center gap-2">
-						<h3 className="font-semibold text-base">Subscription usage</h3>
+						<h3 className="font-medium text-base">Subscription usage</h3>
 						<Badge variant="outline">Live account view</Badge>
 					</div>
 					<p className="max-w-2xl text-muted-foreground text-sm">

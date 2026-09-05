@@ -362,7 +362,7 @@ export function ContributionsGraph({
 				<div className="flex items-center justify-between gap-4">
 					<div className="flex items-center gap-2">
 						{GitHubIcon}
-						<span className="font-semibold text-sm">{title ?? "Activity"}</span>
+						<span className="font-medium text-sm">{title ?? "Activity"}</span>
 					</div>
 					<span className="text-muted-foreground text-sm">
 						{formatCount(total)} contributions in the last year
@@ -388,7 +388,7 @@ export function ContributionsGraph({
 								transition={{ duration: 0.2 }}
 							>
 								<span className="block -translate-x-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-3 py-1.5 text-white text-xs shadow-xl dark:bg-white dark:text-zinc-900">
-									<span className="mr-1 font-bold">{hovered.count}</span>
+									<span className="mr-1 font-medium">{hovered.count}</span>
 									<span className="text-zinc-400 dark:text-zinc-500">
 										contributions on {hovered.date}
 									</span>
@@ -447,7 +447,7 @@ export function StatCard({
 					</span>
 				) : null}
 			</div>
-			<span className="font-mono font-semibold text-2xl text-foreground tabular-nums">
+			<span className="font-medium font-mono text-2xl text-foreground tabular-nums">
 				{value}
 			</span>
 			{sub ? (

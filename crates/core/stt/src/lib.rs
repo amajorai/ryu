@@ -1,12 +1,14 @@
 //! Speech-to-text (STT) modality primitive: `transcribe(audio) -> text` behind a
 //! swappable engine seam.
 //!
-//! Three engines, one dispatch ([`transcribe_wav_detailed`]):
+//! Four local/cloud engines, one dispatch ([`transcribe_wav_detailed`]):
 //! - **parakeet** (default where the `voice-parakeet` feature is compiled): the
 //!   in-process ONNX engine — the genuinely in-process hot path, never IPC (see
 //!   [`parakeet`]).
 //! - **whisper**: forwarded to a local whisper.cpp voice server's `/inference`
 //!   (a thin HTTP proxy).
+//! - **audiocpp**: forwarded to audio.cpp's OpenAI-shaped multipart transcription
+//!   endpoint (a thin HTTP proxy; the server can also host TTS).
 //! - **gateway**: the swappable cloud STT slot, routed through the Gateway's
 //!   `/v1/audio/transcriptions` with the per-attribute `x-ryu-slot-stt-*` headers
 //!   (a thin HTTP proxy).
@@ -14,8 +16,8 @@
 //! Per the Core-vs-Gateway rule the *dispatch* is a Core concern (it decides
 //! *what runs* — which local voice engine handles the audio); this crate owns the
 //! reusable transcription logic + result types, while the host couplings it
-//! cannot own — the whisper base-url, the Gateway url/bearer, and the parakeet
-//! model directory — are injected via the narrow [`SttHost`] trait. The crate has
+//! cannot own — the whisper/audio.cpp base-urls, the Gateway url/bearer, and the
+//! parakeet model directory — are injected via the narrow [`SttHost`] trait. The crate has
 //! ZERO dependency on `apps/core` (mirrors `ryu-search`'s `SearchEmbedder` seam).
 
 use std::path::PathBuf;
@@ -31,6 +33,14 @@ pub mod parakeet;
 pub trait SttHost: Send + Sync {
     /// Base URL of the local whisper.cpp voice server (`{base}/inference`).
     fn whisper_base_url(&self) -> String;
+    /// Base URL of the local audio.cpp server (`{base}/v1/audio/transcriptions`).
+    fn audio_cpp_base_url(&self) -> String {
+        "http://127.0.0.1:8086".to_string()
+    }
+    /// Model id declared in Ryu's generated audio.cpp server config.
+    fn audio_cpp_stt_model(&self) -> String {
+        "ryu-audiocpp-stt".to_string()
+    }
     /// Base URL of the Gateway (`{base}/v1/audio/transcriptions`).
     fn gateway_url(&self) -> String;
     /// The Gateway bearer token slot (never a raw provider API key).
@@ -139,8 +149,9 @@ pub async fn transcribe_wav(
 }
 
 /// Like [`transcribe_wav`] but also returns timestamped segments when the engine
-/// provides them (Whisper `verbose_json` via the Gateway or local whisper.cpp).
-/// Parakeet (the in-process default) returns text only, so its segments are empty.
+/// provides them (Whisper `verbose_json` via the Gateway or local whisper.cpp,
+/// and audio.cpp's segment/sample offsets). Parakeet (the in-process default)
+/// returns text only, so its `segments` is empty.
 pub async fn transcribe_wav_detailed(
     client: &reqwest::Client,
     host: &dyn SttHost,
@@ -175,6 +186,14 @@ pub async fn transcribe_wav_detailed(
                 segments: Vec::new(),
             })
             .map_err(|e| format!("parakeet transcription failed: {e:#}"));
+    }
+
+    // audio.cpp's server accepts the same multipart shape as OpenAI's
+    // transcription API. Its Parakeet response includes segment sample offsets;
+    // `parse_audio_cpp_segments` normalizes those to the shared millisecond
+    // clip contract.
+    if engine == "audiocpp" {
+        return transcribe_via_audio_cpp(client, host, bytes, filename).await;
     }
 
     // Gateway-routed Whisper: the swappable cloud STT slot (default provider
@@ -225,6 +244,101 @@ pub async fn transcribe_wav_detailed(
         .trim()
         .to_string();
     let segments = parse_verbose_segments(&value);
+    Ok(Transcription { text, segments })
+}
+
+/// Parse audio.cpp segment timings. Current responses may provide both seconds
+/// (`start`/`end`) and sample offsets (`start_sample`/`end_sample`); prefer the
+/// seconds because they are already normalized, and fall back to samples for
+/// Parakeet-TDT responses that only expose the latter.
+fn parse_audio_cpp_segments(body: &Value) -> Vec<TranscriptSegment> {
+    let sample_rate = body
+        .get("timing")
+        .and_then(|timing| timing.get("sample_rate"))
+        .and_then(Value::as_f64)
+        .or_else(|| body.get("sample_rate").and_then(Value::as_f64))
+        .filter(|rate| *rate > 0.0)
+        .unwrap_or(16_000.0);
+
+    body.get("segments")
+        .and_then(Value::as_array)
+        .map(|segments| {
+            segments
+                .iter()
+                .filter_map(|segment| {
+                    let (start_ms, end_ms) = if let (Some(start), Some(end)) = (
+                        segment.get("start").and_then(Value::as_f64),
+                        segment.get("end").and_then(Value::as_f64),
+                    ) {
+                        (
+                            (start.max(0.0) * 1000.0) as u64,
+                            (end.max(0.0) * 1000.0) as u64,
+                        )
+                    } else {
+                        let start = segment.get("start_sample").and_then(Value::as_f64)?;
+                        let end = segment.get("end_sample").and_then(Value::as_f64)?;
+                        (
+                            (start.max(0.0) * 1000.0 / sample_rate) as u64,
+                            (end.max(0.0) * 1000.0 / sample_rate) as u64,
+                        )
+                    };
+                    let text = segment
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    Some(TranscriptSegment {
+                        start_ms,
+                        end_ms,
+                        text,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn transcribe_via_audio_cpp(
+    client: &reqwest::Client,
+    host: &dyn SttHost,
+    bytes: Vec<u8>,
+    filename: String,
+) -> Result<Transcription, String> {
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(filename);
+    let form = reqwest::multipart::Form::new()
+        .part("file", part)
+        .text("model", host.audio_cpp_stt_model());
+    let base = host.audio_cpp_base_url();
+    let url = format!("{}/v1/audio/transcriptions", base.trim_end_matches('/'));
+    let response = client
+        .post(&url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| {
+            format!(
+                "audio.cpp voice engine not reachable at {url}: {error}. Install + start `audiocpp` from the Store first."
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        return Err(format!("audio.cpp returned {status}: {detail}"));
+    }
+
+    let value: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("could not parse audio.cpp response: {error}"))?;
+    let text = value
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let segments = parse_audio_cpp_segments(&value);
     Ok(Transcription { text, segments })
 }
 
@@ -424,6 +538,7 @@ mod tests {
 
     struct FakeHost {
         whisper: String,
+        audio_cpp: String,
         gateway: String,
         bearer: Result<String, String>,
     }
@@ -432,6 +547,7 @@ mod tests {
         fn default() -> Self {
             Self {
                 whisper: "http://127.0.0.1:0".to_string(),
+                audio_cpp: "http://127.0.0.1:0".to_string(),
                 gateway: "http://127.0.0.1:0".to_string(),
                 bearer: Ok("testtoken".to_string()),
             }
@@ -441,6 +557,9 @@ mod tests {
     impl SttHost for FakeHost {
         fn whisper_base_url(&self) -> String {
             self.whisper.clone()
+        }
+        fn audio_cpp_base_url(&self) -> String {
+            self.audio_cpp.clone()
         }
         fn gateway_url(&self) -> String {
             self.gateway.clone()
@@ -549,6 +668,51 @@ mod tests {
         assert_eq!(out.segments.len(), 2);
         assert_eq!(out.segments[0].text, "hello");
         assert_eq!(out.segments[1].end_ms, 2000);
+    }
+
+    #[tokio::test]
+    async fn audiocpp_success_parses_sample_segments() {
+        let server = spawn_server(
+            StatusCode::OK,
+            r#"{"text":"  hello from audio cpp  ","timing":{"sample_rate":16000},"segments":[{"start_sample":0,"end_sample":24000,"text":" hello "},{"start_sample":24000,"end_sample":40000,"text":" from audio cpp "}]}"#,
+        )
+        .await;
+        let host = FakeHost {
+            audio_cpp: server.url(),
+            ..FakeHost::default()
+        };
+        let client = reqwest::Client::new();
+        let out = transcribe_wav_detailed(
+            &client,
+            &host,
+            b"fakeaudio".to_vec(),
+            "clip.wav".to_string(),
+            Some("audiocpp"),
+        )
+        .await
+        .expect("audio.cpp transcription should succeed");
+        assert_eq!(out.text, "hello from audio cpp");
+        assert_eq!(out.segments.len(), 2);
+        assert_eq!(out.segments[0].end_ms, 1500);
+        assert_eq!(out.segments[1].start_ms, 1500);
+        assert_eq!(out.segments[1].end_ms, 2500);
+    }
+
+    #[test]
+    fn audiocpp_segment_parser_prefers_seconds_when_both_exist() {
+        let body = json!({
+            "timing": { "sample_rate": 16000 },
+            "segments": [{
+                "start": 0.25,
+                "end": 0.75,
+                "start_sample": 0,
+                "end_sample": 32000,
+                "text": "hello"
+            }]
+        });
+        let segments = parse_audio_cpp_segments(&body);
+        assert_eq!(segments[0].start_ms, 250);
+        assert_eq!(segments[0].end_ms, 750);
     }
 
     #[tokio::test]

@@ -302,6 +302,9 @@ pub trait CoreCatalog: Send + Sync {
     /// to a `ToolPrincipal` so a gateway-exec'd tool resolves `Owned` instead of the
     /// fail-closed `Unresolved` on an org-bound node. It is NOT `user_id` (which is
     /// client-supplied and spoofable). `None` preserves the fail-closed default.
+    /// `host_conversation_proof` is the process-local proof Core attaches before
+    /// the Gateway forward; it is relayed separately so a direct node-token caller
+    /// cannot opt into this internal context.
     async fn call_tool(
         &self,
         tool_id: &str,
@@ -309,6 +312,7 @@ pub trait CoreCatalog: Send + Sync {
         agent_id: Option<&str>,
         user_id: Option<&str>,
         host_conversation_id: Option<&str>,
+        host_conversation_proof: Option<&str>,
     ) -> Result<Value, String>;
 
     /// Forward a PTC `execute`/`resume` to Core (Contract 4, P4). `path` is the
@@ -412,6 +416,7 @@ impl CoreCatalog for ToolSearchClient {
         agent_id: Option<&str>,
         user_id: Option<&str>,
         host_conversation_id: Option<&str>,
+        host_conversation_proof: Option<&str>,
     ) -> Result<Value, String> {
         let body = json!({
             "tool": tool_id,
@@ -421,9 +426,7 @@ impl CoreCatalog for ToolSearchClient {
             // Server-derived host conversation → Core's `ToolPrincipal`. Omitted-as-
             // null preserves the fail-closed default on a bound node.
             "host_conversation_id": host_conversation_id,
-            // The Gateway charges its own Composio tool loop after Core returns.
-            // Core must not emit a second charge for the same action.
-            "budget_already_metered": true,
+            "host_conversation_proof": host_conversation_proof,
         });
         let resp = self
             .with_auth(self.http.post(self.url("/api/mcp/tools/call")).json(&body))

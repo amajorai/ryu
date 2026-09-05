@@ -279,7 +279,7 @@ export function AgendaView({
 						<div className="flex items-baseline gap-2 border-b pb-1.5">
 							<span
 								className={cn(
-									"font-semibold text-sm",
+									"font-medium text-sm",
 									isToday(day) ? "text-primary" : "text-foreground"
 								)}
 							>

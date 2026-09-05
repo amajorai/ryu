@@ -67,7 +67,7 @@ export function LicensesTab() {
 	return (
 		<div className="mx-auto max-w-2xl px-6 py-8">
 			<div className="mb-6 flex items-center justify-between">
-				<h2 className="font-semibold text-lg">My licenses</h2>
+				<h2 className="font-medium text-lg">My licenses</h2>
 				<Button onClick={() => refresh()} size="sm" variant="ghost">
 					<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
 					Refresh

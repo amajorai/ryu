@@ -12,16 +12,16 @@ test("conversation sharing exposes the live and public access controls", async (
 	await expect(dialog).toContainText("Jia Wei Ng (you)");
 	await expect(dialog).toContainText("Noor Aziz");
 	await expect(dialog.getByLabel("Role for Noor Aziz")).toContainText("Viewer");
-	await expect(dialog.getByLabel("General access")).toContainText(
-		"Anyone with the link"
-	);
+	await expect(
+		dialog.getByRole("combobox", { name: "General access" })
+	).toContainText("Anyone with the link");
 	await expect(dialog).toContainText("frozen copy");
 	await expect(dialog.getByRole("button", { name: "Copy link" })).toBeVisible();
 	await expect(
 		dialog.getByRole("button", { name: "Update copy" })
 	).toBeVisible();
 
-	await dialog.getByLabel("General access").click();
+	await dialog.getByRole("combobox", { name: "General access" }).click();
 	await expect(page.getByRole("option", { name: "Restricted" })).toBeVisible();
 	await expect(
 		page.getByRole("option", { name: "Anyone in the organization" })

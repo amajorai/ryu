@@ -873,7 +873,7 @@ export function PricingSavingsCalculator({
 								<>
 									<div className="mt-6 flex items-baseline">
 										<NumberTicker
-											className="font-heading font-semibold text-4xl tabular-nums"
+											className="font-heading font-medium text-4xl tabular-nums"
 											prefix={savings < 0 ? "-$" : "$"}
 											value={Math.abs(savings)}
 										/>

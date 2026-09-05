@@ -494,10 +494,10 @@ async fn transcribe(
     .map(|t| t.trim().to_string())
 }
 
-/// Synthesize one sentence to WAV bytes. Uses OuteTTS (built-in), the Gateway's
-/// cloud TTS slot for `gateway`, or, for any other engine id, the resident
-/// RyuTTS sidecar `/generate` — the low-latency path for repeated per-sentence
-/// synthesis (mirrors `server::voice::speak`).
+/// Synthesize one sentence to WAV bytes. Uses OuteTTS (built-in), audio.cpp, the
+/// Gateway's cloud TTS slot for `gateway`, or, for any other engine id, the
+/// resident RyuTTS sidecar `/generate` — the low-latency path for repeated
+/// per-sentence synthesis (mirrors `server::voice::speak`).
 async fn synthesize_sentence(
     deps: &VoiceSessionDeps,
     cfg: &VoiceConfig,
@@ -511,6 +511,23 @@ async fn synthesize_sentence(
         .unwrap_or_else(crate::sidecar::providers::ryutts::default_tts_engine);
     if engine == "outetts" {
         return crate::sidecar::providers::outetts::synthesize(text).await;
+    }
+
+    // Native audio.cpp is an explicit runtime choice. Its server returns WAV by
+    // default, so it can use the same binary voice frame protocol as the other
+    // local engines without changing the websocket client.
+    if engine == "audiocpp" {
+        let request = crate::server::voice::SpeakRequest {
+            text: text.to_string(),
+            engine: Some(engine),
+            voice: cfg.tts_voice.clone(),
+            speed: None,
+            language: None,
+            reference_audio: None,
+        };
+        return crate::server::voice::synth_via_audio_cpp(&deps.client, &request, text)
+            .await
+            .map_err(anyhow::Error::msg);
     }
 
     // The cloud slot, so picking "Cloud (via gateway)" in settings works in

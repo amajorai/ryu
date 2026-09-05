@@ -202,7 +202,7 @@ export function DashboardBuilderChat({
 			attachments={composer.attachments}
 			emptyStateHeader={
 				<div className="flex flex-col gap-1 px-1 pb-3 text-center">
-					<span className="font-semibold text-base">
+					<span className="font-medium text-base">
 						Build {dashboardName.trim() || "this dashboard"}
 					</span>
 					<span className="text-muted-foreground text-sm">

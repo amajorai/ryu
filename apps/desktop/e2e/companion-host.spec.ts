@@ -134,14 +134,19 @@ for (const app of APPS) {
 
 		const srcdoc = await mountInHarness(page, app);
 
-		// The injection must land INSIDE <head> and before the app's own module
-		// script, or the bridge never runs at all.
-		const headAt = srcdoc.indexOf("<head");
+		// The builder intentionally prepends the security prefix before the app's
+		// `<html><head>` token. The HTML parser places that prefix in the document
+		// head, while the raw-string ordering guarantees that hostile pre-head app
+		// markup cannot run before the bridge.
+		const appDocumentAt = srcdoc.indexOf("<html");
 		const cspAt = srcdoc.indexOf("Content-Security-Policy");
+		const bridgeAt = srcdoc.indexOf("ryu-plugin-ready");
 		const appScriptAt = srcdoc.indexOf('<script type="module"');
-		expect(headAt).toBeGreaterThanOrEqual(0);
-		expect(cspAt).toBeGreaterThan(headAt);
-		expect(appScriptAt).toBeGreaterThan(cspAt);
+		expect(appDocumentAt).toBeGreaterThanOrEqual(0);
+		expect(cspAt).toBeGreaterThanOrEqual(0);
+		expect(cspAt).toBeLessThan(appDocumentAt);
+		expect(bridgeAt).toBeGreaterThan(cspAt);
+		expect(appScriptAt).toBeGreaterThan(bridgeAt);
 
 		// The handshake itself. Generous but finite: the panel gives up (shows the
 		// stall state) at 8s, so anything slower is a user-visible failure anyway.

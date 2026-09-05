@@ -10,11 +10,14 @@ test("shows the registered memory citation action and tooltip", async ({
 	const proof = page.getByTestId("memory-citations-proof");
 	await expect(proof).toBeVisible();
 
-	const action = page.getByRole("button", { name: "Memories cited" });
+	const more = page.getByRole("button", { name: "More message actions" });
+	await expect(more).toBeVisible();
+	await more.click();
+	const action = page.getByRole("menuitem", { name: "Memories cited" });
 	await expect(action).toBeVisible();
-	await action.hover();
+	await action.click();
 
-	const tooltip = page.locator('[data-slot="tooltip-content"]');
+	const tooltip = page.locator('[data-slot="popover-content"]');
 	await expect(tooltip).toBeVisible();
 	await page.waitForTimeout(300);
 	await expect(tooltip).toContainText("Memories cited");

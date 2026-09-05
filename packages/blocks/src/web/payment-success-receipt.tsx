@@ -75,13 +75,13 @@ const PAYMENT_SUCCESS_COPY: Record<PaymentSuccessKind, PaymentSuccessCopy> = {
 		title: "Subscription active",
 	},
 	topup: {
-		detailLabel: "Balance",
-		detailValue: "Rollover credits",
+		detailLabel: "Wallet",
+		detailValue: "Credit update",
 		description:
 			"Your payment went through. Your credited balance will appear as the wallet update clears.",
 		eyebrow: "Ryu / top-up receipt",
-		nextLabel: "Credits",
-		nextValue: "Being added",
+		nextLabel: "Balance",
+		nextValue: "Syncing",
 		title: "Top-up complete",
 	},
 	upgrade: {

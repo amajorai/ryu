@@ -10,12 +10,17 @@ import {
 	roleSatisfies,
 } from "@ryu/db/models/control-plane.model";
 import { PlatformInboxNotification } from "@ryu/db/models/inbox-notification.model";
+import { OrganizationFeatureControl } from "@ryu/db/models/organization-feature-control.model";
 import {
 	isOrganizationNotificationEnabled,
 	type OrganizationNotificationKind,
 	organizationNotificationRecipientRoles,
 } from "@ryu/db/models/organization-notification.model";
 import { OrganizationActivityEmail } from "@ryu/email";
+import {
+	organizationFeatureByKey,
+	resolveOrganizationFeature,
+} from "./organization-features.ts";
 import {
 	deliverUserNotificationEmail,
 	shouldStoreUserNotificationInApp,
@@ -87,6 +92,42 @@ const normalizeEmail = (value: unknown): string =>
 const uniqueStrings = (values: readonly string[], max: number): string[] => [
 	...new Set(values.map((value) => text(value, max)).filter(Boolean)),
 ];
+
+/** Resolve the member-aware organization notification access switch. */
+async function organizationNotificationsEnabled(
+	organizationId: string,
+	userId: string
+): Promise<boolean> {
+	const feature = organizationFeatureByKey("products.notify");
+	if (!feature) {
+		return true;
+	}
+	try {
+		const controls = await OrganizationFeatureControl.find({
+			organizationId,
+			key: feature.key,
+			$or: [{ userId: null }, ...(userId ? [{ userId }] : [])],
+		}).limit(2);
+		let organizationOverride: boolean | null = null;
+		let memberOverride: boolean | null = null;
+		for (const control of controls) {
+			if (control.userId === null) {
+				organizationOverride = control.enabled;
+			} else if (control.userId === userId) {
+				memberOverride = control.enabled;
+			}
+		}
+		return resolveOrganizationFeature(
+			feature,
+			organizationOverride,
+			memberOverride
+		);
+	} catch {
+		// Notification delivery remains fail-open when the feature-control store is
+		// unavailable, matching the existing transactional notification policy.
+		return true;
+	}
+}
 
 function safeActionUrl(value: unknown): string | null {
 	const candidate = text(value, MAX_TEXT);
@@ -579,7 +620,27 @@ export async function notifyOrganizationEvent(
 				mergeRecipients(recipients, resolved);
 			}
 		}
-		if (recipients.length === 0) {
+		const enabledRecipients: OrganizationNotificationRecipient[] = [];
+		for (const recipient of recipients) {
+			const enabledOrganizationIds: string[] = [];
+			for (const organizationId of recipient.organizationIds) {
+				if (
+					await organizationNotificationsEnabled(
+						organizationId,
+						recipient.userId
+					)
+				) {
+					enabledOrganizationIds.push(organizationId);
+				}
+			}
+			if (enabledOrganizationIds.length > 0) {
+				enabledRecipients.push({
+					...recipient,
+					organizationIds: enabledOrganizationIds,
+				});
+			}
+		}
+		if (enabledRecipients.length === 0) {
 			return;
 		}
 
@@ -601,7 +662,7 @@ export async function notifyOrganizationEvent(
 		);
 
 		await Promise.all(
-			recipients.map(async (recipient) => {
+			enabledRecipients.map(async (recipient) => {
 				try {
 					await publishOrganizationInboxNotification(input, recipient);
 				} catch (error) {

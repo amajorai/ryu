@@ -211,6 +211,15 @@ async fn handle_socket(
     // client-supplied id is a REUSE of an existing conversation and must be gated;
     // a minted `voice_…` id is brand new and cannot collide with anyone's row.
     let conversation_id = conversation_id.unwrap_or_else(|| format!("voice_{session_id}"));
+    if !crate::sidecar::adapters::acp::is_safe_host_conversation_id(&conversation_id) {
+        let _ = ws_tx
+            .send(error_frame(
+                "bad_conversation_id",
+                "conversation_id must be 1-128 ASCII letters, digits, '.', '_' or '-'",
+            ))
+            .await;
+        return;
+    }
 
     // ── THE GATE ─────────────────────────────────────────────────────────────
     // The same create-or-use gate `chat_stream` uses: an EXISTING row gets the full

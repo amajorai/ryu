@@ -2790,12 +2790,7 @@ mod tests {
         assert_eq!(server.command.as_deref(), Some("npx"));
         assert_eq!(
             server.args,
-            vec![
-                "-y",
-                "@zvec/zvec-grep@0.2.1",
-                "server",
-                "--stdio"
-            ]
+            vec!["-y", "@zvec/zvec-grep@0.2.1", "server", "--stdio"]
         );
     }
 

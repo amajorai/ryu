@@ -1153,7 +1153,7 @@ export function ChannelsView({
 							</AlertDescription>
 						</Alert>
 					) : null}
-					<h1 className="font-semibold text-lg">
+					<h1 className="font-medium text-lg">
 						{isNew ? "New channel bot" : selected?.name}
 					</h1>
 

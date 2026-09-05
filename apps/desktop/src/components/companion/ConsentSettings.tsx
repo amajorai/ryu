@@ -204,7 +204,7 @@ export default function ConsentSettings({
 
 	return (
 		<div className="flex flex-col gap-4 p-4">
-			<h2 className="font-semibold text-sm">Companion Consent</h2>
+			<h2 className="font-medium text-sm">Companion Consent</h2>
 			<p className="text-muted-foreground text-xs">
 				All capabilities are off by default. Enable only what you need. Settings
 				are stored locally — no telemetry.

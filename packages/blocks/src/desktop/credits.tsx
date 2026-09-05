@@ -287,7 +287,7 @@ export function CreditsView({
 	return (
 		<div className="mx-auto max-w-2xl px-6 py-8">
 			<div className="mb-8 flex items-center justify-between">
-				<h1 className="font-semibold text-xl">Credits</h1>
+				<h1 className="font-medium text-xl">Credits</h1>
 				<Button
 					aria-label="Refresh balance"
 					onClick={onRefresh}
@@ -346,13 +346,13 @@ export function CreditsView({
 							? (wallet.providerAllocations ?? null)
 							: wallet && !grantPoolsLoading
 								? grantPools.map<CreditAllocationView>((pool) => ({
-									expiresAtLabel: pool.expiresAtLabel,
-									id: pool.id,
-									isFreeProvider: pool.isFreeProvider,
-									label: pool.label,
-									remainingMicroUsd: pool.remainingMicroUsd,
-									spendableOn: pool.spendableOn,
-								}))
+										expiresAtLabel: pool.expiresAtLabel,
+										id: pool.id,
+										isFreeProvider: pool.isFreeProvider,
+										label: pool.label,
+										remainingMicroUsd: pool.remainingMicroUsd,
+										spendableOn: pool.spendableOn,
+									}))
 								: null
 					}
 					totalMicroUsd={wallet?.balanceMicroUsd ?? null}

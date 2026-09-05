@@ -39,7 +39,7 @@ function nodeStyle(
 		borderRadius: node.kind === "memory" ? 10 : 999,
 		color: "var(--foreground)",
 		fontSize: 12,
-		fontWeight: node.kind === "memory" ? 500 : 600,
+		fontWeight: 500,
 		maxWidth: node.kind === "memory" ? 220 : 180,
 		padding: "7px 10px",
 		whiteSpace: "normal",

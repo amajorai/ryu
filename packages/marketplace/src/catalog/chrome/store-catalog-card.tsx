@@ -47,10 +47,12 @@ import {
 import { MarketplaceAccessBadge } from "@ryu/ui/components/marketplace-access-badge.tsx";
 import { UNAVAILABLE_ROW_CLASS } from "@ryu/ui/components/status-badge.tsx";
 import type { VerificationDetails } from "@ryu/ui/components/verification-popover.tsx";
+import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils.ts";
 import type { PublisherTrustLevel } from "@ryuhq/protocol/publisher-trust";
 import { createContext, type ReactNode, useContext } from "react";
 import ItemLikeButton from "../../likes/like-button.tsx";
+import type { MarketplaceCommunityStats } from "../bundle-types.ts";
 import { stabilityLabel } from "../stability.ts";
 import {
 	type CardDither,
@@ -103,6 +105,9 @@ export default function StoreCatalogCard({
 	seedId,
 	seedPlate,
 	description,
+	bundleMemberCount,
+	communityStats,
+	publisher,
 	external = false,
 	layers,
 	stability,
@@ -165,6 +170,12 @@ export default function StoreCatalogCard({
 	 *  wash — see {@link AppIcon.seedPlate}. */
 	seedPlate?: boolean;
 	description?: string | null;
+	/** Optional publisher identity/action row, supplied by the host surface. */
+	publisher?: ReactNode;
+	/** Number of child listings for a bundle. */
+	bundleMemberCount?: number;
+	/** Anonymous community totals; no identity or content is included. */
+	communityStats?: MarketplaceCommunityStats | null;
 	/** Mark a hosted provider and its public swappable capability layers. */
 	external?: boolean;
 	layers?: CatalogLayer[] | null;
@@ -305,7 +316,9 @@ export default function StoreCatalogCard({
 			/>
 			<span className="pointer-events-none min-w-0 flex-1">
 				<span className="flex items-center gap-1.5">
-					<span className="truncate font-medium text-sm">{name}</span>
+					<span className="min-w-0 flex-1 truncate font-medium text-sm">
+						{name}
+					</span>
 					{/* Beside the NAME, not on the icon: the icon is the app's own
 					    identity, the check is a claim about who published it. `shrink-0`
 					    so a long name truncates and the badge survives. */}
@@ -346,9 +359,26 @@ export default function StoreCatalogCard({
 						/>
 					) : null}
 				</span>
+				{publisher ? (
+					<span className="pointer-events-auto relative z-10 mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+						{publisher}
+					</span>
+				) : null}
 				<span className="block truncate text-muted-foreground text-xs">
 					{description || "No description provided."}
 				</span>
+				{bundleMemberCount ? (
+					<span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+						Bundle · {bundleMemberCount} items · one-click install
+					</span>
+				) : null}
+				{communityStats &&
+				(communityStats.downloads > 0 || communityStats.runs > 0) ? (
+					<span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+						Community · {formatCount(communityStats.downloads)} installs ·{" "}
+						{formatCount(communityStats.runs)} runs
+					</span>
+				) : null}
 			</span>
 			{action ? <div className="relative z-10 shrink-0">{action}</div> : null}
 		</div>

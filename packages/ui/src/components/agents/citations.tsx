@@ -59,7 +59,7 @@ export function Citation({
 		<a
 			aria-label={`View citation ${index}`}
 			className={cn(
-				"mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-md bg-muted/60 px-1 py-0.5 font-semibold text-[10px] text-muted-foreground leading-none no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+				"mx-0.5 inline-flex min-w-4 -translate-y-0.5 items-center justify-center rounded-md bg-muted/60 px-1 py-0.5 font-medium text-[10px] text-muted-foreground leading-none no-underline outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
 				className
 			)}
 			href={`#${citationTargetId(idPrefix, citationId)}`}
@@ -146,7 +146,7 @@ function CitationRow({
 				) : null}
 			</span>
 			<span className="flex shrink-0 items-center gap-1.5">
-				<span className="grid size-5 place-items-center rounded-md bg-foreground/[0.05] font-semibold text-[10px] text-muted-foreground tabular-nums">
+				<span className="grid size-5 place-items-center rounded-md bg-foreground/[0.05] font-medium text-[10px] text-muted-foreground tabular-nums">
 					{index}
 				</span>
 				{citation.url ? (
@@ -254,7 +254,7 @@ export function Citations({
 			>
 				<BookOpenText className="size-4" />
 				<span className="font-medium">{title}</span>
-				<span className="rounded-full bg-muted px-1.5 py-0.5 font-semibold text-[10px] tabular-nums">
+				<span className="rounded-full bg-muted px-1.5 py-0.5 font-medium text-[10px] tabular-nums">
 					{citations.length}
 				</span>
 				<motion.span

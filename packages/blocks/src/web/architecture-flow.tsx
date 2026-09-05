@@ -130,10 +130,10 @@ function GatewayNode() {
 			/>
 			<div className="flex items-start justify-between gap-2">
 				<div>
-					<p className="font-semibold text-[10px] text-background/60 uppercase tracking-widest">
+					<p className="font-medium text-[10px] text-background/60 uppercase tracking-widest">
 						Control
 					</p>
-					<h3 className="font-semibold text-lg tracking-tight">Ryu Gateway</h3>
+					<h3 className="font-medium text-lg tracking-tight">Ryu Gateway</h3>
 				</div>
 			</div>
 			<p className="mt-1 text-background/65 text-xs">
@@ -168,10 +168,10 @@ function CoreNode() {
 				position={Position.Left}
 				type="target"
 			/>
-			<p className="font-semibold text-[10px] text-muted-foreground uppercase tracking-widest">
+			<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-widest">
 				Orchestration
 			</p>
-			<h3 className="font-semibold text-foreground text-lg tracking-tight">
+			<h3 className="font-medium text-foreground text-lg tracking-tight">
 				Ryu Core
 			</h3>
 			<p className="mt-1 text-muted-foreground text-xs">

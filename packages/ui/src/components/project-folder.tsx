@@ -299,7 +299,7 @@ export function ProjectFolder({
 									<div className="flex items-start justify-between gap-4">
 										<div>
 											<h2
-												className="font-semibold text-lg"
+												className="font-medium text-lg"
 												id={`${dialogId}-title`}
 											>
 												{title}

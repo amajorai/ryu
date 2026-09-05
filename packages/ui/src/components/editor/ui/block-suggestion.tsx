@@ -97,7 +97,7 @@ export function BlockSuggestionCard({
 						<AvatarImage alt={userInfo?.name} src={userInfo?.avatarUrl} />
 						<AvatarFallback>{userInfo?.name?.[0]}</AvatarFallback>
 					</Avatar>
-					<h4 className="mx-2 font-semibold text-sm leading-none">
+					<h4 className="mx-2 font-medium text-sm leading-none">
 						{userInfo?.name}
 					</h4>
 					<div className="text-muted-foreground/80 text-xs leading-none">

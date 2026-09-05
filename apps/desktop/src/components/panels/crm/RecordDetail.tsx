@@ -279,7 +279,7 @@ export function RecordDetail({
 						← Back
 					</Button>
 					<div className="min-w-0">
-						<h2 className="truncate font-semibold text-base">
+						<h2 className="truncate font-medium text-base">
 							{recordTitle(record.title, record.values, titleField)}
 						</h2>
 						<p className="text-muted-foreground text-xs">

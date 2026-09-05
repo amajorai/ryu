@@ -114,7 +114,7 @@ export default function ConnectionsTab() {
 	return (
 		<div className="mx-auto max-w-5xl px-6 py-6">
 			<div className="mb-5">
-				<h2 className="font-semibold text-lg">Connections</h2>
+				<h2 className="font-medium text-lg">Connections</h2>
 				<p className="text-muted-foreground text-sm">
 					Connect your accounts once here, then attach their tools to any agent.
 				</p>

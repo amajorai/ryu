@@ -1,9 +1,9 @@
 //! Voice engine data path — Voice Recognition transcription and Audio synthesis.
 //!
 //! `POST /api/voice/transcribe` accepts a multipart upload with a `file` field
-//! (the audio) and proxies it to the running whisper.cpp voice sidecar's
-//! `/inference` endpoint, returning `{ "text": "..." }`. This is the consumer
-//! that makes the voice engine callable: install + start `whispercpp` from the
+//! (the audio) and proxies it to the selected local/cloud STT runtime, returning
+//! `{ "text": "..." }` plus segments when available. This is the consumer that
+//! makes the voice engines callable: install + start the chosen runtime from the
 //! Store, then POST audio here.
 //!
 //! Per the Core-vs-Gateway rule this is **Core** (it decides *what runs* — which
@@ -36,8 +36,9 @@ pub use crate::stt_host::{transcribe_wav, transcribe_wav_detailed};
 /// Optional `?engine=` selector for the transcription engine.
 #[derive(Debug, Deserialize)]
 pub struct TranscribeQuery {
-    /// `"parakeet"` (default), `"whisper"` (local whisper.cpp), or `"gateway"`
-    /// (Gateway-routed Whisper — the swappable cloud Voice Recognition slot, default Groq).
+    /// `"parakeet"` (default), `"whisper"` (local whisper.cpp), `"audiocpp"`
+    /// (the native audio.cpp runtime), or `"gateway"` (Gateway-routed Whisper —
+    /// the swappable cloud Voice Recognition slot, default Groq).
     /// When omitted, the cross-surface default from [`default_stt_engine`] is used.
     #[serde(default)]
     pub engine: Option<String>,
@@ -50,8 +51,8 @@ pub struct SpeakRequest {
     pub text: String,
     /// Engine selector. Omitted or `"outetts"` → the built-in OuteTTS engine
     /// (backward compatible). `"gateway"` routes to the Gateway's Audio modality
-    /// slot (the swappable cloud provider). Any other id (e.g. `"kitten"`,
-    /// `"pocket"`) is served by the universal Ryu Audio sidecar
+    /// slot; `"audiocpp"` routes to the native audio.cpp server. Any other id
+    /// (e.g. `"kitten"`, `"pocket"`) is served by the universal Ryu Audio sidecar
     /// (`apps-store/voice/sidecar`).
     #[serde(default)]
     pub engine: Option<String>,
@@ -469,6 +470,20 @@ pub async fn speak(
         }
     }
 
+    // Native audio.cpp is an explicit runtime choice. Do not silently fall
+    // through to OuteTTS here: a caller selecting this engine must either get
+    // audio.cpp output or an actionable unavailable/error response.
+    if engine == "audiocpp" {
+        return match synth_via_audio_cpp(&state.client, &req, text).await {
+            Ok(wav) => (StatusCode::OK, [(header::CONTENT_TYPE, "audio/wav")], wav).into_response(),
+            Err(error) => (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("audio.cpp synthesis failed: {error}") })),
+            )
+                .into_response(),
+        };
+    }
+
     // Everything else (incl. the Kokoro default): proxy to the Ryu Audio sidecar's
     // normalized /generate. If the sidecar is down or the engine can't render (e.g.
     // the sidecar runtime isn't provisioned yet on this node), degrade gracefully to
@@ -547,6 +562,93 @@ async fn synth_via_sidecar(
         .await
         .map(|b| b.to_vec())
         .map_err(|e| format!("reading Audio output failed: {e}"))
+}
+
+/// Build the audio.cpp OpenAI-compatible TTS request. Model-specific options
+/// belong under `options`; `speaking_rate` is the PocketTTS option documented by
+/// audio.cpp, while voice/reference fields stay at the request top level.
+fn audio_cpp_tts_payload(req: &SpeakRequest, text: &str) -> Value {
+    let voice = req
+        .voice
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(crate::sidecar::providers::audiocpp::DEFAULT_TTS_VOICE);
+    let mut payload = json!({
+        "model": crate::sidecar::providers::audiocpp::tts_model_id(),
+        "input": text,
+        "voice": voice,
+        "response_format": "wav",
+    });
+    if let Some(speed) = req.speed {
+        payload["options"] = json!({ "speaking_rate": speed });
+    }
+    if let Some(language) = req
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payload["language"] = json!(language);
+    }
+    if let Some(reference_audio) = req
+        .reference_audio
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        payload["voice_ref"] = json!(reference_audio);
+    }
+    payload
+}
+
+/// Send one synthesis request to the Core-managed audio.cpp server.
+pub(crate) async fn synth_via_audio_cpp(
+    client: &reqwest::Client,
+    req: &SpeakRequest,
+    text: &str,
+) -> Result<Vec<u8>, String> {
+    let base = crate::sidecar::providers::audiocpp::base_url();
+    synth_via_audio_cpp_at(client, &base, req, text).await
+}
+
+async fn synth_via_audio_cpp_at(
+    client: &reqwest::Client,
+    base: &str,
+    req: &SpeakRequest,
+    text: &str,
+) -> Result<Vec<u8>, String> {
+    let url = format!("{}/v1/audio/speech", base.trim_end_matches('/'));
+    let response = client
+        .post(&url)
+        .json(&audio_cpp_tts_payload(req, text))
+        .send()
+        .await
+        .map_err(|error| format!("audio.cpp server not reachable at {url}: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        return Err(format!("audio.cpp returned {status}: {detail}"));
+    }
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !content_type.is_empty() && !content_type.starts_with("audio/wav") {
+        return Err(format!(
+            "audio.cpp returned unexpected content type {content_type}"
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("reading audio.cpp output failed: {error}"))?;
+    if bytes.is_empty() {
+        return Err("audio.cpp returned an empty audio body".to_string());
+    }
+    Ok(bytes.to_vec())
 }
 
 /// The voice sent to the Gateway when the caller supplies none. OpenAI's
@@ -755,10 +857,9 @@ pub(crate) async fn synth_via_gateway(
 }
 
 /// `GET /api/voice/tts-engines` — list available Audio engines for the desktop
-/// picker. Always includes the built-in `outetts`, then mirrors the Ryu TTS
-/// sidecar's `/engines` catalog when it is reachable (so the set is whatever the
-/// sidecar registry serves — nothing hardcoded). When the sidecar is down, only
-/// the built-in is returned.
+/// picker. Always includes the built-in `outetts`, the native `audiocpp` runtime,
+/// and the cloud slot, then mirrors the Ryu TTS sidecar's `/engines` catalog when
+/// it is reachable.
 #[utoipa::path(
     get,
     path = "/api/voice/tts-engines",
@@ -781,10 +882,15 @@ pub async fn tts_engines(State(state): State<ServerState>) -> impl IntoResponse 
         "loaded": false,
     });
 
-    // The cloud slot, listed independently of the sidecar call so it is
-    // reachable from every picker (TtsEngineSettings, IslandSettings,
-    // NodeSelector) even when no TTS sidecar is running.
-    let mut engines = vec![builtin, gateway_tts_engine_row()];
+    // Both alternate slots are listed independently of the Ryu TTS sidecar call
+    // so every picker can select them before the Python sidecar is installed.
+    let audio_cpp_loaded =
+        crate::sidecar::providers::audiocpp::server_reachable(&state.client).await;
+    let audio_cpp = crate::sidecar::providers::audiocpp::tts_engine_row(
+        crate::sidecar::providers::audiocpp::tts_runtime_installed(),
+        audio_cpp_loaded && crate::sidecar::providers::audiocpp::tts_model_present(),
+    );
+    let mut engines = vec![builtin, gateway_tts_engine_row(), audio_cpp];
     if let Ok(Value::Array(sidecar_engines)) =
         crate::sidecar::providers::ryutts::list_engines(&state.client).await
     {
@@ -800,8 +906,8 @@ pub async fn tts_engines(State(state): State<ServerState>) -> impl IntoResponse 
 /// `GET /api/voice/tts-models` — the curated, installable Audio model catalog (the
 /// voicebox-style known-good set, each model bound to its engine + cache state).
 /// Distinct from the raw HF `pipeline_tag=text-to-speech` browse in the Models
-/// tab: these are the models Core can actually install + run. Empty when the Ryu
-/// TTS sidecar is not running.
+/// tab: these are the models Core can actually install + run. The native
+/// audio.cpp row is available even when its server is not running.
 #[utoipa::path(
     get,
     path = "/api/voice/tts-models",
@@ -810,10 +916,12 @@ pub async fn tts_engines(State(state): State<ServerState>) -> impl IntoResponse 
     responses((status = 200, description = "OK", body = serde_json::Value))
 )]
 pub async fn tts_models(State(state): State<ServerState>) -> impl IntoResponse {
-    let models = match crate::sidecar::providers::ryutts::list_models(&state.client).await {
-        Ok(Value::Array(rows)) => rows,
-        _ => Vec::new(),
-    };
+    let mut models = vec![crate::sidecar::providers::audiocpp::tts_model_row()];
+    if let Ok(Value::Array(rows)) =
+        crate::sidecar::providers::ryutts::list_models(&state.client).await
+    {
+        models.extend(rows);
+    }
     (
         StatusCode::OK,
         Json(json!({ "object": "list", "data": models })),
@@ -850,21 +958,54 @@ pub async fn tts_models_install(
     let engine = req.engine.clone();
     let model_name = req.model_name.clone();
     let client = state.client.clone();
+    if engine == "audiocpp" && model_name != "pocket_tts_english_q8_0" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "unsupported audio.cpp model; use pocket_tts_english_q8_0"
+            })),
+        )
+            .into_response();
+    }
     let label = format!("Audio model: {model_name}");
 
-    let result = state
-        .downloads
-        .register_indeterminate_as(
-            format!("tts-model:{engine}:{model_name}"),
-            crate::downloads::DownloadKind::Model,
-            crate::downloads::DownloadRole::VoiceModel,
-            label,
-            async move {
-                crate::sidecar::providers::ryutts::install_model(&client, &engine, &model_name)
-                    .await
-            },
-        )
-        .await;
+    let result = if engine == "audiocpp" {
+        let downloads = state.downloads.clone();
+        state
+            .downloads
+            .register_indeterminate_as(
+                format!("tts-model:{engine}:{model_name}"),
+                crate::downloads::DownloadKind::Model,
+                crate::downloads::DownloadRole::VoiceModel,
+                label,
+                async move {
+                    let version = crate::sidecar::providers::audiocpp::AudioCppDownloader::new()
+                        .ensure_installed(&downloads)
+                        .await?;
+                    Ok(json!({
+                        "engine": "audiocpp",
+                        "model_name": "pocket_tts_english_q8_0",
+                        "version": version,
+                        "installed": true,
+                    }))
+                },
+            )
+            .await
+    } else {
+        state
+            .downloads
+            .register_indeterminate_as(
+                format!("tts-model:{engine}:{model_name}"),
+                crate::downloads::DownloadKind::Model,
+                crate::downloads::DownloadRole::VoiceModel,
+                label,
+                async move {
+                    crate::sidecar::providers::ryutts::install_model(&client, &engine, &model_name)
+                        .await
+                },
+            )
+            .await
+    };
 
     match result {
         Ok(body) => (StatusCode::OK, Json(body)).into_response(),
@@ -931,6 +1072,9 @@ pub async fn transcribe(
 mod gateway_tts_tests {
     use super::*;
 
+    use axum::{http::header::CONTENT_TYPE, routing::post, Router};
+    use tokio::net::TcpListener;
+
     /// The prompt must ride under `input`. The Gateway's inbound firewall scans
     /// `body["input"]` for Tts, so sending Core's own field name (`text`) would
     /// route correctly and silently skip the scan.
@@ -963,6 +1107,80 @@ mod gateway_tts_tests {
         let p = gateway_tts_payload("tts-1", Some("shimmer"), Some(1.25), "hi");
         assert_eq!(p["voice"], "shimmer");
         assert_eq!(p["speed"], 1.25);
+    }
+
+    #[test]
+    fn audio_cpp_payload_uses_native_model_and_request_options() {
+        let request = SpeakRequest {
+            text: "hello".to_string(),
+            engine: Some("audiocpp".to_string()),
+            voice: Some("alba".to_string()),
+            speed: Some(1.15),
+            language: Some("en".to_string()),
+            reference_audio: Some("/tmp/reference.wav".to_string()),
+        };
+        let payload = audio_cpp_tts_payload(&request, "hello");
+        assert_eq!(
+            payload["model"],
+            crate::sidecar::providers::audiocpp::DEFAULT_TTS_MODEL_ID
+        );
+        assert_eq!(payload["input"], "hello");
+        assert_eq!(payload["voice"], "alba");
+        let speaking_rate = payload["options"]["speaking_rate"]
+            .as_f64()
+            .expect("speaking_rate should be numeric");
+        assert!((speaking_rate - 1.15).abs() < 0.000_001);
+        assert_eq!(payload["language"], "en");
+        assert_eq!(payload["voice_ref"], "/tmp/reference.wav");
+        assert!(payload.get("text").is_none());
+    }
+
+    #[test]
+    fn audio_cpp_payload_defaults_to_alba() {
+        let request = SpeakRequest {
+            text: "hello".to_string(),
+            engine: Some("audiocpp".to_string()),
+            voice: Some("   ".to_string()),
+            speed: None,
+            language: None,
+            reference_audio: None,
+        };
+        let payload = audio_cpp_tts_payload(&request, "hello");
+        assert_eq!(
+            payload["voice"],
+            crate::sidecar::providers::audiocpp::DEFAULT_TTS_VOICE
+        );
+        assert!(payload.get("options").is_none());
+    }
+
+    #[tokio::test]
+    async fn audio_cpp_http_adapter_accepts_wav_output() {
+        let app = Router::new().route(
+            "/v1/audio/speech",
+            post(|| async { ([(CONTENT_TYPE, "audio/wav")], b"RIFF-test-wav".to_vec()) }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let request = SpeakRequest {
+            text: "hello".to_string(),
+            engine: Some("audiocpp".to_string()),
+            voice: None,
+            speed: None,
+            language: None,
+            reference_audio: None,
+        };
+        let audio = synth_via_audio_cpp_at(
+            &reqwest::Client::new(),
+            &format!("http://{address}"),
+            &request,
+            "hello",
+        )
+        .await
+        .expect("audio.cpp adapter should accept WAV output");
+        assert_eq!(audio, b"RIFF-test-wav");
     }
 
     /// The default install must NOT pin a provider: the Gateway resolves slot

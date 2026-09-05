@@ -1,5 +1,6 @@
 "use client";
 
+import { FIRST_PURCHASE_VOUCHER_CODE } from "@ryu/auth/lib/vouchers";
 import { buttonVariants } from "@ryu/ui/components/button";
 import { ChromaticTextReveal } from "@ryu/ui/components/motion/chromatic-text-reveal";
 import PageHeader from "@ryu/ui/components/page-header";
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DOCS_URL } from "./data/resources.tsx";
 import { DownloadMenu } from "./download-menu.tsx";
 import {
@@ -29,6 +30,7 @@ import HeroWorkflowLoop, {
 import { landingHeadlineClass } from "./landing-typography.ts";
 import ProductLandingCtas from "./product-landing-ctas.tsx";
 import { ProductRealmSelector } from "./product-realm-selector.tsx";
+import ScratchCard from "./scratch-card.tsx";
 import {
 	BentoGrid,
 	type BentoItem,
@@ -38,6 +40,10 @@ import {
 import { StaggerLines } from "./stagger-lines.tsx";
 import { StandaloneServicesSection } from "./standalone-services-section.tsx";
 import StartupPrograms from "./startup-programs.tsx";
+
+const LANDING_SCRATCH_CHANCE = 0.1;
+const LANDING_SCRATCH_ROLLED_KEY = "ryu:landing-scratch-rolled";
+const LANDING_SCRATCH_DISMISSED_KEY = "ryu:landing-scratch-dismissed";
 
 const MANAGED_DEPLOYMENT_STEPS = [
 	{
@@ -175,6 +181,89 @@ function ManagedDeployment() {
 	);
 }
 
+/** A small, sampled launch drop. The voucher itself is already provisioned and
+ * scoped by the billing authority; this component only decides who sees the
+ * optional presentation, never who is eligible at checkout. */
+function LandingScratchOffer() {
+	const [visible, setVisible] = useState(false);
+
+	useEffect(() => {
+		try {
+			const preview =
+				process.env.NODE_ENV !== "production" &&
+				new URLSearchParams(window.location.search).get("scratch") === "1";
+			if (window.sessionStorage.getItem(LANDING_SCRATCH_DISMISSED_KEY)) {
+				return;
+			}
+			if (
+				!preview &&
+				window.sessionStorage.getItem(LANDING_SCRATCH_ROLLED_KEY)
+			) {
+				return;
+			}
+			if (!preview) {
+				window.sessionStorage.setItem(LANDING_SCRATCH_ROLLED_KEY, "1");
+			}
+			setVisible(preview || Math.random() < LANDING_SCRATCH_CHANCE);
+		} catch {
+			// Privacy modes can deny sessionStorage; the card remains a best-effort
+			// sampled enhancement and must never break the landing page.
+			setVisible(Math.random() < LANDING_SCRATCH_CHANCE);
+		}
+	}, []);
+
+	if (!visible) {
+		return null;
+	}
+
+	return (
+		<section
+			aria-labelledby="landing-scratch-heading"
+			className="mt-14 overflow-hidden rounded-[2rem] border border-primary/15 bg-muted/20 px-6 py-8 md:px-10 md:py-10"
+			data-testid="landing-scratch-offer"
+		>
+			<div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
+				<div className="max-w-xl">
+					<p className="font-medium text-primary text-xs uppercase tracking-[0.18em]">
+						A random launch drop
+					</p>
+					<h2
+						className="mt-3 text-balance font-medium text-2xl leading-tight tracking-[-0.04em] md:text-3xl"
+						id="landing-scratch-heading"
+					>
+						A little luck for your first run.
+					</h2>
+					<p className="mt-3 max-w-md text-muted-foreground text-sm leading-relaxed">
+						You found one of the launch drops. Scratch the foil to reveal a
+						first-month offer, then bring the code to checkout.
+					</p>
+					<p className="mt-5 text-muted-foreground text-xs">
+						One reveal per browser session · Pro monthly plan only
+					</p>
+				</div>
+				<ScratchCard
+					ariaLabel="Scratch the launch offer foil to reveal the voucher code"
+					caption="Use it on the Pro monthly plan · first month only."
+					className="max-w-none bg-background shadow-md"
+					code={FIRST_PURCHASE_VOUCHER_CODE}
+					discountLabel="10%"
+					headline="Scratch to reveal your launch offer"
+					onNeverShowAgain={() => {
+						try {
+							window.sessionStorage.setItem(LANDING_SCRATCH_DISMISSED_KEY, "1");
+						} catch {
+							// The local dismiss still applies for this render.
+						}
+						setVisible(false);
+					}}
+					overlayLabel="Scratch to reveal"
+					revealAnnouncement="Your first-month launch offer is revealed."
+				/>
+			</div>
+		</section>
+	);
+}
+
 export default function RealmsHero() {
 	const [scenarioIndex, setScenarioIndex] = useState(0);
 
@@ -249,6 +338,10 @@ export default function RealmsHero() {
 
 				<div className="mx-auto mt-12 max-w-5xl">
 					<ProductRealmSelector />
+				</div>
+
+				<div className="mx-auto max-w-5xl">
+					<LandingScratchOffer />
 				</div>
 
 				<div className="mt-14 grid gap-3 pt-6 text-sm sm:grid-cols-3">

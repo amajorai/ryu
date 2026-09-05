@@ -167,7 +167,7 @@ function KpiCard({
 					/>
 					{label}
 				</CardDescription>
-				<CardTitle className="font-semibold text-2xl tabular-nums">
+				<CardTitle className="font-medium text-2xl tabular-nums">
 					{value}
 				</CardTitle>
 			</CardHeader>
@@ -199,9 +199,7 @@ function MetricTile({
 				/>
 				<span className="truncate">{label}</span>
 			</div>
-			<span className="truncate font-semibold text-sm tabular-nums">
-				{value}
-			</span>
+			<span className="truncate font-medium text-sm tabular-nums">{value}</span>
 		</div>
 	);
 }
@@ -260,7 +258,7 @@ function UsageTrend({ data }: { data: UsageAnalyticsData }) {
 					</CardDescription>
 				</div>
 				<CardAction className="ml-auto shrink-0 text-right">
-					<div className="font-semibold text-xl tabular-nums">
+					<div className="font-medium text-xl tabular-nums">
 						{formatCompact(data.totals.requests)}
 					</div>
 					<div className="text-muted-foreground text-xs">requests in range</div>
@@ -466,7 +464,7 @@ function UsageDonut({
 								</PieChart>
 							</ChartContainer>
 							<div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-								<span className="font-semibold text-xl tabular-nums">
+								<span className="font-medium text-xl tabular-nums">
 									{total > 0
 										? formatCompact(total)
 										: formatMicroUsd(totalSpend)}
@@ -537,7 +535,7 @@ function ActivityHeatmap({ data }: { data: UsageAnalyticsData }) {
 					</CardDescription>
 				</div>
 				<CardAction className="ml-auto shrink-0 text-right">
-					<div className="font-semibold text-xl tabular-nums">{peak}</div>
+					<div className="font-medium text-xl tabular-nums">{peak}</div>
 					<div className="text-muted-foreground text-xs">peak requests</div>
 				</CardAction>
 			</CardHeader>
@@ -867,7 +865,7 @@ export function UsageAnalyticsDashboard({
 		>
 			<div className="flex flex-col gap-1">
 				<div className="flex flex-wrap items-center gap-2">
-					<h4 className="font-semibold text-base">Usage analytics</h4>
+					<h4 className="font-medium text-base">Usage analytics</h4>
 					<Badge className="rounded-full" variant="outline">
 						{SCOPE_LABELS[scope]}
 					</Badge>

@@ -359,7 +359,7 @@ function drawFront(
 	// Title (the small tracked eyebrow).
 	ctx.textBaseline = "alphabetic";
 	ctx.fillStyle = accent;
-	ctx.font = "700 15px Inter, system-ui, sans-serif";
+	ctx.font = "500 15px Inter, system-ui, sans-serif";
 	const title = builtIn ? "CORE STAFF" : prettyEngine(engine);
 	drawTracked(ctx, title, cx, 262, 3);
 
@@ -368,12 +368,12 @@ function drawFront(
 	const nameSize = fitFontSize(
 		ctx,
 		heading,
-		(px) => `700 ${px}px Inter, system-ui, sans-serif`,
+		(px) => `500 ${px}px Inter, system-ui, sans-serif`,
 		46,
 		26,
 		maxTextWidth
 	);
-	ctx.font = `700 ${nameSize}px Inter, system-ui, sans-serif`;
+	ctx.font = `500 ${nameSize}px Inter, system-ui, sans-serif`;
 	ctx.fillStyle = INK;
 	ctx.fillText(heading, cx, 322);
 
@@ -410,7 +410,7 @@ function drawFront(
 	);
 
 	// Version caption under the QR.
-	ctx.font = "600 14px 'JetBrains Mono', ui-monospace, monospace";
+	ctx.font = "500 14px Inter, system-ui, sans-serif";
 	ctx.fillStyle = FAINT;
 	drawTracked(ctx, `v${version}`, cx, qrY + qrSize + 34, 1);
 }
@@ -429,19 +429,19 @@ function drawBack(ctx: CanvasRenderingContext2D, input: AgentBadgeInput): void {
 	drawLogo(ctx, cx, 150, 72, INK);
 
 	ctx.fillStyle = FAINT;
-	ctx.font = "700 14px Inter, system-ui, sans-serif";
+	ctx.font = "500 14px Inter, system-ui, sans-serif";
 	drawTracked(ctx, "PROPERTY OF", cx, 356, 3);
 
 	const workspace = node?.trim() || "Ryu Workspace";
 	const wsSize = fitFontSize(
 		ctx,
 		workspace,
-		(px) => `700 ${px}px Inter, system-ui, sans-serif`,
+		(px) => `500 ${px}px Inter, system-ui, sans-serif`,
 		30,
 		18,
 		CARD_W - MARGIN * 2
 	);
-	ctx.font = `700 ${wsSize}px Inter, system-ui, sans-serif`;
+	ctx.font = `500 ${wsSize}px Inter, system-ui, sans-serif`;
 	ctx.fillStyle = INK;
 	ctx.fillText(workspace, cx, 398);
 
@@ -463,10 +463,10 @@ function drawBack(ctx: CanvasRenderingContext2D, input: AgentBadgeInput): void {
 		.toUpperCase()
 		.padStart(8, "0");
 	ctx.fillStyle = FAINT;
-	ctx.font = "600 13px Inter, system-ui, sans-serif";
+	ctx.font = "500 13px Inter, system-ui, sans-serif";
 	drawTracked(ctx, "SERIAL", cx, 606, 3);
 	ctx.fillStyle = MUTED;
-	ctx.font = "500 20px 'JetBrains Mono', ui-monospace, monospace";
+	ctx.font = "500 20px Inter, system-ui, sans-serif";
 	ctx.fillText(`RYU-${serial}`, cx, 640);
 }
 

@@ -106,7 +106,7 @@ function Stat({
 		<div className="rounded-lg border bg-card/40 px-3 py-2">
 			<div
 				className={cn(
-					"font-semibold text-xl tabular-nums",
+					"font-medium text-xl tabular-nums",
 					tone === "danger" && value > 0 && "text-destructive"
 				)}
 			>
@@ -453,7 +453,7 @@ export default function MissionControlPage() {
 				<div className="flex items-center gap-2">
 					<HugeiconsIcon className="size-5" icon={Radar01Icon} />
 					<div>
-						<h1 className="font-semibold text-base">Mission Control</h1>
+						<h1 className="font-medium text-base">Mission Control</h1>
 						<p className="text-muted-foreground text-xs">
 							{folderPath
 								? `What every chat in ${projectLabel} did, and what is still open.`

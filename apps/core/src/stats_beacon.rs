@@ -19,6 +19,8 @@
 //! snapshots what the Gateway already measured and forwards it to the control
 //! plane, which aggregates across the community.
 
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -36,6 +38,133 @@ const ENV_CONTROL_PLANE_URL: &str = "RYU_CONTROL_PLANE_URL";
 /// Default control-plane base (local dev), with NO `/api` suffix — the ingest
 /// path is built as `{base}/api/community/ingest`.
 const DEFAULT_CONTROL_PLANE_URL: &str = "http://127.0.0.1:3000";
+
+const MARKETPLACE_STATS_KINDS: &[&str] = &[
+    "app",
+    "plugin",
+    "skill",
+    "model",
+    "mcp",
+    "agent",
+    "stack_template",
+    "workflow",
+    "theme",
+    "language_pack",
+    "space",
+    "profile",
+    "output_style",
+    "bundle",
+];
+const MARKETPLACE_STATS_MAX_ID_BYTES: usize = 200;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MarketplaceStatsSnapshot {
+    id: String,
+    kind: String,
+    downloads: u64,
+    runs: u64,
+}
+
+static MARKETPLACE_STATS: OnceLock<Mutex<BTreeMap<String, MarketplaceStatsSnapshot>>> =
+    OnceLock::new();
+static MARKETPLACE_RUNTIME_IDS: OnceLock<Mutex<BTreeMap<String, (String, String)>>> =
+    OnceLock::new();
+
+fn marketplace_stats_store() -> &'static Mutex<BTreeMap<String, MarketplaceStatsSnapshot>> {
+    MARKETPLACE_STATS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn marketplace_runtime_store() -> &'static Mutex<BTreeMap<String, (String, String)>> {
+    MARKETPLACE_RUNTIME_IDS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn marketplace_id(kind: &str, id: &str) -> Option<(String, String)> {
+    let kind = kind.trim().to_ascii_lowercase();
+    let id = id.trim();
+    if !MARKETPLACE_STATS_KINDS.contains(&kind.as_str())
+        || id.is_empty()
+        || id.len() > MARKETPLACE_STATS_MAX_ID_BYTES
+        || !id
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || "@._/-".contains(value))
+        || id.split('/').any(|part| part == "." || part == "..")
+    {
+        return None;
+    }
+    Some((kind, id.to_owned()))
+}
+
+fn marketplace_runtime_identity(kind: &str, id: &str) -> Option<(String, String)> {
+    if let Ok(store) = marketplace_runtime_store().lock() {
+        if let Some((marketplace_kind, listing_id)) = store.get(&format!("{kind}:{id}")) {
+            return marketplace_id(marketplace_kind, listing_id);
+        }
+    }
+    if kind != "agent" && kind != "workflow" {
+        return marketplace_id(kind, id);
+    }
+    if let Ok(packages) = crate::portable_packages::list() {
+        if let Some(package) = packages.into_iter().find(|package| {
+            package.kind == kind
+                && package
+                    .runtime_ids
+                    .iter()
+                    .any(|runtime_id| runtime_id == id)
+        }) {
+            return marketplace_id(kind, &package.id);
+        }
+    }
+    marketplace_id(kind, id)
+}
+
+/// Associate a host-created runtime id with its Marketplace listing id. This is
+/// needed for published Agent Templates, whose safe local agent id is generated
+/// during import and therefore differs from the public listing id.
+pub fn associate_marketplace_runtime(kind: &str, marketplace: &str, runtime: &str) {
+    let Some((kind, marketplace)) = marketplace_id(kind, marketplace) else {
+        return;
+    };
+    let runtime = runtime.trim();
+    if runtime.is_empty() || runtime.len() > MARKETPLACE_STATS_MAX_ID_BYTES {
+        return;
+    }
+    if let Ok(mut store) = marketplace_runtime_store().lock() {
+        store.insert(format!("{kind}:{runtime}"), (kind, marketplace));
+    }
+}
+
+/// Record one local, content-free Marketplace event. Counters stay in Core until
+/// the consent-gated beacon sends a snapshot; no account or organization is read.
+pub fn record_marketplace_event(kind: &str, id: &str, download: bool) {
+    let Some((kind, id)) = marketplace_runtime_identity(kind, id) else {
+        return;
+    };
+    let key = format!("{kind}:{id}");
+    let Ok(mut store) = marketplace_stats_store().lock() else {
+        return;
+    };
+    let entry = store
+        .entry(key)
+        .or_insert_with(|| MarketplaceStatsSnapshot {
+            id,
+            kind,
+            downloads: 0,
+            runs: 0,
+        });
+    if download {
+        entry.downloads = entry.downloads.saturating_add(1);
+    } else {
+        entry.runs = entry.runs.saturating_add(1);
+    }
+}
+
+fn marketplace_stats_snapshot() -> Vec<MarketplaceStatsSnapshot> {
+    marketplace_stats_store()
+        .lock()
+        .map(|store| store.values().cloned().collect())
+        .unwrap_or_default()
+}
 
 /// Resolve the control-plane base URL: env override → local-dev default.
 fn control_plane_base() -> String {
@@ -62,6 +191,8 @@ struct IngestPayload {
     arch: String,
     version: String,
     engine: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    marketplace_stats: Vec<MarketplaceStatsSnapshot>,
 }
 
 /// Get-or-mint the anonymous install id, persisting it in the preferences store.
@@ -176,6 +307,7 @@ pub fn spawn_stats_beacon(prefs: crate::server::preferences::PreferencesStore) {
                 version: env!("CARGO_PKG_VERSION").to_owned(),
                 // Best-effort engine label; the gateway snapshot is engine-agnostic.
                 engine: "unknown".to_owned(),
+                marketplace_stats: marketplace_stats_snapshot(),
             };
 
             let endpoint = format!("{}/api/community/ingest", control_plane_base());
@@ -201,4 +333,47 @@ pub fn spawn_stats_beacon(prefs: crate::server::preferences::PreferencesStore) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marketplace_identity_is_normalized_and_path_safe() {
+        assert_eq!(
+            marketplace_id("AGENT", "ryu/design-director"),
+            Some(("agent".to_owned(), "ryu/design-director".to_owned()))
+        );
+        assert!(marketplace_id("agent", "../secret").is_none());
+        assert!(marketplace_id("unknown", "demo").is_none());
+    }
+
+    #[test]
+    fn marketplace_snapshot_uses_content_free_camel_case_fields() {
+        let payload = IngestPayload {
+            instance_id: "instance".to_owned(),
+            session_id: "session".to_owned(),
+            requests: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            tokens_saved: 0,
+            cache_hit_rate: 0.0,
+            os: "test".to_owned(),
+            arch: "test".to_owned(),
+            version: "test".to_owned(),
+            engine: "test".to_owned(),
+            marketplace_stats: vec![MarketplaceStatsSnapshot {
+                id: "ryu/design-director".to_owned(),
+                kind: "agent".to_owned(),
+                downloads: 1,
+                runs: 2,
+            }],
+        };
+        let value = serde_json::to_value(payload).expect("payload should serialize");
+        assert_eq!(value["marketplaceStats"][0]["downloads"], 1);
+        assert_eq!(value["marketplaceStats"][0]["runs"], 2);
+        assert!(value.get("userId").is_none());
+        assert!(value.get("hostname").is_none());
+    }
 }

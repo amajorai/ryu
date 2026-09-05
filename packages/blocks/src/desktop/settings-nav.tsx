@@ -275,7 +275,7 @@ export const SettingsSubpages = ({
 						{current.icon ? (
 							<SettingsIconTile icon={current.icon} tint={current.tint} />
 						) : null}
-						<h3 className="font-semibold text-base">{localizedCurrentTitle}</h3>
+						<h3 className="font-medium text-base">{localizedCurrentTitle}</h3>
 					</div>
 					{localizedCurrentHint ? (
 						<p className="px-0.5 text-muted-foreground text-sm leading-snug">

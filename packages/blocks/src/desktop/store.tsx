@@ -88,6 +88,9 @@ function SectionTabIcon({
 	if (typeof icon === "string") {
 		return <Icon className="shrink-0" icon={icon} size={16} />;
 	}
+	if (!Array.isArray(icon)) {
+		return null;
+	}
 	return <HugeiconsIcon className="size-4 shrink-0" icon={icon} />;
 }
 

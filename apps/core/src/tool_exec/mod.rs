@@ -1512,6 +1512,154 @@ fn render_command_arg(template: &str, args: &Value) -> Result<String, String> {
     Ok(out)
 }
 
+/// Replace declared filesystem arguments with canonical paths inside the active
+/// workspace. The command backend remains argv-only, but argv separation alone
+/// does not stop a read-only binary from opening an arbitrary absolute path.
+/// Canonicalization happens after the grant check and before spawn, so a command
+/// tool gets neither a path outside its caller's workspace nor a symlink escape.
+fn prepare_workspace_path_args(
+    args: &mut Value,
+    path_args: &[String],
+    workspace_root: Option<&std::path::Path>,
+) -> Result<(), String> {
+    if path_args.is_empty() {
+        return Ok(());
+    }
+    let root = workspace_root.ok_or_else(|| {
+        "command tool: an active workspace is required for filesystem path arguments".to_owned()
+    })?;
+    let root = std::fs::canonicalize(root)
+        .map_err(|e| format!("command tool: workspace root is unavailable: {e}"))?;
+    if !root.is_dir() {
+        return Err("command tool: workspace root is not a directory".to_owned());
+    }
+    let object = args
+        .as_object_mut()
+        .ok_or_else(|| "command tool: filesystem path arguments require an object".to_owned())?;
+    for name in path_args {
+        let raw = object
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("command tool: missing filesystem path argument '{name}'"))?;
+        let resolved = resolve_workspace_path(&root, raw)?;
+        object.insert(name.clone(), Value::String(resolved));
+    }
+    Ok(())
+}
+
+/// Resolve one command-tool path against a canonical workspace root.
+/// Existing paths are required so the check can reject symlink components rather
+/// than checking a path that may later resolve somewhere else. The command still
+/// receives the canonical path, not the caller's spelling.
+fn resolve_workspace_path(workspace_root: &std::path::Path, raw: &str) -> Result<String, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("command tool: filesystem path must not be empty".to_owned());
+    }
+    if raw.len() > MAX_COMMAND_ARG_LEN {
+        return Err(format!(
+            "command tool: filesystem path exceeds {MAX_COMMAND_ARG_LEN} bytes"
+        ));
+    }
+    if raw.contains('\0') {
+        return Err("command tool: filesystem path contains a NUL byte".to_owned());
+    }
+
+    let requested = std::path::Path::new(raw);
+    let candidate = if requested.is_absolute() {
+        requested.to_owned()
+    } else {
+        workspace_root.join(requested)
+    };
+    let canonical = std::fs::canonicalize(&candidate)
+        .map_err(|_| "command tool: filesystem path could not be resolved".to_owned())?;
+    if !path_is_within(&canonical, workspace_root) {
+        return Err(
+            "command tool: filesystem path must stay inside the active workspace".to_owned(),
+        );
+    }
+    if path_has_symlink_component_below_root(&candidate, workspace_root) {
+        return Err("command tool: filesystem path may not contain symlinks".to_owned());
+    }
+    if is_protected_host_path(&canonical) {
+        return Err("command tool: protected host paths are not searchable".to_owned());
+    }
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
+fn path_is_within(path: &std::path::Path, root: &std::path::Path) -> bool {
+    path == root || path.strip_prefix(root).is_ok()
+}
+
+/// Check workspace-relative spelling supplied to `canonicalize`, not only its
+/// resolved target. Parent directories outside the workspace may legitimately be
+/// symlinks (for example macOS's `/tmp`), so only components below the canonical
+/// workspace root are rejected.
+fn path_has_symlink_component_below_root(
+    path: &std::path::Path,
+    workspace_root: &std::path::Path,
+) -> bool {
+    let Ok(relative) = path.strip_prefix(workspace_root) else {
+        return false;
+    };
+    let mut current = workspace_root.to_owned();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return true,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    false
+}
+
+/// Ryu's own data and the conventional per-user credential directories are not
+/// valid workspace search targets, even when an operator accidentally selects a
+/// parent directory as the active workspace. Known Ryu credential filenames are
+/// denied at any depth as a second defense for copied or nested data directories.
+pub(crate) fn is_protected_host_path(path: &std::path::Path) -> bool {
+    let mut roots = vec![crate::paths::ryu_dir()];
+    if let Some(home) = dirs::home_dir() {
+        roots.extend([
+            home.join(".ssh"),
+            home.join(".gnupg"),
+            home.join(".aws"),
+            home.join(".azure"),
+            home.join(".codex"),
+            home.join(".pi"),
+            home.join(".config").join("gcloud"),
+        ]);
+    }
+    if roots
+        .into_iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .any(|root| path_is_within(path, &root))
+    {
+        return true;
+    }
+
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    matches!(
+        file_name.to_ascii_lowercase().as_str(),
+        "node-auth.token" | "core.token" | "gateway.token" | "pairing.token"
+    )
+}
+
+/// Reject workspace roots that would turn a narrowly selected project search
+/// into a host-wide search. The active root must be a real directory below the
+/// filesystem root and must not be the user's home or a protected host store.
+pub(crate) fn is_usable_workspace_root(path: &std::path::Path) -> bool {
+    if !path.is_dir() || path.parent().is_none() || is_protected_host_path(path) {
+        return false;
+    }
+    dirs::home_dir()
+        .and_then(|home| std::fs::canonicalize(home).ok())
+        .is_none_or(|home| path != home)
+}
+
 /// Build argv from a structured [`ArgSpec`] list (the `command_args` template
 /// grammar's superset). Each spec reads one call arg and expands to 0..N tokens:
 ///
@@ -1653,7 +1801,7 @@ pub async fn run_command_tool(
     output: crate::plugin_manifest::schema::CommandOutput,
     egress_url_arg: Option<&str>,
     arg_bounds: &BTreeMap<String, crate::plugin_manifest::schema::ArgBounds>,
-    mut args: Value,
+    args: Value,
     grants: &std::collections::HashSet<String>,
     plugin_id: &str,
     session_id: Option<&str>,
@@ -1690,11 +1838,55 @@ pub async fn run_command_tool_with_agent(
     output: crate::plugin_manifest::schema::CommandOutput,
     egress_url_arg: Option<&str>,
     arg_bounds: &BTreeMap<String, crate::plugin_manifest::schema::ArgBounds>,
+    args: Value,
+    grants: &std::collections::HashSet<String>,
+    plugin_id: &str,
+    session_id: Option<&str>,
+    audit_agent_id: Option<&str>,
+) -> Result<Value, String> {
+    run_command_tool_with_agent_and_workspace(
+        bin_key,
+        arg_templates,
+        arg_specs,
+        env_map,
+        cwd,
+        timeout_secs,
+        output,
+        egress_url_arg,
+        arg_bounds,
+        args,
+        grants,
+        plugin_id,
+        session_id,
+        audit_agent_id,
+        None,
+        &[],
+    )
+    .await
+}
+
+/// Variant of [`run_command_tool_with_agent`] for command tools that declare
+/// caller-workspace path arguments. The workspace root is resolved by the MCP
+/// registry from the server-owned conversation context; passing it separately
+/// keeps this generic command runner independent of conversation storage.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_command_tool_with_agent_and_workspace(
+    bin_key: &str,
+    arg_templates: &[String],
+    arg_specs: Option<&[crate::plugin_manifest::schema::ArgSpec]>,
+    env_map: &BTreeMap<String, String>,
+    cwd: Option<&str>,
+    timeout_secs: u64,
+    output: crate::plugin_manifest::schema::CommandOutput,
+    egress_url_arg: Option<&str>,
+    arg_bounds: &BTreeMap<String, crate::plugin_manifest::schema::ArgBounds>,
     mut args: Value,
     grants: &std::collections::HashSet<String>,
     plugin_id: &str,
     session_id: Option<&str>,
     audit_agent_id: Option<&str>,
+    workspace_root: Option<&std::path::Path>,
+    workspace_path_args: &[String],
 ) -> Result<Value, String> {
     use crate::plugin_manifest::schema::CommandOutput;
     use tokio::io::AsyncReadExt;
@@ -1714,6 +1906,8 @@ pub async fn run_command_tool_with_agent(
             "command tool: exec of '{bin_key}' is not granted (needs '{needed}')"
         ));
     }
+
+    prepare_workspace_path_args(&mut args, workspace_path_args, workspace_root)?;
 
     // 1b. EGRESS SCREEN (SSRF): when this command fetches a URL arg (a crawler /
     //     scraper), screen that arg's value BEFORE any spawn — scheme allowlist +
@@ -2299,6 +2493,163 @@ mod tests {
         assert_eq!(
             render_command_arg("--flag={q}", &serde_json::json!({ "q": "ok" })).unwrap(),
             "--flag=ok"
+        );
+    }
+
+    #[test]
+    fn workspace_path_args_allow_only_existing_non_symlink_workspace_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        let nested = root.join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        let file = nested.join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+
+        let mut args = serde_json::json!({ "path": "src/main.rs" });
+        prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root)).unwrap();
+        assert_eq!(
+            args["path"].as_str(),
+            Some(
+                std::fs::canonicalize(&file)
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+
+        for path in ["../outside", "/tmp", "src/missing.rs"] {
+            let mut args = serde_json::json!({ "path": path });
+            let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root))
+                .expect_err("out-of-workspace or missing path must be denied");
+            assert!(
+                error.contains("workspace")
+                    || error.contains("resolved")
+                    || error.contains("symlink"),
+                "unexpected error for {path}: {error}"
+            );
+        }
+
+        #[cfg(unix)]
+        {
+            let outside = temp.path().join("outside.txt");
+            std::fs::write(&outside, "not in workspace\n").unwrap();
+            let link = root.join("link.txt");
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+            let mut args = serde_json::json!({ "path": "link.txt" });
+            let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root))
+                .expect_err("symlink path must be denied");
+            assert!(
+                error.contains("symlink") || error.contains("workspace"),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn protected_host_paths_are_denied_even_when_the_workspace_is_a_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        std::fs::create_dir_all(&root).unwrap();
+        let token = root.join("node-auth.token");
+        std::fs::write(&token, "not a real token").unwrap();
+
+        let mut args = serde_json::json!({ "path": "node-auth.token" });
+        let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], Some(&root))
+            .expect_err("known Ryu credential filenames must be denied");
+        assert!(error.contains("protected"), "unexpected error: {error}");
+
+        if let Some(home) = dirs::home_dir() {
+            for directory in [".codex", ".pi"] {
+                if let Ok(path) = std::fs::canonicalize(home.join(directory)) {
+                    assert!(
+                        is_protected_host_path(&path),
+                        "agent credential directory {directory} must be protected"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_path_args_require_a_workspace_root() {
+        let mut args = serde_json::json!({ "path": "src/main.rs" });
+        let error = prepare_workspace_path_args(&mut args, &["path".to_owned()], None)
+            .expect_err("path-scoped commands must fail closed without a root");
+        assert!(
+            error.contains("active workspace"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ripgrep_workspace_boundary_allows_in_root_and_denies_outside() {
+        let _lock = crate::sidecar::gateway::lock_gateway_env();
+        let _env = CmdEnvGuard::armed();
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        std::fs::create_dir_all(&root).unwrap();
+        let inside = root.join("notes.txt");
+        let outside = temp.path().join("outside.txt");
+        std::fs::write(&inside, "RYU_WORKSPACE_SEARCH_PROOF\n").unwrap();
+        std::fs::write(&outside, "RYU_OUTSIDE_SEARCH_PROOF\n").unwrap();
+        std::env::set_var(ENV_COMMAND_TOOL_ALLOWLIST, test_allowlist_entry("rg"));
+
+        let templates = vec![
+            "--json".to_owned(),
+            "--color".to_owned(),
+            "never".to_owned(),
+            "--".to_owned(),
+            "{pattern}".to_owned(),
+            "{path}".to_owned(),
+        ];
+        let path_args = vec!["path".to_owned()];
+        let grants = grants(&["tool:command:rg"]);
+        let inside_result = run_command_tool_with_agent_and_workspace(
+            "rg",
+            &templates,
+            None,
+            &BTreeMap::new(),
+            None,
+            10,
+            CommandOutput::Stdout,
+            None,
+            &BTreeMap::new(),
+            serde_json::json!({ "pattern": "RYU_WORKSPACE_SEARCH_PROOF", "path": "notes.txt" }),
+            &grants,
+            "@ryu/ripgrep",
+            None,
+            None,
+            Some(&root),
+            &path_args,
+        )
+        .await
+        .expect("in-workspace ripgrep search runs");
+        let stdout = inside_result["stdout"].as_str().unwrap_or_default();
+        assert!(stdout.contains("RYU_WORKSPACE_SEARCH_PROOF"), "{stdout}");
+
+        let outside_error = run_command_tool_with_agent_and_workspace(
+            "rg",
+            &templates,
+            None,
+            &BTreeMap::new(),
+            None,
+            10,
+            CommandOutput::Stdout,
+            None,
+            &BTreeMap::new(),
+            serde_json::json!({ "pattern": "RYU_OUTSIDE_SEARCH_PROOF", "path": outside }),
+            &grants,
+            "@ryu/ripgrep",
+            None,
+            None,
+            Some(&root),
+            &path_args,
+        )
+        .await
+        .expect_err("outside-workspace ripgrep search must be denied");
+        assert!(
+            outside_error.contains("active workspace"),
+            "{outside_error}"
         );
     }
 

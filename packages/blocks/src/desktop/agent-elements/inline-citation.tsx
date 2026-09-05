@@ -36,7 +36,7 @@ export function CitationMark({
 	return (
 		<span
 			className={cn(
-				"inline-flex h-3 min-w-3 flex-none items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-semibold text-[9px] text-muted-foreground leading-none",
+				"inline-flex h-3 min-w-3 flex-none items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-[9px] text-muted-foreground leading-none",
 				className
 			)}
 			{...props}
@@ -162,7 +162,7 @@ export function CitationMarkLink({ citation }: { citation: Citation }) {
 		<InlineCitation className="mx-0.5">
 			<InlineCitationCard>
 				<HoverCardTrigger
-					className="inline-flex h-3 min-w-3 cursor-pointer items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-semibold text-[9px] text-muted-foreground leading-none no-underline transition-colors hover:bg-muted/80 hover:text-foreground"
+					className="inline-flex h-3 min-w-3 cursor-pointer items-center justify-center rounded bg-muted px-0.5 align-[5.5px] font-medium text-[9px] text-muted-foreground leading-none no-underline transition-colors hover:bg-muted/80 hover:text-foreground"
 					href={citation.url}
 					rel="noopener noreferrer"
 					target="_blank"

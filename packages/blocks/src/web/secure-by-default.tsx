@@ -33,7 +33,7 @@ function RiskCard() {
 	return (
 		<div className={landingMutedCardSurfaceClass}>
 			<AlertTriangle className="size-5 text-foreground" strokeWidth={1.75} />
-			<p className="mt-6 font-semibold text-muted-foreground/60 text-xs uppercase tracking-widest">
+			<p className="mt-6 font-medium text-muted-foreground/60 text-xs uppercase tracking-widest">
 				Why it never ships
 			</p>
 			<h3 className="mt-2 font-medium text-foreground text-xl tracking-tight md:text-2xl">
@@ -64,7 +64,7 @@ function DefenseCard() {
 			<ShieldCheck className={cn("size-5", tone.title)} strokeWidth={1.75} />
 			<p
 				className={cn(
-					"mt-6 font-semibold text-xs uppercase tracking-widest",
+					"mt-6 font-medium text-xs uppercase tracking-widest",
 					tone.eyebrow
 				)}
 			>

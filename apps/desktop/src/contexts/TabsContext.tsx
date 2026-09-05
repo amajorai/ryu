@@ -53,6 +53,13 @@ import {
 	swapLeaves,
 } from "@/src/lib/splitTree.ts";
 import {
+	DEFAULT_TAB_UNLOAD_MINUTES,
+	inactiveTabIds,
+	initialTabActivity,
+	TAB_UNLOAD_INTERVAL_MS,
+	TAB_UNLOAD_MINUTES_KEY,
+} from "@/src/lib/tab-memory-policy.ts";
+import {
 	listenForEntityActivation,
 	registerWindowTabs,
 	tabEntityKey,
@@ -71,6 +78,10 @@ export type {
 	SplitNode,
 	SplitOrientation,
 } from "@/src/lib/splitTree.ts";
+
+// Keep the historical import path available to desktop consumers while the
+// preference's canonical owner lives with the pure tab-memory policy.
+export { TAB_UNLOAD_MINUTES_KEY } from "@/src/lib/tab-memory-policy.ts";
 
 export interface Tab {
 	/** Live run in progress for this tab (streaming chat, etc.). Runtime-only —
@@ -257,11 +268,6 @@ export const TAB_GROUP_COLORS = [
 	"orange",
 ] as const;
 export type TabGroupColor = (typeof TAB_GROUP_COLORS)[number];
-
-/** Shared localStorage key for the "unload inactive tabs after N minutes"
-    preference. 0 disables auto-unload. Read by the timer here and written by the
-    settings dialog so both sides agree without prop-drilling. */
-export const TAB_UNLOAD_MINUTES_KEY = "ryu_tab_unload_minutes";
 
 interface ClosedTab {
 	index: number;
@@ -1167,7 +1173,9 @@ export function TabsProvider({
 	// Last time each tab was the active view, keyed by tab id. Held in a ref (not
 	// tab state) so stamping it on every activation doesn't churn renders; the
 	// auto-unload timer reads it directly.
-	const lastActiveAtRef = useRef<Record<string, number>>({});
+	const lastActiveAtRef = useRef<Record<string, number>>(
+		initialTabActivity(initialState.tabs, Date.now())
+	);
 	const activeTabIdRef = useRef<string>(activeTabId);
 	activeTabIdRef.current = activeTabId;
 
@@ -1935,6 +1943,11 @@ export function TabsProvider({
 		if (id === activeTabIdRef.current) {
 			return;
 		}
+		// A running route may own the live stream that is driving the tab. Keep it
+		// mounted until the run ends so memory cleanup never becomes cancellation.
+		if (tabsRef.current.find((tab) => tab.id === id)?.busy) {
+			return;
+		}
 		// Never unload a pane that is currently visible as part of the active
 		// split — it would blank a side-by-side view the user is still using.
 		const activeSplitId = tabsRef.current.find(
@@ -2661,40 +2674,31 @@ export function TabsProvider({
 	// when the threshold is 0 ("Never").
 	useEffect(() => {
 		const tick = () => {
-			const minutes = readPersistedNumber(TAB_UNLOAD_MINUTES_KEY, 0);
-			if (minutes <= 0) {
-				return;
-			}
-			const cutoff = Date.now() - minutes * 60_000;
-			// Every pane of the currently-visible split is exempt — unloading one
-			// would blank a side-by-side view in active use.
-			const activeSplitId = tabsRef.current.find(
-				(t) => t.id === activeTabIdRef.current
-			)?.splitId;
-			const protectedIds = new Set(
-				activeSplitId
-					? tabsRef.current
-							.filter((t) => t.splitId === activeSplitId)
-							.map((t) => t.id)
-					: []
+			const minutes = readPersistedNumber(
+				TAB_UNLOAD_MINUTES_KEY,
+				DEFAULT_TAB_UNLOAD_MINUTES
 			);
+			const now = Date.now();
 			setTabs((prev) => {
+				const unloadIds = new Set(
+					inactiveTabIds(
+						prev,
+						activeTabIdRef.current,
+						lastActiveAtRef.current,
+						now,
+						minutes
+					)
+				);
+				if (unloadIds.size === 0) {
+					return prev;
+				}
 				let changed = false;
 				const next = prev.map((t) => {
-					if (
-						t.id === activeTabIdRef.current ||
-						t.pinned ||
-						t.unloaded ||
-						protectedIds.has(t.id)
-					) {
+					if (!unloadIds.has(t.id)) {
 						return t;
 					}
-					const lastActive = lastActiveAtRef.current[t.id];
-					if (lastActive !== undefined && lastActive < cutoff) {
-						changed = true;
-						return { ...t, unloaded: true };
-					}
-					return t;
+					changed = true;
+					return { ...t, unloaded: true };
 				});
 				if (!changed) {
 					return prev;
@@ -2703,7 +2707,7 @@ export function TabsProvider({
 				return next;
 			});
 		};
-		const interval = setInterval(tick, 30_000);
+		const interval = setInterval(tick, TAB_UNLOAD_INTERVAL_MS);
 		return () => clearInterval(interval);
 	}, []);
 

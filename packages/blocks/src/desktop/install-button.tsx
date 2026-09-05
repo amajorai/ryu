@@ -7,6 +7,7 @@
 
 import { Button, type ButtonProps } from "@ryu/ui/components/button.tsx";
 import { cn } from "@ryu/ui/lib/utils.ts";
+import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 
 type InstallProgressButtonProps = Omit<
@@ -35,26 +36,28 @@ function InstallProgressButton({
 	installing,
 	percent = null,
 	idleVariant = "default",
-	// "Adding…", not "Installing…": the store's verb is Add everywhere — Add /
-	// Adding… / Added / Remove read as one sentence on a card, and every caller of
-	// this button is a store surface (catalog cards, engines, knowledge, MCP,
-	// agents), so the default is the store's word.
-	busyLabel = "Adding…",
+	busyLabel = "Installing…",
 	size = "sm",
 	className,
 	children,
 	...props
 }: InstallProgressButtonProps) {
+	const reduceMotion = useReducedMotion();
+	const shellTransition = reduceMotion
+		? { duration: 0 }
+		: { type: "spring" as const, stiffness: 420, damping: 32 };
 	if (!installing) {
 		return (
-			<Button
-				className={className}
-				size={size}
-				variant={idleVariant}
-				{...props}
-			>
-				{children}
-			</Button>
+			<motion.div className="inline-flex" layout transition={shellTransition}>
+				<Button
+					className={className}
+					size={size}
+					variant={idleVariant}
+					{...props}
+				>
+					{children}
+				</Button>
+			</motion.div>
 		);
 	}
 
@@ -62,16 +65,25 @@ function InstallProgressButton({
 	const value = known ? Math.min(100, Math.max(0, percent)) : 0;
 
 	return (
-		<Button
-			aria-disabled
-			className={cn("pointer-events-none", className)}
-			loading
-			progress={value}
-			size={size}
-			variant="progress"
-		>
-			{known ? `${Math.round(value)}%` : busyLabel}
-		</Button>
+		<motion.div className="inline-flex" layout transition={shellTransition}>
+			<Button
+				aria-disabled
+				className={cn("pointer-events-none", className)}
+				loading
+				progress={value}
+				size={size}
+				variant="progress"
+			>
+				<motion.span
+					animate={{ opacity: 1, y: 0 }}
+					initial={reduceMotion ? false : { opacity: 0, y: 2 }}
+					key={known ? "percent" : "installing"}
+					transition={reduceMotion ? { duration: 0 } : { duration: 0.16 }}
+				>
+					{known ? `${Math.round(value)}%` : busyLabel}
+				</motion.span>
+			</Button>
+		</motion.div>
 	);
 }
 

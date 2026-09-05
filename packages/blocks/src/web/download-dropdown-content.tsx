@@ -228,7 +228,7 @@ function sectionNote(state: DownloadState): string {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
 	return (
-		<DropdownMenuLabel className="select-none font-semibold text-muted-foreground text-xs">
+		<DropdownMenuLabel className="select-none font-medium text-muted-foreground text-xs">
 			{children}
 		</DropdownMenuLabel>
 	);

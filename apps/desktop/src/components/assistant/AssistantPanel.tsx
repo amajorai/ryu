@@ -224,7 +224,7 @@ function BuilderEmptyState({
 	const prompts = session.prompts?.filter((p) => p.trim().length > 0) ?? [];
 	return (
 		<div className="flex flex-col gap-1 px-1 pb-3 text-center">
-			<span className="font-semibold text-base">{title}</span>
+			<span className="font-medium text-base">{title}</span>
 			<span className="text-muted-foreground text-sm">
 				{surfaceDescription(session)}
 			</span>

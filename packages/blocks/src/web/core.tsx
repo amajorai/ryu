@@ -58,7 +58,7 @@ function RouterViz() {
 					/>
 				))}
 			</div>
-			<div className="flex-shrink-0 animate-node-pulse rounded-full bg-foreground px-3 py-1 font-semibold text-background text-xs">
+			<div className="flex-shrink-0 animate-node-pulse rounded-full bg-foreground px-3 py-1 font-medium text-background text-xs">
 				RYU
 			</div>
 			<div className="relative flex min-h-6 flex-1 flex-col items-center">
@@ -456,7 +456,7 @@ export default function Core() {
 					>
 						{card.viz}
 						<div>
-							<h3 className="mb-1 font-semibold text-foreground text-lg">
+							<h3 className="mb-1 font-medium text-foreground text-lg">
 								{card.title}
 							</h3>
 							<p className="text-muted-foreground text-sm">

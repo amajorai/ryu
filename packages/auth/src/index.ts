@@ -113,6 +113,7 @@ import {
 	resolveInitialActiveOrganization,
 	resolvePersonalOrgId,
 } from "./lib/organizations.ts";
+import { passwordSchema } from "./lib/password-policy.ts";
 import {
 	ensurePolarCustomer,
 	polarClient,
@@ -1388,6 +1389,8 @@ export const auth = betterAuth({
 	},
 	emailAndPassword: {
 		enabled: true,
+		minPasswordLength: 8,
+		maxPasswordLength: 128,
 		requireEmailVerification: true,
 		// `requireEmailVerification` makes Better Auth answer a sign-up for an
 		// already-registered address with a *generic success* — a synthetic user,
@@ -1659,6 +1662,16 @@ export const auth = betterAuth({
 				) {
 					throw new APIError("UNAUTHORIZED", {
 						message: "NO_PASSWORD_ACCOUNT",
+					});
+				}
+			}
+			if (ctx.path === "/sign-up/email") {
+				const body = ctx.body as { password?: unknown };
+				const result = passwordSchema.safeParse(body?.password);
+				if (!result.success) {
+					throw new APIError("BAD_REQUEST", {
+						message:
+							result.error.issues[0]?.message ?? "Choose a stronger password",
 					});
 				}
 			}

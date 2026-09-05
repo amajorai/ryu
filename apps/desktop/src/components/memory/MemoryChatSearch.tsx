@@ -236,7 +236,7 @@ export function MemoryChatSearch({
 		<div className="flex flex-col gap-4" data-testid="memory-chat-search">
 			<div className="flex items-start justify-between gap-4">
 				<div>
-					<h1 className="font-semibold text-lg">Chat sources</h1>
+					<h1 className="font-medium text-lg">Chat sources</h1>
 					<p className="text-muted-foreground text-sm">
 						Search the private source layer; Dream turns useful patterns into
 						reviewable memories.

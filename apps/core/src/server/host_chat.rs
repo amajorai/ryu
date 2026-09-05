@@ -117,6 +117,10 @@ pub async fn host_chat_start_turn(
         Ok((id, _grants)) => id,
         Err((status, msg)) => return (status, Json(json!({ "error": msg }))).into_response(),
     };
+    // The authenticated calling app is the only trustworthy source for this
+    // app-run signal. Core keeps it local until the existing anonymous beacon
+    // sends a consented aggregate snapshot.
+    crate::stats_beacon::record_marketplace_event("app", &plugin_id, false);
 
     let text = body.text.trim();
     if text.is_empty() {

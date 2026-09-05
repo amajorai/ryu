@@ -114,7 +114,7 @@ export function Insights({
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-				<h2 className="font-semibold text-base">Follow-ups & pipeline</h2>
+				<h2 className="font-medium text-base">Follow-ups & pipeline</h2>
 				<Button
 					disabled={loading}
 					onClick={() => void load()}
@@ -279,7 +279,7 @@ export function Insights({
 function Stat({ label, value }: { label: string; value: number }) {
 	return (
 		<div className="rounded-md border bg-card p-3">
-			<div className="font-semibold text-lg tabular-nums">
+			<div className="font-medium text-lg tabular-nums">
 				{formatNumber(value)}
 			</div>
 			<div className="text-muted-foreground text-xs">{label}</div>

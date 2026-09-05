@@ -162,7 +162,7 @@ function PinnedAgentTile({
 }
 
 /**
- * The pinned-agent stage at the top of Bot mode's Agents tab.
+ * The pinned-agent stage at the top of Bot mode's Agents section.
  *
  * It intentionally lives outside `SidebarMenu`: pinned agents are a visual
  * priority shelf, while the remaining agents stay ordinary accessible rows.

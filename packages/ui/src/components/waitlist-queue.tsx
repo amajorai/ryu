@@ -528,7 +528,7 @@ export function WaitlistQueue({
 								/>
 								<div className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5">
 									<div>
-										<p className="font-semibold">Skip the waitlist</p>
+										<p className="font-medium">Skip the waitlist</p>
 										<p className="mt-1 text-muted-foreground text-sm">
 											Your account leaves the waitlist as soon as payment is
 											confirmed.

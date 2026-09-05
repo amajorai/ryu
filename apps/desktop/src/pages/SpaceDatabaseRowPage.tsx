@@ -470,7 +470,7 @@ export default function SpaceDatabaseRowPage({
 				{/* Title = the first column (the row's "Name"). */}
 				<Input
 					aria-label="Row title"
-					className="h-auto border-none bg-transparent px-0 font-semibold text-2xl shadow-none focus-visible:ring-0"
+					className="h-auto border-none bg-transparent px-0 font-medium text-2xl shadow-none focus-visible:ring-0"
 					disabled={readOnly || !titleColumnId}
 					onChange={(e) => {
 						if (titleColumnId) {

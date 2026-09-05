@@ -318,7 +318,7 @@ function MetricTile({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="rounded-lg bg-muted/40 p-3">
 			<div className="text-muted-foreground text-xs">{label}</div>
-			<div className="mt-1 font-mono font-semibold text-lg tabular-nums">
+			<div className="mt-1 font-medium font-mono text-lg tabular-nums">
 				{value}
 			</div>
 		</div>

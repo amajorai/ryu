@@ -152,7 +152,7 @@ function paintTierFront(
 		trackingEm: LABEL_TRACKING_EM,
 		weight: 600,
 	});
-	ctx.font = font(family, 600, labelSize, scale);
+	ctx.font = font(family, 500, labelSize, scale);
 	setTracking(ctx, labelSize * LABEL_TRACKING_EM * scale);
 	ctx.fillStyle = palette.cardForeground;
 	// "Desktop" and "Enterprise" are long enough to bottom out on the ramp at the

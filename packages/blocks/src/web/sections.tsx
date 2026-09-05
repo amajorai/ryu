@@ -233,7 +233,7 @@ export function BentoCard({ item }: { item: BentoItem }) {
 					) : null)}
 			</div>
 			<div>
-				<h3 className="mb-1 font-semibold text-base text-foreground">
+				<h3 className="mb-1 font-medium text-base text-foreground">
 					{item.title}
 				</h3>
 				<p className="text-muted-foreground text-sm leading-relaxed">

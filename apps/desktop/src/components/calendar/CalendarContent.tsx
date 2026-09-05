@@ -118,7 +118,7 @@ function DayCell({
 				<span
 					className={cn(
 						"flex size-6 items-center justify-center rounded-full text-xs",
-						today && "bg-primary font-semibold text-primary-foreground",
+						today && "bg-primary font-medium text-primary-foreground",
 						!(today || inMonth) && "text-muted-foreground/50",
 						!today && inMonth && "text-foreground"
 					)}
@@ -202,7 +202,7 @@ function DayPanel({
 		<aside className="flex w-72 shrink-0 flex-col border-l">
 			<div className="flex shrink-0 items-center justify-between border-b px-3 py-2.5">
 				<div>
-					<p className="font-semibold text-sm">{format(day, "EEEE")}</p>
+					<p className="font-medium text-sm">{format(day, "EEEE")}</p>
 					<p className="text-muted-foreground text-xs">
 						{format(day, "MMMM d, yyyy")}
 					</p>

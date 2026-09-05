@@ -26,7 +26,7 @@ pub async fn get_metrics(State(state): State<SharedState>) -> Json<Value> {
 /// Public, ungated community-savings aggregate (mirrors `/metrics` registration
 /// but exposes ONLY safe totals — no per-provider maps, no quota, no keys).
 /// Core's community-stats beacon reads this to fan out anonymous savings to the
-/// control plane. Opt-in on the Core side; the gateway endpoint itself is public.
+/// control plane. Opt-out on the Core side; the gateway endpoint itself is public.
 pub async fn community_savings(State(state): State<SharedState>) -> Json<Value> {
     let m = &state.metrics;
     let hits = m.cache_hits.load(Ordering::Relaxed);

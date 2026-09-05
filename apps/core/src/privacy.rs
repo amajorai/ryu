@@ -36,7 +36,7 @@ pub const DIAGNOSTICS_OTLP_ENDPOINT_PREF_KEY: &str = "diagnostics-otlp-endpoint"
 pub const SUPPORT_ACCESS_LOCAL_ENABLED_PREF_KEY: &str = "support-access-local-enabled";
 /// Hard expiry (unix ms) for the local support channel; 0 = none. (§6)
 pub const SUPPORT_ACCESS_LOCAL_EXPIRY_PREF_KEY: &str = "support-access-local-expiry";
-/// Anonymous community-savings beacon (aggregate compression stats). Opt-in: OFF.
+/// Anonymous community-savings beacon (aggregate compression stats). Opt-out: ON.
 pub const COMMUNITY_STATS_ENABLED_PREF_KEY: &str = "community-stats-enabled";
 
 // ── Env-var mirrors (so an operator can set them without the desktop) ───────────

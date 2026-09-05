@@ -65,6 +65,14 @@ export interface CatalogAffordanceTarget {
 	realm: CatalogRealm;
 }
 
+/** Public identity of the organization that published a Marketplace listing. */
+export interface CatalogPublisherTarget {
+	id: string;
+	logo: string | null;
+	name: string;
+	slug: string | null;
+}
+
 /** Props for the host-provided install button. The host encapsulates the live
  *  download-progress lookup (keyed by {@link progress}) so the shared sections
  *  never import the desktop downloads store. */
@@ -299,6 +307,8 @@ export interface CatalogHost {
 	/** Read-only primary affordance, rendered where the install button would be
 	 *  when {@link install} is null (web: an "Open in Ryu" button). */
 	renderAffordance?: (target: CatalogAffordanceTarget) => ReactNode;
+	/** Optional host-rendered publisher identity/follow action for hosted cards. */
+	renderPublisher?: (target: CatalogPublisherTarget) => ReactNode;
 	/** Run the configured, read-only agent review for one catalog item. Web omits
 	 *  this because it has no Core node to execute against, so the Scan button is
 	 *  absent there rather than pretending a browser-only review ran. */

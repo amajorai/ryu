@@ -17,7 +17,7 @@ import { useIslandState } from "../store/island-state.ts";
 
 /** Number of bars in the scrolling waveform (each is one moment in time). */
 const BAR_COUNT = 24;
-/** Target sample rate for whisper (it expects 16 kHz mono). */
+/** Target sample rate for the local STT runtimes (they expect 16 kHz mono). */
 const TARGET_SAMPLE_RATE = 16_000;
 /** Visual gain so normal speech rises to a readable height without clipping. */
 const LEVEL_GAIN = 5;
@@ -30,6 +30,7 @@ const SILENT_LEVELS = new Array<number>(BAR_COUNT).fill(0);
 const ENGINE_SIDECARS: Record<string, string> = {
 	whisper: "whispercpp",
 	parakeet: "parakeet",
+	audiocpp: "audiocpp",
 };
 
 /** How long a transient error message stays on the pill before collapsing. */

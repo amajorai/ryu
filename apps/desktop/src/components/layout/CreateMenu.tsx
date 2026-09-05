@@ -187,7 +187,7 @@ export function CreateMenu() {
 						>
 							{items.map((item) => (
 								<button
-									className="rounded-xl px-3 py-1 text-left font-semibold text-foreground text-xl tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground motion-reduce:transition-none"
+									className="rounded-xl px-3 py-1 text-left font-medium text-foreground text-xl tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground motion-reduce:transition-none"
 									key={item.id}
 									onClick={() => {
 										item.onSelect();

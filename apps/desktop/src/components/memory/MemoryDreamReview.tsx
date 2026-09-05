@@ -273,7 +273,7 @@ export function MemoryDreamReview({ target }: { target: ApiTarget }) {
 				<div>
 					<div className="flex items-center gap-2">
 						<Sparkles className="size-5 text-primary" />
-						<h1 className="font-semibold text-lg">Dream review</h1>
+						<h1 className="font-medium text-lg">Dream review</h1>
 					</div>
 					<p className="mt-1 max-w-xl text-muted-foreground text-sm">
 						Dream looks back at recent conversations and suggests durable

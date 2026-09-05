@@ -200,10 +200,12 @@ import {
 	usePluginContributions,
 	usePluginContributionsQuery,
 } from "@/src/hooks/usePluginContributions.ts";
+import { useProjectlessTaskFolder } from "@/src/hooks/useProjectlessTaskFolder.ts";
 import {
 	setQueueDrainMode,
 	useQueueDrainMode,
 } from "@/src/hooks/useQueueDrainMode.ts";
+import { useShowBottomPanelToggle } from "@/src/hooks/useShowBottomPanelToggle.ts";
 import { useSkillsCatalog } from "@/src/hooks/useSkillsCatalog.ts";
 import { useSpeechPlayback } from "@/src/hooks/useSpeechPlayback.ts";
 import { useTeams } from "@/src/hooks/useTeams.ts";
@@ -248,7 +250,10 @@ import {
 } from "@/src/lib/api/plugins.ts";
 import {
 	getDesktopTtsPrefs,
+	getVoiceInputPrefs,
 	getVoiceModeReadbackPrefs,
+	subscribePreferenceChanges,
+	VOICE_PREF_KEY,
 } from "@/src/lib/api/preferences.ts";
 import {
 	fetchDocument,
@@ -362,6 +367,7 @@ import { useCreateAgentDialog } from "@/src/store/useCreateAgentDialog.ts";
 import { useDockPanelRequestStore } from "@/src/store/useDockPanelRequestStore.ts";
 import { useFileTreeSearchStore } from "@/src/store/useFileTreeSearchStore.ts";
 import { useMeetingRecordingStore } from "@/src/store/useMeetingRecordingStore.ts";
+import { isLocalNode } from "@/src/store/useNodeStore.ts";
 import {
 	publishSidebarTodoProgress,
 	sidebarTodoProgressKey,
@@ -1228,6 +1234,12 @@ export default function ChatPage({
 	);
 
 	const { folder, setFolder } = useWorkspaceStore();
+	const activeNode = useActiveNode();
+	const [projectlessTaskFolder] = useProjectlessTaskFolder();
+	const [showBottomPanelToggle] = useShowBottomPanelToggle();
+	const localProjectlessTaskFolder = isLocalNode(activeNode)
+		? projectlessTaskFolder
+		: null;
 	// THIS TAB's composer target. Every chat tab stays mounted at once (Layout),
 	// so this is deliberately per-instance state: nothing outside this ChatPage
 	// may write it. The seed chain (merged-view pin → tab seed → last-used hint →
@@ -1276,6 +1288,11 @@ export default function ChatPage({
 	// Workspace panel open/close state (bottom + right panels)
 	const [bottomPanelOpen, setBottomPanelOpen] = useState(false);
 	const [rightPanelOpen, setRightPanelOpen] = useState(false);
+	useEffect(() => {
+		if (!showBottomPanelToggle) {
+			setBottomPanelOpen(false);
+		}
+	}, [showBottomPanelToggle]);
 	const [shareDialogOpen, setShareDialogOpen] = useState(false);
 	// User's intent for the "Pinned summary" sidebar (project ▸ branch ▸
 	// worktree + git changes + commit&push). It docks as its own column stacked
@@ -1848,7 +1865,7 @@ export default function ChatPage({
 	// another tab changes that selection.
 	const chatFolder = convId
 		? (getConversation(convId)?.folderPath ?? null)
-		: folder;
+		: (folder ?? localProjectlessTaskFolder);
 	const chatFolderRef = useRef<string | null>(chatFolder);
 	chatFolderRef.current = chatFolder;
 
@@ -1920,7 +1937,6 @@ export default function ChatPage({
 		}
 	}, [isActiveTab, convId, setActiveConversationId]);
 
-	const activeNode = useActiveNode();
 	const chatTarget: ApiTarget = useMemo(
 		() => ({
 			url: activeNode.url,
@@ -1939,7 +1955,7 @@ export default function ChatPage({
 				rows
 					.filter(
 						(draft) =>
-							(draft.folder_path ?? undefined) === (folder ?? undefined)
+							(draft.folder_path ?? undefined) === (chatFolder ?? undefined)
 					)
 					.map((draft) => ({
 						id: draft.id,
@@ -1950,7 +1966,7 @@ export default function ChatPage({
 		} catch {
 			setProjectDrafts([]);
 		}
-	}, [chatTarget, folder]);
+	}, [chatFolder, chatTarget]);
 	useEffect(() => {
 		void refreshProjectDrafts();
 	}, [refreshProjectDrafts]);
@@ -1964,12 +1980,12 @@ export default function ChatPage({
 			onSave: (text: string) => {
 				void saveDraft(chatTarget, {
 					text,
-					folder_path: folder ?? undefined,
+					folder_path: chatFolder ?? undefined,
 					source: "manual",
 				}).then(refreshProjectDrafts);
 			},
 		}),
-		[chatTarget, folder, projectDrafts, refreshProjectDrafts]
+		[chatFolder, chatTarget, projectDrafts, refreshProjectDrafts]
 	);
 
 	// Voice input: a stable transcribe fn (reads the live node target via a ref)
@@ -2015,9 +2031,40 @@ export default function ChatPage({
 			cancelled = true;
 		};
 	}, [effectiveModel]);
+	const [voiceInputEngine, setVoiceInputEngine] = useState<
+		string | undefined
+	>();
+	useEffect(() => {
+		let cancelled = false;
+		const load = () => {
+			getVoiceInputPrefs(chatTarget)
+				.then((prefs) => {
+					if (!cancelled) {
+						setVoiceInputEngine(prefs.engine);
+					}
+				})
+				.catch(() => undefined);
+		};
+		load();
+		const unsubscribe = subscribePreferenceChanges((key) => {
+			if (key === VOICE_PREF_KEY) {
+				load();
+			}
+		});
+		return () => {
+			cancelled = true;
+			unsubscribe();
+		};
+	}, [chatTarget]);
 	const voiceTranscribe = useCallback(
-		(audio: Blob) => transcribeAudio(chatTargetRef.current, audio),
-		[]
+		(audio: Blob) =>
+			transcribeAudio(
+				chatTargetRef.current,
+				audio,
+				"recording.wav",
+				voiceInputEngine
+			),
+		[voiceInputEngine]
 	);
 
 	// #415: Load the conversation's participants so assistant messages can still be
@@ -2719,6 +2766,7 @@ export default function ChatPage({
 	// (VAD, endpointing, barge-in) lives in Core; this reflects it into the overlay.
 	const voiceMode = useVoiceMode(chatTarget, {
 		conversationId: activeConversationId ?? undefined,
+		sttEngine: voiceInputEngine,
 		ttsEngine: desktopTts.engine,
 		ttsVoice: desktopTts.voice || undefined,
 	});
@@ -2794,14 +2842,14 @@ export default function ChatPage({
 	// turn-hook interprets them — so nothing client-side handles them here.
 	const handleOpenFileLink = useCallback(
 		(mentionedPath: string) => {
-			const path = resolveWorkspaceFilePath(folder, mentionedPath);
+			const path = resolveWorkspaceFilePath(chatFolder, mentionedPath);
 			if (!path) {
 				toast.error("That file is outside the current workspace.");
 				return;
 			}
 			openTab(`/file/${encodeURIComponent(path)}`, { title: basename(path) });
 		},
-		[folder, openTab]
+		[chatFolder, openTab]
 	);
 	const handleOpenWebsiteLink = useCallback(
 		async (href: string) => {
@@ -5512,7 +5560,9 @@ export default function ChatPage({
 				effectiveStatus === "streaming" || effectiveStatus === "submitted",
 			stop: handleStop,
 			startVoiceMode: voiceMode.start,
-			toggleBottomPanel: () => setBottomPanelOpen((v) => !v),
+			toggleBottomPanel: showBottomPanelToggle
+				? () => setBottomPanelOpen((v) => !v)
+				: null,
 			toggleRightPanel: () => setRightPanelOpen((v) => !v),
 			toggleSearch: toggleChatSearch,
 		});
@@ -5531,6 +5581,7 @@ export default function ChatPage({
 		handleStop,
 		voiceMode.start,
 		toggleChatSearch,
+		showBottomPanelToggle,
 		publishHotkeyTargets,
 		publishFileTreeSearch,
 		clearHotkeyTargets,
@@ -6929,6 +6980,7 @@ export default function ChatPage({
 		interfaceLevel === "simple" || processedMessages.length > 0 ? null : (
 			<WorkspaceBar
 				conversationId={activeConversationId ?? draftConvId.current}
+				folderOverride={chatFolder}
 				onWorktreeModeChange={handleWorktreeModeChange}
 				target={chatTarget}
 				worktreeModeOverride={tabWorktreeMode}
@@ -7479,7 +7531,7 @@ export default function ChatPage({
 				{shareAction}
 				<PanelToggleButtons
 					bottomOpen={bottomPanelOpen}
-					folder={folder}
+					folder={chatFolder}
 					onBottomToggle={() => setBottomPanelOpen((v) => !v)}
 					onPinnedSummaryToggle={
 						hasMessages ? () => setPinnedSummaryOpen((v) => !v) : undefined
@@ -7487,6 +7539,7 @@ export default function ChatPage({
 					onRightToggle={() => setRightPanelOpen((v) => !v)}
 					pinnedSummaryOpen={pinnedSummaryOpen}
 					rightOpen={rightPanelOpen}
+					showBottomPanelToggle={showBottomPanelToggle}
 				/>
 			</>
 		);
@@ -7500,8 +7553,9 @@ export default function ChatPage({
 		composerPicker,
 		chatPickerPlacement,
 		bottomPanelOpen,
+		showBottomPanelToggle,
 		rightPanelOpen,
-		folder,
+		chatFolder,
 		pinnedSummaryOpen,
 	]);
 
@@ -7568,7 +7622,7 @@ export default function ChatPage({
 				cowork={coworkData}
 				fileReviewRequest={fileReviewRequest}
 				fileSearchRequest={fileSearchRequest}
-				folder={folder}
+				folder={chatFolder}
 				onBottomOpenChange={setBottomPanelOpen}
 				onRightOpenChange={setRightPanelOpen}
 				renderPinnedSummary={
@@ -7609,7 +7663,7 @@ export default function ChatPage({
 						{chatSearch.open && (
 							<ChatSearchBar
 								activeMatchIndex={activeChatSearchMatchIndex}
-								folderAvailable={Boolean(folder)}
+								folderAvailable={Boolean(chatFolder)}
 								matches={chatSearchMatches}
 								mode={chatSearch.mode}
 								onClose={closeChatSearch}

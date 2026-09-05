@@ -6,6 +6,7 @@
 // block's money-logic-free `MarketplaceCardData` the same way.
 
 import type { MarketplaceCardData } from "@ryu/blocks/desktop/marketplace";
+import type { ReactNode } from "react";
 import {
 	formatPricingLabel,
 	type MarketplaceCard,
@@ -24,6 +25,7 @@ export function toCardData(
 		active?: boolean;
 		installed?: boolean;
 		installing?: boolean;
+		like?: ReactNode;
 		onInstall?: () => void;
 	} = {}
 ): MarketplaceCardData {
@@ -31,6 +33,7 @@ export function toCardData(
 	return {
 		id: card.id,
 		kind: card.kind,
+		bundleMemberCount: card.bundleMemberCount,
 		name: card.name,
 		author: card.author,
 		description: card.description,
@@ -38,11 +41,13 @@ export function toCardData(
 		active: options.active,
 		installed: options.installed,
 		installing: options.installing,
+		like: options.like,
 		onInstall: options.onInstall,
 		version: card.version,
 		verification: card.verification,
 		iconUrl: card.iconUrl,
 		category: card.category,
+		communityStats: card.communityStats,
 		ratingAverage: card.ratingAverage,
 		ratingCount: card.ratingCount,
 		priceLabel,

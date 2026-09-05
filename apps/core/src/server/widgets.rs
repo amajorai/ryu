@@ -490,6 +490,14 @@ async fn send_exec_tool(
         "arguments": arguments,
         "agent_id": agent_id,
         "session_id": session_id,
+        // Core owns this value: the Gateway forwards it to Core's internal tool
+        // route as the host-conversation context used for tenancy and vault
+        // resolution. It is not derived from model tool arguments. The paired
+        // process-local proof below lets Core distinguish this forward from a
+        // direct node-token request.
+        "host_conversation_id": (!session_id.is_empty()).then_some(session_id),
+        "host_conversation_proof": (!session_id.is_empty())
+            .then(|| crate::server::host_conversation_proof(session_id)),
         "feature": feature,
     });
     if let Some((instance_id, origin_server)) = widget {

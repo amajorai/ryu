@@ -94,7 +94,7 @@ function renderSegment(segment: Segment, key: number): ReactNode {
 	}
 	if (segment.kind === "bold") {
 		return (
-			<strong className="font-semibold" key={key}>
+			<strong className="font-medium" key={key}>
 				{segment.value}
 			</strong>
 		);

@@ -1166,6 +1166,9 @@ export default function OnboardingPage({
 	const [selectedAgentSuggestions, setSelectedAgentSuggestions] = useState<
 		Set<string>
 	>(new Set());
+	const [reviewedAgentSuggestions, setReviewedAgentSuggestions] = useState<
+		Set<string>
+	>(new Set());
 	const [agentSuggestionsSubmitting, setAgentSuggestionsSubmitting] =
 		useState(false);
 	const [agentSuggestionsError, setAgentSuggestionsError] = useState<
@@ -1725,6 +1728,7 @@ export default function OnboardingPage({
 		if (suggestions.length > 0) {
 			setAgentSuggestions(suggestions);
 			setSelectedAgentSuggestions(new Set());
+			setReviewedAgentSuggestions(new Set());
 			setAgentSuggestionsError(null);
 			setPhase("agent-suggestions");
 			return;
@@ -1744,8 +1748,31 @@ export default function OnboardingPage({
 		});
 	}, []);
 
+	const reviewAgentSuggestion = useCallback((id: string, reviewed: boolean) => {
+		setReviewedAgentSuggestions((current) => {
+			const next = new Set(current);
+			if (reviewed) {
+				next.add(id);
+			} else {
+				next.delete(id);
+			}
+			return next;
+		});
+	}, []);
+
 	const createOnboardingAgents = useCallback(async () => {
 		if (agentSuggestionsSubmitting || selectedAgentSuggestions.size === 0) {
+			return;
+		}
+		const unreviewed = agentSuggestions.filter(
+			(suggestion) =>
+				selectedAgentSuggestions.has(suggestion.id) &&
+				!reviewedAgentSuggestions.has(suggestion.id)
+		);
+		if (unreviewed.length > 0) {
+			setAgentSuggestionsError(
+				`Review ${unreviewed.length} selected draft${unreviewed.length === 1 ? "" : "s"} before adding it.`
+			);
 			return;
 		}
 		setAgentSuggestionsSubmitting(true);
@@ -1814,6 +1841,7 @@ export default function OnboardingPage({
 			);
 		} else {
 			setSelectedAgentSuggestions(new Set());
+			setReviewedAgentSuggestions(new Set());
 			goToTelegram();
 		}
 		setAgentSuggestionsSubmitting(false);
@@ -1824,6 +1852,7 @@ export default function OnboardingPage({
 		guardAgentCreation,
 		getActiveNode,
 		goToTelegram,
+		reviewedAgentSuggestions,
 		selectedAgentSuggestions,
 	]);
 
@@ -2815,6 +2844,7 @@ export default function OnboardingPage({
 		allowedAgentIds,
 		agentSuggestions,
 		agentSuggestionsError,
+		agentSuggestionsReviewed: reviewedAgentSuggestions,
 		agentSuggestionsSelected: selectedAgentSuggestions,
 		agentSuggestionsSubmitting,
 		allowedProviderIds:
@@ -2878,6 +2908,7 @@ export default function OnboardingPage({
 						: goToTelegram,
 		onToggleAutoImport: setAutoImport,
 		onToggleAgentSuggestion: toggleAgentSuggestion,
+		onReviewAgentSuggestion: reviewAgentSuggestion,
 	};
 
 	if (phase === "updates") {

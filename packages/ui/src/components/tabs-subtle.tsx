@@ -352,7 +352,7 @@ const TabsSubtleItem = forwardRef<HTMLButtonElement, TabsSubtleItemProps>(
 				<span
 					aria-hidden="true"
 					className="invisible col-start-1 row-start-1 [text-box:trim-both_cap_alphabetic]"
-					style={{ fontVariationSettings: fontWeights.semibold }}
+					style={{ fontVariationSettings: fontWeights.medium }}
 				>
 					{label}
 				</span>
@@ -363,7 +363,7 @@ const TabsSubtleItem = forwardRef<HTMLButtonElement, TabsSubtleItemProps>(
 					)}
 					style={{
 						fontVariationSettings: isSelected
-							? fontWeights.semibold
+							? fontWeights.medium
 							: fontWeights.normal,
 					}}
 				>

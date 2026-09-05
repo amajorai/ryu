@@ -100,7 +100,7 @@ function MetricTile({
 	return (
 		<div className="rounded-lg bg-muted/40 p-3">
 			<p className="text-muted-foreground text-xs">{label}</p>
-			<p className="mt-1 font-semibold text-foreground text-lg tabular-nums">
+			<p className="mt-1 font-medium text-foreground text-lg tabular-nums">
 				{value}
 			</p>
 			<p className="text-[10px] text-muted-foreground/70">{hint}</p>
@@ -135,9 +135,7 @@ export function GatewayMock() {
 				{/* Content */}
 				<div className="flex-1 space-y-4 p-4">
 					<div className="flex items-center justify-between">
-						<h3 className="font-semibold text-base text-foreground">
-							Overview
-						</h3>
+						<h3 className="font-medium text-base text-foreground">Overview</h3>
 						<span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 font-medium text-[11px] text-success">
 							<span className="size-1.5 rounded-full bg-success" />
 							Up

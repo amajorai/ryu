@@ -88,7 +88,7 @@ function Preview({ count, label }: { count: number; label: string }) {
 				<div className="flex items-center justify-between border-sidebar-border/70 border-b px-4 py-3">
 					<span className="font-semibold text-sm">Agents view</span>
 					<span className="text-muted-foreground text-xs">
-						Sessions ⇄ Agents
+						Direct threads inline
 					</span>
 				</div>
 				<div className="p-2.5">

@@ -194,7 +194,7 @@ export default function PluginViewPage({
 	return (
 		<div className="mx-auto max-w-3xl p-6">
 			{contribution.title ? (
-				<h2 className="mb-4 font-semibold text-lg">{contribution.title}</h2>
+				<h2 className="mb-4 font-medium text-lg">{contribution.title}</h2>
 			) : null}
 			<DeclarativeView
 				fetchJson={fetchJson}

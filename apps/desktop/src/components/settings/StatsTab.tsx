@@ -250,7 +250,7 @@ export function StatsTab() {
 						<AvatarFallback>{initials}</AvatarFallback>
 					</Avatar>
 					<div className="flex flex-1 flex-col gap-1">
-						<span className="font-semibold text-base">{displayName}</span>
+						<span className="font-medium text-base">{displayName}</span>
 						{profile ? (
 							<span className="text-muted-foreground text-xs">
 								Joined {format(new Date(profile.joinedAt), "MMM d, yyyy")}

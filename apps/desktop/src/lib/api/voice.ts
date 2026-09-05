@@ -1,8 +1,8 @@
 // apps/desktop/src/lib/api/voice.ts
 //
 // Typed client for Core's Voice Recognition data path (`POST /api/voice/transcribe`).
-// Core proxies the uploaded audio to the whisper.cpp voice sidecar's `/inference`
-// endpoint and returns `{ text }`. The whisper-server build decodes WAV, so the
+// Core proxies the uploaded audio to the selected local/cloud STT runtime and
+// returns `{ text }`. The whisper/audio.cpp builds decode WAV, so the
 // recorder uploads 16 kHz mono PCM WAV (see hooks/useVoiceRecorder.ts) rather
 // than the browser's default webm/opus.
 //
@@ -12,16 +12,21 @@
 
 import { type ApiTarget, authenticatedFetch } from "./client.ts";
 
-/** Transcribe a recorded audio blob via Core's whisper proxy. Returns the text. */
+/** Transcribe a recorded audio blob via Core's selected STT runtime. */
 export async function transcribeAudio(
 	target: ApiTarget,
 	audio: Blob,
-	filename = "recording.wav"
+	filename = "recording.wav",
+	engine?: string
 ): Promise<string> {
 	const form = new FormData();
 	form.append("file", audio, filename);
+	const selectedEngine = engine?.trim();
+	const path = selectedEngine
+		? `/api/voice/transcribe?engine=${encodeURIComponent(selectedEngine)}`
+		: "/api/voice/transcribe";
 
-	const resp = await authenticatedFetch(target, "/api/voice/transcribe", {
+	const resp = await authenticatedFetch(target, path, {
 		method: "POST",
 		headers: { "Content-Type": null },
 		body: form,
@@ -153,7 +158,7 @@ export async function processSpeechText(
 }
 
 /** One selectable Audio engine, as Core's `/api/voice/tts-engines`
- * returns it (built-in OuteTTS + whatever the Ryu Audio sidecar registry serves). */
+ * returns it (built-in OuteTTS, native audio.cpp, and RyuTTS entries). */
 export interface TtsEngine {
 	default_voice: string;
 	description: string;
@@ -168,8 +173,8 @@ export interface TtsEngine {
 	voices: string[];
 }
 
-/** List the Audio engines available on this node (nothing hardcoded — Core mirrors
- * the sidecar registry). Always includes the built-in `outetts`. */
+/** List the Audio engines available on this node. Core owns the built-in/native
+ * rows and mirrors any additional RyuTTS engines. */
 export async function listTtsEngines(target: ApiTarget): Promise<TtsEngine[]> {
 	const resp = await authenticatedFetch(target, "/api/voice/tts-engines");
 	if (!resp.ok) {
@@ -247,8 +252,8 @@ export interface SpeakOptions {
 }
 
 /** Synthesize speech via Core's `/api/voice/speak`, returning a playable WAV blob.
- * The engine is whatever the caller selects — Core routes built-ins to OuteTTS and
- * everything else to the universal Ryu Audio sidecar. */
+ * The engine is whatever the caller selects — Core routes it to the matching
+ * built-in, native audio.cpp, cloud, or RyuTTS runtime. */
 export async function speakText(
 	target: ApiTarget,
 	text: string,

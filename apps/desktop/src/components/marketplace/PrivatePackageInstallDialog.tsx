@@ -467,7 +467,7 @@ export default function PrivatePackageInstallDialog({
 								<div className="flex items-start justify-between gap-3">
 									<div className="min-w-0">
 										<div className="mb-1 flex flex-wrap items-center gap-2">
-											<h3 className="font-semibold text-lg">{preview.name}</h3>
+											<h3 className="font-medium text-lg">{preview.name}</h3>
 											<Badge variant="secondary">
 												{preview.kind.replaceAll("_", " ")}
 											</Badge>

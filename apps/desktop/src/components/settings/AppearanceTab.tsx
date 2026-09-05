@@ -2045,7 +2045,7 @@ export function AppearanceTab() {
 								}
 							/>
 						}
-						description="Use the built-in Agents view: one toggle — Sessions ⇄ Agents — opening on the Agents tab, with messaging-style rows on. Ryu Work selects it automatically; turn it off to return to the full section list."
+						description="Use the built-in Agents view: direct threads appear under each bot, with other chats below the roster and messaging-style rows on. Ryu Work selects it automatically; turn it off to return to the full section list."
 						title="Agents view"
 					/>
 					{/* App-registered modes (`contributes.sidebar_modes`). Rendered from the

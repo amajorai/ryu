@@ -45,7 +45,7 @@ export function ExpandedPanelShell({
 			<header className="flex items-center justify-between gap-2">
 				<div className="flex items-center gap-2">
 					<span className="size-2 rounded-full bg-emerald-400" />
-					<h1 className="font-semibold text-neutral-100 text-sm">Ryu Island</h1>
+					<h1 className="font-medium text-neutral-100 text-sm">Ryu Island</h1>
 				</div>
 				<div className="flex items-center gap-1.5">
 					{onHome ? (

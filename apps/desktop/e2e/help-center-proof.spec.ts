@@ -18,7 +18,16 @@ declare global {
 		__ryuCompanion?: { mount: (options: unknown) => void };
 		__ryuHelpCenterCompanion?: {
 			connected: () => boolean;
-			mount: (appHtml: string) => void;
+			mount: (
+				appHtml: string,
+				view?:
+					| "overview"
+					| "inbox"
+					| "tickets"
+					| "knowledge"
+					| "agent"
+					| "insights"
+			) => void;
 		};
 	}
 }
@@ -48,9 +57,30 @@ test("Help Center companion completes the support workflow in Chromium", async (
 	);
 
 	const fixture = readFileSync(FIXTURE_PATH, "utf8");
+	const mountView = async (
+		view: "overview" | "inbox" | "tickets" | "knowledge" | "agent" | "insights"
+	) => {
+		await page.evaluate(
+			({ appHtml, nextView }) =>
+				window.__ryuHelpCenterCompanion?.mount(appHtml, nextView),
+			{ appHtml: fixture, nextView: view }
+		);
+		await expect
+			.poll(
+				() => page.evaluate(() => window.__ryuHelpCenterCompanion?.connected()),
+				{ timeout: 15_000 }
+			)
+			.toBe(true);
+		const mountedApp = page.frameLocator("#host-root iframe");
+		await expect(mountedApp.getByTestId("help-center-app")).toBeVisible({
+			timeout: 15_000,
+		});
+		return mountedApp;
+	};
+
 	await page.evaluate(
-		(appHtml) => window.__ryuHelpCenterCompanion?.mount(appHtml),
-		fixture
+		({ appHtml }) => window.__ryuHelpCenterCompanion?.mount(appHtml, "inbox"),
+		{ appHtml: fixture }
 	);
 	await expect
 		.poll(
@@ -61,7 +91,7 @@ test("Help Center companion completes the support workflow in Chromium", async (
 		)
 		.toBe(true);
 
-	const app = page.frameLocator("#host-root iframe");
+	let app = page.frameLocator("#host-root iframe");
 	await expect(app.getByTestId("help-center-app")).toBeVisible({
 		timeout: 15_000,
 	});
@@ -71,9 +101,12 @@ test("Help Center companion completes the support workflow in Chromium", async (
 	await expect
 		.poll(() => ticketRows.count(), { timeout: 10_000 })
 		.toBeGreaterThanOrEqual(2);
-	await app.getByRole("button", { name: "Tickets", exact: true }).click();
+	app = await mountView("tickets");
+	await expect(app.getByRole("heading", { name: "Tickets" })).toBeVisible();
 	await expect
-		.poll(() => ticketRows.count(), { timeout: 10_000 })
+		.poll(() => app.getByTestId("help-center-ticket-row").count(), {
+			timeout: 10_000,
+		})
 		.toBeGreaterThanOrEqual(3);
 
 	const selectedRow = app.locator(
@@ -126,7 +159,7 @@ test("Help Center companion completes the support workflow in Chromium", async (
 		resolutionRibbon.getByRole("button", { name: "Resolve ticket" })
 	).toBeVisible();
 
-	await app.getByRole("button", { name: "Knowledge", exact: true }).click();
+	app = await mountView("knowledge");
 	const knowledge = app.getByTestId("help-center-knowledge");
 	await expect(knowledge).toBeVisible();
 	await knowledge
@@ -136,7 +169,7 @@ test("Help Center companion completes the support workflow in Chromium", async (
 		knowledge.getByText("Exporting a report from Ryu", { exact: true })
 	).toBeVisible();
 
-	await app.getByRole("button", { name: "Agent", exact: true }).click();
+	app = await mountView("agent");
 	const agent = app.getByTestId("help-center-agent");
 	await expect(agent).toBeVisible();
 	await agent
@@ -145,7 +178,7 @@ test("Help Center companion completes the support workflow in Chromium", async (
 	await agent.getByRole("button", { name: "Ask", exact: true }).click();
 	await expect(agent).toContainText("Exporting a report from Ryu");
 
-	await app.getByRole("button", { name: "Insights", exact: true }).click();
+	app = await mountView("insights");
 	const insights = app.getByTestId("help-center-insights");
 	await expect(insights).toBeVisible();
 	await expect(
@@ -156,7 +189,7 @@ test("Help Center companion completes the support workflow in Chromium", async (
 		.locator("..");
 	await expect(openTicketsCard.getByText("3", { exact: true })).toBeVisible();
 
-	await app.getByRole("button", { name: "Inbox", exact: true }).click();
+	app = await mountView("inbox");
 	await expect(app.getByTestId("help-center-queue")).toBeVisible();
 	await expect(selectedRow).toBeVisible();
 	await expect(selectedRow).toHaveAttribute("data-selected", "true");

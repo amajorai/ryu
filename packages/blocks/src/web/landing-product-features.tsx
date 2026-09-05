@@ -359,7 +359,7 @@ export default function LandingProductFeatures() {
 								<div className={cn(landingSurfaceCardFlexXlClass, "min-h-80")}>
 									{card.viz}
 									<div>
-										<h3 className="mb-1 font-semibold text-foreground text-lg">
+										<h3 className="mb-1 font-medium text-foreground text-lg">
 											{card.title}
 										</h3>
 										<p className="text-muted-foreground text-sm">

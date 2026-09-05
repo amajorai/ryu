@@ -41,6 +41,18 @@ describe("parseRyuDeepLink", () => {
 		});
 	});
 
+	it("parses a bundle link with a scoped install-target node", () => {
+		expect(
+			parseRyuDeepLink(
+				"ryu://bundles/ryu/bundle/craft?node=https%3A%2F%2Fnode.example.com%3A7980%2F"
+			)
+		).toEqual({
+			kind: "bundle",
+			id: "ryu/bundle/craft",
+			node: "https://node.example.com:7980",
+		});
+	});
+
 	it("parses an app link with an install-target node hint", () => {
 		expect(
 			parseRyuDeepLink(
@@ -239,6 +251,12 @@ describe("buildRyuDeepLink round-trips with parseRyuDeepLink", () => {
 		{
 			kind: "app",
 			id: "com.ryu.agentbrowser",
+			node: "https://node.example.com:7980",
+		},
+		{ kind: "bundle", id: "ryu/bundle/craft", node: null },
+		{
+			kind: "bundle",
+			id: "ryu/bundle/software-factory",
 			node: "https://node.example.com:7980",
 		},
 		{

@@ -200,9 +200,9 @@ describe("CatalogHost seam — Apps section", () => {
 		expect(html).toContain("A sample plugin.");
 	});
 
-	test("with an install layer, list rows show the Add action (desktop)", () => {
+	test("with an install layer, list rows show the Get action (desktop)", () => {
 		const html = render(MOCK_INSTALL);
-		expect(html).toContain("Add");
+		expect(html).toContain("Get");
 		expect(html).not.toContain("Open Sample Plugin in Ryu");
 	});
 
@@ -211,11 +211,11 @@ describe("CatalogHost seam — Apps section", () => {
 		expect(html).toContain("Details");
 	});
 
-	test("StoreItemAction shows Add when not installed and no affordance", () => {
+	test("StoreItemAction shows Get when not installed and no affordance", () => {
 		const html = renderToStaticMarkup(
 			<StoreItemAction installed={false} onInstall={() => undefined} />
 		);
-		expect(html).toContain("Add");
+		expect(html).toContain("Get");
 		expect(html).not.toContain("Open Sample Plugin in Ryu");
 	});
 
@@ -325,7 +325,7 @@ describe("CatalogHost seam — Apps section", () => {
 				onInstall={() => undefined}
 			/>
 		);
-		expect(html).toContain("Add");
+		expect(html).toContain("Get");
 		expect(html).not.toContain("Unavailable");
 	});
 

@@ -16,6 +16,7 @@
 //     ryu://models/<source>/<id…>?node=…      install/switch a model
 //     ryu://skills/<source>/<id…>?node=…      install a skill
 //     ryu://apps/<id…>?node=…                 install an app (plugin id)
+//     ryu://bundles/<id…>?node=…              install a Marketplace bundle
 //     ryu://nodes/connect?url=…&token=…&name=…  connect to a Core node
 //
 // The node link is also the CONNECTION STRING: one line carrying everything a
@@ -56,6 +57,7 @@ export type DeepLinkIntent =
 	| { kind: "model"; source: string; id: string; node: string | null }
 	| { kind: "skill"; source: string; id: string; node: string | null }
 	| { kind: "app"; id: string; node: string | null }
+	| { kind: "bundle"; id: string; node: string | null }
 	| { kind: "node"; name: string; url: string; token: string | null }
 	| {
 			kind: "handoff";
@@ -81,6 +83,7 @@ export type DeepLinkBuildInput =
 	| { kind: "model"; source: string; id: string; node?: string | null }
 	| { kind: "skill"; source: string; id: string; node?: string | null }
 	| { kind: "app"; id: string; node?: string | null }
+	| { kind: "bundle"; id: string; node?: string | null }
 	| { kind: "node"; name: string; url: string; token?: string | null }
 	| {
 			kind: "handoff";
@@ -332,6 +335,10 @@ export function parseRyuDeepLink(raw: string): DeepLinkIntent | null {
 		}
 		return { kind: "app", id, node: parseNodeHint(params) };
 	}
+	if (category === "bundles") {
+		const id = pathSegments.join("/");
+		return id ? { kind: "bundle", id, node: parseNodeHint(params) } : null;
+	}
 	return null;
 }
 
@@ -396,7 +403,9 @@ export function buildRyuDeepLink(intent: DeepLinkBuildInput): string {
 	const base =
 		intent.kind === "app"
 			? `ryu://apps/${idPath}`
-			: `ryu://${intent.kind === "model" ? "models" : "skills"}/${encodeURIComponent(intent.source)}/${idPath}`;
+			: intent.kind === "bundle"
+				? `ryu://bundles/${idPath}`
+				: `ryu://${intent.kind === "model" ? "models" : "skills"}/${encodeURIComponent(intent.source)}/${idPath}`;
 	// Only an http(s) node url is emitted, matching what the parser will accept —
 	// a builder that emitted more than the parser reads would drift immediately.
 	const node = intent.node?.trim();

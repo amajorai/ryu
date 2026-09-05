@@ -183,7 +183,7 @@ export function AvailableUpdates({ compact = false }: { compact?: boolean }) {
 		<section className="flex flex-col gap-2">
 			<div className="flex items-center justify-between gap-2 px-3 py-2">
 				<div className="flex flex-col">
-					<span className="font-semibold text-sm">
+					<span className="font-medium text-sm">
 						Available updates
 						<span className="ml-1.5 text-muted-foreground tabular-nums">
 							{updates.length}

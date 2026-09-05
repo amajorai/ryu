@@ -6,6 +6,7 @@ import { OnboardingSetupStep } from "./OnboardingSetupStep.tsx";
 const baseProps = {
 	agentSuggestions: [],
 	agentSuggestionsError: null,
+	agentSuggestionsReviewed: new Set<string>(),
 	agentSuggestionsSelected: new Set<string>(),
 	agentSuggestionsSubmitting: false,
 	allowedAgentIds: ["ryu"],
@@ -32,6 +33,7 @@ const baseProps = {
 	onImportThreads: () => undefined,
 	onLocalSelectionChange: () => undefined,
 	onSearchConnections: () => undefined,
+	onReviewAgentSuggestion: () => undefined,
 	onSkip: () => undefined,
 	onToggleAgentSuggestion: () => undefined,
 	onToggleAutoImport: () => undefined,

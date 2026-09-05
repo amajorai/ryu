@@ -65,7 +65,7 @@ export default function ExtensionSettings({
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
 			<div className="shrink-0 px-6 pt-5 pb-0">
-				<h1 className="mb-4 font-semibold text-base">Settings</h1>
+				<h1 className="mb-4 font-medium text-base">Settings</h1>
 				<Tabs className="flex h-full flex-col" defaultValue={defaultTab}>
 					<TabsList className="justify-start">
 						{TABS.map(({ value, label }) => (

@@ -1016,7 +1016,7 @@ function ModelDetailHeader({
 		<header className="flex flex-col gap-2">
 			<div className="flex items-start justify-between gap-2">
 				<div className="min-w-0">
-					<h2 className="truncate font-semibold text-xl">
+					<h2 className="truncate font-medium text-xl">
 						{friendly ? friendlyModelName(card.name, card.tags) : card.name}
 					</h2>
 					<p className="text-muted-foreground text-sm">
@@ -1160,7 +1160,7 @@ function ModelSpecsRow({ card }: { card: ModelCard }) {
 					) : (
 						<span className="text-muted-foreground text-xs">{s.label}</span>
 					)}
-					<span className="font-semibold text-sm">{s.value}</span>
+					<span className="font-medium text-sm">{s.value}</span>
 				</div>
 			))}
 		</section>
@@ -1737,7 +1737,7 @@ function StatsBlock({
 							{it.label}
 						</span>
 						<span
-							className={`font-semibold text-sm ${
+							className={`font-medium text-sm ${
 								it.money ? "font-heading tabular-nums" : ""
 							}`}
 						>

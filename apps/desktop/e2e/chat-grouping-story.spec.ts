@@ -132,7 +132,7 @@ test("the clock collapses with the avatar, once per run", async ({ page }) => {
 		nodes
 			.filter((node) => node.querySelector(".group\\/user-message"))
 			.map((node) => ({
-				hasHeader: Boolean(node.querySelector('[data-slot="message-header"]')),
+				hasHeader: Boolean(node.querySelector('[data-slot="message-footer"]')),
 				position: node.getAttribute("data-group-position"),
 			}))
 	);

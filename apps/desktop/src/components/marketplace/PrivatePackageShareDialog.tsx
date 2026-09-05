@@ -216,7 +216,7 @@ export default function PrivatePackageShareDialog({
 								/>
 								Code ready
 							</div>
-							<p className="break-all font-mono font-semibold text-2xl tracking-[0.18em]">
+							<p className="break-all font-medium font-mono text-2xl tracking-[0.18em]">
 								{result.code}
 							</p>
 							<Button

@@ -230,7 +230,7 @@ export function TeamStrategyView({
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex items-center gap-2 border-border border-b px-4 py-3">
-				<h2 className="font-semibold">{teamName}</h2>
+				<h2 className="font-medium">{teamName}</h2>
 				<Badge variant="outline">
 					{formatCount(memberNames.length) ?? "—"} members
 				</Badge>

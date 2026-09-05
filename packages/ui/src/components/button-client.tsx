@@ -75,6 +75,8 @@ function Button({
 				aria-valuemin={0}
 				aria-valuenow={value}
 				className={classNameWithLoading}
+				data-cuelume-press=""
+				data-cuelume-release=""
 				data-slot="button"
 				role="progressbar"
 				{...localizedProps}
@@ -99,6 +101,8 @@ function Button({
 	return (
 		<ButtonPrimitive
 			className={classNameWithLoading}
+			data-cuelume-press=""
+			data-cuelume-release=""
 			data-slot="button"
 			{...localizedProps}
 			{...buttonStateProps}

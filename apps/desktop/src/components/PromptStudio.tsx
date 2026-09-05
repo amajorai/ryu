@@ -585,7 +585,7 @@ export function PromptStudio({
 		<div className="flex flex-col gap-4">
 			{/* Header */}
 			<div className="flex items-center gap-2">
-				<span className="font-semibold text-base">Prompt Studio</span>
+				<span className="font-medium text-base">Prompt Studio</span>
 				<Badge className="ml-1 text-[10px]" variant="secondary">
 					v{version}
 				</Badge>
@@ -1282,7 +1282,7 @@ function PromptTestCases({
 	return (
 		<section className="flex flex-col gap-3 rounded-xl border p-4">
 			<div className="flex items-center gap-2">
-				<span className="font-semibold text-base">Promptfoo suite</span>
+				<span className="font-medium text-base">Promptfoo suite</span>
 				{suite ? (
 					<Badge variant="secondary">{suiteVersions.length} versions</Badge>
 				) : null}
@@ -2457,7 +2457,7 @@ function StatCell({
 			<span className="text-[9px] text-muted-foreground uppercase tracking-wide">
 				{label}
 			</span>
-			<span className={`font-semibold text-xs ${tone ?? ""}`}>{value}</span>
+			<span className={`font-medium text-xs ${tone ?? ""}`}>{value}</span>
 		</div>
 	);
 }
@@ -2512,7 +2512,7 @@ function MatrixCell({
 				>
 					{score.assertions_pass ? "pass" : "fail"}
 				</Badge>
-				<span className={`font-semibold ${scoreTone(score.overall)}`}>
+				<span className={`font-medium ${scoreTone(score.overall)}`}>
 					{pct(score.overall)}
 				</span>
 			</div>

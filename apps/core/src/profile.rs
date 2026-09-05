@@ -265,7 +265,7 @@ fn tracing_note() {
         "ryu profile: '{}' active — isolated stack (ports +{}, data dir {})",
         profile(),
         port_offset(),
-        crate::paths::default_ryu_dir().display()
+        crate::paths::ryu_dir().display()
     );
 }
 

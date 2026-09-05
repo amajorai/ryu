@@ -17,10 +17,10 @@ test("agent routines show health, durable destinations, and safe controls", asyn
 	);
 	await expect(page.getByTestId("agent-routine-row")).toHaveCount(3);
 	await expect(
-		page.getByText("Persistent chat", { exact: true })
+		page.getByText("cron: 0 9 * * 1-5 · Persistent chat", { exact: true })
 	).toBeVisible();
 	await expect(
-		page.getByText("New chat each run", { exact: true })
+		page.getByText("Every 2h · New chat each run", { exact: true })
 	).toBeVisible();
 	await expect(
 		page.getByRole("heading", { name: "Run history" })

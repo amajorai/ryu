@@ -406,7 +406,7 @@ export default function DraftsPage() {
 			<header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
 				<HugeiconsIcon className="size-5" icon={FileEditIcon} />
 				<div>
-					<h1 className="font-semibold text-base">Drafts</h1>
+					<h1 className="font-medium text-base">Drafts</h1>
 					<p className="text-muted-foreground text-xs">
 						Messages you have not sent, and what each one is waiting for.
 					</p>

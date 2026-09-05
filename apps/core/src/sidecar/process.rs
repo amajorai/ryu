@@ -17,6 +17,10 @@ use crate::win_process::NoWindow;
 pub struct ProcessHandle {
     running: Arc<AtomicBool>,
     child: Arc<Mutex<Option<tokio::process::Child>>>,
+    /// Serializes async start/stop transitions. `is_running()` is synchronous and
+    /// cannot hold this lock, so every async transition re-checks liveness after
+    /// acquiring it before spawning or taking the child.
+    lifecycle: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ProcessHandle {
@@ -24,11 +28,16 @@ impl ProcessHandle {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             child: Arc::new(Mutex::new(None)),
+            lifecycle: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     /// Spawn `binary` with no extra arguments.
     pub async fn start(&self, binary: &Path) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
         let child = tokio::process::Command::new(binary)
             .kill_on_drop(true)
             .no_window()
@@ -41,6 +50,10 @@ impl ProcessHandle {
 
     /// Spawn `binary` with additional CLI arguments.
     pub async fn start_with_args(&self, binary: &Path, args: &[&'static str]) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
         let child = tokio::process::Command::new(binary)
             .args(args)
             .kill_on_drop(true)
@@ -76,6 +89,10 @@ impl ProcessHandle {
         args: &[String],
         env: &[(String, String)],
     ) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
         let mut command = tokio::process::Command::new(program);
         command.args(args).kill_on_drop(true).no_window();
         for (key, value) in env {
@@ -104,6 +121,10 @@ impl ProcessHandle {
         args: &[String],
         env: &[(String, String)],
     ) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
         let mut command = tokio::process::Command::new(program);
         command.args(args).kill_on_drop(true).no_window();
         command.env_clear();
@@ -134,6 +155,10 @@ impl ProcessHandle {
         args: &[String],
         env: &[(String, String)],
     ) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
         let mut command = tokio::process::Command::new(program);
         command
             .args(args)
@@ -178,6 +203,10 @@ impl ProcessHandle {
         args: &[String],
         env: &[(String, String)],
     ) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
+        if self.is_running() {
+            return Ok(());
+        }
         let mut command = tokio::process::Command::new(program);
         command.args(args).kill_on_drop(true).no_window();
         command.env_clear();
@@ -196,6 +225,7 @@ impl ProcessHandle {
     }
 
     pub async fn stop(&self) -> Result<()> {
+        let _lifecycle = self.lifecycle.lock().await;
         let child = { self.child.lock().unwrap().take() };
         if let Some(mut c) = child {
             let _ = c.kill().await;

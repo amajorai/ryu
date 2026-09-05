@@ -104,7 +104,11 @@ export function NumberTicker({
 	const animate = mounted && !reduce && (!startOnView || inView);
 
 	return (
-		<span className={className} ref={ref}>
+		<span
+			aria-label={`${prefix}${formatted}${suffix}`}
+			className={className}
+			ref={ref}
+		>
 			{prefix}
 			{chars.map((char, index) => {
 				const placeFromRight = chars.length - 1 - index;

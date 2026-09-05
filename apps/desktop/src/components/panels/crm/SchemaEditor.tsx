@@ -136,7 +136,7 @@ export function SchemaEditor({
 		<div className="flex h-full min-h-0 flex-col">
 			<header className="flex items-start justify-between gap-2 border-b px-4 py-3">
 				<div>
-					<h2 className="font-semibold text-base capitalize">
+					<h2 className="font-medium text-base capitalize">
 						{subject.object.plural} schema
 					</h2>
 					<p className="text-muted-foreground text-xs">

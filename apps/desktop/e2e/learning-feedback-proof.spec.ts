@@ -11,16 +11,18 @@ test("renders and toggles the Learning plugin feedback action", async ({
 	await expect(page.getByTestId("feedback-contract")).toContainText(
 		"learning.recordFeedback"
 	);
-	const good = page.getByRole("button", { name: "Good response" });
-	const bad = page.getByRole("button", { name: "Bad response" });
-	await expect(good).toHaveAttribute("aria-pressed", "false");
-	await expect(bad).toHaveAttribute("aria-pressed", "false");
+	const more = page.getByRole("button", { name: "More message actions" });
+	await expect(more).toBeVisible();
 	await expect(page.getByTestId("feedback-status")).toContainText(
 		"No response rating selected"
 	);
 
+	await more.click();
+	const good = page.getByRole("menuitem", { name: "Good response" });
+	const bad = page.getByRole("menuitem", { name: "Bad response" });
+	await expect(good).toBeVisible();
+	await expect(bad).toBeVisible();
 	await good.click();
-	await expect(good).toHaveAttribute("aria-pressed", "true");
 	await expect(page.getByTestId("feedback-status")).toContainText(
 		"Good response selected"
 	);
@@ -29,14 +31,14 @@ test("renders and toggles the Learning plugin feedback action", async ({
 		path: testInfo.outputPath("learning-feedback-proof.png"),
 	});
 
+	await more.click();
 	await good.click();
-	await expect(good).toHaveAttribute("aria-pressed", "false");
 	await expect(page.getByTestId("feedback-status")).toContainText(
 		"No response rating selected"
 	);
 
+	await more.click();
 	await bad.click();
-	await expect(bad).toHaveAttribute("aria-pressed", "true");
 	await expect(page.getByTestId("feedback-status")).toContainText(
 		"Bad response selected"
 	);

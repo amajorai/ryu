@@ -34,7 +34,9 @@ import {
 import { cn } from "@ryu/ui/lib/utils.ts";
 import {
 	type CSSProperties,
+	type ReactElement,
 	type ReactNode,
+	type RefObject,
 	useCallback,
 	useEffect,
 	useId,
@@ -45,6 +47,15 @@ import {
 import { createPortal } from "react-dom";
 
 export type TrayTone = "default" | "danger" | "success" | "primary";
+
+export interface TrayTriggerRenderProps {
+	"aria-controls": string;
+	"aria-expanded": boolean;
+	"aria-haspopup": true;
+	"aria-label": string;
+	onClick: () => void;
+	ref: RefObject<HTMLButtonElement | null>;
+}
 
 /** The 28px footer icon button both trays hang off. */
 export const trayTriggerClass =
@@ -73,9 +84,9 @@ const TRAY_MORPH_INITIAL_H = 240;
 const MORPH_SLOT_OFFSET = 6;
 
 /**
- * The count bubble both triggers overlay. Stays mounted so the
- * transitions.dev notification-badge (03) can pop it in/out rather than
- * hard-mounting, and so the two trays badge identically.
+ * The count bubble for trays without a dedicated animated trigger. It stays
+ * mounted so the transitions.dev notification-badge (03) can pop it in/out
+ * rather than hard-mounting.
  */
 export function TrayBadge({
 	count,
@@ -139,6 +150,7 @@ export function TrayMorph({
 	label,
 	onOpenChange,
 	open,
+	renderTrigger,
 }: {
 	badge?: ReactNode;
 	/** The tray panel body — TrayHeader, TrayScroll/TrayEmpty, TrayFooter. */
@@ -147,6 +159,7 @@ export function TrayMorph({
 	label: string;
 	onOpenChange: (open: boolean) => void;
 	open: boolean;
+	renderTrigger?: (props: TrayTriggerRenderProps) => ReactElement;
 }) {
 	const panelId = useId();
 	const rootRef = useRef<HTMLDivElement | null>(null);
@@ -260,6 +273,14 @@ export function TrayMorph({
 		"--morph-open-w": TRAY_MORPH_OPEN_W,
 		"--morph-open-h": `${openH}px`,
 	} as CSSProperties;
+	const triggerProps: TrayTriggerRenderProps = {
+		"aria-controls": panelId,
+		"aria-expanded": open,
+		"aria-haspopup": true,
+		"aria-label": label,
+		onClick: () => onOpenChange(!open),
+		ref: triggerRef,
+	};
 
 	return (
 		<div className="relative size-7 shrink-0" ref={rootRef}>
@@ -274,22 +295,21 @@ export function TrayMorph({
 				<Tooltip>
 					<TooltipTrigger
 						render={
-							<button
-								aria-controls={panelId}
-								aria-expanded={open}
-								aria-haspopup="true"
-								aria-label={label}
-								className={cn(
-									trayTriggerClass,
-									open && "bg-muted text-foreground"
-								)}
-								onClick={() => onOpenChange(!open)}
-								ref={triggerRef}
-								type="button"
-							>
-								<HugeiconsIcon icon={icon} size={15} />
-								{badge}
-							</button>
+							renderTrigger ? (
+								renderTrigger(triggerProps)
+							) : (
+								<button
+									{...triggerProps}
+									className={cn(
+										trayTriggerClass,
+										open && "bg-muted text-foreground"
+									)}
+									type="button"
+								>
+									<HugeiconsIcon icon={icon} size={15} />
+									{badge}
+								</button>
+							)
 						}
 					/>
 					<TooltipContent>{label}</TooltipContent>
@@ -368,7 +388,7 @@ export function TrayHeader({
 		<div className="flex items-start gap-2 px-2.5 pt-1.5 pb-2">
 			<div className="flex min-w-0 flex-col gap-0.5">
 				<div className="flex items-center gap-1.5">
-					<span className="font-semibold text-[13px] tracking-tight">
+					<span className="font-medium text-[13px] tracking-tight">
 						{title}
 					</span>
 					{count !== undefined && count > 0 && (

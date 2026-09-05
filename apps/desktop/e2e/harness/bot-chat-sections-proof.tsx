@@ -151,7 +151,7 @@ function Story() {
 						<main className="min-h-screen bg-background p-6 text-foreground">
 							<div className="mb-4 max-w-sm">
 								<h1 className="font-semibold text-lg">
-									Agents view · Sessions
+									Agents view · Other chats
 								</h1>
 								<p className="mt-1 text-muted-foreground text-sm">
 									Local custom chat sections proof.

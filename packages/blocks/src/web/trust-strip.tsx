@@ -60,7 +60,7 @@ export default function TrustStrip() {
 										className="size-5 text-foreground"
 										strokeWidth={1.75}
 									/>
-									<p className="font-semibold text-foreground text-sm">
+									<p className="font-medium text-foreground text-sm">
 										{point.label}
 									</p>
 									<p className="text-muted-foreground text-sm leading-relaxed">

@@ -39,6 +39,8 @@ export const STEP_UP_SCOPES = [
 	"org.delete",
 	/** Membership and control: remove a member, change a role, hand over ownership. */
 	"org.members",
+	/** Organization-owned feature access controls. */
+	"org.features",
 	/** Long-lived secrets: gateway keys, API keys, the provider key vault. */
 	"org.credentials",
 	/** Cloud nodes: schedule removal, transfer, or destroy live infrastructure. */
@@ -96,6 +98,7 @@ const MINUTE_MS = 60 * 1000;
 const WINDOW_MS: Record<StepUpScope, number> = {
 	"org.delete": 5 * MINUTE_MS,
 	"org.members": 10 * MINUTE_MS,
+	"org.features": 10 * MINUTE_MS,
 	"org.credentials": 10 * MINUTE_MS,
 	"node.destroy": 5 * MINUTE_MS,
 	billing: 5 * MINUTE_MS,
@@ -170,6 +173,7 @@ const SCOPE_LABELS: Record<StepUpScope, string> = {
 	"org.credentials": "change long-lived access keys",
 	"org.delete": "delete a workspace",
 	"org.members": "change who can access a workspace",
+	"org.features": "change organization feature access",
 	"node.destroy": "remove a cloud node",
 	billing: "complete this billing action",
 	"platform.admin": "use Ryu staff powers",

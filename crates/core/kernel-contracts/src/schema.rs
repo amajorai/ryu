@@ -180,6 +180,14 @@ pub struct ToolConfig {
     /// (e.g. `"--query={query}"`). Absent = no arguments.
     #[serde(default)]
     pub command_args: Option<Vec<String>>,
+    /// `command`: names of call arguments that are filesystem paths. Core resolves
+    /// these against the active caller workspace before spawning the command and
+    /// rejects paths outside that workspace, symlink escapes, and protected host
+    /// directories. This is required for command tools such as ripgrep that read
+    /// caller-selected files; an absent value preserves the non-filesystem command
+    /// contract used by tools such as `spider`, `rtk`, and `bws`.
+    #[serde(default)]
+    pub workspace_path_args: Option<Vec<String>>,
     /// `command`: child-environment overlay — child var name → source spec. v1
     /// supports only `"env:VARNAME"` (read Core's process env). Declared VALUES are
     /// deliberately excluded from the firewall/DLP scan and the audit trail.
@@ -369,6 +377,10 @@ pub enum ToolBackend {
         /// paths) so a raw-JSON caller that bypasses the advertised schema still
         /// gets the schema's `default`/`minimum`/`maximum`. Empty = no bounds.
         arg_bounds: std::collections::BTreeMap<String, ArgBounds>,
+        /// Call arguments whose values must resolve inside the active caller
+        /// workspace before the command is spawned. Empty = not a filesystem
+        /// path-scoped command.
+        workspace_path_args: Vec<String>,
     },
 }
 
@@ -521,6 +533,54 @@ fn number_from(v: f64, integer: bool) -> serde_json::Value {
     }
 }
 
+/// Validate the manifest declaration that marks command arguments as workspace
+/// paths. Keeping the declaration tied to an actual argv expansion prevents a
+/// manifest from accidentally believing it protected a value that never reaches
+/// the command, while the runtime still performs the caller-specific filesystem
+/// check immediately before spawn.
+fn validate_workspace_path_args(config: &ToolConfig, names: &[String]) -> Result<(), String> {
+    let mut seen = std::collections::BTreeSet::new();
+    for raw_name in names {
+        let name = raw_name.trim();
+        if name.is_empty() || raw_name != name || name.contains('/') || name.contains('}') {
+            return Err(format!(
+                "tool backend 'command': invalid workspace path argument '{name}'"
+            ));
+        }
+        if !seen.insert(name.to_owned()) {
+            return Err(format!(
+                "tool backend 'command': duplicate workspace path argument '{name}'"
+            ));
+        }
+        let placeholder = format!("{{{name}}}");
+        let used_in_templates = config.command_args.as_ref().is_some_and(|templates| {
+            templates
+                .iter()
+                .any(|template| template.contains(&placeholder))
+        });
+        let used_in_specs = config
+            .args
+            .as_ref()
+            .is_some_and(|specs| specs.iter().any(|spec| spec.from == name));
+        let expanded_in_specs = config.args.as_ref().is_some_and(|specs| {
+            specs
+                .iter()
+                .any(|spec| spec.from == name && (spec.map.is_some() || spec.split.is_some()))
+        });
+        if expanded_in_specs {
+            return Err(format!(
+                "tool backend 'command': workspace path argument '{name}' must be one argv token"
+            ));
+        }
+        if !used_in_templates && !used_in_specs {
+            return Err(format!(
+                "tool backend 'command': workspace path argument '{name}' is not used by command_args or args"
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl ToolConfig {
     /// Resolve the declared backend, validating that the required fields for the
     /// chosen kind are present. `None`/`"alias"` → [`ToolBackend::Alias`] wrapping
@@ -656,6 +716,8 @@ impl ToolConfig {
                     }
                     _ => None,
                 };
+                let workspace_path_args = self.workspace_path_args.clone().unwrap_or_default();
+                validate_workspace_path_args(self, &workspace_path_args)?;
                 Ok(ToolBackend::Command {
                     bin: bin.to_owned(),
                     args: self.command_args.clone().unwrap_or_default(),
@@ -666,6 +728,7 @@ impl ToolConfig {
                     egress_url_arg: self.egress_url_arg.clone().filter(|s| !s.trim().is_empty()),
                     arg_specs,
                     arg_bounds: extract_arg_bounds(self.input_schema.as_ref()),
+                    workspace_path_args,
                 })
             }
             other => Err(format!(
@@ -2023,6 +2086,7 @@ mod tests {
                 egress_url_arg,
                 arg_specs,
                 arg_bounds,
+                workspace_path_args,
             } => {
                 assert_eq!(bin, "exa");
                 // No numeric bounds without an input_schema.
@@ -2041,6 +2105,7 @@ mod tests {
                 assert_eq!(egress_url_arg, None);
                 // No structured args unless declared (template path).
                 assert_eq!(arg_specs, None);
+                assert!(workspace_path_args.is_empty());
             }
             other => panic!("expected Command backend, got {other:?}"),
         }
@@ -2067,6 +2132,42 @@ mod tests {
                 cfg.resolve_backend().is_err(),
                 "path-shaped bin '{bad}' must be rejected"
             );
+        }
+    }
+
+    #[test]
+    fn command_backend_carries_workspace_path_args() {
+        let cfg: ToolConfig = serde_json::from_value(json!({
+            "slug": "ripgrep.search",
+            "backend": "command",
+            "bin": "rg",
+            "command_args": ["--", "{pattern}", "{path}"],
+            "workspace_path_args": ["path"]
+        }))
+        .unwrap();
+        match cfg.resolve_backend().unwrap() {
+            ToolBackend::Command {
+                workspace_path_args,
+                ..
+            } => assert_eq!(workspace_path_args, vec!["path"]),
+            other => panic!("expected Command backend, got {other:?}"),
+        }
+
+        for (workspace_path_args, command_args) in [
+            (json!(["path"]), json!(["--", "{query}"])),
+            (json!(["path", "path"]), json!(["{path}"])),
+            (json!(["path/child"]), json!(["{path/child}"])),
+            (json!(["missing"]), json!(["{path}"])),
+        ] {
+            let raw = serde_json::json!({
+                "slug": "ripgrep.search",
+                "backend": "command",
+                "bin": "rg",
+                "command_args": command_args,
+                "workspace_path_args": workspace_path_args
+            });
+            let cfg: ToolConfig = serde_json::from_value(raw).unwrap();
+            assert!(cfg.resolve_backend().is_err());
         }
     }
 

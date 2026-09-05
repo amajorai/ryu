@@ -1046,7 +1046,7 @@ export const VOICE_PREF_KEY = "voice-input";
  * existed in Core for some time and was simply unreachable from the UI, because
  * this union and `VOICE_ENGINES` below listed only the two local engines.
  */
-export type VoiceEngine = "whisper" | "parakeet" | "gateway";
+export type VoiceEngine = "whisper" | "parakeet" | "audiocpp" | "gateway";
 
 /**
  * Activation behavior of the push-to-talk shortcut. `"toggle"` = press once to
@@ -1093,6 +1093,12 @@ export const VOICE_ENGINES: {
 		label: "Whisper",
 		model: "ggml-base.en",
 		sidecar: "whispercpp",
+	},
+	{
+		engine: "audiocpp",
+		label: "audio.cpp",
+		model: "parakeet-tdt-0.6b-v3-q8_0",
+		sidecar: "audiocpp",
 	},
 	{
 		engine: "gateway",

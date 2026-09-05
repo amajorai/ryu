@@ -781,7 +781,7 @@ export function NavUser({
 																	<p className="text-muted-foreground text-xs">
 																		Credits left for organization
 																	</p>
-																	<p className="font-mono font-semibold text-sm tabular-nums">
+																	<p className="font-medium font-mono text-sm tabular-nums">
 																		{creditsLeft}
 																	</p>
 																</div>
@@ -789,7 +789,7 @@ export function NavUser({
 																	<p className="text-muted-foreground text-xs">
 																		Reset date
 																	</p>
-																	<p className="font-semibold text-sm">
+																	<p className="font-medium text-sm">
 																		{resetDate}
 																	</p>
 																</div>

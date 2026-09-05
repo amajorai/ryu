@@ -103,7 +103,7 @@ export function ModelLaunchConfigSection({
 				onClick={() => setOpen((o) => !o)}
 				type="button"
 			>
-				<span className="font-semibold text-sm">Engine / Hardware</span>
+				<span className="font-medium text-sm">Engine / Hardware</span>
 				{subtitle ? (
 					<span
 						className="truncate text-muted-foreground text-xs"

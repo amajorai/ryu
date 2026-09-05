@@ -17,7 +17,7 @@ export function PlaceholderPage({
 }: PlaceholderPageProps) {
 	return (
 		<div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-			<h1 className="font-semibold text-lg">{title}</h1>
+			<h1 className="font-medium text-lg">{title}</h1>
 			<p className="max-w-md text-muted-foreground text-sm">{description}</p>
 			<span className="mt-2 rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
 				Coming in {unit}

@@ -143,6 +143,11 @@ export default defineConfig({
 			plugins: [tailwindcss()],
 		},
 	},
+	// The real provider picker imports a small Next navigation adapter. The proof
+	// runs under Vite, so provide the compile-time env object that adapter expects.
+	define: {
+		"process.env": {},
+	},
 	root: harnessDir,
 	clearScreen: false,
 	resolve: {

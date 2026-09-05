@@ -48,7 +48,7 @@ export function WidgetCard({
 		<Card className="group flex h-full flex-col gap-0 overflow-hidden rounded-2xl border-border/60 py-0 shadow-sm transition-shadow duration-200 hover:shadow-md">
 			<div className="widget-drag-handle /50 flex cursor-grab items-center gap-1.5 border-b bg-muted/20 px-3 py-2 active:cursor-grabbing">
 				<GripVerticalIcon className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-				<span className="flex-1 truncate font-semibold text-sm tracking-tight">
+				<span className="flex-1 truncate font-medium text-sm tracking-tight">
 					{widget.title || "Untitled"}
 				</span>
 				<DropdownMenu>

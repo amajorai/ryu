@@ -175,7 +175,7 @@ export function EmployeeBadge({
 							{logo}
 						</span>
 					) : null}
-					<span className="break-words font-semibold text-5xl leading-[1.02] tracking-tight">
+					<span className="break-words font-medium text-5xl leading-[1.02] tracking-tight">
 						{name}
 					</span>
 					{role ? (

@@ -34,6 +34,7 @@
 
 import {
 	Add01Icon,
+	Cancel01Icon,
 	CheckmarkCircle02Icon,
 	Download04Icon,
 	HelpCircleIcon,
@@ -106,6 +107,7 @@ import {
 	showsComposerTuning,
 	showsModelPicker,
 } from "@/src/lib/interface-level.ts";
+import type { PickerRef } from "@/src/lib/picker-favorites.ts";
 import { svglForProvider } from "@/src/lib/provider-brand.tsx";
 
 /** A Pi provider row for the Providers section (built by `useUniversalPicker`). */
@@ -251,9 +253,15 @@ export interface UniversalPickerData {
 	onRemoveAgentAccount: (agentId: string, accountId: string) => void;
 	/** Remove an account from a Pi provider. */
 	onRemoveProviderAccount: (providerId: string, accountId: string) => void;
+	onRemoveRecent?: (ref: PickerRef) => void;
 	onSelectAgent: (id: string) => void;
 	onSelectProviderModel: (providerId: string, modelId: string) => void;
 	onSelectProviderThinking: (providerId: string, level: string) => void;
+	onSelectRecentModel?: (
+		providerId: string,
+		modelId: string,
+		effort?: string
+	) => void;
 	onSelectTeam?: (id: string) => void;
 	/** Switch an ACP agent's active account (`provider` required for the managed
 	 *  Pi's accounts, which live in a provider scope). */
@@ -272,6 +280,7 @@ export interface UniversalPickerData {
 	onUpgrade: () => void;
 	onUseProvider: (providerId: string) => void;
 	providers: ProviderEntry[];
+	recentRefs?: readonly PickerRef[];
 	ryuActive: boolean;
 	/** The flagship Ryu agent, or null if somehow absent from the registry. */
 	ryuAgent: AgentSummary | null;
@@ -397,7 +406,14 @@ function SettingSub({ section }: { section: ComposerSettingsSection }) {
 	const onSelect = (id: string) => {
 		const item = section.items.find((candidate) => candidate.id === id);
 		const apply = () => section.onChange(id);
-		selectionGuard?.request(item ?? { id, name: id }, apply, section.label);
+		if (selectionGuard) {
+			selectionGuard.request(item ?? { id, name: id }, apply, section.label);
+			return;
+		}
+		// ProviderCommandDialog can be rendered beside ComposerSettingsMenu, so it
+		// has no FullAccessSelectionProvider ancestor. A missing optional guard is
+		// not a reason to drop an otherwise safe model/thinking selection.
+		apply();
 	};
 	if (section.variant === "slider" && !loadingEmpty) {
 		if (commandNavigation) {
@@ -1223,6 +1239,228 @@ function matches(
 	return fields.some((f) => (f ?? "").toLowerCase().includes(query));
 }
 
+interface RecentPickerModel {
+	effort?: string;
+	model: ComposerSettingItem;
+	provider: ProviderEntry;
+	ref: Extract<PickerRef, { kind: "model" }>;
+}
+
+function recentModels(
+	refs: readonly PickerRef[] | undefined,
+	providers: ProviderEntry[]
+): RecentPickerModel[] {
+	const byId = new Map(providers.map((provider) => [provider.id, provider]));
+	const rows: RecentPickerModel[] = [];
+	for (const ref of refs ?? []) {
+		if (ref.kind !== "model") {
+			continue;
+		}
+		const provider = byId.get(ref.providerId);
+		const model = provider?.models.find((item) => item.id === ref.modelId);
+		if (!(provider && model)) {
+			continue;
+		}
+		rows.push({ effort: ref.effort, model, provider, ref });
+	}
+	return rows;
+}
+
+function recentAgents(
+	refs: readonly PickerRef[] | undefined,
+	agents: AgentSummary[],
+	ryuAgent: AgentSummary | null
+): Array<{ agent: AgentSummary; ref: Extract<PickerRef, { kind: "agent" }> }> {
+	const byId = new Map(
+		[...(ryuAgent ? [ryuAgent] : []), ...agents].map((agent) => [
+			agent.id,
+			agent,
+		])
+	);
+	const rows: Array<{
+		agent: AgentSummary;
+		ref: Extract<PickerRef, { kind: "agent" }>;
+	}> = [];
+	for (const ref of refs ?? []) {
+		if (ref.kind !== "agent") {
+			continue;
+		}
+		const agent = byId.get(ref.agentId);
+		if (agent) {
+			rows.push({ agent, ref });
+		}
+	}
+	return rows;
+}
+
+function RecentEffortMeter({ effort }: { effort?: string }) {
+	if (!effort) {
+		return null;
+	}
+	const levels = ["off", "low", "medium", "high", "max"];
+	const activeIndex = Math.max(0, levels.indexOf(effort.toLowerCase()));
+	const label = effort.charAt(0).toUpperCase() + effort.slice(1);
+	return (
+		<span
+			aria-label={`Effort: ${label}`}
+			className="composer-effort-meter inline-flex h-4 shrink-0 items-end gap-px text-primary"
+			data-composer-effort-meter="true"
+			role="img"
+			title={`Effort: ${label}`}
+		>
+			{levels.map((level, index) => (
+				<span
+					aria-hidden="true"
+					className={cn(
+						"w-1 rounded-[1px]",
+						index <= activeIndex ? "bg-current" : "bg-muted-foreground/25"
+					)}
+					key={level}
+					style={{ height: `${5 + index * 2}px` }}
+				/>
+			))}
+		</span>
+	);
+}
+
+function RecentModelRow({
+	effort,
+	model,
+	modelRef,
+	onRemove,
+	onSelect,
+	provider,
+	testId,
+}: Omit<RecentPickerModel, "ref"> & {
+	modelRef: RecentPickerModel["ref"];
+	onRemove?: (ref: PickerRef) => void;
+	onSelect: (ref: PickerRef) => void;
+	testId?: string;
+}) {
+	const commandNavigation = useProviderCommandNavigation();
+	const content = (
+		<>
+			<AgentLogo
+				className="size-4 shrink-0"
+				engine={provider.engineKey}
+				size="16px"
+			/>
+			<span className="min-w-0 flex-1">
+				<span className="flex min-w-0 items-center gap-2">
+					<span className="min-w-0 flex-1 truncate">{model.name}</span>
+					<RecentEffortMeter effort={effort} />
+				</span>
+				<span className="block truncate text-muted-foreground text-xs">
+					{provider.label}
+				</span>
+			</span>
+			{onRemove ? (
+				<Button
+					aria-label={`Remove ${model.name} from recent`}
+					className="size-6 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/recent:opacity-100"
+					onClick={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onRemove(modelRef);
+					}}
+					size="icon-sm"
+					type="button"
+					variant="ghost"
+				>
+					<HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} />
+				</Button>
+			) : null}
+		</>
+	);
+	if (commandNavigation) {
+		return (
+			<CommandItem
+				className="group/recent min-w-0 gap-2"
+				data-testid={testId ?? "recent-model-row"}
+				onSelect={() => onSelect(modelRef)}
+				value={`recent ${model.name} ${provider.label}`}
+			>
+				{content}
+			</CommandItem>
+		);
+	}
+	return (
+		<DropdownMenuItem
+			className="group/recent min-w-0 gap-2"
+			closeOnClick={false}
+			data-testid={testId ?? "recent-model-row"}
+			onClick={() => onSelect(modelRef)}
+		>
+			{content}
+		</DropdownMenuItem>
+	);
+}
+
+function RecentAgentRow({
+	agent,
+	agentRef,
+	onRemove,
+	onSelect,
+	testId,
+}: {
+	agent: AgentSummary;
+	agentRef: Extract<PickerRef, { kind: "agent" }>;
+	onRemove?: (ref: PickerRef) => void;
+	onSelect: (ref: PickerRef) => void;
+	testId?: string;
+}) {
+	const commandNavigation = useProviderCommandNavigation();
+	const content = (
+		<>
+			<AgentAvatar
+				className="size-4 shrink-0 rounded-full object-contain"
+				engine={agent.engine ?? agent.id}
+				glyph={agent.avatarGlyph}
+				size="16px"
+			/>
+			<span className="min-w-0 flex-1 truncate">{agent.name}</span>
+			{onRemove ? (
+				<Button
+					aria-label={`Remove ${agent.name} from recent`}
+					className="size-6 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/recent:opacity-100"
+					onClick={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						onRemove(agentRef);
+					}}
+					size="icon-sm"
+					type="button"
+					variant="ghost"
+				>
+					<HugeiconsIcon aria-hidden="true" icon={Cancel01Icon} />
+				</Button>
+			) : null}
+		</>
+	);
+	if (commandNavigation) {
+		return (
+			<CommandItem
+				className="group/recent min-w-0 gap-2"
+				data-testid={testId ?? "recent-agent-row"}
+				onSelect={() => onSelect(agentRef)}
+				value={`recent ${agent.name}`}
+			>
+				{content}
+			</CommandItem>
+		);
+	}
+	return (
+		<DropdownMenuItem
+			className="group/recent min-w-0 gap-2"
+			closeOnClick={false}
+			data-testid={testId ?? "recent-agent-row"}
+			onClick={() => onSelect(agentRef)}
+		>
+			{content}
+		</DropdownMenuItem>
+	);
+}
+
 export function UniversalPickerBody({
 	data,
 	close,
@@ -1254,9 +1492,11 @@ export function UniversalPickerBody({
 		onConfigureCredentials,
 		onCreateAgent,
 		onInstallExternal,
+		onRemoveRecent,
 		onSelectAgent,
 		onSelectProviderModel,
 		onSelectProviderThinking,
+		onSelectRecentModel,
 		onSelectTeam,
 		onSwitchProviderAccount,
 		onRemoveProviderAccount,
@@ -1265,6 +1505,7 @@ export function UniversalPickerBody({
 		onUpgrade,
 		onUseProvider,
 		providers,
+		recentRefs,
 		ryuAgent,
 		ryuActive,
 		teams,
@@ -1296,6 +1537,8 @@ export function UniversalPickerBody({
 		matches(q, a.name, a.id, a.description)
 	);
 	const filteredTeams = teams.filter((t) => matches(q, t.name, t.id));
+	const recentModelRows = recentModels(recentRefs, providers);
+	const recentAgentRows = recentAgents(recentRefs, agents, ryuAgent);
 	const ryuVisible = ryuAgent ? matches(q, ryuAgent.name, "ryu") : false;
 	// The "Auto" row is always offered (empty query) and stays findable by search —
 	// unless a settings field suppresses it (`hideAuto`).
@@ -1515,6 +1758,28 @@ export function UniversalPickerBody({
 		</TargetSub>
 	);
 
+	const selectRecent = (ref: PickerRef) => {
+		if (ref.kind === "agent") {
+			onSelectAgent(ref.agentId);
+			return;
+		}
+		if (onSelectRecentModel) {
+			onSelectRecentModel(ref.providerId, ref.modelId, ref.effort);
+			return;
+		}
+		onSelectProviderModel(ref.providerId, ref.modelId);
+		if (ref.effort) {
+			onSelectProviderThinking(ref.providerId, ref.effort);
+		}
+	};
+
+	const recentModelRowsForDisplay = recentModelRows.filter(({ model }) =>
+		matches(q, model.name)
+	);
+	const recentAgentRowsForDisplay = recentAgentRows.filter(({ agent }) =>
+		matches(q, agent.name, agent.id)
+	);
+
 	return (
 		<div className="flex flex-col">
 			{showSearch && (
@@ -1539,6 +1804,38 @@ export function UniversalPickerBody({
 						No matches for &ldquo;{query.trim()}&rdquo;
 					</p>
 				)}
+
+				{!q &&
+				(recentModelRowsForDisplay.length > 0 ||
+					recentAgentRowsForDisplay.length > 0) ? (
+					<>
+						<SectionHeader label="Recent" />
+						{showProviders &&
+							recentModelRowsForDisplay.map((row, index) => (
+								<RecentModelRow
+									effort={row.effort}
+									key={`model:${row.provider.id}:${row.model.id}`}
+									model={row.model}
+									modelRef={row.ref}
+									onRemove={onRemoveRecent}
+									onSelect={selectRecent}
+									provider={row.provider}
+									testId={`recent-model-row-${index}`}
+								/>
+							))}
+						{showAgents &&
+							recentAgentRowsForDisplay.map((row, index) => (
+								<RecentAgentRow
+									agent={row.agent}
+									agentRef={row.ref}
+									key={`agent:${row.agent.id}`}
+									onRemove={onRemoveRecent}
+									onSelect={selectRecent}
+									testId={`recent-agent-row-${index}`}
+								/>
+							))}
+					</>
+				) : null}
 
 				{/* Auto (Plane B — Core picks the agent per-turn) */}
 				{showAgents && autoVisible && (

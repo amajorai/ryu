@@ -4,7 +4,7 @@
 // "Text and Embedding", "Team rituals", "From the community", …).
 //
 // It exists because the same shelf was styled four different ways across the
-// Store: Home and Apps/Plugins used `font-semibold text-base tracking-tight`,
+// Store: Home and Apps/Plugins used `font-medium text-base tracking-tight`,
 // Engines/Agents/Workflows/contributed tabs used a muted uppercase micro-label,
 // and Installed used the same micro-label with a different tracking. Switching
 // tabs changed the typography of the section titles, which made one surface read
@@ -65,7 +65,7 @@ export default function StoreShelfHeading({
 	onOpen?: () => void;
 }) {
 	const title = (
-		<span className="min-w-0 truncate font-semibold text-base tracking-tight">
+		<span className="min-w-0 truncate font-medium text-base tracking-tight">
 			{children}
 		</span>
 	);

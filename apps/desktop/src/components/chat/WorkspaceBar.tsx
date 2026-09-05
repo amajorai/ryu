@@ -13,6 +13,7 @@ import { WorkspacePicker } from "./WorkspacePicker.tsx";
 
 interface WorkspaceBarProps {
 	conversationId?: string | null;
+	folderOverride?: string | null;
 	onWorktreeModeChange?: (enabled: boolean) => void;
 	target: ApiTarget;
 	worktreeModeOverride?: boolean;
@@ -20,6 +21,7 @@ interface WorkspaceBarProps {
 
 export function WorkspaceBar({
 	conversationId,
+	folderOverride,
 	onWorktreeModeChange,
 	target,
 	worktreeModeOverride,
@@ -27,6 +29,7 @@ export function WorkspaceBar({
 	return (
 		<WorkspacePicker
 			conversationId={conversationId}
+			folderOverride={folderOverride}
 			onWorktreeModeChange={onWorktreeModeChange}
 			target={target}
 			worktreeModeOverride={worktreeModeOverride}

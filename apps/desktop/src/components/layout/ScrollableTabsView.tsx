@@ -276,7 +276,7 @@ export function ScrollableTabsView() {
 					<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.16em]">
 						Center view
 					</p>
-					<h1 className="font-semibold text-sm">Scrollable tabs</h1>
+					<h1 className="font-medium text-sm">Scrollable tabs</h1>
 				</div>
 				<button
 					aria-label="New chat tab"

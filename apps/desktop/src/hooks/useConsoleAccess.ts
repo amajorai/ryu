@@ -56,14 +56,12 @@ export function useConsoleAccess(node: {
 		!organizationsQuery.isError;
 
 	return {
-		canSwitchToConsole:
-			managed &&
-			canAccessConsoleForNode({
-				managed,
-				orgId: node.orgId,
-				organizations: organizationsQuery.data,
-				settled: organizationsQuery.isSuccess,
-			}),
+		canSwitchToConsole: canAccessConsoleForNode({
+			managed,
+			orgId: node.orgId,
+			organizations: organizationsQuery.data,
+			settled: organizationsQuery.isSuccess,
+		}),
 		consoleOnly: !managed,
 		loading,
 	};

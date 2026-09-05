@@ -39,6 +39,8 @@ import {
 	ServerStack01Icon,
 	Target01Icon,
 	Tv01Icon,
+	UserMultiple02Icon,
+	WorkflowCircle06Icon,
 	Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import type { IconSvgElement } from "@hugeicons/react";
@@ -256,10 +258,18 @@ export const SECTION_LABELS = Object.fromEntries(
 	BUILTIN_SECTIONS.map((section) => [section.key, section.label])
 ) as Record<BuiltinSectionKey, string>;
 
-/** Glyphs for the tabbed-mode button bar (one per built-in section). */
+/** Glyphs for the tabbed-mode button bar plus app-owned compatibility keys.
+ *
+ * Teams and Workflows moved from compiled-in sections to app-registered sections,
+ * but Native and older persisted layouts still resolve their canonical glyphs by
+ * key. Keeping these two values here prevents a valid legacy/dynamic key from
+ * handing `undefined` to an icon renderer while leaving ownership with the app. */
 export const SECTION_ICONS = Object.fromEntries(
 	BUILTIN_SECTIONS.map((section) => [section.key, section.icon])
-) as Record<BuiltinSectionKey, IconSvgElement>;
+) as Record<BuiltinSectionKey | "teams" | "workflows", IconSvgElement>;
+
+SECTION_ICONS.teams = UserMultiple02Icon;
+SECTION_ICONS.workflows = WorkflowCircle06Icon;
 
 /** A dynamic app-registered section key (`plugin:<pluginId>:<sectionId>`). */
 export function isDynamicSectionKey(value: string): value is DynamicSectionKey {

@@ -575,7 +575,7 @@ export function DeclarativeView({
 								</CardTitle>
 							</CardHeader>
 							<CardContent>
-								<div className="font-semibold text-2xl">{stat.value}</div>
+								<div className="font-medium text-2xl">{stat.value}</div>
 								{stat.delta ? (
 									<div className="text-muted-foreground text-xs">
 										{stat.delta}
@@ -605,7 +605,7 @@ export function DeclarativeView({
 export function HelloDeclarativeViewHarness() {
 	return (
 		<div className="mx-auto max-w-2xl p-6">
-			<h2 className="mb-4 font-semibold text-lg">
+			<h2 className="mb-4 font-medium text-lg">
 				Declarative view — hello list-detail
 			</h2>
 			<DeclarativeView spec={helloListDetail} />

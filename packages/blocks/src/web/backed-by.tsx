@@ -28,7 +28,7 @@ export default function BackedBy({ className }: { className?: string }) {
 					src="/block71.png"
 					width={24}
 				/>
-				<span className="font-semibold text-foreground">BLOCK71</span>
+				<span className="font-medium text-foreground">BLOCK71</span>
 			</a>
 		</div>
 	);

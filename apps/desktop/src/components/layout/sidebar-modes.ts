@@ -37,10 +37,9 @@ import type { PluginSidebarMode } from "@/src/lib/api/plugins.ts";
  * - `strip` — the section labels become a horizontal tab strip and exactly one
  *   section's list shows below it.
  *
- * Closed on purpose, and a contributed mode does not choose: a mode that names
- * sections IS a strip (naming a subset and then stacking it is the Customize
- * dialog's job — hiding sections — not a mode's). Only the two built-in modes
- * that name nothing use `stacked`/`strip` to mean "all of them, this way".
+ * The built-in Agents view uses `stacked` with a named subset so its direct
+ * threads can sit below each bot. Contributed modes currently resolve to `strip`
+ * and therefore keep their named sections as a compact one-at-a-time selector.
  */
 export type SidebarModeLayout = "stacked" | "strip";
 
@@ -63,16 +62,17 @@ export interface SidebarModeDescriptor {
 	title: string;
 }
 
-/** The two sections Bot mode's toggle switches between: the agent roster
- *  ("Agents") and the chat list ("Sessions"), in that display order. */
+/** The two sections shown by the built-in Bot/Agents view, in display order.
+ *  Direct threads live under their owning agent; the chat list keeps group and
+ *  otherwise-unassigned conversations reachable below the roster. */
 export const AGENT_MODE_SECTIONS: SectionKey[] = ["agents", "chats"];
 
 /**
  * The shell's own modes, in the order they are offered.
  *
- * `agent` is opinionated on purpose — Agents is the primary tab, Sessions is the
- * secondary tab, and the mode opens on the roster — and that
- * opinion is expressed with the same two fields a contributed mode gets
+ * `agent` is opinionated on purpose — Agents comes first, direct threads live
+ * beneath each bot, and other chats remain below the roster — and that opinion
+ * is expressed with the same fields a contributed mode gets
  * (`sections`, `defaultSection`), not with a branch in the renderer.
  */
 export const BUILTIN_SIDEBAR_MODES: SidebarModeDescriptor[] = [
@@ -92,8 +92,9 @@ export const BUILTIN_SIDEBAR_MODES: SidebarModeDescriptor[] = [
 		// Keep the key stable for existing localStorage values and older builds.
 		key: "agent",
 		title: "Agents view",
-		description: "One toggle: Agents ⇄ Sessions, opening on the Agents tab.",
-		layout: "strip",
+		description:
+			"Show agents with their direct threads inline, with other chats below.",
+		layout: "stacked",
 		sections: AGENT_MODE_SECTIONS,
 		defaultSection: "agents",
 	},
@@ -105,9 +106,9 @@ export const DEFAULT_SIDEBAR_MODE_DESCRIPTOR =
 	(BUILTIN_SIDEBAR_MODES[0] as SidebarModeDescriptor);
 
 /**
- * Resolve the display order for a mode's named tabs.
+ * Resolve the display order for a mode's named sections.
  *
- * Bot mode keeps its declared Agents → Sessions order even when the user has
+ * Bot mode keeps its declared Agents → Chats order even when the user has
  * customized the global sidebar order. Other modes continue to follow that
  * global order, preserving the existing customization behavior.
  */

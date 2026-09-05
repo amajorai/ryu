@@ -75,7 +75,7 @@ export default function SaveTimeMoney() {
 									/>
 									<p
 										className={cn(
-											"mt-6 font-semibold text-xs uppercase tracking-widest",
+											"mt-6 font-medium text-xs uppercase tracking-widest",
 											tone.eyebrow
 										)}
 									>

@@ -302,8 +302,16 @@ function createProofServices(): HostServices {
 
 interface HelpCenterCompanionApi {
 	connected: () => boolean;
-	mount: (appHtml: string) => void;
+	mount: (appHtml: string, view?: AppView) => void;
 }
+
+type AppView =
+	| "overview"
+	| "inbox"
+	| "tickets"
+	| "knowledge"
+	| "agent"
+	| "insights";
 
 declare global {
 	interface Window {
@@ -313,8 +321,9 @@ declare global {
 
 let connected = false;
 let root: Root | null = null;
+let services: HostServices | null = null;
 
-function mount(appHtml: string): void {
+function mount(appHtml: string, view: AppView = "inbox"): void {
 	connected = false;
 	const nonce = globalThis.crypto.randomUUID();
 	const granted: ReadonlySet<Capability> = capabilitiesFromGrants([
@@ -322,13 +331,15 @@ function mount(appHtml: string): void {
 		"spaces:docs",
 		"storage:kv",
 	]);
-	const srcdoc = htmlCompanionSrcdoc(nonce, appHtml, PLUGIN_ID);
+	const srcdoc = htmlCompanionSrcdoc(nonce, appHtml, PLUGIN_ID, { view });
 	const container = document.getElementById("host-root");
 	if (!container) {
 		throw new Error("harness #host-root missing");
 	}
 	root?.unmount();
 	root = createRoot(container);
+	const resolvedServices = services ?? createProofServices();
+	services = resolvedServices;
 	root.render(
 		createElement(ExtensionHost, {
 			granted,
@@ -336,7 +347,7 @@ function mount(appHtml: string): void {
 			onConnected: () => {
 				connected = true;
 			},
-			services: createProofServices(),
+			services: resolvedServices,
 			srcdoc,
 			title: "Help Center browser proof",
 		})

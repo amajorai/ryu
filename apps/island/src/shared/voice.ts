@@ -15,7 +15,7 @@ export const VOICE_PREF_KEY = "voice-input";
 /**
  * Transcription engine. The value is the `?engine=` parameter Core's
  * `/api/voice/transcribe` understands (parakeet v3, the in-process ONNX engine,
- * is the default; whisper.cpp is the local alternative; `gateway` is the cloud
+ * is the default; whisper.cpp and audio.cpp are local alternatives; `gateway` is the cloud
  * slot, routed by the node's STT modality mapping rather than a local sidecar).
  *
  * MIRRORS the desktop's `VoiceEngine` in `apps/desktop/src/lib/api/preferences.ts`.
@@ -23,12 +23,13 @@ export const VOICE_PREF_KEY = "voice-input";
  * desktop writes, so an engine one side does not know is one it will silently
  * rewrite on the next save.
  */
-export type VoiceEngine = "whisper" | "parakeet" | "gateway";
+export type VoiceEngine = "whisper" | "parakeet" | "audiocpp" | "gateway";
 
 /** Every engine the union admits, for the coercions that must not narrow it away. */
 export const VOICE_ENGINE_VALUES: readonly VoiceEngine[] = [
 	"whisper",
 	"parakeet",
+	"audiocpp",
 	"gateway",
 ];
 
@@ -84,6 +85,7 @@ export const DEFAULT_VOICE_SHORTCUT = "CommandOrControl+Shift+A";
 export const VOICE_ENGINE_MODELS: Record<VoiceEngine, string> = {
 	whisper: "ggml-base.en",
 	parakeet: "parakeet-tdt-0.6b-v3",
+	audiocpp: "parakeet-tdt-0.6b-v3-q8_0",
 	gateway: "",
 };
 

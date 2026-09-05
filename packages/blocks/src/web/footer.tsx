@@ -35,7 +35,7 @@ export default function Footer({
 
 					<div className="grid grid-cols-2 gap-x-8 gap-y-8 sm:grid-cols-3 sm:gap-x-12 lg:gap-x-16">
 						<div>
-							<h4 className="mb-4 font-semibold">Platform</h4>
+							<h4 className="mb-4 font-medium">Platform</h4>
 							<div className="space-y-2">
 								<a
 									className="block text-muted-foreground transition-colors hover:text-foreground"
@@ -71,7 +71,7 @@ export default function Footer({
 						</div>
 
 						<div>
-							<h4 className="mb-4 font-semibold">Learn</h4>
+							<h4 className="mb-4 font-medium">Learn</h4>
 							<div className="space-y-2">
 								<a
 									className="block text-muted-foreground transition-colors hover:text-foreground"
@@ -107,7 +107,7 @@ export default function Footer({
 						</div>
 
 						<div>
-							<h4 className="mb-4 font-semibold">Company</h4>
+							<h4 className="mb-4 font-medium">Company</h4>
 							<div className="space-y-2">
 								<a
 									className="block text-muted-foreground transition-colors hover:text-foreground"

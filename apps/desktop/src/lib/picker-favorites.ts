@@ -9,10 +9,9 @@
 // live row (label / logo / apply handler) at render, dropping refs that no longer
 // resolve (an uninstalled agent, a vanished model).
 //
-// STATE OF WIRING: `recordRecent` is called from the composer's agent-select
-// seam, so the recents list is live and correct. The picker does not yet RENDER
-// Recents/Pinned sections — that needs a grouped-section list in the composer
-// picker body, which is a UI change rather than part of this module.
+// `recordRecent` is called from the composer's agent-select seam and the picker
+// resolves these refs back to live catalog rows. Refs that no longer resolve
+// (an uninstalled agent or removed model) are dropped at render time.
 
 const RECENTS_KEY = "ryu_picker_recents";
 const PINS_KEY = "ryu_picker_pins";
@@ -27,7 +26,7 @@ export const DEFAULT_RECENTS_LIMIT = 5;
 /** A picker target: an agent, or a provider+model pair. */
 export type PickerRef =
 	| { kind: "agent"; agentId: string }
-	| { kind: "model"; providerId: string; modelId: string };
+	| { effort?: string; kind: "model"; providerId: string; modelId: string };
 
 /** Serialize a ref to its stable storage key. */
 export function refKey(ref: PickerRef): string {
@@ -95,6 +94,14 @@ export function recordRecent(ref: PickerRef): void {
 		RECENTS_STORE_CAP
 	);
 	writeList(RECENTS_KEY, next);
+}
+
+/** Remove one target from the recent list without affecting pinned targets. */
+export function removeRecent(ref: PickerRef): void {
+	writeList(
+		RECENTS_KEY,
+		readList(RECENTS_KEY).filter((key) => key !== refKey(ref))
+	);
 }
 
 /** True when a target is pinned. */

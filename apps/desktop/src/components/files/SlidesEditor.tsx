@@ -152,7 +152,7 @@ export const SlidesEditor = forwardRef<FileEditorHandle, SlidesEditorProps>(
 					/>
 				</main>
 				<aside className="min-h-0 overflow-y-auto border-border border-l bg-background p-3">
-					<h2 className="mb-1 font-semibold text-sm">Slide text</h2>
+					<h2 className="mb-1 font-medium text-sm">Slide text</h2>
 					<p className="mb-4 text-muted-foreground text-xs">
 						Edit text boxes while the slide preview updates.
 					</p>

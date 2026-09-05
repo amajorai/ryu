@@ -18,6 +18,7 @@ export type StepUpScope =
 	| "account.merge"
 	| "org.credentials"
 	| "org.delete"
+	| "org.features"
 	| "org.members"
 	| "node.destroy"
 	| "billing"

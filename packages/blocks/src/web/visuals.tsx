@@ -173,7 +173,7 @@ export function AgentsVisual() {
 		<MinimalCard>
 			<div className="space-y-3">
 				<div className="flex items-center gap-3">
-					<div className="flex size-10 items-center justify-center rounded-lg border border-border bg-foreground/5 font-semibold text-foreground text-sm">
+					<div className="flex size-10 items-center justify-center rounded-lg border border-border bg-foreground/5 font-medium text-foreground text-sm">
 						Pi
 					</div>
 					<div>

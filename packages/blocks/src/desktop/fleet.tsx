@@ -366,7 +366,7 @@ function ServiceSection({
 	return (
 		<div className="border-t first:border-t-0">
 			<div className="px-4 py-1.5">
-				<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+				<span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">
 					{title}
 				</span>
 			</div>

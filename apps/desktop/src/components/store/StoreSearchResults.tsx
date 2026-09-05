@@ -90,7 +90,7 @@ function ResultSection({
 				onClick={() => onOpen(group.realm)}
 				type="button"
 			>
-				<span className="font-semibold text-xs uppercase tracking-widest">
+				<span className="font-medium text-xs uppercase tracking-widest">
 					{group.label}
 				</span>
 				<span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">

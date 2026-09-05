@@ -128,7 +128,7 @@ function SummaryTile({
 				/>
 				{label}
 			</span>
-			<span className="font-semibold text-lg tabular-nums">{value}</span>
+			<span className="font-medium text-lg tabular-nums">{value}</span>
 		</div>
 	);
 }
@@ -183,7 +183,7 @@ function UsageBreakdownChart({
 					<span className="font-medium text-sm">{title}</span>
 					<span className="text-muted-foreground text-xs">Credit spend</span>
 				</div>
-				<span className="font-semibold text-sm tabular-nums">
+				<span className="font-medium text-sm tabular-nums">
 					{formatMicroUsd(total)}
 				</span>
 			</div>
@@ -242,7 +242,7 @@ function UsageAnalytics({ summary }: { summary: UsageSummaryData }) {
 			className="flex flex-col gap-3"
 		>
 			<div>
-				<h4 className="font-semibold text-sm">Credit usage analytics</h4>
+				<h4 className="font-medium text-sm">Credit usage analytics</h4>
 				<p className="text-muted-foreground text-xs">
 					Where this organization&apos;s credits are being spent.
 				</p>
@@ -341,7 +341,7 @@ export function UsageView({
 		<div className="flex flex-col gap-4" data-testid="credit-usage-view">
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex flex-col">
-					<h3 className="font-semibold text-base">Usage</h3>
+					<h3 className="font-medium text-base">Usage</h3>
 					<p className="text-muted-foreground text-sm">
 						Explore consumption across your profile, organization, or this node.
 					</p>

@@ -1,4 +1,5 @@
 import { Package01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	libraryViewDefinition,
 	type SourceItem,
@@ -291,10 +292,10 @@ function FeedRenderer({
 							src={row.item.avatar}
 						/>
 					) : (
-						<Icon
+						<HugeiconsIcon
+							aria-hidden="true"
 							className="mt-1 size-4 text-muted-foreground"
-							icon="package-01"
-							size={16}
+							icon={Package01Icon}
 						/>
 					)}
 					<div className="min-w-0 flex-1">

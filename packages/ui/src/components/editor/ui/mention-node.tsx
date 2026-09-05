@@ -93,7 +93,7 @@ export function MentionElement(
 				inlineSuggestionVariants(),
 				!readOnly && "cursor-pointer",
 				selected && focused && "ring-2 ring-ring",
-				element.children[0]?.[KEYS.bold] === true && "font-bold",
+				element.children[0]?.[KEYS.bold] === true && "font-medium",
 				element.children[0]?.[KEYS.italic] === true && "italic",
 				element.children[0]?.[KEYS.underline] === true && "underline"
 			)}

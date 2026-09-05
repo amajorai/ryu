@@ -22,7 +22,7 @@ export function StatBody({
 	return (
 		<div className="flex h-full flex-col justify-center gap-2">
 			<div className="flex items-baseline gap-1.5">
-				<span className="font-semibold text-4xl tabular-nums tracking-tight">
+				<span className="font-medium text-4xl tabular-nums tracking-tight">
 					{display}
 				</span>
 				{cfg.unit && (

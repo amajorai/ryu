@@ -508,7 +508,7 @@ export default function CompanionPage() {
 	if (ready && !canUse("companion-overlay")) {
 		return (
 			<div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-				<h1 className="font-semibold text-base">Companion is a Pro feature</h1>
+				<h1 className="font-medium text-base">Companion is a Pro feature</h1>
 				<p className="max-w-xs text-muted-foreground text-xs">
 					The in-desktop companion overlay reads your screen context and acts on
 					it. Upgrade to Pro to turn it on.

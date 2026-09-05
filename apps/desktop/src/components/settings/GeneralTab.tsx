@@ -3,6 +3,7 @@ import {
 	CommandLineIcon,
 	ComputerIcon,
 	FolderOpenIcon,
+	Globe02Icon,
 	LayoutTable01Icon,
 	Rocket01Icon,
 } from "@hugeicons/core-free-icons";
@@ -17,17 +18,23 @@ import {
 } from "@ryu/ui/components/select.tsx";
 import { toast } from "@ryu/ui/components/sileo.tsx";
 import { Switch } from "@ryu/ui/components/switch.tsx";
+import {
+	ToggleGroup,
+	ToggleGroupItem,
+} from "@ryu/ui/components/toggle-group.tsx";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import {
 	disable as disableAutostart,
 	enable as enableAutostart,
 	isEnabled as isAutostartEnabled,
 } from "@tauri-apps/plugin-autostart";
-import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listAccounts } from "@/lib/auth-client.ts";
 import { useAppSurface } from "@/src/contexts/app-surface-context.tsx";
-import { TAB_UNLOAD_MINUTES_KEY } from "@/src/contexts/TabsContext.tsx";
+import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
 import { useAutoHideTitleBar } from "@/src/hooks/useAutoHideTitleBar.ts";
 import { useAutoImportThreads } from "@/src/hooks/useAutoImportThreads.ts";
 import { useAutoSetupImportSetting } from "@/src/hooks/useAutoSetupImportSetting.ts";
@@ -46,12 +53,14 @@ import {
 	useNodeTabOverride,
 } from "@/src/hooks/useNodeDisplayMode.ts";
 import { usePersistedNumber } from "@/src/hooks/usePersistedNumber.ts";
+import { useProjectlessTaskFolder } from "@/src/hooks/useProjectlessTaskFolder.ts";
 import {
 	type QueueDrainMode,
 	setQueueDrainMode,
 	useQueueDrainMode,
 } from "@/src/hooks/useQueueDrainMode.ts";
 import { usePendingSubpage } from "@/src/hooks/useSettingSubpage.ts";
+import { useShowBottomPanelToggle } from "@/src/hooks/useShowBottomPanelToggle.ts";
 import {
 	type StartupBehavior,
 	setStartupBehavior,
@@ -75,6 +84,18 @@ import {
 	type TabSwitchBehavior,
 	useTabSwitchBehavior,
 } from "@/src/hooks/useTabSwitchBehavior.ts";
+import {
+	TERMINAL_PANEL_LOCATION_VALUES,
+	type TerminalPanelLocation,
+	useTerminalPanelLocation,
+} from "@/src/hooks/useTerminalPanelLocation.ts";
+import { toTarget } from "@/src/lib/api/client.ts";
+import {
+	DEFAULT_GATEWAY_ACP,
+	fetchGatewayConfig,
+	type GatewayAcpSettings,
+	updateGatewayConfig,
+} from "@/src/lib/api/gateway.ts";
 import type { DefaultFileOpener } from "@/src/lib/default-file-opener.ts";
 import { resetDesktopOnboarding } from "@/src/lib/desktop-onboarding-state.ts";
 import {
@@ -83,12 +104,19 @@ import {
 	type StartupRealm,
 } from "@/src/lib/product-mode.ts";
 import type { StartupSelectionMode } from "@/src/lib/startup-selection.ts";
+import {
+	DEFAULT_TAB_UNLOAD_MINUTES,
+	TAB_UNLOAD_MINUTES_KEY,
+} from "@/src/lib/tab-memory-policy.ts";
 import { STORAGE_KEYS } from "@/src/lib/themes/presets.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
 import { useWorkspaceStore } from "@/src/store/useWorkspaceStore.ts";
+import { LanguageSettings } from "./LanguageSettings.tsx";
+import { OpenSourceLicensesSettings } from "./OpenSourceLicensesSettings.tsx";
 import { SafeModeSettings } from "./SafeModeSettings.tsx";
 import { SplitPresetSettings } from "./SplitPresetSettings.tsx";
 import {
+	SettingsCard,
 	SettingsGroup,
 	SettingsItem,
 	SettingsSection,
@@ -145,7 +173,8 @@ const TERMINAL_SHELL_OPTIONS = [
 	{ value: "cmd", label: "cmd" },
 ];
 
-const FILE_MANAGER_NAME = navigator.userAgent.includes("Mac")
+const IS_MACOS = navigator.userAgent.includes("Mac");
+const FILE_MANAGER_NAME = IS_MACOS
 	? "Finder"
 	: navigator.userAgent.includes("Windows")
 		? "Explorer"
@@ -155,7 +184,7 @@ const DEFAULT_FILE_OPENER_OPTIONS: {
 	value: DefaultFileOpener;
 	label: string;
 }[] = [
-	{ value: "system", label: `OS default (${FILE_MANAGER_NAME})` },
+	{ value: "system", label: FILE_MANAGER_NAME },
 	{ value: "vscode", label: "VS Code" },
 	{ value: "cursor", label: "Cursor" },
 	{ value: "zed", label: "Zed" },
@@ -176,6 +205,76 @@ const TAB_SWITCH_OPTIONS: { value: TabSwitchBehavior; label: string }[] = [
 	{ value: "sequential", label: "In order (left to right)" },
 	{ value: "recent", label: "Most recently used" },
 ];
+
+const TERMINAL_LOCATION_LABELS: Record<TerminalPanelLocation, string> = {
+	bottom: "Bottom",
+	right: "Right",
+};
+
+function KeepAwakeSetting() {
+	const { canManageDesktopLifecycle } = useAppSurface();
+	const node = useActiveNode();
+	const target = useMemo(
+		() => toTarget(node),
+		[node.token, node.url, node.userJwt]
+	);
+	const queryClient = useQueryClient();
+	const configQuery = useQuery({
+		queryKey: ["gateway-acp-runtime", target.url],
+		queryFn: () => fetchGatewayConfig(target),
+		enabled: canManageDesktopLifecycle,
+		refetchOnWindowFocus: false,
+	});
+	const config = configQuery.data?.acp ?? DEFAULT_GATEWAY_ACP;
+	const save = useMutation({
+		mutationFn: (keepComputerAwake: boolean) => {
+			const acp: GatewayAcpSettings = {
+				idle_timeout_minutes: config.idle_timeout_minutes,
+				keep_computer_awake: keepComputerAwake,
+				max_parallel_agents: config.max_parallel_agents,
+			};
+			return updateGatewayConfig(target, { acp });
+		},
+		onSuccess: async () => {
+			await queryClient.invalidateQueries({
+				queryKey: ["gateway-acp-runtime", target.url],
+			});
+		},
+		onError: (error: Error) => {
+			toast.error("Couldn't update the sleep prevention setting", {
+				description: error.message,
+			});
+		},
+	});
+
+	return (
+		<div className="space-y-1.5">
+			<SettingsCard className="p-0">
+				<SettingsItem
+					actions={
+						<Switch
+							checked={config.keep_computer_awake}
+							disabled={
+								!canManageDesktopLifecycle ||
+								configQuery.isLoading ||
+								configQuery.isError ||
+								save.isPending
+							}
+							id="prevent-sleep-while-running-toggle"
+							onCheckedChange={(checked) => save.mutate(checked)}
+						/>
+					}
+					settingsId="general.system.prevent-sleep-while-running"
+					title="Prevent sleep while running"
+				/>
+			</SettingsCard>
+			<p className="px-3.5 pb-1.5 text-muted-foreground text-xs leading-snug">
+				Keep the local computer awake while an ACP agent is running. The display
+				may still turn off. This uses the active node's Gateway policy.
+			</p>
+		</div>
+	);
+}
 
 export function GeneralTab() {
 	const { canManageDesktopLifecycle, canUseNativeShell, isDesktop } =
@@ -226,11 +325,17 @@ export function GeneralTab() {
 	const [autoImportSetup, setAutoImportSetup] = useAutoSetupImportSetting();
 	const [tabUnloadMinutes, setTabUnloadMinutes] = usePersistedNumber(
 		TAB_UNLOAD_MINUTES_KEY,
-		0
+		DEFAULT_TAB_UNLOAD_MINUTES
 	);
+	const [projectlessTaskFolder, setProjectlessTaskFolder] =
+		useProjectlessTaskFolder();
+	const [showBottomPanelToggle, setShowBottomPanelToggle] =
+		useShowBottomPanelToggle();
+	const [terminalPanelLocation, setTerminalPanelLocationPreference] =
+		useTerminalPanelLocation();
 
-	// "Hide tray icon" is persisted in the desktop process (tauri-plugin-store)
-	// so it can be read at startup before Core is up. Disabled by default — the
+	// Tray visibility is persisted in the desktop process (tauri-plugin-store) so
+	// it can be read at startup before Core is up. Disabled by default — the
 	// icon shows in the tray / menu bar unless the user opts out.
 	const [hideTrayIcon, setHideTrayIcon] = useState(false);
 	// "Stay in the tray when closed" lives in the same desktop-process store and
@@ -326,6 +431,27 @@ export function GeneralTab() {
 		}
 	};
 
+	const handleShowInMenuBar = (show: boolean) => {
+		void handleHideTrayIcon(!show);
+	};
+
+	const handleChangeProjectlessTaskFolder = async () => {
+		try {
+			const selected = await open({
+				directory: true,
+				multiple: false,
+				title: "Choose projectless task folder",
+			});
+			if (typeof selected === "string") {
+				setProjectlessTaskFolder(selected);
+			}
+		} catch (error) {
+			toast.error("Couldn't choose the projectless task folder", {
+				description: error instanceof Error ? error.message : String(error),
+			});
+		}
+	};
+
 	const handleDefaultNodeChange = (name: string) => {
 		const nextName = name === NO_STARTUP_DEFAULT ? null : name;
 		if (!nextName) {
@@ -366,9 +492,9 @@ export function GeneralTab() {
 	};
 
 	// ── Sub-pages ────────────────────────────────────────────────────────────
-	// Seven groups covering tabs, chats, the terminal, file opening, tray behaviour
-	// and setup —
-	// unrelated topics that shared one scroll. Split the way iOS/macOS General
+	// Seven groups covering startup, tabs, chats, language, terminal, file opening,
+	// tray behaviour and setup — unrelated topics that shared one scroll. Split the
+	// way iOS/macOS General
 	// is: an index of topics, one page each. "On startup" stays on the index
 	// because it is the question people open this pane to answer.
 	//
@@ -382,6 +508,41 @@ export function GeneralTab() {
 				title="On startup"
 			>
 				<SettingsGroup>
+					{isDesktop ? (
+						<SettingsItem
+							actions={
+								<div className="flex min-w-0 max-w-[min(32rem,60vw)] items-center gap-2">
+									<span
+										className="min-w-0 truncate font-mono text-muted-foreground text-xs"
+										title={projectlessTaskFolder ?? "Not set"}
+									>
+										{projectlessTaskFolder ?? "Not set"}
+									</span>
+									<Button
+										aria-label="Change projectless task folder"
+										onClick={handleChangeProjectlessTaskFolder}
+										size="sm"
+										variant="secondary"
+									>
+										Change
+									</Button>
+									{projectlessTaskFolder ? (
+										<Button
+											aria-label="Clear projectless task folder"
+											onClick={() => setProjectlessTaskFolder(null)}
+											size="sm"
+											variant="ghost"
+										>
+											Clear
+										</Button>
+									) : null}
+								</div>
+							}
+							description="New chats without an explicitly selected project use this folder as their local working directory. Existing chats and selected projects are unchanged."
+							settingsId="general.on-startup.projectless-task-folder"
+							title="Projectless task folder"
+						/>
+					) : null}
 					<SettingsItem
 						actions={
 							<Select
@@ -680,7 +841,7 @@ export function GeneralTab() {
 								</SelectContent>
 							</Select>
 						}
-						description="Free memory by unloading tabs you haven't viewed for a while. An unloaded tab reloads when you click it; pinned and active tabs are never unloaded."
+						description="Free memory by unloading inactive tabs and thread views. Transcripts stay saved and reload when you click them; pinned, active, and running tabs are never unloaded."
 						title="Unload inactive tabs"
 					/>
 					<SettingsItem
@@ -693,6 +854,25 @@ export function GeneralTab() {
 						}
 						description="Each tab can connect to a different node independently."
 						title="Per-tab node override"
+					/>
+				</SettingsGroup>
+			</SettingsSection>
+			<SettingsSection
+				caption="Keep the controls you use to open workspace panels close at hand."
+				title="Interface"
+			>
+				<SettingsGroup>
+					<SettingsItem
+						actions={
+							<Switch
+								checked={showBottomPanelToggle}
+								id="show-bottom-panel-toggle"
+								onCheckedChange={setShowBottomPanelToggle}
+							/>
+						}
+						description="Show the bottom-panel control in the chat header. Turning it off also closes an open bottom panel so no panel is left without a close control."
+						settingsId="general.interface.bottom-panel"
+						title="Bottom panel"
 					/>
 				</SettingsGroup>
 			</SettingsSection>
@@ -836,6 +1016,36 @@ export function GeneralTab() {
 				<SettingsGroup>
 					<SettingsItem
 						actions={
+							<ToggleGroup
+								aria-label="Default terminal location"
+								className="rounded-lg bg-muted/60 p-0.5"
+								onValueChange={(values: string[]) => {
+									const value = values[0];
+									if (value === "bottom" || value === "right") {
+										setTerminalPanelLocationPreference(value);
+									}
+								}}
+								spacing={0}
+								value={[terminalPanelLocation]}
+								variant="default"
+							>
+								{TERMINAL_PANEL_LOCATION_VALUES.map((value) => (
+									<ToggleGroupItem
+										className="h-7 px-3 text-xs aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm"
+										key={value}
+										value={value}
+									>
+										{TERMINAL_LOCATION_LABELS[value]}
+									</ToggleGroupItem>
+								))}
+							</ToggleGroup>
+						}
+						description="Choose where the terminal shortcut and project environment actions open terminal tabs."
+						settingsId="general.terminal.panel-location"
+						title="Default terminal location"
+					/>
+					<SettingsItem
+						actions={
 							<Select
 								items={TERMINAL_SHELL_OPTIONS}
 								onValueChange={(value) => {
@@ -906,7 +1116,8 @@ export function GeneralTab() {
 						</Select>
 					}
 					description={`Choose what the file tree's Open action uses. ${FILE_MANAGER_NAME} is used for the OS default, or choose an installed editor for files and folders.`}
-					title="Default file opener"
+					settingsId="general.files.default-file-open-destination"
+					title="Default file open destination"
 				/>
 			</SettingsGroup>
 		</SettingsSection>
@@ -915,7 +1126,7 @@ export function GeneralTab() {
 	const systemPage = (
 		<>
 			<SettingsSection
-				caption="How Ryu appears in the system tray and runs in the background."
+				caption="How Ryu runs at login, stays available in the system tray, and keeps local work moving."
 				title="System"
 			>
 				<SettingsGroup>
@@ -957,15 +1168,21 @@ export function GeneralTab() {
 					<SettingsItem
 						actions={
 							<Switch
-								checked={hideTrayIcon}
-								id="hide-tray-icon-toggle"
-								onCheckedChange={handleHideTrayIcon}
+								checked={!hideTrayIcon}
+								id="show-in-menu-bar-toggle"
+								onCheckedChange={handleShowInMenuBar}
 							/>
 						}
-						description="Remove the Ryu icon from the system tray (the menu bar on macOS). Ryu keeps running in the background and you can still open it from the taskbar, dock, or its global shortcut."
-						title="Hide tray icon"
+						description={
+							IS_MACOS
+								? "Keep Ryu in the macOS menu bar when the main window is closed."
+								: "Keep Ryu in the system tray when the main window is closed."
+						}
+						settingsId="general.system.show-in-menu-bar"
+						title="Show in menu bar"
 					/>
 				</SettingsGroup>
+				<KeepAwakeSetting />
 			</SettingsSection>
 		</>
 	);
@@ -998,6 +1215,7 @@ export function GeneralTab() {
 			backLabel="General"
 			intro={startupIntro}
 			label="Settings"
+			outro={<OpenSourceLicensesSettings />}
 			pages={[
 				{
 					id: "tabs",
@@ -1014,6 +1232,14 @@ export function GeneralTab() {
 					icon: Chat01Icon,
 					tint: "teal",
 					content: chatsPage,
+				},
+				{
+					id: "language",
+					title: "Language",
+					hint: "Choose the language Ryu uses for its interface.",
+					icon: Globe02Icon,
+					tint: "purple",
+					content: <LanguageSettings settingsId="general.language" />,
 				},
 				...(canUseNativeShell
 					? [

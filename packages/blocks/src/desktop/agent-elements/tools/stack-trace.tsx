@@ -73,7 +73,7 @@ export const StackTrace = memo(function StackTrace({
 	const header = (
 		<div className="flex flex-wrap items-baseline gap-x-2">
 			{parsed.errorType ? (
-				<span className="font-mono font-semibold text-[13px] text-destructive">
+				<span className="font-medium font-mono text-[13px] text-destructive">
 					{parsed.errorType}
 				</span>
 			) : null}

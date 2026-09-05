@@ -56,7 +56,7 @@ export default function LandingStats() {
 									strokeWidth={1.5}
 								/>
 								<div>
-									<p className="font-semibold text-2xl tracking-tight">
+									<p className="font-medium text-2xl tracking-tight">
 										{metric.value}
 									</p>
 									<p className="text-muted-foreground text-sm">

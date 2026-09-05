@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const STORY_URL = "/onboarding-choose-story.html";
+const STORY_URL = "/onboarding-choose-story.html?choose-only";
 
 test.describe("onboarding choose step — game-lobby runtime choices", () => {
 	test("shows three simple, equal choices without technical jargon", async ({

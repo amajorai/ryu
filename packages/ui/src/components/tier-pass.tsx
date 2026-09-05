@@ -225,7 +225,7 @@ export function TierPass({
 
 				<div className="flex min-w-0 flex-1 flex-col justify-end gap-1.5">
 					<AutoFitText
-						className="font-semibold leading-[1.02] tracking-tight"
+						className="font-medium leading-[1.02] tracking-tight"
 						maxPx={TIER_LABEL_MAX_PX}
 						minPx={TIER_LABEL_MIN_PX}
 						stepPx={TIER_FIT_STEP_PX}

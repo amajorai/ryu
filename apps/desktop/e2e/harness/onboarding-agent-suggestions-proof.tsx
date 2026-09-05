@@ -83,6 +83,7 @@ const baseProps = {
 
 function ProofApp() {
 	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [reviewed, setReviewed] = useState<Set<string>>(new Set());
 	const [skipped, setSkipped] = useState(false);
 
 	const toggle = (id: string) => {
@@ -103,6 +104,7 @@ function ProofApp() {
 				{...baseProps}
 				agentSuggestions={suggestions}
 				agentSuggestionsError={null}
+				agentSuggestionsReviewed={reviewed}
 				agentSuggestionsSelected={selected}
 				agentSuggestionsSubmitting={false}
 				kind="agent-suggestions"
@@ -131,6 +133,17 @@ function ProofApp() {
 				}}
 				onImportThreads={() => undefined}
 				onLocalSelectionChange={() => undefined}
+				onReviewAgentSuggestion={(id, next) => {
+					setReviewed((current) => {
+						const updated = new Set(current);
+						if (next) {
+							updated.add(id);
+						} else {
+							updated.delete(id);
+						}
+						return updated;
+					});
+				}}
 				onSearchConnections={() => undefined}
 				onSkip={() => setSkipped(true)}
 				onToggleAgentSuggestion={toggle}

@@ -45,6 +45,7 @@ import {
 	APP_ICON_TILE_CARD_GLYPH,
 	APP_ICON_TILE_CARD_SURFACE,
 } from "@ryu/ui/lib/app-icon-tile";
+import { formatCount } from "@ryu/ui/lib/number-format.ts";
 import { cn } from "@ryu/ui/lib/utils";
 import type { ReactNode } from "react";
 
@@ -72,6 +73,12 @@ export type MarketplaceVerification =
 	| "invalid"
 	| "unknown";
 
+interface MarketplaceCommunityStats {
+	downloads: number;
+	instances: number;
+	runs: number;
+}
+
 /** Presentational card shape. Mirrors the app's `MarketplaceCard` but pre-resolves
  *  the price string so this layer carries no money-formatting logic. `priceLabel`
  *  is null for free items. A price is commerce metadata, not a runtime access
@@ -80,10 +87,12 @@ export interface MarketplaceCardData {
 	/** True when the installed language pack is the selected runtime pack. */
 	active?: boolean;
 	author: string | null;
+	bundleMemberCount?: number;
 	/** True while a checkout for this card is in flight. */
 	buying?: boolean;
 	/** Store-taxonomy category (carried for callers; not part of the card chrome). */
 	category?: string | null;
+	communityStats?: MarketplaceCommunityStats;
 	description: string | null;
 	/** Resolvable logo URL; falls back to the item's initial when null/absent. */
 	iconUrl?: string | null;
@@ -99,6 +108,8 @@ export interface MarketplaceCardData {
 		locale: string;
 		messageCount: number;
 	} | null;
+	/** Like control supplied by the host; kept as a node to avoid importing the host store. */
+	like?: ReactNode;
 	/** The listing is covered by the A Major Pass eligibility pool. */
 	membershipIncluded?: boolean;
 	name: string;
@@ -241,8 +252,9 @@ export function MarketplaceItemCard({
 	const isPaid = card.priceLabel !== null;
 	const isLanguagePack =
 		card.kind === "language_pack" && Boolean(card.onInstall);
+	const isBundle = card.kind === "bundle" && Boolean(card.onInstall) && !isPaid;
 
-	const heading = (
+	const headingContent = (
 		<div className="flex min-w-0 items-center gap-3 text-left">
 			<MarketplaceCardLogo iconUrl={card.iconUrl} name={card.name} />
 			<div className="min-w-0">
@@ -259,21 +271,29 @@ export function MarketplaceItemCard({
 			</div>
 		</div>
 	);
+	const heading = (
+		<div className="flex min-w-0 items-center gap-2">
+			{onOpenDetail ? (
+				<button
+					className="min-w-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					onClick={onOpenDetail}
+					type="button"
+				>
+					{headingContent}
+				</button>
+			) : (
+				headingContent
+			)}
+			{card.like ? (
+				<span className="relative z-10 shrink-0">{card.like}</span>
+			) : null}
+		</div>
+	);
 
 	return (
 		<div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
 			<div className="flex items-start justify-between gap-2">
-				{onOpenDetail ? (
-					<button
-						className="min-w-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						onClick={onOpenDetail}
-						type="button"
-					>
-						{heading}
-					</button>
-				) : (
-					heading
-				)}
+				{heading}
 				<div className="flex shrink-0 flex-col items-end gap-1">
 					{isPaid ? (
 						<Badge className="gap-1" variant="secondary">
@@ -293,6 +313,18 @@ export function MarketplaceItemCard({
 					{card.description}
 				</p>
 			) : null}
+			{isBundle ? (
+				<p className="text-[11px] text-muted-foreground">
+					{card.bundleMemberCount ?? 0} items · one-click install
+				</p>
+			) : null}
+			{card.communityStats &&
+			(card.communityStats.downloads > 0 || card.communityStats.runs > 0) ? (
+				<p className="text-[11px] text-muted-foreground">
+					Community · {formatCount(card.communityStats.downloads)} installs ·{" "}
+					{formatCount(card.communityStats.runs)} runs
+				</p>
+			) : null}
 			{card.languagePack ? (
 				<p className="text-[11px] text-muted-foreground">
 					{card.languagePack.locale} ·{" "}
@@ -310,7 +342,11 @@ export function MarketplaceItemCard({
 				<Badge className="text-[10px]" variant="outline">
 					v{card.version}
 				</Badge>
-				{isLanguagePack ? (
+				{isBundle ? (
+					<Button loading={card.installing} onClick={card.onInstall} size="sm">
+						Install bundle
+					</Button>
+				) : isLanguagePack ? (
 					card.active ? (
 						<Badge className="gap-1" variant="secondary">
 							<HugeiconsIcon
@@ -532,7 +568,7 @@ export function MarketplaceHeader({
 				className="mr-2 size-5 text-muted-foreground"
 				icon={Store01Icon}
 			/>
-			<h1 className="mr-4 font-semibold text-base">
+			<h1 className="mr-4 font-medium text-base">
 				{i18n?.t("common.marketplace") ?? "Marketplace"}
 			</h1>
 			{tabs.map((t) => (

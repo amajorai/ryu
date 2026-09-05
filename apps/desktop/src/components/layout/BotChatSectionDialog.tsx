@@ -54,7 +54,7 @@ export function BotChatSectionDialog({
 						{mode === "create" ? "New chat section" : "Rename chat section"}
 					</DialogTitle>
 					<DialogDescription>
-						Group related chats together in the Agents view Sessions.
+						Group related chats together in the Bot view.
 					</DialogDescription>
 				</DialogHeader>
 				<form

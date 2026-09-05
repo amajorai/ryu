@@ -3,6 +3,7 @@ import type { Conversation } from "@/types/chat.ts";
 import {
 	conversationGroupKey,
 	conversationParticipantIds,
+	conversationsForOtherChats,
 	directAgentThreads,
 	isForkedConversation,
 	isGroupConversation,
@@ -77,5 +78,20 @@ describe("agent conversation grouping", () => {
 				conversation("git", { branch: "feature/login", title: "Plan" })
 			)
 		).toBe(false);
+	});
+
+	test("keeps group and unknown-agent chats reachable outside bot rows", () => {
+		const other = conversationsForOtherChats(
+			[
+				conversation("direct", { agentId: "builder" }),
+				conversation("group", {
+					agentId: "builder",
+					participants: ["reviewer"],
+				}),
+				conversation("unknown", { agentId: "deleted-agent" }),
+			],
+			new Set(["builder"])
+		);
+		expect(other.map(({ id }) => id)).toEqual(["group", "unknown"]);
 	});
 });

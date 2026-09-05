@@ -99,6 +99,8 @@ export default function MarketplaceDetailDialog({
 	id,
 	initialName,
 	initialIconUrl,
+	onInstallBundle,
+	bundleInstalling = false,
 }: {
 	open: boolean;
 	onClose: () => void;
@@ -107,6 +109,8 @@ export default function MarketplaceDetailDialog({
 	/** Optional seed so the header shows a name before detail loads. */
 	initialName?: string;
 	initialIconUrl?: string | null;
+	onInstallBundle?: () => void;
+	bundleInstalling?: boolean;
 }) {
 	return (
 		<Dialog
@@ -123,10 +127,12 @@ export default function MarketplaceDetailDialog({
 				<div className="scroll-fade max-h-[88vh] overflow-y-auto overflow-x-hidden">
 					{open ? (
 						<DetailBody
+							bundleInstalling={bundleInstalling}
 							id={id}
 							initialIconUrl={initialIconUrl}
 							initialName={initialName}
 							kind={kind}
+							onInstallBundle={onInstallBundle}
 						/>
 					) : null}
 				</div>
@@ -140,11 +146,15 @@ function DetailBody({
 	id,
 	initialName,
 	initialIconUrl,
+	onInstallBundle,
+	bundleInstalling,
 }: {
 	kind: MarketplaceKind;
 	id: string;
 	initialName?: string;
 	initialIconUrl?: string | null;
+	onInstallBundle?: () => void;
+	bundleInstalling: boolean;
 }) {
 	const [detail, setDetail] = useState<MarketplaceDetail | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -198,7 +208,7 @@ function DetailBody({
 					<div className="flex items-start justify-between gap-4">
 						<div className="min-w-0">
 							<div className="flex min-w-0 items-center gap-2">
-								<h2 className="truncate font-semibold text-2xl tracking-tight">
+								<h2 className="truncate font-medium text-2xl tracking-tight">
 									{name}
 								</h2>
 								<VerifiedBadge
@@ -267,11 +277,129 @@ function DetailBody({
 					</p>
 				</ListingSection>
 			) : null}
+			{detail ? (
+				<>
+					<CommunityStatsSection detail={detail} />
+					{detail.kind === "bundle" ? (
+						<BundleContents
+							detail={detail}
+							installing={bundleInstalling}
+							onInstall={onInstallBundle}
+						/>
+					) : null}
+				</>
+			) : null}
 
 			{detail ? (
 				<MarketplacePreviewDetails detail={detail} id={id} kind={kind} />
 			) : null}
 		</div>
+	);
+}
+
+function CommunityStatsSection({ detail }: { detail: MarketplaceDetail }) {
+	return (
+		<section className="rounded-xl border border-border/60 bg-muted/20 p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<h3 className="font-medium text-sm">Community usage</h3>
+					<p className="mt-1 text-muted-foreground text-xs">
+						Anonymous aggregate counts. No account, hostname, prompt, or content
+						is collected.
+					</p>
+				</div>
+				<HugeiconsIcon
+					aria-hidden="true"
+					className="size-4 shrink-0 text-muted-foreground"
+					icon={Shield01Icon}
+				/>
+			</div>
+			<div className="mt-4 grid grid-cols-3 gap-2">
+				<CommunityStat
+					label="Downloads"
+					value={detail.communityStats.downloads}
+				/>
+				<CommunityStat label="Runs" value={detail.communityStats.runs} />
+				<CommunityStat
+					label="Anonymous instances"
+					value={detail.communityStats.instances}
+				/>
+			</div>
+		</section>
+	);
+}
+
+function CommunityStat({ label, value }: { label: string; value: number }) {
+	return (
+		<div className="rounded-lg border border-border/60 bg-background/70 px-3 py-2">
+			<p className="font-medium text-base tabular-nums">{formatCount(value)}</p>
+			<p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+		</div>
+	);
+}
+
+function BundleContents({
+	detail,
+	onInstall,
+	installing,
+}: {
+	detail: MarketplaceDetail;
+	onInstall?: () => void;
+	installing: boolean;
+}) {
+	return (
+		<section className="flex flex-col gap-3">
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<h3 className="font-medium text-sm">Bundle contents</h3>
+					<p className="mt-1 text-muted-foreground text-xs">
+						These existing Marketplace items install through their own trusted
+						kind-specific paths.
+					</p>
+					{detail.bundleSourceUrl ? (
+						<a
+							className="mt-2 inline-block text-muted-foreground text-xs underline underline-offset-4 hover:text-foreground"
+							href={detail.bundleSourceUrl}
+							rel="noopener noreferrer"
+							target="_blank"
+						>
+							View topic source
+						</a>
+					) : null}
+				</div>
+				{onInstall ? (
+					<Button loading={installing} onClick={onInstall} size="sm">
+						Install bundle
+					</Button>
+				) : null}
+			</div>
+			{detail.bundleMembers.length > 0 ? (
+				<ul className="grid gap-2 sm:grid-cols-2">
+					{detail.bundleMembers.map((member) => (
+						<li
+							className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2"
+							key={`${member.kind}:${member.id}`}
+						>
+							<div className="min-w-0">
+								<p className="truncate font-medium text-sm">
+									{member.name ?? member.id}
+								</p>
+								<p className="truncate text-[11px] text-muted-foreground">
+									{member.kind} · {member.id}
+								</p>
+							</div>
+							<Badge variant={member.required ? "secondary" : "outline"}>
+								{member.required ? "Required" : "Optional"}
+							</Badge>
+						</li>
+					))}
+				</ul>
+			) : (
+				<p className="text-muted-foreground text-sm">
+					No installable members are declared for this bundle.
+				</p>
+			)}
+		</section>
 	);
 }
 
@@ -423,7 +551,7 @@ function DetailLogo({
 	return (
 		<span
 			aria-hidden="true"
-			className="font-semibold text-2xl text-foreground uppercase"
+			className="font-medium text-2xl text-foreground uppercase"
 		>
 			{name.trim().charAt(0) || "?"}
 		</span>

@@ -74,7 +74,7 @@ export function AnnouncementDetailDialog({
 						<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.18em]">
 							Product update
 						</p>
-						<DialogTitle className="font-semibold text-2xl tracking-tight sm:text-3xl">
+						<DialogTitle className="font-medium text-2xl tracking-tight sm:text-3xl">
 							{announcement.title}
 						</DialogTitle>
 						{announcement.body ? (

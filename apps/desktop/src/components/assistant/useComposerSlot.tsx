@@ -52,6 +52,11 @@ import { useComposerShortcutBindings } from "@/src/hooks/useComposerShortcutBind
 import { useInterfaceLevel } from "@/src/hooks/useInterfaceLevel.ts";
 import { useVoiceMode } from "@/src/hooks/useVoiceMode.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
+import {
+	getVoiceInputPrefs,
+	subscribePreferenceChanges,
+	VOICE_PREF_KEY,
+} from "@/src/lib/api/preferences.ts";
 import type { Team } from "@/src/lib/api/teams.ts";
 import { stageImageUpload } from "@/src/lib/api/uploads.ts";
 import { transcribeAudio } from "@/src/lib/api/voice.ts";
@@ -453,9 +458,40 @@ export function useComposerSlot(
 	// so the memoized slot never remounts and drops textarea focus.
 	const targetRef = useRef(target);
 	targetRef.current = target;
+	const [voiceInputEngine, setVoiceInputEngine] = useState<
+		string | undefined
+	>();
+	useEffect(() => {
+		let cancelled = false;
+		const load = () => {
+			getVoiceInputPrefs(target)
+				.then((prefs) => {
+					if (!cancelled) {
+						setVoiceInputEngine(prefs.engine);
+					}
+				})
+				.catch(() => undefined);
+		};
+		load();
+		const unsubscribe = subscribePreferenceChanges((key) => {
+			if (key === VOICE_PREF_KEY) {
+				load();
+			}
+		});
+		return () => {
+			cancelled = true;
+			unsubscribe();
+		};
+	}, [target]);
 	const transcribe = useCallback(
-		(audio: Blob) => transcribeAudio(targetRef.current, audio),
-		[]
+		(audio: Blob) =>
+			transcribeAudio(
+				targetRef.current,
+				audio,
+				"recording.wav",
+				voiceInputEngine
+			),
+		[voiceInputEngine]
 	);
 
 	// ChatGPT-style continuous voice mode — its own entry point, separate from the
@@ -467,6 +503,7 @@ export function useComposerSlot(
 		agentId: runtime.agentId ?? undefined,
 		agentName: agents.find((agent) => agent.id === runtime.agentId)?.name,
 		conversationId,
+		sttEngine: voiceInputEngine,
 	});
 	const composerShortcuts = useComposerShortcutBindings();
 

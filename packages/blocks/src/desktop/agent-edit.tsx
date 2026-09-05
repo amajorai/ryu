@@ -341,7 +341,7 @@ export function AgentPreviewCard({
 					<RyuLogo className="text-foreground" size="24px" variant="outline" />
 				</div>
 				<div className="flex min-w-0 flex-col">
-					<span className="truncate font-semibold text-base leading-tight">
+					<span className="truncate font-medium text-base leading-tight">
 						{heading}
 					</span>
 					<span className="truncate text-muted-foreground text-xs">
@@ -1487,7 +1487,7 @@ function EvalStatCard({ label, value, tone }: EvalStat) {
 			<span className="text-[10px] text-muted-foreground uppercase tracking-wide">
 				{label}
 			</span>
-			<span className={`font-semibold text-sm ${tone ?? ""}`}>{value}</span>
+			<span className={`font-medium text-sm ${tone ?? ""}`}>{value}</span>
 		</div>
 	);
 }
@@ -2033,7 +2033,7 @@ function DitherLayer({ className }: { className?: string }) {
 function ProfileStat({ label, value }: { label: string; value: ReactNode }) {
 	return (
 		<span className="inline-flex items-baseline gap-1 text-sm">
-			<span className="font-semibold text-foreground">{value}</span>
+			<span className="font-medium text-foreground">{value}</span>
 			<span className="text-muted-foreground">{label}</span>
 		</span>
 	);
@@ -2173,7 +2173,7 @@ function ProfileHeader({
 							Name
 						</Label>
 						<Input
-							className="h-auto border-0 bg-transparent px-0 font-bold text-2xl shadow-none focus-visible:ring-0"
+							className="h-auto border-0 bg-transparent px-0 font-medium text-2xl shadow-none focus-visible:ring-0"
 							disabled={isLocked}
 							id="agent-name"
 							onChange={(e) => onNameChange?.(e.target.value)}
@@ -3551,7 +3551,7 @@ export function AgentSettingsForm(props: AgentSettingsFormProps) {
 				}
 				header={
 					<div className="flex flex-col gap-1">
-						<h1 className="font-semibold text-xl">Create an agent</h1>
+						<h1 className="font-medium text-xl">Create an agent</h1>
 						<p className="text-muted-foreground text-sm">
 							{guidedStepCount} steps. Nothing here is permanent.
 						</p>
@@ -3767,7 +3767,7 @@ export function AgentPromptStudioView({
 		<div className="mx-auto flex max-w-2xl flex-col gap-6">
 			{editor ?? (
 				<section className="flex flex-col gap-2">
-					<h2 className="font-semibold text-base">Prompt Studio</h2>
+					<h2 className="font-medium text-base">Prompt Studio</h2>
 					<p className="text-muted-foreground text-xs">
 						PlateJS markdown editor for the system prompt.
 					</p>

@@ -102,7 +102,7 @@ export function ActivityChat(props: { className?: string }) {
 
 	return (
 		<div className={`flex min-h-0 flex-col ${className ?? ""}`}>
-			<div className="border-b px-4 py-2 font-semibold text-sm">
+			<div className="border-b px-4 py-2 font-medium text-sm">
 				Ask about your activity
 			</div>
 			<div

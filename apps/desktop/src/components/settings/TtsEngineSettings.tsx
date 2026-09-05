@@ -2,7 +2,7 @@
 //
 // Picks the default audio engine + voice and lets the user test it.
 // The engine set is whatever Core returns from `/api/voice/tts-engines` (the
-// built-in OuteTTS plus whatever the universal Ryu TTS sidecar registry serves)
+// built-in OuteTTS, native audio.cpp, plus whatever the universal Ryu TTS sidecar registry serves)
 // — nothing is hardcoded here, this is a GUI layer over the Core data path. The
 // choice is persisted to localStorage so any future in-chat "speak" surface can
 // read the same default.
@@ -86,6 +86,10 @@ export function TtsEngineSettings() {
 		() => voiceSidecars.find((e) => e.name === "ryutts"),
 		[voiceSidecars]
 	);
+	const audiocpp = useMemo(
+		() => voiceSidecars.find((e) => e.name === "audiocpp"),
+		[voiceSidecars]
+	);
 
 	const handleReadyRyuTts = useCallback(async () => {
 		if (!ryutts) {
@@ -104,6 +108,24 @@ export function TtsEngineSettings() {
 			setSidecarPending(false);
 		}
 	}, [ryutts, installVoiceSidecar, setVoiceRunning]);
+
+	const handleReadyAudioCpp = useCallback(async () => {
+		if (!audiocpp) {
+			return;
+		}
+		setSidecarPending(true);
+		try {
+			if (audiocpp.installState !== "installed") {
+				await installVoiceSidecar("audiocpp");
+			} else if (!audiocpp.running) {
+				await setVoiceRunning("audiocpp", true);
+			}
+		} catch {
+			// Failures surface via the global download overlay / engine error state.
+		} finally {
+			setSidecarPending(false);
+		}
+	}, [audiocpp, installVoiceSidecar, setVoiceRunning]);
 
 	const refreshModels = useCallback(() => {
 		listTtsModels(toTarget(node))
@@ -217,6 +239,28 @@ export function TtsEngineSettings() {
 		}
 		return null;
 	}, [ryutts, sidecarPending]);
+	const audioCppPrompt = useMemo(() => {
+		if (!audiocpp) {
+			return null;
+		}
+		if (audiocpp.installState !== "installed") {
+			return {
+				label: sidecarPending ? "Installing…" : "Install audio.cpp runtime",
+			};
+		}
+		if (!audiocpp.running) {
+			return {
+				label: sidecarPending ? "Starting…" : "Start audio.cpp runtime",
+			};
+		}
+		return null;
+	}, [audiocpp, sidecarPending]);
+	const selectedRuntimePrompt =
+		engineId === "audiocpp"
+			? audioCppPrompt
+			: engineId !== "outetts" && engineId !== "gateway"
+				? ryuTtsPrompt
+				: null;
 
 	const engineOptions = useMemo(
 		() =>
@@ -320,21 +364,25 @@ export function TtsEngineSettings() {
 				>
 					{testState === "speaking" ? "Speaking…" : "Test voice"}
 				</button>
-				{ryuTtsPrompt && (
+				{selectedRuntimePrompt && (
 					<button
 						className="rounded-md px-2 py-1 text-xs hover:bg-muted/50 disabled:opacity-50"
 						disabled={sidecarPending}
 						onClick={() => {
-							handleReadyRyuTts().catch(() => undefined);
+							(engineId === "audiocpp"
+								? handleReadyAudioCpp
+								: handleReadyRyuTts)().catch(() => undefined);
 						}}
 						type="button"
 					>
-						{ryuTtsPrompt.label}
+						{selectedRuntimePrompt.label}
 					</button>
 				)}
-				{ryuTtsPrompt && (
+				{selectedRuntimePrompt && (
 					<span className="text-muted-foreground text-xs">
-						Unlocks more voices (KittenTTS, Pocket TTS, …).
+						{engineId === "audiocpp"
+							? "Runs PocketTTS and Parakeet through one native runtime."
+							: "Unlocks more voices (KittenTTS, Pocket TTS, …)."}
 					</span>
 				)}
 			</div>

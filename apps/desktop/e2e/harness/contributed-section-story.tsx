@@ -132,6 +132,7 @@ function Story() {
 							contribution={{
 								approved_grants: ["ui:declarative-http"],
 								id: "working",
+								http_policy: "core",
 								plugin: "@ryu/agent-status",
 								title: "Working",
 								icon: "lucide:loader-circle",

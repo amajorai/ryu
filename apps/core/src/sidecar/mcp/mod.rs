@@ -2677,6 +2677,61 @@ impl McpRegistry {
         }
     }
 
+    /// Resolve the active workspace for a command tool from the server-owned
+    /// conversation metadata. A command tool may not infer a workspace from a
+    /// caller-provided absolute path. On an unbound local node, the Core process
+    /// directory is the only available local workspace fallback; bound nodes
+    /// require a conversation whose run metadata names an existing workspace.
+    async fn command_workspace_root(&self, host_conversation_id: Option<&str>) -> Option<PathBuf> {
+        if let (Some(store), Some(conversation_id)) = (
+            self.conversations.as_ref(),
+            host_conversation_id.filter(|id| !id.is_empty()),
+        ) {
+            if let Ok(Some(summary)) = store.get_run_summary(conversation_id).await {
+                for raw in [
+                    summary.worktree_path.as_deref(),
+                    summary.folder_path.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if let Ok(path) = std::fs::canonicalize(raw) {
+                        if crate::tool_exec::is_usable_workspace_root(&path) {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        if crate::sidecar::control_plane::registered_org().is_none()
+            && host_conversation_id.is_none()
+        {
+            return std::env::current_dir()
+                .ok()
+                .and_then(|path| std::fs::canonicalize(path).ok())
+                .filter(|path| crate::tool_exec::is_usable_workspace_root(path));
+        }
+        None
+    }
+
+    /// Whether a resolved app command is a local workspace reader. The HTTP
+    /// ingress uses this to require the distinct `files:read` capability without
+    /// forcing remote MCP or credential tools to request a filesystem grant.
+    pub(crate) async fn command_tool_requires_files_read(&self, tool_id: &str) -> bool {
+        self.resolve_app_tool_backend(tool_id)
+            .await
+            .is_some_and(|resolved| {
+                matches!(
+                    resolved.backend,
+                    crate::plugin_manifest::schema::ToolBackend::Command {
+                        workspace_path_args,
+                        ..
+                    } if !workspace_path_args.is_empty()
+                )
+            })
+    }
+
     /// Resolve `secret:NAME` references in a user MCP server's headers/env
     /// immediately before a call. Unresolved references are omitted rather
     /// than sent upstream as literal text. Static values remain unchanged.
@@ -5203,13 +5258,19 @@ impl McpRegistry {
                         egress_url_arg,
                         arg_specs,
                         arg_bounds,
+                        workspace_path_args,
                     } => {
                         // Exec an allowlisted local CLI through the governed path.
                         // The bin grant + allowlist are checked first (deterministic)
                         // inside `run_command_tool`. The approval gate (if any) has
                         // already classified under the outer `app.` id (gate_id's
                         // `_ => tool_id` arm), so no per-target re-gate is needed.
-                        return crate::tool_exec::run_command_tool_with_agent(
+                        let workspace_root = if workspace_path_args.is_empty() {
+                            None
+                        } else {
+                            self.command_workspace_root(host_conversation_id).await
+                        };
+                        return crate::tool_exec::run_command_tool_with_agent_and_workspace(
                             &bin,
                             &args,
                             arg_specs.as_deref(),
@@ -5224,6 +5285,8 @@ impl McpRegistry {
                             &resolved.plugin_id,
                             session_id.as_deref(),
                             agent_id,
+                            workspace_root.as_deref(),
+                            &workspace_path_args,
                         )
                         .await
                         .map_err(|e| anyhow!(e));
@@ -6932,9 +6995,21 @@ mod tests {
             false,
             true,
         ));
-        assert!(!profile_scope_allows_registry_tool("composio_connect.search", true, true));
-        assert!(!profile_scope_allows_registry_tool("tools.exec", true, true));
-        assert!(profile_scope_allows_registry_tool("spaces.search", false, false));
+        assert!(!profile_scope_allows_registry_tool(
+            "composio_connect.search",
+            true,
+            true
+        ));
+        assert!(!profile_scope_allows_registry_tool(
+            "tools.exec",
+            true,
+            true
+        ));
+        assert!(profile_scope_allows_registry_tool(
+            "spaces.search",
+            false,
+            false
+        ));
     }
 
     #[tokio::test]

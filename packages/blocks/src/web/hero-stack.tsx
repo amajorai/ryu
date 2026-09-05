@@ -122,7 +122,7 @@ export default function HeroStack() {
 				/>
 				<div className="relative z-10">
 					<div className="mb-3 flex items-center justify-center gap-2">
-						<span className="font-semibold text-[11px] text-foreground uppercase tracking-[0.2em]">
+						<span className="font-medium text-[11px] text-foreground uppercase tracking-[0.2em]">
 							Ryu Core + Gateway
 						</span>
 						<AnimatePresence>

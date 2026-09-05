@@ -27,7 +27,9 @@ export default defineConfig({
 	webServer: {
 		command: "bun run dev -- --host 127.0.0.1 --port 5198 --strictPort",
 		cwd: mppUiDirectory,
-		reuseExistingServer: true,
+		// Port 5198 is also used by the rich listing proof; reusing that server
+		// makes this suite silently load the wrong app and report missing controls.
+		reuseExistingServer: false,
 		timeout: 120_000,
 		url: PROOF_URL,
 	},

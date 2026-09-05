@@ -303,7 +303,7 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 		return (
 			<div className="flex flex-col gap-6">
 				<div>
-					<h2 className="mb-1 font-semibold text-xl">Get Ryu ready</h2>
+					<h2 className="mb-1 font-medium text-xl">Get Ryu ready</h2>
 					<p className="text-muted-foreground text-sm">
 						We'll install what you need to get started.
 					</p>
@@ -369,7 +369,7 @@ export function SetupStep({ nodeUrl, token, onInstall }: SetupStepProps) {
 	return (
 		<div className="flex flex-col gap-4">
 			<div>
-				<h2 className="mb-1 font-semibold text-xl">Choose what to install</h2>
+				<h2 className="mb-1 font-medium text-xl">Choose what to install</h2>
 				<p className="text-muted-foreground text-sm">
 					Select categories or individual items.
 				</p>

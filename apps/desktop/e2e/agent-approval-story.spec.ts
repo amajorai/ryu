@@ -53,7 +53,9 @@ test("Simple keeps approval language human-readable", async ({ page }) => {
 
 	await expect(card).toBeVisible();
 	await expect(card.getByText("Ryu wants to take an action")).toBeVisible();
-	await expect(card.getByText("run a shell command")).toBeVisible();
+	await expect(
+		card.getByText("run a shell command", { exact: true })
+	).toBeVisible();
 	await expect(card.locator("pre")).toHaveCount(0);
 });
 

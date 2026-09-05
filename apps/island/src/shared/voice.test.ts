@@ -56,6 +56,12 @@ describe("parseVoicePrefs", () => {
 		expect(prefs.model).toBe(VOICE_ENGINE_MODELS.whisper);
 	});
 
+	it("preserves the audio.cpp runtime selection and bundled model", () => {
+		const prefs = parseVoicePrefs(JSON.stringify({ engine: "audiocpp" }));
+		expect(prefs.engine).toBe("audiocpp");
+		expect(prefs.model).toBe("parakeet-tdt-0.6b-v3-q8_0");
+	});
+
 	it("coerces an unknown mode to toggle", () => {
 		expect(parseVoicePrefs(JSON.stringify({ mode: "double-tap" })).mode).toBe(
 			"toggle"

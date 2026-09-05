@@ -560,7 +560,7 @@ function MonitorDetail({
 		<div className="mx-auto max-w-2xl space-y-5">
 			<div className="flex items-start justify-between">
 				<div>
-					<h1 className="font-semibold text-lg">{monitor.name}</h1>
+					<h1 className="font-medium text-lg">{monitor.name}</h1>
 					<a
 						className="text-muted-foreground text-sm hover:underline"
 						href={monitor.url}
@@ -715,7 +715,7 @@ export function MonitorsView({
 		<div className="flex h-full overflow-hidden">
 			<div className="flex w-64 shrink-0 flex-col border-r">
 				<div className="flex items-center justify-between border-b px-3 py-2">
-					<span className="font-semibold text-sm">Monitors</span>
+					<span className="font-medium text-sm">Monitors</span>
 					<Button onClick={onNew} size="sm" variant="ghost">
 						<HugeiconsIcon className="size-4" icon={Add01Icon} />
 					</Button>

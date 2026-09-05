@@ -759,9 +759,12 @@ mod gateway_status_redaction_tests {
 
 #[cfg(test)]
 mod managed_user_authorization_tests {
-    use super::managed_user_jwt_resolution_for;
+    use super::{
+        anonymous_host_conversation_allowed, caller_owns_host_conversation,
+        host_conversation_proof, host_conversation_proof_is_valid, managed_user_jwt_resolution_for,
+    };
     use crate::authorization::{Capability, RoutePolicy};
-    use crate::identity_verify::{OrgRole, TeamMembership, VerifiedCaller};
+    use crate::identity_verify::{OrgRole, ResourceTenancy, TeamMembership, VerifiedCaller};
     use crate::sidecar::control_plane::{NodeScope, RegisteredNode, RegisteredOrg};
 
     fn node() -> RegisteredNode {
@@ -903,6 +906,43 @@ mod managed_user_authorization_tests {
         assert!(
             managed_user_jwt_resolution_for(other, &personal_node(), Some("ryu"), 10).is_none()
         );
+    }
+
+    #[test]
+    fn a_shared_conversation_does_not_delegate_its_owner_vault() {
+        let member = caller(OrgRole::Member, "org_1");
+        let visible_to_member = ResourceTenancy {
+            owner_user_id: Some("user_2".to_owned()),
+            org_id: Some("org_1".to_owned()),
+            visibility: "org".to_owned(),
+            team_id: None,
+            collaborators: Vec::new(),
+        };
+        assert!(!caller_owns_host_conversation(&member, &visible_to_member));
+
+        let own = ResourceTenancy {
+            owner_user_id: Some("user_1".to_owned()),
+            ..visible_to_member
+        };
+        assert!(caller_owns_host_conversation(&member, &own));
+    }
+
+    #[test]
+    fn anonymous_host_conversation_context_requires_a_trusted_forwarder_on_bound_nodes() {
+        assert!(!anonymous_host_conversation_allowed(true, false));
+        assert!(anonymous_host_conversation_allowed(true, true));
+        assert!(anonymous_host_conversation_allowed(false, false));
+    }
+
+    #[test]
+    fn host_conversation_proof_binds_the_id_to_this_core_process() {
+        let proof = host_conversation_proof("conversation-1");
+        assert!(host_conversation_proof_is_valid("conversation-1", &proof));
+        assert!(!host_conversation_proof_is_valid("conversation-2", &proof));
+        assert!(!host_conversation_proof_is_valid(
+            "conversation-1",
+            "invalid"
+        ));
     }
 }
 
@@ -1976,6 +2016,41 @@ async fn marketplace_packages_installed() -> axum::response::Response {
         Ok(packages) => Json(json!({ "packages": packages })).into_response(),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct MarketplaceUsageBody {
+    event: String,
+    id: String,
+    kind: String,
+}
+
+/// `POST /api/marketplace/usage` — record a local, content-free Marketplace
+/// install signal. The caller cannot submit counters; Core increments the one
+/// event after the normal lifecycle permission check and the existing beacon
+/// later sends its aggregate snapshot when community stats are enabled.
+async fn record_marketplace_usage(
+    State(state): State<ServerState>,
+    Extension(caller): Extension<Option<crate::identity_verify::VerifiedCaller>>,
+    Json(body): Json<MarketplaceUsageBody>,
+) -> axum::response::Response {
+    if let Err(response) = enforce_app_lifecycle_permission(
+        &state,
+        &caller,
+        crate::identity_verify::permissions::APP_INSTALL,
+    )
+    .await
+    {
+        return response;
+    }
+    if body.event != "download" {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "`event` must be `download`".to_owned(),
+        );
+    }
+    crate::stats_beacon::record_marketplace_event(&body.kind, &body.id, true);
+    Json(json!({ "success": true })).into_response()
 }
 
 async fn install_portable_marketplace_package(
@@ -4085,6 +4160,7 @@ pub fn create_router(
             "/api/marketplace/packages/installed",
             get(marketplace_packages_installed),
         )
+        .route("/api/marketplace/usage", post(record_marketplace_usage))
         .route(
             "/api/language-packs/installed",
             get(language_packs::installed),
@@ -8583,6 +8659,14 @@ async fn chat_stream(
             }
         }
     }
+    if let Some(conversation_id) = req.conversation_id.as_deref() {
+        if !crate::sidecar::adapters::acp::is_safe_host_conversation_id(conversation_id) {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "conversation_id must be 1-128 ASCII letters, digits, '.', '_' or '-'".to_owned(),
+            );
+        }
+    }
     // Widget follow-ups carry only an opaque ticket on the wire. Validate it
     // here, but defer consumption until the final pre-dispatch point below so
     // RBAC and conversation ACL rejection do not burn a valid ticket. Core is
@@ -8679,6 +8763,14 @@ async fn chat_stream(
         }
     }
     req.referenced_conversation_ids = readable_references;
+    // Community Marketplace usage is recorded locally as a counter only. The
+    // consent-gated Core beacon later sends an anonymous snapshot, and resolves
+    // portable agent runtime ids back to their Marketplace listing ids.
+    if let Some(workflow_id) = req.workflow_id.as_deref() {
+        crate::stats_beacon::record_marketplace_event("workflow", workflow_id, false);
+    } else if let Some(agent_id) = req.agent_id.as_deref() {
+        crate::stats_beacon::record_marketplace_event("agent", agent_id, false);
+    }
     // Wake any `onChat`-gated plugins the first time a chat turn is handled
     // (once per process, off the hot path — see `fire_on_chat_once`). Cheap
     // atomic on every subsequent request; covers both the single- and team-chat
@@ -11884,6 +11976,12 @@ async fn channel_run(
     axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(mut req): Json<ChannelRunRequest>,
 ) -> axum::response::Response {
+    if !crate::sidecar::adapters::acp::is_safe_host_conversation_id(&req.conversation_id) {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "conversation_id must be 1-128 ASCII letters, digits, '.', '_' or '-'".to_owned(),
+        );
+    }
     // Per-resource ACL (machine-ingress variant). `conversation_id` is caller-supplied
     // here too, so without this a node-token holder could pass a HUMAN's conversation
     // id and have that thread's history loaded as context and their turn appended
@@ -17359,6 +17457,7 @@ async fn install_plugin_from_catalog(
 
     match outcome {
         Ok(installed_plugins) => {
+            crate::stats_beacon::record_marketplace_event("plugin", &id, true);
             let dependencies: Vec<&str> = installed_plugins
                 .iter()
                 .map(|(pid, _)| pid.as_str())
@@ -18354,6 +18453,7 @@ async fn install_app_handler(
 
     match installed {
         Ok(record) => {
+            crate::stats_beacon::record_marketplace_event("app", &id, true);
             // Live contributions refresh — same lossy `system:plugins` nudge as
             // the enable handler, so a newly installed plugin's presence reaches
             // subscribed shells immediately.
@@ -24874,6 +24974,8 @@ async fn published_agent_install(
                         ),
                     );
                 }
+                crate::stats_beacon::associate_marketplace_runtime("agent", &id, &record.id);
+                crate::stats_beacon::record_marketplace_event("agent", &id, true);
             }
             (
                 if replayed {
@@ -30803,15 +30905,21 @@ struct CallToolBody {
     /// owner) and scopes per-user audit. Absent → env/`"default"` fallback.
     #[serde(default)]
     user_id: Option<String>,
-    /// The **server-derived** host conversation this tool call runs on behalf of,
-    /// forwarded by the Gateway exec plane (`POST /v1/exec/tool`). Lowered to a
-    /// [`crate::sidecar::mcp::ToolPrincipal`] so a gateway-exec'd tool resolves
-    /// `Owned` on an org-bound node instead of the fail-closed `Unresolved`.
-    /// Distinct from `user_id`, which is client-supplied and MUST NEVER be an
-    /// authorization principal. Absent ⇒ fail-closed default (unbound nodes are
-    /// unaffected: they resolve `Unrestricted` regardless).
+    /// Internal host conversation context forwarded by the Gateway exec plane
+    /// (`POST /v1/exec/tool`). Direct managed-user callers may provide it only
+    /// for a conversation they own; visibility or collaboration never delegates
+    /// the owner's vault. The node-token path is accepted only with the
+    /// process-local proof Core adds before its Gateway forward. Distinct from
+    /// `user_id`, which is client-supplied and MUST NEVER be an authorization
+    /// principal. Absent ⇒ fail-closed default on bound nodes (unbound nodes
+    /// remain unrestricted).
     #[serde(default)]
     host_conversation_id: Option<String>,
+    /// Process-local proof attached by Core before its Gateway forward. It is
+    /// never accepted from a normal client and is required when an anonymous
+    /// node-token request carries `host_conversation_id` on a bound node.
+    #[serde(default)]
+    host_conversation_proof: Option<String>,
     /// Optional Core-injected onboarding profile scopes. These are narrowing
     /// controls only; normal network callers cannot widen an agent's access by
     /// supplying them.
@@ -30820,11 +30928,6 @@ struct CallToolBody {
         Option<Vec<crate::sidecar::adapters::ComposioConnectionBinding>>,
     #[serde(default)]
     profile_conversation_scope: Option<Vec<String>>,
-    /// Set by the Gateway's own OpenAI tool loop after it has recorded the
-    /// action. Core's direct ACP/MCP callers leave this false so Core can emit
-    /// the charge to the Gateway exactly once.
-    #[serde(default)]
-    budget_already_metered: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -30845,6 +30948,98 @@ fn is_billable_composio_tool(tool_id: &str) -> bool {
 
 /// `POST /api/mcp/tools/call` — invoke a registered MCP tool. This is the path
 /// the chat tool loop (U12) uses to execute a tool the agent requested.
+async fn authorize_tool_host_conversation(
+    state: &ServerState,
+    caller: Option<&crate::identity_verify::VerifiedCaller>,
+    raw_id: Option<&str>,
+    host_conversation_proof: Option<&str>,
+) -> Result<Option<String>, (StatusCode, String)> {
+    let Some(raw_id) = raw_id else {
+        return Ok(None);
+    };
+    if !crate::sidecar::adapters::acp::is_safe_host_conversation_id(raw_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "host_conversation_id must be 1-128 ASCII letters, digits, '.', '_' or '-'".to_owned(),
+        ));
+    }
+
+    // A managed-user JWT identifies the human who is making this direct Core
+    // request. A shared or collaborator-visible conversation is not enough to
+    // select that conversation owner's vault: the caller must own the host
+    // conversation. An anonymous node-token request may carry this context only
+    // with the process-local proof Core created before its Gateway forward;
+    // otherwise a direct node-token caller could omit the user JWT and select
+    // another owner's vault.
+    if let Some(caller) = caller {
+        let meta = match state.conversations.get_access_meta(raw_id).await {
+            Ok(Some(meta)) => meta,
+            Ok(None) => {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    "host conversation is not owned by the caller".to_owned(),
+                ));
+            }
+            Err(error) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("host conversation lookup failed: {error}"),
+                ));
+            }
+        };
+        if !caller_owns_host_conversation(caller, &meta) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "host conversation is not owned by the caller".to_owned(),
+            ));
+        }
+    } else if !anonymous_host_conversation_allowed(
+        crate::sidecar::control_plane::registered_org().is_some()
+            || crate::sidecar::control_plane::is_managed_node(),
+        host_conversation_proof
+            .is_some_and(|proof| host_conversation_proof_is_valid(raw_id, proof)),
+    ) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "host conversation requires a verified caller or trusted forwarder".to_owned(),
+        ));
+    }
+    Ok(Some(raw_id.to_owned()))
+}
+
+fn anonymous_host_conversation_allowed(node_bound: bool, trusted_forwarder: bool) -> bool {
+    trusted_forwarder || !node_bound
+}
+
+/// Prove that a host conversation id came from this Core's own Gateway forward
+/// path. The key is process-local and never leaves Core; the Gateway only relays
+/// the proof. A direct node-token caller therefore cannot opt into the trusted
+/// host-context path by copying a public header or body flag.
+pub(crate) fn host_conversation_proof(conversation_id: &str) -> String {
+    use base64::Engine as _;
+    use sha2::{Digest, Sha256};
+
+    static KEY: std::sync::OnceLock<[u8; 16]> = std::sync::OnceLock::new();
+    let key = KEY.get_or_init(|| *uuid::Uuid::new_v4().as_bytes());
+    let mut digest = Sha256::new();
+    digest.update(b"ryu-host-conversation-proof-v1\0");
+    digest.update(key);
+    digest.update(conversation_id.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest.finalize())
+}
+
+fn host_conversation_proof_is_valid(conversation_id: &str, proof: &str) -> bool {
+    ct_eq(proof, &host_conversation_proof(conversation_id))
+}
+
+fn caller_owns_host_conversation(
+    caller: &crate::identity_verify::VerifiedCaller,
+    meta: &crate::identity_verify::ResourceTenancy,
+) -> bool {
+    meta.owner_user_id.as_deref() == Some(caller.user_id.as_str())
+        && meta.org_id.as_deref() == caller.org_id.as_deref()
+}
+
 #[utoipa::path(
     post,
     path = "/api/mcp/tools/call",
@@ -30855,13 +31050,29 @@ fn is_billable_composio_tool(tool_id: &str) -> bool {
 )]
 async fn call_mcp_tool(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Json(body): Json<CallToolBody>,
 ) -> axum::response::Response {
-    let should_record_tool_charge =
-        !body.budget_already_metered && is_billable_composio_tool(&body.tool);
+    let host_conversation_id = match authorize_tool_host_conversation(
+        &state,
+        caller.as_ref(),
+        body.host_conversation_id.as_deref(),
+        body.host_conversation_proof.as_deref(),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err((status, message)) => return json_error(status, message),
+    };
+    // Core is the execution and charge authority for every Composio action that
+    // reaches this dispatcher. A client-controlled `budget_already_metered`
+    // flag used to let any node-token caller suppress the charge notification.
+    // Gateway callers now rely on this Core-side event and do not debit the same
+    // unified-tool execution a second time.
+    let should_record_tool_charge = is_billable_composio_tool(&body.tool);
     let charge_agent_id = body.agent_id.clone();
     let charge_user_id = body.user_id.clone();
-    let charge_session_id = body.host_conversation_id.clone();
+    let charge_session_id = host_conversation_id.clone();
     // The allowlist must be tied to a *known* agent. A `None` allowlist means
     // "allow every tool" (see `McpRegistry::call_tool`), so we must not let a
     // client reach that path by omitting or faking `agent_id` — that would be a
@@ -30880,6 +31091,20 @@ async fn call_mcp_tool(
             Json(json!({ "ok": false, "error": format!("unknown agent '{agent_id}'") })),
         )
             .into_response();
+    }
+    if state.mcp.command_tool_requires_files_read(&body.tool).await
+        && enforce_permission(
+            &state,
+            &caller,
+            crate::identity_verify::permissions::SPACE_READ,
+        )
+        .await
+        .is_err()
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "insufficient permissions: space.read (required for workspace file search)".to_owned(),
+        );
     }
     // Per-agent restriction comes from the agent's configured allowlist. (A
     // deny-by-default global policy for unconfigured agents is Gateway /
@@ -30921,7 +31146,7 @@ async fn call_mcp_tool(
             // refusing); absent ⇒ fail-closed `Unresolved` on a bound node (e.g. a
             // direct/legacy caller). Unbound (personal) nodes resolve `Unrestricted`
             // regardless. This is NEVER `user_id` (client-supplied, spoofable).
-            body.host_conversation_id.as_deref(),
+            host_conversation_id.as_deref(),
             body.profile_composio_connection_scope.as_deref(),
             body.profile_conversation_scope.as_deref(),
         )
@@ -30969,6 +31194,7 @@ async fn call_mcp_tool(
 )]
 async fn call_action(
     State(state): State<ServerState>,
+    axum::Extension(caller): axum::Extension<Option<crate::identity_verify::VerifiedCaller>>,
     Path(action_id): Path<String>,
     Json(body): Json<CallActionBody>,
 ) -> axum::response::Response {
@@ -30981,17 +31207,16 @@ async fn call_action(
     };
     call_mcp_tool(
         State(state),
+        axum::Extension(caller),
         Json(CallToolBody {
             tool: tool_id,
             arguments: body.arguments,
             agent_id: body.agent_id,
             user_id: body.user_id,
             host_conversation_id: None,
+            host_conversation_proof: None,
             profile_composio_connection_scope: None,
             profile_conversation_scope: None,
-            // The public Action route must never accept the Gateway's internal
-            // charge-bypass marker.
-            budget_already_metered: false,
         }),
     )
     .await
@@ -32086,6 +32311,15 @@ struct ToolExecBody {
     /// so the caller must bind it to a real session upstream.
     #[serde(default)]
     conversation_id: Option<String>,
+    /// Core-validated server-derived host conversation for conversation-scoped
+    /// tools. This is distinct from `conversation_id`, which remains the
+    /// client-supplied Composio entity/audit selector for compatibility.
+    #[serde(default)]
+    host_conversation_id: Option<String>,
+    /// Process-local proof attached by Core's Gateway forwarder. A direct
+    /// node-token caller cannot opt into another user's conversation scope.
+    #[serde(default)]
+    host_conversation_proof: Option<String>,
 }
 
 /// Body for `POST /api/tools/exec/resume`.
@@ -32116,8 +32350,22 @@ struct ToolExecResumeBody {
 )]
 async fn tools_exec(
     State(state): State<ServerState>,
+    axum::Extension(verified_caller): axum::Extension<
+        Option<crate::identity_verify::VerifiedCaller>,
+    >,
     Json(body): Json<ToolExecBody>,
 ) -> axum::response::Response {
+    let host_conversation_id = match authorize_tool_host_conversation(
+        &state,
+        verified_caller.as_ref(),
+        body.host_conversation_id.as_deref(),
+        body.host_conversation_proof.as_deref(),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err((status, message)) => return json_error(status, message),
+    };
     if let Some(agent_id) = body.agent_id.as_deref() {
         if state
             .agent_store
@@ -32162,12 +32410,13 @@ async fn tools_exec(
         .unwrap_or_default();
     let caller: std::sync::Arc<dyn crate::tool_exec::ToolCaller> = state.mcp.clone();
     let invoker = std::sync::Arc::new(
-        crate::tool_exec::SandboxToolInvoker::registry_with_identity(
+        crate::tool_exec::SandboxToolInvoker::registry_with_identity_and_conversation(
             caller,
             agent_id.clone(),
             allowlist,
             body.conversation_id,
             identity_profile_ids,
+            host_conversation_id,
         ),
     );
     let outcome = crate::tool_exec::execute_code(body.code, invoker, &agent_id).await;
@@ -40348,6 +40597,7 @@ async fn skills_catalog_install(
         .await;
     match installed {
         Ok(result) => {
+            crate::stats_beacon::record_marketplace_event("skill", &id, true);
             let result_value = serde_json::to_value(&result).unwrap_or_default();
             let remember_target_ids =
                 selection_input.remember_target_ids && selection_input.target_ids.is_some();
@@ -41083,6 +41333,11 @@ async fn install_sidecar(
                 .ensure_model(&downloads)
                 .await
                 .map(|_| "installed".to_string()),
+            "audiocpp" => {
+                crate::sidecar::providers::audiocpp::AudioCppDownloader::new()
+                    .ensure_installed(&downloads)
+                    .await
+            }
             "sdcpp" => {
                 crate::sidecar::providers::sdcpp::StableDiffusionDownloader::new()
                     .ensure_installed(&downloads)
@@ -44625,7 +44880,10 @@ async fn install_workflow_template(
         return response;
     }
     match crate::workflow::templates::install(&body.template_id).await {
-        Ok(workflow_id) => (StatusCode::OK, Json(json!({ "workflow_id": workflow_id }))),
+        Ok(workflow_id) => {
+            crate::stats_beacon::record_marketplace_event("workflow", &body.template_id, true);
+            (StatusCode::OK, Json(json!({ "workflow_id": workflow_id })))
+        }
         Err(e) => {
             let status = if e.contains("unknown template") {
                 StatusCode::NOT_FOUND

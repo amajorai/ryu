@@ -67,7 +67,7 @@ export interface VoiceSessionOptions {
 	handlers?: VoiceSessionHandlers;
 	/** The user-identity JWT (Better Auth). Omit for the local user. */
 	jwt?: string | null;
-	/** STT engine hint (`"whisper"` default | `"parakeet"`). */
+	/** STT engine hint (`"whisper"` | `"audiocpp"` | `"parakeet"`). */
 	sttEngine?: string;
 	/** TTS engine hint (`"outetts"` | a RyuTTS engine id). */
 	ttsEngine?: string;

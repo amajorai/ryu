@@ -198,7 +198,7 @@ function PacksShelfBody({
 			<div className="mx-auto w-full max-w-4xl px-4">
 				<div className="mb-2 flex items-end justify-between gap-3">
 					<div>
-						<h3 className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+						<h3 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
 							Skill packs
 						</h3>
 						<p className="mt-1 text-muted-foreground text-xs">

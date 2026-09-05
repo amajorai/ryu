@@ -1,7 +1,7 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.2.7",
+  "version": "0.2.8",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -23,6 +23,8 @@
     "test:wiring": "bun test e2e/wiring/",
     "build:harness": "vite build --config e2e/harness/vite.harness.config.ts",
     "build:harness:welcome": "vite build --config e2e/harness/vite.welcome.config.ts",
+    "licenses": "node ../../tools/generate-desktop-licenses.mjs",
+    "licenses:check": "node ../../tools/generate-desktop-licenses.mjs --check",
     "test:e2e:welcome": "playwright test --config e2e/welcome-step-story.playwright.config.ts",
     "clean": "rm -rf src-tauri/target dist build",
     "brand:dev": "node ../../scripts/release/channel-brand.mjs --channel dev --config apps/desktop/src-tauri/tauri.dev.conf.json"
@@ -45,6 +47,7 @@
     "@pierre/trees": "^1.0.0-beta.4",
     "@platejs/docx-io": "53.0.8",
     "@platejs/yjs": "^53.2.0",
+    "@radix-ui/react-slot": "^1.3.3",
     "@ryu/app-host": "workspace:*",
     "@ryu/assistant-widget": "workspace:*",
     "@ryu/auth": "workspace:*",
@@ -78,8 +81,8 @@
     "ai": "catalog:",
     "better-auth": "^1.7.1",
     "class-variance-authority": "^0.7.1",
-    "cn": "^0.2.4",
     "cmdk": "^1.1.1",
+    "cn": "^0.2.4",
     "cron-parser": "^5.5.0",
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
@@ -91,6 +94,7 @@
     "maplibre-gl": "^5.24.0",
     "mermaid": "^11.15.0",
     "metal-fx": "^1.0.4",
+    "motion": "^13.1.1",
     "next-themes": "^0.4.6",
     "pdfjs-dist": "6.2.108",
     "platejs": "^53.0.7",

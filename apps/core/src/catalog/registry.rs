@@ -79,6 +79,7 @@ pub fn installer_pin(name: &str) -> Option<&'static str> {
     match name {
         "llamacpp" => Some(crate::sidecar::providers::llamacpp::downloader::TARGET_VERSION),
         "whispercpp" => Some(crate::sidecar::providers::whispercpp::downloader::TARGET_VERSION),
+        "audiocpp" => Some(crate::sidecar::providers::audiocpp::TARGET_VERSION),
         "sdcpp" => Some(crate::sidecar::providers::sdcpp::downloader::TARGET_VERSION),
         _ => None,
     }
@@ -159,6 +160,20 @@ pub fn supported_on_node(name: &str) -> bool {
         // this gate answers only "is this Mac new enough to possibly run it".
         "apfel" => {
             cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") && macos_at_least_26()
+        }
+        // audio.cpp publishes native server archives for macOS and Windows on
+        // x64/arm64 where listed, plus Linux x86_64. Keep this gate aligned
+        // with the pinned downloader assets rather than claiming every Rust
+        // target can run the runtime.
+        "audiocpp" => {
+            cfg!(any(
+                all(
+                    target_os = "macos",
+                    any(target_arch = "aarch64", target_arch = "x86_64")
+                ),
+                all(target_os = "linux", target_arch = "x86_64"),
+                all(target_os = "windows", target_arch = "x86_64"),
+            ))
         }
         other => {
             let platforms = required_platforms(other);
@@ -458,6 +473,17 @@ pub fn static_registry() -> Vec<CatalogEntry> {
             deprecated: false,
             recommended: false,
         },
+        CatalogEntry {
+            name: "audiocpp",
+            display_name: "audio.cpp",
+            description: "Native local audio runtime · PocketTTS speech and Parakeet-TDT recognition · CPU/Metal-capable GGUF packages",
+            category: SidecarCategory::Voice,
+            source: SidecarSource::Github {
+                repo: "0xShug0/audio.cpp",
+            },
+            deprecated: false,
+            recommended: false,
+        },
         // NOTE: parakeet is NOT a catalog/Store entry — it is a speech *model*
         // (NVIDIA Parakeet TDT ONNX), downloaded by onboarding and browsable in
         // the Models tab. whisper.cpp is the user-facing speech engine; parakeet
@@ -577,16 +603,16 @@ mod tests {
     #[test]
     fn registry_has_correct_count() {
         let r = static_registry();
-        // 22 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
+        // 23 base entries + 4 sandbox backends (wasmtime, docker, microsandbox,
         // opensandbox). The nano/pico/nemo/iron-claw + temporal + qmd rows were
         // dropped and unsloth/docker-model-runner/apfel/mesh-llm added since the old count
         // of 30; `spider` then left the managed-sidecar catalog when it became a
-        // BYO declarative `command` plugin, leaving the base count at 22 (its
+        // BYO declarative `command` plugin, leaving the base count at 23 (its
         // sibling assertions in `registry_recommended_entries` and the tool count
         // moved with it — this one did not, hence the rebase). NOTE: this is a
         // global count over a shared tree — if a concurrent feature adds a catalog
         // row, rebase this number with it.
-        assert_eq!(r.len(), 26);
+        assert_eq!(r.len(), 27);
     }
 
     #[test]
@@ -690,9 +716,9 @@ mod tests {
         // docker-model-runner (adopt-only), apfel (Apple FM, Apple Silicon macOS 26+),
         // mesh-llm (adopt-or-start, OpenAI-compatible distributed runtime).
         assert_eq!(providers.len(), 11);
-        // whisper.cpp + OuteTTS + Ryu TTS multi-engine sidecar (parakeet is a
-        // model, not a Store engine entry).
-        assert_eq!(voice.len(), 3);
+        // whisper.cpp + audio.cpp + OuteTTS + Ryu TTS multi-engine sidecar
+        // (parakeet is also a model, not a Store engine entry).
+        assert_eq!(voice.len(), 4);
         assert_eq!(media.len(), 1);
         // No embedding *engine* is a Store entry — the embeddings server is
         // backing infra (auto-started), not user-pickable.

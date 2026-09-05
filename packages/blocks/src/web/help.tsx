@@ -169,7 +169,7 @@ export function HelpArticlesSearch({
 					{Object.entries(groupedArticles).map(([cat, catArticles]) => (
 						<div key={cat}>
 							{!category && (
-								<h2 className="mb-4 font-semibold text-xl capitalize">{cat}</h2>
+								<h2 className="mb-4 font-medium text-xl capitalize">{cat}</h2>
 							)}
 							<div className="grid gap-4 md:grid-cols-2">
 								{catArticles.map((article) => (

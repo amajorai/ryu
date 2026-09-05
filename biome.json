@@ -55,6 +55,7 @@
       "!crates/sdk/napi/index.js",
       "!crates/sdk/napi/index.d.ts",
       "!apps/desktop/e2e/harness/*.html",
+      "!apps/desktop/src/lib/desktop-licenses.generated.ts",
       "!apps/desktop/e2e/harness/media-proof-dist",
       "!apps/fumadocs",
       "!apps/raycast",

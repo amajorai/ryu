@@ -6,6 +6,10 @@ import {
 } from "@ryu/i18n";
 import { I18nProvider } from "@ryu/i18n/react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+	LANGUAGE_MODE_CHANGED_EVENT,
+	readLanguageMode,
+} from "@/src/hooks/useLanguageMode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import { fetchInstalledLanguagePacks } from "@/src/lib/api/language-packs.ts";
 import { useNodeStore } from "@/src/store/useNodeStore.ts";
@@ -22,6 +26,14 @@ export function LanguagePackBridge({ children }: { children: ReactNode }) {
 		[node.token, node.url, node.userJwt]
 	);
 	const [packs, setPacks] = useState<LanguagePack[]>([]);
+	const [languageMode, setLanguageMode] = useState(readLanguageMode);
+
+	useEffect(() => {
+		const onModeChanged = () => setLanguageMode(readLanguageMode());
+		window.addEventListener(LANGUAGE_MODE_CHANGED_EVENT, onModeChanged);
+		return () =>
+			window.removeEventListener(LANGUAGE_MODE_CHANGED_EVENT, onModeChanged);
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -67,7 +79,15 @@ export function LanguagePackBridge({ children }: { children: ReactNode }) {
 		};
 	}, [target]);
 
-	return <I18nProvider packs={packs}>{children}</I18nProvider>;
+	return (
+		<I18nProvider
+			initialLocale={languageMode === "auto" ? navigator.language : null}
+			key={`desktop-i18n-${languageMode}`}
+			packs={packs}
+		>
+			{children}
+		</I18nProvider>
+	);
 }
 
 export { BUILT_IN_LANGUAGE_PACKS };

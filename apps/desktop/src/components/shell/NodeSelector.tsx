@@ -3851,7 +3851,7 @@ export function NodeSelector({ mode }: NodeSelectorProps) {
 					<div className="border-border/60 border-b bg-muted/20 px-3 py-3">
 						<div className="flex items-start justify-between gap-3">
 							<div>
-								<p className="font-semibold text-sm">
+								<p className="font-medium text-sm">
 									Choose a {simpleInterface ? "device" : "node"}
 								</p>
 								<p className="mt-0.5 text-muted-foreground text-xs">

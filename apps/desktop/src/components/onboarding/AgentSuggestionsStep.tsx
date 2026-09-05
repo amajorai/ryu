@@ -1,7 +1,8 @@
 import { Button } from "@ryu/ui/components/button";
+import { Checkbox } from "@ryu/ui/components/checkbox";
 import { Logo as RyuLogo } from "@ryu/ui/components/logo";
 import { PageHeader } from "@ryu/ui/components/page-header";
-import { Check } from "lucide-react";
+import { Check, ChevronDown, Sparkles, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
 import { SettingsCard } from "@/src/components/settings/shared/settings-items.tsx";
 import type { OnboardingAgentSuggestion } from "@/src/lib/api/onboarding-profile.ts";
@@ -44,6 +45,35 @@ const EXPRESSIVE_PALETTES = [
 		c3: "oklch(70% 0.15 45)",
 	},
 ] as const;
+
+const TOOL_LABELS: Record<string, string> = {
+	"memory.search": "Memory search",
+	"memory.store": "Save memories",
+	"routines.create": "Create routines",
+	"routines.list": "View routines",
+	"search_conversations.search": "Search past chats",
+	"skills.load": "Load skills",
+	"skills.search": "Search skills",
+	"spaces.list_documents": "List Space documents",
+	"spaces.search": "Search Spaces",
+	"web.crawl": "Crawl the web",
+	"web.extract": "Read web pages",
+	"web.search": "Search the web",
+	"workspace.open_panel": "Open a Ryu panel",
+	"workspace.open_tab": "Open a Ryu page",
+};
+
+function toolLabel(tool: string): string {
+	return (
+		TOOL_LABELS[tool] ??
+		tool
+			.split(".")
+			.at(-1)
+			?.replaceAll("_", " ")
+			.replace(/\b\w/g, (letter) => letter.toUpperCase()) ??
+		tool
+	);
+}
 
 function paletteForSuggestion(seed: string) {
 	let hash = 0;
@@ -104,12 +134,16 @@ function SuggestionCard({
 	connectedApps,
 	disabled,
 	onToggle,
+	onReview,
+	reviewed,
 	selected,
 	suggestion,
 }: {
 	connectedApps: readonly OnboardingConnectedApp[];
 	disabled: boolean;
 	onToggle: () => void;
+	onReview: (reviewed: boolean) => void;
+	reviewed: boolean;
 	selected: boolean;
 	suggestion: OnboardingAgentSuggestion;
 }) {
@@ -148,6 +182,9 @@ function SuggestionCard({
 
 				{connectedApps.length > 0 ? (
 					<div className="mt-3 ml-14 flex flex-wrap items-center gap-1.5">
+						<span className="mr-1 text-[11px] text-muted-foreground">
+							Connected apps
+						</span>
 						{connectedApps.map((app) => (
 							<span
 								className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground"
@@ -162,6 +199,61 @@ function SuggestionCard({
 						))}
 					</div>
 				) : null}
+
+				<div className="mt-3 ml-14 flex flex-col gap-3">
+					<div className="rounded-lg bg-background/50 px-3 py-2">
+						<div className="flex items-center gap-1.5 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+							<Sparkles className="size-3" />
+							Why this showed up
+						</div>
+						<p className="mt-1 text-xs leading-relaxed">{suggestion.reason}</p>
+					</div>
+
+					<div className="flex items-start gap-2">
+						<Wrench className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+						<div
+							className="flex min-w-0 flex-wrap gap-1.5"
+							data-testid="suggested-tools"
+						>
+							{suggestion.tools.map((tool) => (
+								<span
+									className="rounded-full border border-border/70 bg-background/60 px-2 py-1 text-[11px] text-muted-foreground"
+									key={tool}
+								>
+									{toolLabel(tool)}
+								</span>
+							))}
+						</div>
+					</div>
+
+					<details
+						className="group rounded-lg border border-border/60 bg-background/40"
+						open
+					>
+						<summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-muted-foreground text-xs [&::-webkit-details-marker]:hidden">
+							<span>Review prompt setup</span>
+							<ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+						</summary>
+						<p
+							className="max-h-40 overflow-y-auto whitespace-pre-wrap border-border/60 border-t px-3 py-2 text-muted-foreground text-xs leading-relaxed"
+							data-testid="suggested-prompt"
+						>
+							{suggestion.systemPrompt}
+						</p>
+					</details>
+
+					<div className="flex items-start gap-2 text-muted-foreground text-xs leading-relaxed">
+						<Checkbox
+							aria-label={`I reviewed ${suggestion.name}`}
+							checked={reviewed}
+							disabled={disabled}
+							onCheckedChange={(checked) => onReview(checked === true)}
+						/>
+						<span>
+							I reviewed this draft&apos;s prompt and tools before adding it.
+						</span>
+					</div>
+				</div>
 			</SettingsCard>
 		</div>
 	);
@@ -174,6 +266,8 @@ export function AgentSuggestionsStep({
 	onCreate,
 	onSkip,
 	onToggle,
+	onReview,
+	reviewed,
 	selected,
 	suggestions,
 }: {
@@ -183,10 +277,15 @@ export function AgentSuggestionsStep({
 	onCreate: () => void;
 	onSkip: () => void;
 	onToggle: (id: string) => void;
+	onReview: (id: string, reviewed: boolean) => void;
+	reviewed: ReadonlySet<string>;
 	selected: ReadonlySet<string>;
 	suggestions: readonly OnboardingAgentSuggestion[];
 }) {
 	const selectedCount = selected.size;
+	const pendingReviewCount = suggestions.filter(
+		(suggestion) => selected.has(suggestion.id) && !reviewed.has(suggestion.id)
+	).length;
 	return (
 		<div className="flex w-full max-w-xl flex-col gap-3 pb-4">
 			<div className="flex flex-col gap-3">
@@ -195,7 +294,9 @@ export function AgentSuggestionsStep({
 						connectedApps={connectedApps}
 						disabled={busy}
 						key={suggestion.id}
+						onReview={(next) => onReview(suggestion.id, next)}
 						onToggle={() => onToggle(suggestion.id)}
+						reviewed={reviewed.has(suggestion.id)}
 						selected={selected.has(suggestion.id)}
 						suggestion={suggestion}
 					/>
@@ -213,15 +314,17 @@ export function AgentSuggestionsStep({
 					Skip for now
 				</Button>
 				<Button
-					disabled={selectedCount === 0 || busy}
+					disabled={selectedCount === 0 || pendingReviewCount > 0 || busy}
 					loading={busy}
 					onClick={onCreate}
 					size="lg"
 					variant="mono"
 				>
-					{selectedCount > 0
-						? `Add ${selectedCount} agent${selectedCount === 1 ? "" : "s"}`
-						: "Select an agent"}
+					{pendingReviewCount > 0
+						? `Review ${pendingReviewCount} selected draft${pendingReviewCount === 1 ? "" : "s"}`
+						: selectedCount > 0
+							? `Add ${selectedCount} agent${selectedCount === 1 ? "" : "s"}`
+							: "Select an agent"}
 				</Button>
 			</div>
 		</div>

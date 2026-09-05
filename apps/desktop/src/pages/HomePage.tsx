@@ -830,7 +830,7 @@ export default function HomePage() {
 						className={buttonVariants({
 							variant: "ghost",
 							size: "sm",
-							className: "gap-0.5 font-semibold",
+							className: "gap-0.5 font-medium",
 						})}
 					>
 						{dashboardName}

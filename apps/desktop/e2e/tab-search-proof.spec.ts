@@ -39,6 +39,10 @@ test("searches, activates, closes, hides, and restores the tab search control", 
 	await expect(page.locator('[data-tab-search-id="long-running"]')).toHaveCount(
 		0
 	);
+	// Closing a row keeps the search dialog open so another tab can be managed;
+	// dismiss the dialog before exercising the trigger's context menu.
+	await page.keyboard.press("Escape");
+	await expect(search).toHaveCount(0);
 
 	await trigger.click({ button: "right" });
 	await expect(

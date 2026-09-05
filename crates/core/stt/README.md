@@ -8,8 +8,8 @@ swappable engine seam.
 An extracted Core capability crate — **in-process by default** and consumed as a
 **non-optional path dependency**: the voice / meetings / hardware data paths reach
 it unconditionally. It carries **zero dependency on `apps/core`**. Host couplings
-it cannot own (whisper base-url, Gateway url/bearer, the parakeet model dir) inject
-via the narrow `SttHost` trait.
+it cannot own (whisper/audio.cpp base-urls, Gateway url/bearer, the parakeet model
+dir) inject via the narrow `SttHost` trait.
 
 ## Key API (`src/lib.rs`, `src/parakeet.rs`)
 
@@ -21,12 +21,13 @@ via the narrow `SttHost` trait.
 
 ## Swap seam
 
-Three engines behind one `transcribe`:
+Four engines behind one `transcribe`:
 - **parakeet ONNX** — in-process default, the genuine hot path, behind the
   `voice-parakeet` feature (pulls `transcribe-rs` + native ONNX Runtime, plus a
   process-global lazily-loaded model). With the feature off, `parakeet::transcribe`
   returns a clear "not built" error and the default falls back to whisper.cpp.
 - **whisper.cpp** — thin HTTP proxy to a local whisper server.
+- **audio.cpp** — thin HTTP proxy to the native audio.cpp multipart server.
 - **Gateway-routed cloud Whisper** — thin HTTP proxy through the Gateway.
 
 ## Consumed as

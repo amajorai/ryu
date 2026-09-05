@@ -244,7 +244,7 @@ function RatingSummary({
 				) : (
 					<>
 						<div className="flex items-baseline gap-2">
-							<span className="font-semibold text-3xl tabular-nums">
+							<span className="font-medium text-3xl tabular-nums">
 								{(Math.round(average * 10) / 10).toFixed(1)}
 							</span>
 							<span className="text-muted-foreground text-sm">out of 5</span>

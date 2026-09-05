@@ -89,7 +89,7 @@ function SummarySide({
 			>
 				{item.eyebrow}
 			</Badge>
-			<p className="break-words font-mono font-semibold text-lg tabular-nums leading-tight sm:text-xl">
+			<p className="break-words font-medium font-mono text-lg tabular-nums leading-tight sm:text-xl">
 				{item.amount}
 			</p>
 			<p className="mt-0.5 truncate font-medium text-sm">{item.label}</p>

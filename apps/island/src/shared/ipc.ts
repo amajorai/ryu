@@ -312,7 +312,7 @@ export type CoreToolCallResult =
 export interface CoreTranscribeRequest {
 	/** 16 kHz mono WAV bytes captured in the renderer. */
 	audio: ArrayBuffer;
-	/** Transcription engine (`"whisper"` | `"parakeet"`), the `?engine=` value. */
+	/** Transcription engine (`"whisper"` | `"audiocpp"` | `"parakeet"`), the `?engine=` value. */
 	engine: string;
 }
 

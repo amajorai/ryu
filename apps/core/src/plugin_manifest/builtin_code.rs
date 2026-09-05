@@ -724,12 +724,16 @@ pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[
     (
         "@ryu/output-styles",
         "output-styles/explanatory.md",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/explanatory.md"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/explanatory.md"
+        ),
     ),
     (
         "@ryu/output-styles",
         "output-styles/i-have-adhd.md",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/i-have-adhd.md"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/i-have-adhd.md"
+        ),
     ),
     (
         "@ryu/output-styles",
@@ -754,7 +758,9 @@ pub(crate) const BUILTIN_OUTPUT_STYLES: &[(&str, &str, &str)] = &[
     (
         "@ryu/output-styles",
         "output-styles/plain-technical.md",
-        include_str!("../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/plain-technical.md"),
+        include_str!(
+            "../../../../generated/ryu-runtime/plugins-store/plugins/output-styles/output-styles/plain-technical.md"
+        ),
     ),
     (
         "@ryu/output-styles",

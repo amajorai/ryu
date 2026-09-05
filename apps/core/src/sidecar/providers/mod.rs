@@ -1,4 +1,5 @@
 pub mod apfel;
+pub mod audiocpp;
 pub mod docker_model_runner;
 pub mod llamacpp;
 pub mod mesh_llm;
@@ -16,6 +17,7 @@ pub mod vllm;
 pub mod whispercpp;
 
 pub use apfel::ApfelManager;
+pub use audiocpp::AudioCppManager;
 pub use docker_model_runner::DockerModelRunnerManager;
 pub use llamacpp::LlamaCppManager;
 pub use mesh_llm::MeshLlmManager;

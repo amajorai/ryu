@@ -69,7 +69,7 @@ export default function MarketplaceHelpDialog() {
 							<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.18em]">
 								Marketplace guide
 							</p>
-							<DialogTitle className="font-semibold text-2xl tracking-tight sm:text-3xl">
+							<DialogTitle className="font-medium text-2xl tracking-tight sm:text-3xl">
 								Apps &amp; plugins
 							</DialogTitle>
 							<DialogDescription className="max-w-xl text-sm leading-6">

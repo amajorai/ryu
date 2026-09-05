@@ -127,6 +127,8 @@ interface AppManifestWire {
 	tagline?: string | null;
 	/** Host surfaces the plugin runs on. Absent/empty = EVERY surface. */
 	targets?: Surface[];
+	/** Core-derived provenance tier. Never infer this from the manifest id. */
+	tier?: AppTier | null;
 	version: string;
 	windows_first: boolean;
 }
@@ -141,6 +143,21 @@ interface AppRecordWire {
 }
 
 // ── Client types (camelCase, used by React) ───────────────────────────────────
+
+/** Server-derived plugin provenance. The id namespace is not a trust signal. */
+export type AppTier = "core" | "community";
+
+/** First-party UI is admitted only when Core explicitly derives the Core tier. */
+export function isCoreAppTier(
+	tier: AppTier | null | undefined
+): tier is "core" {
+	return tier === "core";
+}
+
+/** Parse Core's provenance field without ever treating an unknown value as Core. */
+export function appTierFromWire(value: unknown): AppTier | null {
+	return value === "core" || value === "community" ? value : null;
+}
 
 export interface RunnableEntry {
 	config: unknown;
@@ -263,6 +280,8 @@ export interface AppInfo extends AppPresentation {
 	surfaceSupport: CatalogSurfaceSupport[];
 	/** Host surfaces this plugin runs on. **Empty = every surface**, never "none". */
 	targets: Surface[];
+	/** Core-derived provenance. Missing/unknown values are not first-party. */
+	tier: AppTier | null;
 	version: string;
 	windowsFirst: boolean;
 }
@@ -480,6 +499,7 @@ function toAppInfo(w: AppManifestWire): AppInfo {
 	return {
 		approvedGrants: w.approved_grants ?? [],
 		builtIn: w.built_in ?? false,
+		tier: appTierFromWire(w.tier),
 		category: w.category ?? null,
 		companion: w.companion
 			? {

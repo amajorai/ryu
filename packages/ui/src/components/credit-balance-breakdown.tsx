@@ -55,7 +55,7 @@ function amountLabel(
 	currency: string
 ): string {
 	const amount = finiteAmount(value);
-	return amount === null ? "—" : formatMicroUsd(amount, currency);
+	return amount === null ? "—" : formatMicroUsd(amount, currency, 2);
 }
 
 function InfoTooltip({ label, children }: { label: string; children: string }) {
@@ -94,7 +94,7 @@ function BucketCard({
 					{tooltip}
 				</InfoTooltip>
 			</div>
-			<p className="mt-2 font-mono font-semibold text-xl tabular-nums">
+			<p className="mt-2 font-medium font-mono text-xl tabular-nums">
 				{amount}
 			</p>
 			<p className="mt-1 text-muted-foreground text-xs leading-relaxed">
@@ -199,7 +199,7 @@ export function CreditBalanceBreakdown({
 										: "Available now is the total of Polar's shared meter and provider-specific meters. Each provider-specific allocation only pays for its assigned provider."}
 								</InfoTooltip>
 							</div>
-							<p className="mt-1 font-mono font-semibold text-3xl tabular-nums">
+							<p className="mt-1 font-medium font-mono text-3xl tabular-nums">
 								{amountLabel(totalMicroUsd, currency)}
 							</p>
 						</div>

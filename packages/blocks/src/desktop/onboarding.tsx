@@ -500,7 +500,7 @@ function FeatureStep({
 				) : null}
 
 				<div className="rounded-lg bg-muted/40 p-4 text-left">
-					<p className="font-semibold text-lg">{currentFeature.name}</p>
+					<p className="font-medium text-lg">{currentFeature.name}</p>
 					<p className="mt-1 text-muted-foreground text-sm">
 						{currentFeature.description}
 					</p>
@@ -739,7 +739,7 @@ function CardHeader({ eyebrow, title }: { eyebrow: string; title: string }) {
 				as="h2"
 				stagger={false}
 				title={title}
-				titleClassName="font-semibold text-lg"
+				titleClassName="font-medium text-lg"
 			/>
 		</div>
 	);

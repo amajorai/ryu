@@ -180,8 +180,8 @@ use sidecar::{
     install_state::InstallStatusStore,
     onboarding::SetupManager,
     providers::{
-        apfel::ApfelManager, llamacpp::LlamaCppClassifyManager, llamacpp::LlamaCppEmbedManager,
-        llamacpp::LlamaCppManager, llamacpp::LlamaCppRerankManager,
+        apfel::ApfelManager, audiocpp::AudioCppManager, llamacpp::LlamaCppClassifyManager,
+        llamacpp::LlamaCppEmbedManager, llamacpp::LlamaCppManager, llamacpp::LlamaCppRerankManager,
         llamacpp::LlamaCppSpeechManager, mesh_llm::MeshLlmManager, mlx::MlxManager,
         mlx_serve::MlxServeManager, mlx_vlm::MlxVlmManager, ollama::OllamaManager,
         omlx::OmlxManager, outetts::OuteTtsManager, parakeet::ParakeetManager,
@@ -655,6 +655,7 @@ async fn main() {
         // Voice engines (STT/TTS) — opt-in, run alongside the resident chat engine.
         Arc::new(WhisperCppManager::new().with_downloads(download_center.clone())),
         Arc::new(ParakeetManager::new().with_downloads(download_center.clone())),
+        Arc::new(AudioCppManager::new()),
         Arc::new(OuteTtsManager::new().with_downloads(download_center.clone())),
         // Ryu TTS sidecar — universal multi-engine text-to-speech (Python runtime
         // fronting KittenTTS, Pocket TTS, …). Opt-in; NOT in startup_order — it
@@ -725,6 +726,10 @@ async fn main() {
         // installed, and a lean build (no `voice-parakeet`) refuses in `start()` and
         // reports the missing feature — neither reports a false "Running".
         "parakeet".into(),
+        // audio.cpp is a selectable native STT/TTS runtime. It is only started
+        // when its version marker is present, so the optional alternate costs
+        // nothing on nodes that have not installed it.
+        "audiocpp".into(),
         "ollama".into(),
         "vllm".into(),
         "sglang".into(),
@@ -1809,8 +1814,8 @@ async fn main() {
     let sync_conversations = conversations.clone();
     let sync_spaces = spaces.clone();
     let sync_preferences = preferences.clone();
-    // Clone the preferences handle for the opt-in anonymous community-savings
-    // beacon (OFF by default) before `preferences` moves into ServerState below.
+    // Clone the preferences handle for the opt-out anonymous community-savings
+    // beacon (ON by default) before `preferences` moves into ServerState below.
     let stats_preferences = preferences.clone();
     // Clone the preferences handle for the managed Ryu analytics heartbeat. It
     // starts after durable-token adoption below so the relay sees the live node
@@ -2184,10 +2189,10 @@ async fn main() {
     // this never alters default behaviour or blocks startup.
     server::sync::spawn_sync_loop(sync_conversations, sync_spaces, sync_preferences);
 
-    // Start the opt-in anonymous community-savings beacon. A no-op every tick
-    // until the user opts in (`community-stats-enabled` pref or
-    // `RYU_COMMUNITY_STATS_ENABLED`). OFF by default and fail-open, so this never
-    // alters default behaviour, sends identity data, or blocks startup.
+    // Start the opt-out anonymous community-savings beacon. It remains inactive
+    // whenever the user opts out (`community-stats-enabled=false` or
+    // `RYU_COMMUNITY_STATS_ENABLED=false`) and is fail-open, so it never sends
+    // identity data or blocks startup.
     stats_beacon::spawn_stats_beacon(stats_preferences);
 
     // F7 boot precedence: BEFORE any control-plane spawn reads the gateway env,

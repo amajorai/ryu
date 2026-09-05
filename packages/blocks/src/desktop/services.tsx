@@ -79,7 +79,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 	return (
 		<div className="mt-4">
 			<div className="px-4 py-1.5">
-				<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+				<span className="font-medium text-muted-foreground text-xs uppercase tracking-wider">
 					{title}
 				</span>
 			</div>

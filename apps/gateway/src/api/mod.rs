@@ -105,7 +105,7 @@ pub fn router(state: SharedState) -> Router {
         // Live request traffic (SSE). Admin-gated like /v1/audit; feeds the
         // desktop's live-traffic dashboard through Core's proxy.
         .route("/v1/traffic", get(traffic::live_traffic))
-        // Community savings — public, ungated anonymous aggregate (opt-in beacon
+        // Community savings — public, ungated anonymous aggregate (opt-out beacon
         // source). Mirrors /metrics registration; NO admin gate.
         .route("/v1/savings", get(metrics::community_savings))
         .route("/savings", get(metrics::community_savings))

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DesktopShell } from "./shell.tsx";
 
-test("Bot mode puts Agents before Sessions and renders messaging previews", () => {
+test("Bot mode renders agents with inline threads and no Sessions toggle", () => {
 	const html = renderToStaticMarkup(
 		<DesktopShell sidebarMode="bot">
 			<div>Transcript</div>
@@ -11,8 +11,10 @@ test("Bot mode puts Agents before Sessions and renders messaging previews", () =
 
 	expect(html).toContain('data-testid="hero-bot-mode-sidebar"');
 	expect(html).toContain("Agents");
-	expect(html).toContain("Sessions");
-	expect(html.indexOf("Agents")).toBeLessThan(html.indexOf("Sessions"));
+	expect(html).not.toContain("hero-bot-mode-sessions-tab");
+	expect(html).toContain("Threads");
+	expect(html).toContain("Refactor the auth flow");
+	expect(html).toContain("SSE fix follow-up");
 	expect(html).toContain("Follow-up draft is ready");
 	expect(html).toContain("Reviewed the launch checklist");
 });

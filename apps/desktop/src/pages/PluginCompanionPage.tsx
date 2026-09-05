@@ -113,7 +113,7 @@ export default function PluginCompanionPage({
 						<HugeiconsIcon className="size-5" icon={Package01Icon} />
 					</div>
 					<div className="min-w-0">
-						<h1 className="truncate font-semibold text-lg">
+						<h1 className="truncate font-medium text-lg">
 							{companion.label || companion.name}
 						</h1>
 						<p className="truncate text-muted-foreground text-sm">

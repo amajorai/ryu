@@ -136,7 +136,7 @@ export default function FAQ({ items = GENERAL_FAQ_ITEMS }: FAQProps) {
 						// animate their own radii, so no rounding class here.
 						item: "border-none bg-muted/50 dark:bg-white/5",
 						trigger: "px-4 py-3",
-						title: "font-semibold text-[15px] leading-6",
+						title: "font-medium text-[15px] leading-6",
 						description: "px-1 text-[15px] text-muted-foreground",
 					}}
 					items={accordionItems}

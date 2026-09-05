@@ -168,8 +168,9 @@ pub async fn dispatch_scoped(
                             .into_iter()
                             .filter(|id| {
                                 visible.contains(id)
-                                    && conversation_scope
-                                        .is_none_or(|scope| scope.iter().any(|allowed| allowed == id))
+                                    && conversation_scope.is_none_or(|scope| {
+                                        scope.iter().any(|allowed| allowed == id)
+                                    })
                             })
                             .collect(),
                     )

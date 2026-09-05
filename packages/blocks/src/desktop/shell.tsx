@@ -23,6 +23,7 @@ import {
 	Add01Icon,
 	ArrowDown01Icon,
 	Calendar03Icon,
+	GitBranchIcon,
 	LibraryIcon,
 	Mic01Icon,
 	PencilEdit01Icon,
@@ -73,26 +74,22 @@ const BOT_MODE_AGENTS = [
 		name: "Ryu",
 		preview: "Follow-up draft is ready",
 		stamp: "9:41 AM",
+		threads: ["Refactor the auth flow", "Auth flow follow-up"],
 	},
 	{
 		id: "claude-code",
 		name: "Claude Code",
 		preview: "Reviewed the launch checklist",
 		stamp: "Yesterday",
+		threads: ["Plan the launch checklist", "Launch checklist review"],
 	},
 	{
 		id: "codex",
 		name: "Codex",
 		preview: "Found two files to update",
 		stamp: "Mon",
+		threads: ["Debug the SSE stream", "SSE fix follow-up"],
 	},
-] as const;
-
-const BOT_MODE_SESSIONS = [
-	"Refactor the auth flow",
-	"Summarize the Q3 report",
-	"Debug the SSE stream",
-	"Plan the launch checklist",
 ] as const;
 
 const TRUST_MODE_AI = [
@@ -235,6 +232,7 @@ function BotModeAgentRow({
 	name,
 	preview,
 	stamp,
+	threads,
 }: (typeof BOT_MODE_AGENTS)[number]) {
 	return (
 		<SidebarMenuItem>
@@ -257,18 +255,24 @@ function BotModeAgentRow({
 					</span>
 				</span>
 			</button>
-		</SidebarMenuItem>
-	);
-}
-
-function BotModeSessionRow({ title }: { title: string }) {
-	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton className="h-10">
-				<span className="min-w-0 truncate text-sidebar-foreground/85">
-					{title}
-				</span>
-			</SidebarMenuButton>
+			<div className="relative ml-7 border-sidebar-border/70 border-l pl-2">
+				<div className="px-2 py-1 text-[10px] text-muted-foreground uppercase tracking-[0.12em]">
+					Threads
+				</div>
+				<SidebarMenu className="gap-0.5">
+					{threads.map((thread) => (
+						<SidebarMenuItem key={thread}>
+							<SidebarMenuButton className="h-8 gap-2 text-xs">
+								<HugeiconsIcon
+									className="size-3.5 text-muted-foreground"
+									icon={GitBranchIcon}
+								/>
+								<span className="truncate">{thread}</span>
+							</SidebarMenuButton>
+						</SidebarMenuItem>
+					))}
+				</SidebarMenu>
+			</div>
 		</SidebarMenuItem>
 	);
 }
@@ -365,57 +369,16 @@ function TrustModeSidebarContent() {
 }
 
 function BotModeSidebarContent() {
-	const [activeTab, setActiveTab] = useState<"agents" | "sessions">("agents");
-
 	return (
 		<div
-			className="flex min-h-0 flex-1 flex-col"
+			className="scroll-fade no-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-2"
 			data-testid="hero-bot-mode-sidebar"
 		>
-			<Tabs
-				className="min-h-0 flex-1"
-				onValueChange={(value) => {
-					if (value === "agents" || value === "sessions") {
-						setActiveTab(value);
-					}
-				}}
-				value={activeTab}
-			>
-				<div className="px-2 pt-1">
-					<TabsList className="w-full" manageLayout={false}>
-						<TabsTrigger
-							className="flex-1"
-							data-testid="hero-bot-mode-agents-tab"
-							value="agents"
-						>
-							Agents
-						</TabsTrigger>
-						<TabsTrigger
-							className="flex-1"
-							data-testid="hero-bot-mode-sessions-tab"
-							value="sessions"
-						>
-							Sessions
-						</TabsTrigger>
-					</TabsList>
-				</div>
-
-				<div className="scroll-fade no-scrollbar min-h-0 flex-1 overflow-auto px-2 pt-2">
-					{activeTab === "agents" ? (
-						<SidebarMenu className="gap-0.5">
-							{BOT_MODE_AGENTS.map((agent) => (
-								<BotModeAgentRow key={agent.name} {...agent} />
-							))}
-						</SidebarMenu>
-					) : (
-						<SidebarMenu className="gap-0.5">
-							{BOT_MODE_SESSIONS.map((title) => (
-								<BotModeSessionRow key={title} title={title} />
-							))}
-						</SidebarMenu>
-					)}
-				</div>
-			</Tabs>
+			<Section label="Agents">
+				{BOT_MODE_AGENTS.map((agent) => (
+					<BotModeAgentRow key={agent.name} {...agent} />
+				))}
+			</Section>
 		</div>
 	);
 }

@@ -405,6 +405,8 @@ export function TelegramManagedBotPanel({
 				) : null}
 				<div className="flex gap-2">
 					<Button
+						aria-label={`Connect @${created.botUsername}`}
+						className="whitespace-nowrap"
 						onClick={() => {
 							accept().catch(() => undefined);
 						}}

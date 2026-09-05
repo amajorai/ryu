@@ -261,7 +261,7 @@ export interface ProfileStatsPanelProps {
 function HeroStat({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex flex-col gap-1 rounded-4xl bg-card p-3 text-card-foreground shadow-sm">
-			<span className="truncate font-heading font-semibold text-foreground text-lg tabular-nums">
+			<span className="truncate font-heading font-medium text-foreground text-lg tabular-nums">
 				{value}
 			</span>
 			<span className="truncate text-muted-foreground text-xs">{label}</span>
@@ -403,12 +403,12 @@ export function ProfileStatsPanel({
 						src={summary.image}
 					/>
 				) : (
-					<div className="flex size-20 items-center justify-center rounded-full bg-muted font-semibold text-2xl">
+					<div className="flex size-20 items-center justify-center rounded-full bg-muted font-medium text-2xl">
 						{(summary?.name ?? "You").slice(0, 2).toUpperCase()}
 					</div>
 				)}
 				<div>
-					<h2 className="font-semibold text-2xl tracking-normal">
+					<h2 className="font-medium text-2xl tracking-normal">
 						{summary?.name ?? "Your activity"}
 					</h2>
 					<div className="mt-1 flex flex-wrap items-center justify-center gap-2 text-muted-foreground text-sm">

@@ -218,7 +218,7 @@ export default function VaultPage() {
 								icon={ShieldKeyIcon}
 								size={18}
 							/>
-							<h1 className="font-semibold text-xl">Vault</h1>
+							<h1 className="font-medium text-xl">Vault</h1>
 						</div>
 						<p className="max-w-2xl text-muted-foreground text-sm">
 							Store your own secrets once and let governed MCP calls use them

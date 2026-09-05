@@ -82,6 +82,7 @@ const BUILTIN_SECTION_VALUES = MARKETPLACE_SECTION_VALUES;
 
 /** Store sections whose content uses the shared catalog grid/list geometry. */
 const STORE_VIEW_SECTIONS: ReadonlySet<string> = new Set([
+	"bundles",
 	"apps",
 	"plugins",
 	"skills",
@@ -514,6 +515,9 @@ function StoreContent({
 }) {
 	if (section === "home") {
 		return <StoreHome onOpenRealm={onOpenRealm} />;
+	}
+	if (section === "bundles") {
+		return <MarketplaceBrowseSection onlyKind="bundle" />;
 	}
 	if (section === "integrations") {
 		return (

@@ -420,7 +420,7 @@ export function MemoryLibrary({
 					<MemoryViewNav onChange={setView} value={view} />
 					<div className="flex items-center justify-between gap-3">
 						<div>
-							<h1 className="font-semibold text-lg">Memory</h1>
+							<h1 className="font-medium text-lg">Memory</h1>
 							<p className="text-muted-foreground text-sm">
 								Durable facts Ryu recalls across your conversations.
 							</p>

@@ -28,6 +28,10 @@ impl SttHost for CoreSttHost {
         crate::sidecar::providers::whispercpp::whisper_base_url()
     }
 
+    fn audio_cpp_base_url(&self) -> String {
+        crate::sidecar::providers::audiocpp::base_url()
+    }
+
     fn gateway_url(&self) -> String {
         crate::sidecar::gateway::gateway_url()
     }

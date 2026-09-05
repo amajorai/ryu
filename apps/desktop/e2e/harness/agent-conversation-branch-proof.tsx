@@ -9,6 +9,7 @@ import {
 	MessagingAgentRowBody,
 	SidebarConversationList,
 } from "../../src/components/layout/AppSidebar.tsx";
+import { TabsContext } from "../../src/contexts/TabsContext.tsx";
 import type { AgentSummary } from "../../src/lib/api/agents.ts";
 import type { Conversation } from "../../src/types/chat.ts";
 import "../../src/index.css";
@@ -43,6 +44,10 @@ const AGENTS = [
 	agent("planner", "Planner", "codex"),
 ];
 
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const NOW = Date.now();
+
 function conversation(
 	id: string,
 	title: string,
@@ -65,12 +70,12 @@ const DIRECT_THREADS = [
 	conversation("builder-branch", "Design review (branch)", {
 		agentId: "builder",
 		lastMessage: "Try the alternative layout here.",
-		updatedAt: 30,
+		updatedAt: NOW - 15 * MINUTE,
 	}),
 	conversation("builder-main", "Design review", {
 		agentId: "builder",
 		lastMessage: "The main thread is still intact.",
-		updatedAt: 20,
+		updatedAt: NOW - 2 * HOUR,
 	}),
 ];
 
@@ -78,12 +83,12 @@ const GROUP_THREADS = [
 	conversation("group-branch", "Launch plan (branch)", {
 		lastMessage: "Reviewer joined the branch.",
 		participants: ["builder", "reviewer"],
-		updatedAt: 40,
+		updatedAt: NOW - 20 * MINUTE,
 	}),
 	conversation("group-main", "Launch plan", {
 		lastMessage: "Builder shared the launch checklist.",
 		participants: ["builder", "reviewer"],
-		updatedAt: 10,
+		updatedAt: NOW - 3 * HOUR,
 	}),
 ];
 
@@ -170,89 +175,93 @@ function Story() {
 			forcedTheme="dark"
 		>
 			<QueryClientProvider client={queryClient}>
-				<main className="min-h-screen bg-background p-8 text-foreground">
-					<div className="mx-auto grid max-w-[1180px] gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-						<section
-							className="overflow-hidden rounded-2xl border border-border/70 bg-sidebar shadow-sm"
-							data-testid="agent-sidebar-proof"
-						>
-							<header className="border-border/70 border-b px-5 py-4">
-								<p className="font-semibold text-sm">Agents view</p>
-								<p className="mt-1 text-muted-foreground text-xs">
-									Sessions ⇄ Agents · branch tree
-								</p>
-							</header>
-							<div className="space-y-4 p-3">
-								<div>
-									<div className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-										Agents
-									</div>
-									<div className="rounded-md bg-background/30">
-										<MessagingAgentRowBody
-											agent={AGENTS[0]}
-											conversation={DIRECT_THREADS[0]}
-											onEdit={() => undefined}
-											onToggleThreads={() =>
-												setThreadsExpanded((value) => !value)
-											}
-											threadCount={DIRECT_THREADS.length}
-											threadsExpanded={threadsExpanded}
-											usageBarVisible={false}
-										/>
-									</div>
-									{threadsExpanded ? (
-										<AgentThreadList
-											onOpen={(id) => opened(`Opened ${id}`)}
-											pageSize={1}
-											threads={DIRECT_THREADS}
-										/>
-									) : null}
-								</div>
-								<div>
-									<div className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
-										Sessions
-									</div>
-									<SidebarConversationList
-										conversations={GROUP_THREADS}
-										handlers={handlers}
-										pageSize={1}
-									/>
-								</div>
-							</div>
-						</section>
-						<section className="rounded-2xl border border-border/70 bg-background p-6 shadow-sm">
-							<div className="mb-5 flex items-center justify-between">
-								<div>
-									<p className="font-semibold text-sm">Workspace transcript</p>
+				<TabsContext.Provider value={{ openTab: () => "proof-chat" } as never}>
+					<main className="min-h-screen bg-background p-8 text-foreground">
+						<div className="mx-auto grid max-w-[1180px] gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+							<section
+								className="overflow-hidden rounded-2xl border border-border/70 bg-sidebar shadow-sm"
+								data-testid="agent-sidebar-proof"
+							>
+								<header className="border-border/70 border-b px-5 py-4">
+									<p className="font-semibold text-sm">Agents view</p>
 									<p className="mt-1 text-muted-foreground text-xs">
-										Agent messages stay visible between turns.
+										Direct agent threads inline · fallback group chats
 									</p>
+								</header>
+								<div className="space-y-4 p-3">
+									<div>
+										<div className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+											Agents
+										</div>
+										<div className="rounded-md bg-background/30">
+											<MessagingAgentRowBody
+												agent={AGENTS[0]}
+												conversation={DIRECT_THREADS[0]}
+												onEdit={() => undefined}
+												onToggleThreads={() =>
+													setThreadsExpanded((value) => !value)
+												}
+												threadCount={DIRECT_THREADS.length}
+												threadsExpanded={threadsExpanded}
+												usageBarVisible={false}
+											/>
+										</div>
+										{threadsExpanded ? (
+											<AgentThreadList
+												onOpen={(id) => opened(`Opened ${id}`)}
+												pageSize={1}
+												threads={DIRECT_THREADS}
+											/>
+										) : null}
+									</div>
+									<div>
+										<div className="mb-1 px-2 font-medium text-[11px] text-muted-foreground uppercase tracking-wide">
+											Other chats
+										</div>
+										<SidebarConversationList
+											conversations={GROUP_THREADS}
+											handlers={handlers}
+											pageSize={1}
+										/>
+									</div>
 								</div>
-								<span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary text-xs">
-									Switchboard
-								</span>
-							</div>
-							<AgentMessageTool
-								context={messageContext}
-								part={{
-									input: {
-										question: "Can you review the launch branch?",
-										to: "reviewer",
-									},
-									output: {
-										from: "builder",
-										question: "Can you review the launch branch?",
-										reply:
-											"It is ready. The branch keeps the main chat untouched.",
-										to: "reviewer",
-									},
-									type: "tool-mcp-agent-comms.agents.ask",
-								}}
-							/>
-						</section>
-					</div>
-					<output className="sr-only" data-testid="opened-thread" />
-				</main>
+							</section>
+							<section className="rounded-2xl border border-border/70 bg-background p-6 shadow-sm">
+								<div className="mb-5 flex items-center justify-between">
+									<div>
+										<p className="font-semibold text-sm">
+											Workspace transcript
+										</p>
+										<p className="mt-1 text-muted-foreground text-xs">
+											Agent messages stay visible between turns.
+										</p>
+									</div>
+									<span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary text-xs">
+										Switchboard
+									</span>
+								</div>
+								<AgentMessageTool
+									context={messageContext}
+									part={{
+										input: {
+											question: "Can you review the launch branch?",
+											to: "reviewer",
+										},
+										output: {
+											from: "builder",
+											question: "Can you review the launch branch?",
+											reply:
+												"It is ready. The branch keeps the main chat untouched.",
+											to: "reviewer",
+										},
+										type: "tool-mcp-agent-comms.agents.ask",
+									}}
+								/>
+							</section>
+						</div>
+						<output className="sr-only" data-testid="opened-thread" />
+					</main>
+				</TabsContext.Provider>
 			</QueryClientProvider>
 		</ThemeProvider>
 	);

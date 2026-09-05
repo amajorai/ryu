@@ -172,7 +172,7 @@ export function BookCard({
 								className="flex flex-col justify-between gap-[6.1%] p-[6.1%] [container-type:inline-size]"
 								style={{ minHeight: "34%" }}
 							>
-								<span className="line-clamp-3 text-balance font-semibold text-[11cqw] text-card-foreground leading-[1.25em] tracking-[-0.02em]">
+								<span className="line-clamp-3 text-balance font-medium text-[11cqw] text-card-foreground leading-[1.25em] tracking-[-0.02em]">
 									{title}
 								</span>
 								{footer ? (

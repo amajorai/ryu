@@ -217,7 +217,7 @@ function Sheet({
 			tabIndex={-1}
 		>
 			<div className="mb-2 flex items-center justify-between">
-				<p className="font-semibold text-lg" id={`${kind}-mobile-nav-title`}>
+				<p className="font-medium text-lg" id={`${kind}-mobile-nav-title`}>
 					{SHEET_TITLES[kind]}
 				</p>
 				<button

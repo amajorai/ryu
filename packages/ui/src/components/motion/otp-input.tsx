@@ -317,7 +317,7 @@ export function OTPInput({
 						return (
 							<div
 								className={cn(
-									"relative grid h-14 w-12 place-items-center overflow-hidden rounded-2xl border bg-input/50 font-semibold text-xl tabular-nums transition-all duration-200",
+									"relative grid h-14 w-12 place-items-center overflow-hidden rounded-2xl border bg-input/50 font-medium text-xl tabular-nums transition-all duration-200",
 									showSuccess && "border-success text-foreground",
 									isError && "border-destructive text-foreground",
 									!(showSuccess || isError) &&

@@ -104,7 +104,7 @@ function FileSummaryRow({
 			onClick={onSelect}
 			type="button"
 		>
-			<span className={`w-3 shrink-0 font-bold font-mono ${kindClass}`}>
+			<span className={`w-3 shrink-0 font-medium font-mono ${kindClass}`}>
 				{kindLabel}
 			</span>
 			<HugeiconsIcon

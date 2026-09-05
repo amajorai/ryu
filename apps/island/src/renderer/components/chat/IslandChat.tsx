@@ -196,7 +196,7 @@ export function IslandChat() {
 			{notes.length > 0 ? (
 				<div className="relative z-20 shrink-0 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-1.5">
 					<div className="flex items-start justify-between gap-2">
-						<span className="font-semibold text-[10px] text-amber-300/90 uppercase tracking-wide">
+						<span className="font-medium text-[10px] text-amber-300/90 uppercase tracking-wide">
 							{t("island.note", undefined, "Note")}
 						</span>
 						<button

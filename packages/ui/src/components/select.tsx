@@ -92,6 +92,7 @@ function SelectTrigger({
 					: "bg-input/50",
 				className
 			)}
+			data-cuelume-toggle=""
 			data-size={size}
 			data-slot="select-trigger"
 			{...props}

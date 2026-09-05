@@ -8,6 +8,9 @@
 	<body>
 		<div id="root"></div>
 		<script>
+			// Keep this layout proof in the shared OS shell so the route registry is
+			// exercised; the Bot product intentionally hides non-chat routes.
+			localStorage.setItem("ryu:product-mode", "os");
 			window.process = {
 				cwd: () => "/",
 				env: {},

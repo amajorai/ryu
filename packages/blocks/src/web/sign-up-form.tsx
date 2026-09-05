@@ -14,6 +14,7 @@ import PageHeader from "@ryu/ui/components/page-header";
 import { StaggerReveal } from "@ryu/ui/components/stagger-reveal";
 import type { ReactNode, SVGProps } from "react";
 import { useEffect, useState } from "react";
+import { PasswordStrengthMeter } from "./password-strength.tsx";
 
 /** Google brand mark, inlined so the block has no app-local SVG dependency. */
 function Google(props: SVGProps<SVGSVGElement>) {
@@ -193,8 +194,8 @@ export default function SignUpForm({
 								<Input
 									aria-describedby={
 										visiblePasswordError
-											? "password-error password-hint"
-											: "password-hint"
+											? "password-error password-strength-label password-strength-requirements"
+											: "password-strength-label password-strength-requirements"
 									}
 									aria-invalid={Boolean(visiblePasswordError)}
 									autoComplete="new-password"
@@ -224,14 +225,11 @@ export default function SignUpForm({
 									/>
 								</Button>
 							</div>
-							{/* The 8-character minimum is enforced on submit; stating it up
-							    front is cheaper than a round trip through an error. */}
-							<p
-								className="px-1 text-muted-foreground text-sm"
-								id="password-hint"
-							>
-								At least 8 characters.
-							</p>
+							<PasswordStrengthMeter
+								className="px-1"
+								idPrefix="password-strength"
+								value={password}
+							/>
 							{visiblePasswordError ? (
 								<FieldError
 									errors={[{ message: visiblePasswordError }]}

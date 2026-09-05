@@ -239,6 +239,7 @@ import { useVoiceEngines } from "@/src/hooks/useVoiceEngines.ts";
 import {
 	conversationGroupKey,
 	conversationParticipantIds,
+	conversationsForOtherChats,
 	directAgentThreads,
 	isForkedConversation,
 	isGroupConversation,
@@ -253,9 +254,11 @@ import type { BtwEntry } from "@/src/lib/api/btw.ts";
 import { CHANNEL_LABELS } from "@/src/lib/api/channels.ts";
 import type { ApiTarget } from "@/src/lib/api/client.ts";
 import { apiUrl, requestHeaders, toTarget } from "@/src/lib/api/client.ts";
-import type {
-	PluginSidebarButton,
-	PluginSidebarSection,
+import {
+	type AppInfo,
+	isCoreAppTier,
+	type PluginSidebarButton,
+	type PluginSidebarSection,
 } from "@/src/lib/api/plugins.ts";
 import { listSkills } from "@/src/lib/api/skills.ts";
 import type { Space, SpaceDocument } from "@/src/lib/api/spaces.ts";
@@ -360,6 +363,7 @@ import {
 	SidebarPreviewTitle,
 } from "./sidebar-item-preview.tsx";
 import {
+	AGENT_MODE_SECTIONS,
 	orderedSidebarModeSections,
 	resolveSidebarMode,
 } from "./sidebar-modes.ts";
@@ -544,12 +548,6 @@ export type DynamicChromeKey = `plugin:${string}`;
 
 export type ChromeKey = BuiltinChromeKey | DynamicChromeKey;
 
-/** First-party Ryu Apps own the app shelf. Their feature navigation belongs inside
- * the app or in contributed sidebar sections, never as a flat host-level button list. */
-function isRyuAppId(pluginId: string): boolean {
-	return pluginId.startsWith("@ryu/");
-}
-
 // Marketplace, Apps, and Extensions folded into the Customize (Store) shell as
 // sections — they no longer get their own sidebar buttons. The keys stay in
 // ChromeKey/CHROME_LABELS so any persisted user layout referencing them is
@@ -560,12 +558,11 @@ function isRyuAppId(pluginId: string): boolean {
 // Tasks/Timeline/Activity/Calendar left the same way, for a stronger reason: they
 // are no longer built-in pages at all. Each is a Ryu App (com.ryu.{quests,timeline,
 // activity,calendar}) whose route already mounts `PluginCompanionPage` (see
-// `contributions/builtins.ts`), and `AppsSection` lists every ENABLED companion
-// straight from `GET /api/plugins/contributions`. A hardcoded button here was a
-// second, dumber copy of that list — it rendered whether or not the App was
-// installed, so a fresh install (quests/timeline/activity are not pre-installed) showed
-// buttons for features the user never had. The App declares itself; the shell does
-// not enumerate Apps.
+// `contributions/builtins.ts`), and `AppsSection` lists enabled Core-tier Apps
+// from `GET /api/plugins` plus their contribution feed. A hardcoded button here
+// was a second, dumber copy of that list — it rendered whether or not the App was
+// installed, and an id prefix is not provenance because user plugins can claim it.
+// The server-derived tier is the only shelf classifier.
 const CHROME_ORDER: ChromeKey[] = [
 	"node-selector",
 	// "home" is represented by the owning app's Apps-shelf tile.
@@ -2231,7 +2228,7 @@ function TabsSection({
 
 /** The newest direct conversation each agent appears in, keyed by agent id.
  *
- *  Group conversations have their own group-chat row in Sessions. Keeping them
+ *  Group conversations have their own group-chat row in Other chats. Keeping them
  *  out here prevents one council/team thread from being duplicated under every
  *  participating bot while preserving the direct-chat preview on each bot row.
  */
@@ -4013,7 +4010,7 @@ function ChannelsSection({
 							!agents.some((agent) => agent.id === channel.agentId) ? (
 								<span
 									aria-label="This channel was reverted to the default agent"
-									className="font-semibold text-amber-600 text-xs dark:text-amber-400"
+									className="font-medium text-amber-600 text-xs dark:text-amber-400"
 									title="This channel was reverted to the default agent because its original agent was deleted"
 								>
 									!
@@ -4995,23 +4992,26 @@ function PluginsSection({
 	);
 }
 
-/** Apps shelf in the sidebar. First-party Apps get one visual tile each; their
- * internal views are not flattened into the host's top-button list. Plugins stay in
- * the Plugins section and never appear in this shelf. */
+/** Apps shelf in the sidebar. Core-tier Apps get one visual tile each; their
+ * internal views are not flattened into the host's top-button list. Community
+ * plugins stay in the Plugins section and retain their generic contributions. */
 function AppsSection({
+	apps,
 	collapsed,
 	dnd,
 	menu,
 	onToggleCollapsed,
 	pageSize,
 	sort,
-}: SectionProps) {
+}: SectionProps & { apps: AppInfo[] }) {
 	const { openTab } = useTabsContext();
 	const { companions, sidebar_buttons: sidebarButtons } =
 		usePluginContributions();
 	const report = useOptionalReport();
-	const { apps } = useApps();
 	const appItems = useMemo<PinnedAppItem[]>(() => {
+		const coreAppIds = new Set(
+			apps.filter((app) => isCoreAppTier(app.tier)).map((app) => app.id)
+		);
 		const companionByApp = new Map<string, (typeof companions)[number]>();
 		for (const companion of companions) {
 			if (
@@ -5025,7 +5025,7 @@ function AppsSection({
 
 		const entryByApp = new Map<string, { order: number; target: string }>();
 		for (const button of [...sidebarButtons]
-			.filter((candidate) => isRyuAppId(candidate.plugin))
+			.filter((candidate) => coreAppIds.has(candidate.plugin))
 			.sort(
 				(a, b) =>
 					(a.order ?? Number.MAX_SAFE_INTEGER) -
@@ -5040,7 +5040,7 @@ function AppsSection({
 		}
 
 		return apps
-			.filter((app) => isRyuAppId(app.id) && app.installed && app.enabled)
+			.filter((app) => isCoreAppTier(app.tier) && app.installed && app.enabled)
 			.sort(
 				(a, b) =>
 					(entryByApp.get(a.id)?.order ?? Number.MAX_SAFE_INTEGER) -
@@ -6720,6 +6720,7 @@ export function ChatsSection({
 	onNew,
 	onToggleCollapsed,
 	pageSize,
+	sectionLabel = "Chats",
 	sort,
 }: SectionProps & {
 	botMode: boolean;
@@ -6731,6 +6732,7 @@ export function ChatsSection({
 	/** Open the "import agent setup from a folder" dialog. */
 	onImportSetup?: () => void;
 	onNew: () => void;
+	sectionLabel?: string;
 }) {
 	const botChatSections = useBotChatSections();
 	const [sectionDialog, setSectionDialog] =
@@ -6904,7 +6906,7 @@ export function ChatsSection({
 				}
 				collapsed={collapsed}
 				dnd={dnd}
-				label="Chats"
+				label={sectionLabel}
 				menu={menu}
 				onToggleCollapsed={onToggleCollapsed}
 				pageSize={pageSize}
@@ -6913,7 +6915,7 @@ export function ChatsSection({
 				wrapHeader={(header) => (
 					<DeleteAllChatsMenu
 						conversationIds={loose.map((c) => c.id)}
-						groupLabel="Chats"
+						groupLabel={sectionLabel}
 						onDelete={handlers.onDeleteConversation}
 						scope="all"
 					>
@@ -8100,7 +8102,7 @@ function NavTabButton({
 
 /**
  * A plugin-registered header button, rendered generically from a `sidebar_buttons`
- * contribution. First-party Ryu Apps are filtered before this renderer and use the
+ * contribution. Core-tier Ryu Apps are filtered before this renderer and use the
  * app shelf instead. Opens the contribution's `target` route; its glyph resolves
  * through the string-`icon` primitive (Iconify/Hugeicons) rather than a compiled
  * IconSvgElement. Present only while the owning app is enabled (the aggregator
@@ -8361,8 +8363,9 @@ export function SidebarPanelContent({
 	// Changing mode drops the remembered tab. The reconciliation below only catches
 	// a selection the new mode does NOT offer, and "chats" is offered by both — so
 	// arriving in Bot mode from a Tabbed session parked on Chats would open on
-	// Sessions and quietly break the one thing that mode promises (land on the
-	// roster). Clearing lets each mode's own default win.
+	// Chats is offered by both modes, so arriving in Agents view from a full
+	// sidebar must still land on the roster. Clearing lets each mode's own default
+	// win.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reacting to the mode change itself, not to the setter.
 	useEffect(() => {
 		setActiveTabbedSection(null);
@@ -8396,6 +8399,13 @@ export function SidebarPanelContent({
 		sidebar_sections: contributedSections,
 		sidebar_buttons: contributedButtons,
 	} = usePluginContributions();
+	const coreAppIds = useMemo(
+		() =>
+			new Set(
+				pluginApps.filter((app) => isCoreAppTier(app.tier)).map((app) => app.id)
+			),
+		[pluginApps]
+	);
 	const sideChatsEnabled = hasPluginChatFeature(
 		chatFeatures,
 		SIDE_CHATS_PLUGIN_ID,
@@ -8464,19 +8474,19 @@ export function SidebarPanelContent({
 	// "show Inbox" toggle whose only outcome is a tab reading "App not enabled".
 	const inboxOwner = useCompanionAlias(APPROVALS_ALIAS);
 	// Plugin-registered header buttons (`sidebar_buttons`), appended to the persisted
-	// chrome order the same way dynamic sections are. First-party App buttons are
+	// chrome order the same way dynamic sections are. Core-tier App buttons are
 	// deliberately excluded; their single entry belongs in the Apps shelf.
 	const dynamicChromeKeys = useMemo<ChromeKey[]>(
 		() =>
 			[...contributedButtons]
-				.filter((button) => !isRyuAppId(button.plugin))
+				.filter((button) => !coreAppIds.has(button.plugin))
 				.sort(
 					(a, b) =>
 						(a.order ?? Number.MAX_SAFE_INTEGER) -
 						(b.order ?? Number.MAX_SAFE_INTEGER)
 				)
 				.map((b) => `plugin:${b.plugin}:${b.id}` as ChromeKey),
-		[contributedButtons]
+		[contributedButtons, coreAppIds]
 	);
 	const effectiveChromeOrder = useMemo<ChromeKey[]>(() => {
 		// Drop stale app-button keys from older releases as well as currently absent
@@ -8748,6 +8758,14 @@ export function SidebarPanelContent({
 			.filter((p) => removedSet.has(folderKey(p.path)))
 			.flatMap((p) => p.conversations),
 	];
+	const knownAgentIds = new Set(agents.map((agent) => agent.id));
+	// Direct conversations are already rendered under their bot in the focused
+	// Agents view. Keep group chats and rows whose agent is missing from the
+	// roster in the fallback list so removing the old tab never hides a thread.
+	const agentModeOtherChats =
+		activeMode.key === "agent"
+			? conversationsForOtherChats(rest, knownAgentIds)
+			: looseChats;
 
 	// Projects now live nested under the single Projects section, so the rendered
 	// order is just the persisted built-in order (loadSectionOrder already drops any
@@ -8765,9 +8783,11 @@ export function SidebarPanelContent({
 	);
 	const renderOrder: SectionKey[] = botProduct
 		? ["chats"]
-		: effectiveOrder.filter(
-				(key) => !isDynamicSectionKey(key) || liveDynamicKeys.has(key)
-			);
+		: activeMode.key === "agent"
+			? AGENT_MODE_SECTIONS
+			: effectiveOrder.filter(
+					(key) => !isDynamicSectionKey(key) || liveDynamicKeys.has(key)
+				);
 	const renderChromeOrder: ChromeKey[] = botProduct
 		? ["new-chat"]
 		: effectiveChromeOrder.filter((key) => !hiddenChrome.has(key));
@@ -9225,7 +9245,7 @@ export function SidebarPanelContent({
 			case "plugins":
 				return <PluginsSection key={key} {...sectionProps} />;
 			case "companions":
-				return <AppsSection key={key} {...sectionProps} />;
+				return <AppsSection apps={pluginApps} key={key} {...sectionProps} />;
 			case "engines":
 				return <EnginesSection key={key} {...sectionProps} />;
 			case "pinned":
@@ -9253,13 +9273,16 @@ export function SidebarPanelContent({
 						key={key}
 						{...sectionProps}
 						handlers={chatRowHandlers}
-						loose={looseChats}
+						loose={agentModeOtherChats}
 						managedProduct={botProduct}
 						onImport={botProduct ? undefined : () => setImportOpen(true)}
 						onImportSetup={
 							botProduct ? undefined : () => setSetupImportOpen(true)
 						}
 						onNew={handleNewConversation}
+						sectionLabel={
+							activeMode.key === "agent" ? "Other chats" : undefined
+						}
 					/>
 				);
 			// canvas + whiteboard are app-registered (com.ryu.{canvas,whiteboard}
@@ -9303,16 +9326,15 @@ export function SidebarPanelContent({
 	// A mode that NAMES sections narrows the strip to exactly those. Most modes
 	// follow the user's own section order (so someone who dragged Chats above
 	// Agents keeps that reading order); built-in Bot mode intentionally keeps its
-	// declared Agents → Sessions order. `hiddenSections` is deliberately NOT
+	// declared Agents → Chats order. `hiddenSections` is deliberately NOT
 	// applied to them: picking a mode is a more specific instruction than a
-	// section hidden back when the sidebar listed fifteen of them, and a two-tab
-	// toggle missing one of its halves is just the previous mode with fewer rows.
+	// section hidden back when the sidebar listed fifteen of them.
 	const tabbedKeys = activeMode.sections
 		? orderedSidebarModeSections(activeMode, renderOrder)
 		: visibleTabbedKeys;
-	// Keep the active tab pointed at a real, visible section. A mode's declared
-	// `defaultSection` wins over "the first tab" — Bot mode declares Agents as
-	// both its first tab and its default, so the roster is the primary surface.
+	// Keep the remembered section pointed at a real, visible section. A mode's
+	// declared `defaultSection` wins over "the first section" — Bot mode declares
+	// Agents as both its first section and its default, so the roster is primary.
 	const defaultTabbedKey =
 		activeMode.defaultSection && tabbedKeys.includes(activeMode.defaultSection)
 			? activeMode.defaultSection
@@ -9322,22 +9344,13 @@ export function SidebarPanelContent({
 			? activeTabbedSection
 			: defaultTabbedKey;
 
-	// In Bot mode the chat list is the "Sessions" half of the toggle — the
-	// vocabulary Grok/Hermes bot mode uses, and the word that reads correctly
-	// opposite "Agents". A label the user renamed in Customize wins over both.
-	const stripLabels =
-		activeMode.key === "agent"
-			? {
-					...sectionLabels,
-					chats: t("sidebar.section.sessions", {}, "Sessions"),
-				}
-			: sectionLabels;
-
 	// The peek jump-list only makes sense in a stacked mode, where every visible
 	// section is rendered (and thus has a scroll anchor). Under a tab strip only one
-	// section exists at a time, so there's nothing to jump between.
+	// section exists at a time, so there's nothing to jump between. Agents view is
+	// deliberately a single focused roster surface too; its direct threads are
+	// already nested in the bot rows rather than behind another selector.
 	const sectionNavItems =
-		activeMode.layout === "stacked"
+		activeMode.layout === "stacked" && activeMode.key !== "agent"
 			? visibleTabbedKeys.map((key) => ({
 					key,
 					label: sectionLabels[key] ?? key,
@@ -9360,9 +9373,9 @@ export function SidebarPanelContent({
 							className="flex items-center gap-2 px-2 pt-2 pb-1"
 							data-tauri-drag-region
 						>
-									{/* Back/forward/sidebar-toggle/search live pinned at the window's
-									    top-left (in Layout). The node selector is right-aligned here so
-									    it never collides with that cluster. */}
+							{/* Back/forward/sidebar-toggle/search live pinned at the window's
+							    top-left (in Layout). The node selector is right-aligned here so
+							    it never collides with that cluster. */}
 							<div
 								className="ml-auto flex items-center gap-0.5"
 								data-tauri-drag-region={false}
@@ -9400,7 +9413,7 @@ export function SidebarPanelContent({
 					<TabbedSectionNav
 						activeKey={activeTabbedKey}
 						keys={tabbedKeys}
-						labels={stripLabels}
+						labels={sectionLabels}
 						onSelect={setActiveTabbedSection}
 					/>
 				)}

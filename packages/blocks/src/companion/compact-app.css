@@ -56,7 +56,7 @@ body {
 	margin: 0;
 	font-family: var(--font-heading);
 	font-size: 15px;
-	font-weight: 600;
+	font-weight: 500;
 }
 
 main {
@@ -72,7 +72,7 @@ h2 {
 h3 {
 	margin: 18px 0 8px;
 	font-size: 13px;
-	font-weight: 600;
+	font-weight: 500;
 	color: var(--compact-muted);
 }
 p {

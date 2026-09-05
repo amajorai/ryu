@@ -27,8 +27,8 @@ test("footer carries the universal integration positioning", () => {
 test("footer keeps GitHub and its star count in the build row", () => {
 	const html = renderToStaticMarkup(<Footer githubStargazersCount={1234} />);
 	const learnColumn = html.slice(
-		html.indexOf('<h4 class="mb-4 font-semibold">Learn</h4>'),
-		html.indexOf('<h4 class="mb-4 font-semibold">Company</h4>')
+		html.indexOf('<h4 class="mb-4 font-medium">Learn</h4>'),
+		html.indexOf('<h4 class="mb-4 font-medium">Company</h4>')
 	);
 
 	expect(learnColumn).not.toContain("Open Source");

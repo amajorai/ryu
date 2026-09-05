@@ -68,6 +68,7 @@ export const EN_MESSAGES = {
 	"chat.untitled": "Untitled",
 	"chat.unpin": "Unpin",
 	"language.available_packs": "Available language packs",
+	"language.auto_detect": "Auto detect",
 	"language.base_locale": "Base language",
 	"language.built_in": "Built in",
 	"language.choose": "Choose how Ryu speaks to you.",

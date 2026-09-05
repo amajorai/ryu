@@ -11,7 +11,10 @@ test("proves grouped bubbles, compact actions, and pass access copy", async ({
 	await page.goto("/message-pass-proof.html");
 	await expect(page.getByTestId("chat-proof")).toBeVisible();
 	await expect(page.getByTestId("pricing-proof")).toContainText("A Major Pass");
-	await expect(page.getByTestId("pricing-proof")).toContainText("$20.00");
+	await expect(
+		page.getByTestId("pricing-proof").locator('[aria-label="$20"]')
+	).toBeVisible();
+	await expect(page.getByTestId("pricing-proof")).toContainText("/mo");
 	await expect(page.getByTestId("pricing-proof")).toContainText(
 		"Get A Major Pass"
 	);

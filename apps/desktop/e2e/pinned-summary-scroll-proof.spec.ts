@@ -20,7 +20,9 @@ test("keeps the transcript scrollbar at the workspace edge beside a short card",
 
 	const viewport = page.locator('[data-slot="message-scroller-viewport"]');
 	await expect(viewport).toBeVisible();
-	await expect(page.getByTestId("pinned-summary")).toBeVisible();
+	await expect(
+		page.getByRole("complementary", { name: "Pinned summary" })
+	).toBeVisible();
 	await expect(page.getByText("Pinned summary scrollbar proof")).toBeVisible();
 
 	await expect
@@ -69,7 +71,9 @@ test("keeps the sidebar width transition when toggled", async ({ page }) => {
 	const spacer = page.getByTestId("sidebar-spacer");
 	const initialWidth = (await spacer.boundingBox())?.width ?? 0;
 	await page.getByTestId("toggle-summary").click();
-	await expect(page.getByTestId("pinned-summary")).not.toBeVisible();
+	await expect(
+		page.getByRole("complementary", { name: "Pinned summary" })
+	).not.toBeVisible();
 
 	const transition = await spacer.evaluate(
 		(element) => getComputedStyle(element).transitionProperty
@@ -79,7 +83,9 @@ test("keeps the sidebar width transition when toggled", async ({ page }) => {
 		.poll(async () => (await spacer.boundingBox())?.width ?? -1)
 		.toBe(0);
 	await page.getByTestId("toggle-summary").click();
-	await expect(page.getByTestId("pinned-summary")).toBeVisible();
+	await expect(
+		page.getByRole("complementary", { name: "Pinned summary" })
+	).toBeVisible();
 	await expect
 		.poll(async () => (await spacer.boundingBox())?.width ?? -1)
 		.toBe(PINNED_COLUMN_WIDTH);

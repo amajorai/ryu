@@ -214,6 +214,7 @@ export default defineConfig({
 				),
 				tabSearchProof: path.resolve(harnessDir, "tab-search-proof.html"),
 				tabDropdownProof: path.resolve(harnessDir, "tab-dropdown-proof.html"),
+				tabMemoryProof: path.resolve(harnessDir, "tab-memory-proof.html"),
 				floatingTabsProof: path.resolve(harnessDir, "floating-tabs-proof.html"),
 				reorderIndicatorProof: path.resolve(
 					harnessDir,

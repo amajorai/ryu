@@ -1097,7 +1097,8 @@ function AppList({
 	// Resolved HERE, not inside `card`: `card` is a plain render function, not a
 	// component, so a hook inside it would run a variable number of times per
 	// render. The host's floors are one value for the whole grid anyway.
-	const { hostVersions } = useCatalogHost();
+	const host = useCatalogHost();
+	const { hostVersions } = host;
 	const incompatibilityOf = (it: AppCatalogItem) =>
 		describeIncompatibility(
 			evaluateCompatibility(
@@ -1168,6 +1169,18 @@ function AppList({
 			onClick={() => onSelect(it.entry.id)}
 			orgVerified={it.entry.org_verified}
 			orgVerifiedTier={it.entry.org_verified_tier}
+			publisher={
+				host.renderPublisher &&
+				it.entry.publisher_org_id &&
+				it.entry.publisher_org_name
+					? host.renderPublisher({
+							id: it.entry.publisher_org_id,
+							logo: it.entry.publisher_org_logo ?? null,
+							name: it.entry.publisher_org_name,
+							slug: it.entry.publisher_org_slug ?? null,
+						})
+					: undefined
+			}
 			publisherTrust={it.entry.publisher_trust}
 			publisherVerification={it.entry.publisher_verification}
 			seedId={it.entry.id}
@@ -1495,7 +1508,7 @@ function CommunityShelf({
 							{/* Each marketplace's SMALLER sub-heading — the category
 							    treatment at one size down, so it reads as nested under
 							    "Community Marketplaces". */}
-							<h3 className="px-1 font-semibold text-sm tracking-tight">
+							<h3 className="px-1 font-medium text-sm tracking-tight">
 								{marketplace.name}
 							</h3>
 							<StoreCardGrid>{marketplace.items.map(card)}</StoreCardGrid>
@@ -1975,7 +1988,7 @@ function AppPrimaryAction({
 					value={channel}
 				/>
 				<InstallButton
-					busyLabel="Adding…"
+					busyLabel="Installing…"
 					idleVariant="default"
 					installing={installing}
 					onClick={runInstall}
@@ -1989,7 +2002,7 @@ function AppPrimaryAction({
 					}}
 				>
 					<HugeiconsIcon className="size-4" icon={Download01Icon} />
-					Add
+					Get
 				</InstallButton>
 			</>
 		);

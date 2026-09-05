@@ -149,7 +149,7 @@ export function ReferralPass({
 
 				<div className="flex min-w-0 flex-1 flex-col justify-end gap-1.5">
 					<AutoFitText
-						className="font-semibold leading-[1.02] tracking-tight"
+						className="font-medium leading-[1.02] tracking-tight"
 						maxPx={REFERRAL_CODE_MAX_PX}
 						minPx={REFERRAL_CODE_MIN_PX}
 						stepPx={REFERRAL_FIT_STEP_PX}

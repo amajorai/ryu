@@ -5,7 +5,10 @@ import "../../src/index.css";
 
 Object.defineProperty(window, "__TAURI_INTERNALS__", {
 	configurable: true,
-	value: {},
+	value: {
+		invoke: async () => ({ source: "file", token: "owner-proof-token" }),
+		transformCallback: () => 0,
+	},
 });
 
 function ProofArtifact() {

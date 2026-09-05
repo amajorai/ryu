@@ -97,7 +97,7 @@ test("Speech Processing exposes the S1-mini model and its style control", async 
 	await openMenu(page);
 	await page.getByRole("menuitem", { name: /Speech Processing/ }).click();
 	await expect(
-		page.getByRole("menuitem", { name: /S1-mini by Superwhisper/ })
+		page.getByRole("menuitem", { name: /^S1-mini by Superwhisper/ })
 	).toBeVisible();
 	await page.getByRole("menuitem", { name: /^Style semi-formal/ }).click();
 	await expect(page.getByRole("menuitem", { name: /^formal/ })).toBeVisible();

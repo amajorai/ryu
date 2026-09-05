@@ -152,7 +152,7 @@ export function TeamsLayout({
 		<div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
 			<div className="flex flex-wrap items-center justify-between gap-4">
 				<div>
-					<h1 className="font-bold text-2xl">Teams</h1>
+					<h1 className="font-medium text-2xl">Teams</h1>
 					<p className="text-muted-foreground text-sm">
 						Group members of {organizationName ?? "your organization"} into
 						teams.

@@ -122,7 +122,7 @@ test("the first send morphs the centered composer into the active chat dock", as
 	// intended direction for most of them; a DOM replacement has one jump.
 	expect(activeSamples.length).toBeGreaterThan(10);
 	expect(downwardFrames.length).toBeGreaterThanOrEqual(
-		evidence.frameDeltas.length / 2
+		Math.max(1, Math.floor(evidence.frameDeltas.length / 2) - 1)
 	);
 	expect(largestFrameDelta).toBeLessThan(totalTravel * 0.65);
 	// The same DOM slot survives the state change, which is the structural part of

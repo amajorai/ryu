@@ -131,7 +131,7 @@ export function SellTab() {
 	return (
 		<div className="mx-auto max-w-2xl px-6 py-8">
 			<div className="mb-6 flex items-center justify-between">
-				<h2 className="font-semibold text-lg">Marketplace & payouts</h2>
+				<h2 className="font-medium text-lg">Marketplace & payouts</h2>
 				<Button onClick={() => refresh()} size="sm" variant="ghost">
 					<HugeiconsIcon className="mr-2 size-3.5" icon={Refresh01Icon} />
 					Refresh
@@ -235,7 +235,7 @@ export function SellTab() {
 					) : membership.report ? (
 						<div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
 							<div>
-								<p className="font-semibold text-base">
+								<p className="font-medium text-base">
 									{membership.report.eligibleListingCount}
 								</p>
 								<p className="text-muted-foreground text-xs">
@@ -243,7 +243,7 @@ export function SellTab() {
 								</p>
 							</div>
 							<div>
-								<p className="font-semibold text-base">
+								<p className="font-medium text-base">
 									{formatMinorCurrency(
 										membershipTotals?.pendingMinor ?? 0,
 										membershipTotals?.currency ?? "usd"
@@ -252,7 +252,7 @@ export function SellTab() {
 								<p className="text-muted-foreground text-xs">Pending</p>
 							</div>
 							<div>
-								<p className="font-semibold text-base">
+								<p className="font-medium text-base">
 									{formatMinorCurrency(
 										membershipTotals?.paidMinor ?? 0,
 										membershipTotals?.currency ?? "usd"
@@ -261,7 +261,7 @@ export function SellTab() {
 								<p className="text-muted-foreground text-xs">Paid out</p>
 							</div>
 							<div>
-								<p className="font-semibold text-base">
+								<p className="font-medium text-base">
 									{membershipTotals?.usageCount ?? 0}
 								</p>
 								<p className="text-muted-foreground text-xs">Usage signals</p>

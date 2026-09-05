@@ -182,10 +182,10 @@ export function DesktopChatPreview({
 			emptyStateHeader={
 				isEmptyHome ? (
 					<div className="mb-5 flex flex-col items-center gap-3 text-center">
-						<span className="flex size-12 items-center justify-center rounded-2xl bg-primary font-bold text-primary-foreground text-xl">
+						<span className="flex size-12 items-center justify-center rounded-2xl bg-primary font-medium text-primary-foreground text-xl">
 							R
 						</span>
-						<h2 className="font-semibold text-xl">How can I help today?</h2>
+						<h2 className="font-medium text-xl">How can I help today?</h2>
 					</div>
 				) : undefined
 			}

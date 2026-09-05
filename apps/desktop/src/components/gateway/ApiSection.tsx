@@ -520,7 +520,7 @@ function Tile({ label, value }: { label: string; value: string }) {
 	return (
 		<div className="flex flex-col gap-0.5 rounded-md border bg-background px-3 py-2">
 			<span className="text-muted-foreground text-xs">{label}</span>
-			<span className="font-semibold text-lg tabular-nums">{value}</span>
+			<span className="font-medium text-lg tabular-nums">{value}</span>
 		</div>
 	);
 }

@@ -45,6 +45,7 @@ pub const NODES_VIEW: &str = "nodes.view";
 pub const NODES_MANAGE: &str = "nodes.manage";
 pub const MEMBERS_MANAGE: &str = "members.manage";
 pub const ROLES_MANAGE: &str = "roles.manage";
+pub const FEATURES_MANAGE: &str = "features.manage";
 pub const BILLING_MANAGE: &str = "billing.manage";
 pub const AUDIT_VIEW: &str = "audit.view";
 pub const APP_INSTALL: &str = "app.install";
@@ -87,6 +88,7 @@ pub const PERMISSIONS: &[&str] = &[
     NODES_MANAGE,
     MEMBERS_MANAGE,
     ROLES_MANAGE,
+    FEATURES_MANAGE,
     BILLING_MANAGE,
     AUDIT_VIEW,
     APP_INSTALL,

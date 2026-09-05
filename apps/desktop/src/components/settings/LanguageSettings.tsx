@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useActiveNode } from "@/src/hooks/useActiveNode.ts";
+import { useLanguageMode } from "@/src/hooks/useLanguageMode.ts";
 import { toTarget } from "@/src/lib/api/client.ts";
 import {
 	downloadLanguagePack,
@@ -24,12 +25,19 @@ import {
 } from "./shared/settings-items.tsx";
 
 const DEFAULT_PACK_VALUE = "__english__";
+const AUTO_DETECT_VALUE = "__auto_detect__";
 
 /** App-level locale and flavor-pack picker shared by native desktop and webapp. */
-export function LanguageSettings() {
+export function LanguageSettings({
+	settingsId = "appearance.language",
+}: {
+	settingsId?: string;
+} = {}) {
 	const navigate = useNavigate();
 	const node = useActiveNode();
-	const { availablePacks, direction, selectedPack, selectPack, t } = useI18n();
+	const { availablePacks, direction, selectedPack, selectPack, setLocale, t } =
+		useI18n();
+	const [languageMode, setLanguageMode] = useLanguageMode();
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [pendingPackId, setPendingPackId] = useState<string | null>(null);
 	const [importError, setImportError] = useState<string | null>(null);
@@ -44,6 +52,12 @@ export function LanguageSettings() {
 
 	const select = useCallback(
 		async (value: string | null) => {
+			if (value === AUTO_DETECT_VALUE) {
+				setLanguageMode("auto");
+				selectPack(null);
+				setLocale(navigator.language);
+				return;
+			}
 			const id = value === DEFAULT_PACK_VALUE ? null : value;
 			const pack = id ? packs.find((candidate) => candidate.id === id) : null;
 			if (pack && pack.enabled === false) {
@@ -59,9 +73,10 @@ export function LanguageSettings() {
 				}
 				setBusyId(null);
 			}
+			setLanguageMode("fixed");
 			selectPack(id);
 		},
-		[node, packs, selectPack]
+		[node, packs, selectPack, setLanguageMode, setLocale]
 	);
 
 	useEffect(() => {
@@ -73,9 +88,10 @@ export function LanguageSettings() {
 		) {
 			return;
 		}
+		setLanguageMode("fixed");
 		selectPack(pendingPackId);
 		setPendingPackId(null);
-	}, [availablePacks, pendingPackId, selectPack]);
+	}, [availablePacks, pendingPackId, selectPack, setLanguageMode]);
 
 	const importFile = useCallback(
 		async (file: File) => {
@@ -147,14 +163,23 @@ export function LanguageSettings() {
 								onValueChange={(value) => {
 									void select(value);
 								}}
-								value={selectedPack?.id ?? DEFAULT_PACK_VALUE}
+								value={
+									languageMode === "auto"
+										? AUTO_DETECT_VALUE
+										: (selectedPack?.id ?? DEFAULT_PACK_VALUE)
+								}
 							>
 								<SelectTrigger className="h-8 w-64" disabled={busyId !== null}>
 									<SelectValue>
-										{selectedPack?.name ?? t("common.english")}
+										{languageMode === "auto"
+											? t("language.auto_detect")
+											: (selectedPack?.name ?? t("common.english"))}
 									</SelectValue>
 								</SelectTrigger>
 								<SelectContent>
+									<SelectItem value={AUTO_DETECT_VALUE}>
+										{t("language.auto_detect")}
+									</SelectItem>
 									<SelectItem value={DEFAULT_PACK_VALUE}>
 										{t("common.english")}
 									</SelectItem>
@@ -167,7 +192,7 @@ export function LanguageSettings() {
 							</Select>
 						}
 						description={t("language.choose")}
-						settingsId="appearance.language"
+						settingsId={settingsId}
 						title={t("language.current")}
 					/>
 				</SettingsGroup>

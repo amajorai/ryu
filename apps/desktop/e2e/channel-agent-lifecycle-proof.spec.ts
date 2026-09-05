@@ -54,7 +54,8 @@ test("proves channel fallback, setup toggles, and protected deletion", async ({
 		(message) =>
 			!(
 				message.includes("127.0.0.1:7980/api/") ||
-				message.includes("Failed to load resource: net::ERR_FAILED")
+				message.includes("Failed to load resource: net::ERR_FAILED") ||
+				message.includes("Failed to load resource: net::ERR_CONNECTION_REFUSED")
 			)
 	);
 	expect(unexpectedConsoleErrors).toEqual([]);

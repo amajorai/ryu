@@ -229,7 +229,7 @@ const BlockCommentContent = ({ children, element }: PlateElementProps) => {
 							{suggestionsCount > 0 && discussionsCount > 0 && (
 								<MessagesSquareIcon className="size-4 shrink-0" />
 							)}
-							<span className="font-semibold text-xs">{totalCount}</span>
+							<span className="font-medium text-xs">{totalCount}</span>
 						</PopoverTrigger>
 					</div>
 				)}

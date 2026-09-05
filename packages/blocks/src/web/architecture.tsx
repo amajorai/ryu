@@ -187,7 +187,7 @@ function ArchitectureDiagram() {
 				fill="var(--muted-foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={11}
-				fontWeight={700}
+				fontWeight={500}
 				letterSpacing={1.4}
 				textAnchor="start"
 				x={34}
@@ -199,7 +199,7 @@ function ArchitectureDiagram() {
 				fill="var(--muted-foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={11}
-				fontWeight={700}
+				fontWeight={500}
 				letterSpacing={1.4}
 				textAnchor="end"
 				x={1146}
@@ -222,7 +222,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="start"
 				x={62}
 				y={124.5}
@@ -244,7 +244,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="start"
 				x={62}
 				y={179.5}
@@ -266,7 +266,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="start"
 				x={62}
 				y={234.5}
@@ -287,7 +287,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="start"
 				x={62}
 				y={289.5}
@@ -309,7 +309,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="start"
 				x={62}
 				y={344.5}
@@ -331,7 +331,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="start"
 				x={62}
 				y={399.5}
@@ -353,7 +353,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="end"
 				x={1118}
 				y={124.5}
@@ -375,7 +375,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="end"
 				x={1118}
 				y={179.5}
@@ -397,7 +397,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="end"
 				x={1118}
 				y={234.5}
@@ -419,7 +419,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="end"
 				x={1118}
 				y={289.5}
@@ -441,7 +441,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="end"
 				x={1118}
 				y={344.5}
@@ -463,7 +463,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={14}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="end"
 				x={1118}
 				y={399.5}
@@ -495,7 +495,7 @@ function ArchitectureDiagram() {
 				fill="var(--background)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={10.5}
-				fontWeight={700}
+				fontWeight={500}
 				letterSpacing={1.4}
 				textAnchor="start"
 				x={328}
@@ -507,7 +507,7 @@ function ArchitectureDiagram() {
 				fill="var(--background)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={21}
-				fontWeight={700}
+				fontWeight={500}
 				textAnchor="start"
 				x={328}
 				y={158}
@@ -528,7 +528,7 @@ function ArchitectureDiagram() {
 				fill="var(--background)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={11}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={495}
 				y={142}
@@ -558,7 +558,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={347.5}
 				y={268.5}
@@ -577,7 +577,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={474.5}
 				y={268.5}
@@ -596,7 +596,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={347.5}
 				y={318.5}
@@ -615,7 +615,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={474.5}
 				y={318.5}
@@ -634,7 +634,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={347.5}
 				y={368.5}
@@ -653,7 +653,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={474.5}
 				y={368.5}
@@ -688,7 +688,7 @@ function ArchitectureDiagram() {
 				fill="var(--muted-foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={10.5}
-				fontWeight={700}
+				fontWeight={500}
 				letterSpacing={1.4}
 				textAnchor="start"
 				x={686}
@@ -700,7 +700,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={21}
-				fontWeight={700}
+				fontWeight={500}
 				textAnchor="start"
 				x={686}
 				y={158}
@@ -730,7 +730,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={705.5}
 				y={268.5}
@@ -749,7 +749,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={832.5}
 				y={268.5}
@@ -768,7 +768,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={705.5}
 				y={318.5}
@@ -787,7 +787,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={832.5}
 				y={318.5}
@@ -806,7 +806,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={705.5}
 				y={368.5}
@@ -825,7 +825,7 @@ function ArchitectureDiagram() {
 				fill="var(--foreground)"
 				fontFamily="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 				fontSize={13.5}
-				fontWeight={600}
+				fontWeight={500}
 				textAnchor="middle"
 				x={832.5}
 				y={368.5}
@@ -887,7 +887,7 @@ export function ArchitectureStacked() {
 			<div className="rounded-2xl bg-foreground p-5 text-background">
 				<div className="flex items-start justify-between gap-2">
 					<div>
-						<p className="font-semibold text-[10px] text-background/60 uppercase tracking-widest">
+						<p className="font-medium text-[10px] text-background/60 uppercase tracking-widest">
 							Control
 						</p>
 						<h3 className="font-medium text-lg tracking-tight">Ryu Gateway</h3>
@@ -914,7 +914,7 @@ export function ArchitectureStacked() {
 			<FlowConnector />
 
 			<div className="rounded-2xl border bg-card p-5">
-				<p className="font-semibold text-[10px] text-muted-foreground uppercase tracking-widest">
+				<p className="font-medium text-[10px] text-muted-foreground uppercase tracking-widest">
 					Orchestration
 				</p>
 				<h3 className="font-medium text-foreground text-lg tracking-tight">

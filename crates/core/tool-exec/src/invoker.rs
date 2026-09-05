@@ -117,7 +117,14 @@ impl SandboxToolInvoker {
         allowlist: Option<Vec<String>>,
         user_id: Option<String>,
     ) -> Self {
-        Self::registry_with_identity(caller, agent_id, allowlist, user_id, Vec::new())
+        Self::registry_with_identity_and_conversation(
+            caller,
+            agent_id,
+            allowlist,
+            user_id,
+            Vec::new(),
+            None,
+        )
     }
 
     /// Construct the production registry invoker carrying the agent's bound
@@ -132,12 +139,35 @@ impl SandboxToolInvoker {
         user_id: Option<String>,
         identity_profile_ids: Vec<String>,
     ) -> Self {
+        Self::registry_with_identity_and_conversation(
+            caller,
+            agent_id,
+            allowlist,
+            user_id,
+            identity_profile_ids,
+            None,
+        )
+    }
+
+    /// Construct the production registry invoker with a server-derived host
+    /// conversation. This context is kept separate from `user_id`: the latter is
+    /// a client-supplied Composio entity/audit selector, while this value is the
+    /// authorization principal resolved by Core for conversation-scoped tools.
+    pub fn registry_with_identity_and_conversation(
+        caller: Arc<dyn ToolCaller>,
+        agent_id: String,
+        allowlist: Option<Vec<String>>,
+        user_id: Option<String>,
+        identity_profile_ids: Vec<String>,
+        host_conversation_id: Option<String>,
+    ) -> Self {
         SandboxToolInvoker::Registry(RegistryToolInvoker {
             caller,
             agent_id,
             allowlist,
             user_id,
             identity_profile_ids,
+            host_conversation_id,
         })
     }
 
@@ -175,6 +205,8 @@ pub struct RegistryToolInvoker {
     user_id: Option<String>,
     /// Agent's bound Identity Vault profiles (epic #517). Empty = no vault consult.
     identity_profile_ids: Vec<String>,
+    /// Core-validated conversation principal for conversation-scoped tools.
+    host_conversation_id: Option<String>,
 }
 
 impl RegistryToolInvoker {
@@ -190,10 +222,7 @@ impl RegistryToolInvoker {
                 self.user_id.as_deref(),
                 &self.identity_profile_ids,
                 None,
-                // No host conversation reaches the PTC sandbox today, so on an
-                // ORG-BOUND node the conversation-reading tools fail closed here
-                // (`ToolPrincipal::Unresolved`). Unbound nodes are unaffected.
-                None,
+                self.host_conversation_id.as_deref(),
             )
             .await
         {
@@ -237,6 +266,30 @@ impl MockInvoker {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingCaller {
+        host_conversation_id: Mutex<Option<String>>,
+    }
+
+    #[async_trait]
+    impl ToolCaller for RecordingCaller {
+        async fn call_tool_with_identity(
+            &self,
+            _agent_id: Option<&str>,
+            _tool_id: &str,
+            _arguments: Value,
+            _allowlist: Option<&[String]>,
+            _user_id: Option<&str>,
+            _profile_ids: &[String],
+            _session_id: Option<String>,
+            host_conversation_id: Option<&str>,
+        ) -> Result<Value, String> {
+            *self.host_conversation_id.lock().unwrap() = host_conversation_id.map(str::to_owned);
+            Ok(json!({ "ok": true }))
+        }
+    }
 
     #[test]
     fn path_first_segment_is_server() {
@@ -321,5 +374,31 @@ mod tests {
             }
             InvokeOutcome::Suspend(_) => panic!("expected result"),
         }
+    }
+
+    #[tokio::test]
+    async fn registry_invoker_forwards_validated_host_conversation() {
+        let caller = Arc::new(RecordingCaller::default());
+        let invoker = SandboxToolInvoker::registry_with_identity_and_conversation(
+            caller.clone(),
+            "agent-1".into(),
+            None,
+            None,
+            Vec::new(),
+            Some("conversation-1".into()),
+        );
+
+        let out = invoker
+            .invoke(ToolInvocation {
+                path: "threads.list".into(),
+                args: json!({}),
+            })
+            .await;
+
+        assert!(matches!(out, InvokeOutcome::Result(result) if !result.is_error));
+        assert_eq!(
+            caller.host_conversation_id.lock().unwrap().as_deref(),
+            Some("conversation-1")
+        );
     }
 }

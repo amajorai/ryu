@@ -467,7 +467,7 @@ export function SpaceImportsPanel({
 	return (
 		<div className="flex flex-col gap-8 p-4">
 			<header>
-				<h2 className="font-semibold text-lg">Import</h2>
+				<h2 className="font-medium text-lg">Import</h2>
 				<p className="mt-1 text-muted-foreground text-sm">
 					Turn files and connected-app data into editable pages and databases in
 					this space.

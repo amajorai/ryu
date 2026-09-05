@@ -210,7 +210,7 @@ export function Comment(props: {
 					<AvatarImage alt={userInfo?.name} src={userInfo?.avatarUrl} />
 					<AvatarFallback>{userInfo?.name?.[0]}</AvatarFallback>
 				</Avatar>
-				<h4 className="mx-2 font-semibold text-sm leading-none">
+				<h4 className="mx-2 font-medium text-sm leading-none">
 					{/* Replace to your own backend or refer to potion */}
 					{userInfo?.name}
 				</h4>

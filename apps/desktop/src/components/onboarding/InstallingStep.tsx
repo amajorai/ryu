@@ -169,7 +169,7 @@ export function InstallingStep({
 					<SuccessCheck className="size-8 shrink-0 text-success" />
 				) : null}
 				<div>
-					<h2 className="mb-1 font-semibold text-xl">Setting up Ryu</h2>
+					<h2 className="mb-1 font-medium text-xl">Setting up Ryu</h2>
 					<p className="text-muted-foreground text-sm">
 						{doneCount < total ? (
 							<>

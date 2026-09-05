@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta content="width=device-width, initial-scale=1" name="viewport">
+		<title>Thread memory proof</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script>
+			localStorage.setItem("ryu:product-mode", "os");
+			localStorage.setItem("ryu_startup_behavior", "restore");
+			localStorage.setItem("ryu_tab_unload_minutes", "10");
+			localStorage.setItem(
+				"ryu_session_tabs",
+				JSON.stringify({
+					activeIndex: 0,
+					tabs: [
+						{ path: "/thread-memory/active", title: "Current thread" },
+						{ path: "/thread-memory/old", title: "Long research thread" },
+						{ path: "/thread-memory/finished", title: "Finished thread" },
+					],
+				})
+			);
+			window.__ryuMemoryNow = 1000000;
+			Date.now = () => window.__ryuMemoryNow;
+			const nativeSetInterval = window.setInterval.bind(window);
+			window.setInterval = (handler, timeout, ...args) =>
+				nativeSetInterval(handler, timeout === 30000 ? 40 : timeout, ...args);
+		</script>
+		<script src="./tab-memory-proof.tsx" type="module"></script>
+	</body>
+</html>

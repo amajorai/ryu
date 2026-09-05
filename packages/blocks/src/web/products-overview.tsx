@@ -35,7 +35,7 @@ function ProductCard({
 				<ArrowUpRight className="size-4 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
 			</div>
 			<div>
-				<h3 className="font-semibold text-base text-foreground">
+				<h3 className="font-medium text-base text-foreground">
 					{product.name}
 				</h3>
 				<p className="mt-1 text-muted-foreground text-sm leading-relaxed">

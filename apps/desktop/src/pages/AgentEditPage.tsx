@@ -1405,7 +1405,7 @@ export default function AgentEditPage({
 	const titleBarTitle = useMemo(
 		() => (
 			<span className="flex min-w-0 items-center gap-2">
-				<span className="truncate font-semibold">
+				<span className="truncate font-medium">
 					{isNew ? "New agent" : name.trim() || "Edit agent"}
 				</span>
 				<Badge

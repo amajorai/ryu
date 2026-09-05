@@ -2771,11 +2771,7 @@ mod tests {
             .iter()
             .copied()
             .chain(std::iter::once(crate::plugins::builtins::ENGINES_PLUGIN_ID))
-            .chain(
-                crate::plugins::builtins::CORE_PREINSTALLED
-                    .iter()
-                    .copied(),
-            )
+            .chain(crate::plugins::builtins::CORE_PREINSTALLED.iter().copied())
         {
             assert!(
                 ids.contains(id),

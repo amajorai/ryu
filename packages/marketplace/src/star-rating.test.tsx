@@ -1,7 +1,7 @@
 // Render tests for the shared star-rating primitives. The read-only StarRating
 // carries the accessible average as an aria-label (rounded to one decimal) and an
 // optional review count; the interactive StarRatingInput exposes one labeled
-// button per star with aria-pressed reflecting the current value. Static markup,
+// button per star in a keyboard-accessible radiogroup. Static markup,
 // no DOM — the same idiom as the rest of the package.
 
 import { describe, expect, test } from "bun:test";
@@ -54,13 +54,14 @@ describe("StarRatingInput", () => {
 		expect(html).toContain('aria-label="5 stars"');
 	});
 
-	test("aria-pressed marks the currently selected star", () => {
+	test("aria-checked marks the currently selected star", () => {
 		const html = renderToStaticMarkup(
 			<StarRatingInput onChange={() => undefined} value={3} />
 		);
-		// The selected (3-star) button is pressed; a different one is not.
-		expect(html).toContain('aria-label="3 stars" aria-pressed="true"');
-		expect(html).toContain('aria-label="4 stars" aria-pressed="false"');
+		// The selected (3-star) radio is checked; a different one is not.
+		expect(html).toContain('aria-checked="true" aria-label="3 stars"');
+		expect(html).toContain('aria-checked="false" aria-label="4 stars"');
+		expect(html).toContain('role="radiogroup"');
 	});
 
 	test("disabled propagates to every star button", () => {

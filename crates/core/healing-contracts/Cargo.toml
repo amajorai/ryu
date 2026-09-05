@@ -1,6 +1,6 @@
 [package]
 name = "ryu-healing-contracts"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 license = "Apache-2.0"
 description = "Shared wire contract for the Ryu self-healing loop: the `HealVerdict` action enum the out-of-process `ryu-healing` sidecar returns to Core, plus the two constants both sides must agree on out-of-band (the `healrun_` never-heal-a-heal prefix and the context-truncation policy). Dep-light (serde only) and with ZERO dependency on apps/core, so Core and the sidecar can both link it without either linking the other."

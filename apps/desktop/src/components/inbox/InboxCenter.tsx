@@ -52,13 +52,14 @@ import {
 	NotificationFilterTabs,
 	notificationFilterLabel,
 } from "@ryu/ui/lib/notification-filters.tsx";
+import { cn } from "@ryu/ui/lib/utils.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { NotificationBell } from "@/components/ui/notification-bell.tsx";
 import { openExternal } from "@/lib/tauri-bridge.ts";
 import { AnnouncementDetailDialog } from "@/src/components/notifications/announcement-detail-dialog.tsx";
 import {
 	TrayAction,
-	TrayBadge,
 	TrayEmpty,
 	TrayFooter,
 	TrayHeader,
@@ -559,11 +560,24 @@ export function InboxCenter({
 		return (
 			<>
 				<TrayMorph
-					badge={<TrayBadge count={totalCount} label="notifications" />}
 					icon={Notification01Icon}
 					label="Notifications"
 					onOpenChange={setOpen}
 					open={open}
+					renderTrigger={(triggerProps) => (
+						<NotificationBell
+							{...triggerProps}
+							className={cn(
+								"rounded-xl bg-transparent! text-muted-foreground! hover:bg-muted! hover:text-foreground!",
+								open && "bg-muted! text-foreground!"
+							)}
+							color="red"
+							count={totalCount}
+							max={99}
+							size={40}
+							style={{ height: 28, width: 28 }}
+						/>
+					)}
 				>
 					{showInbox ? (
 						<NotificationFilterTabs
@@ -603,11 +617,24 @@ export function InboxCenter({
 	return (
 		<>
 			<TrayMorph
-				badge={<TrayBadge count={totalCount} label="notifications" />}
 				icon={showAnnouncements ? Notification01Icon : InboxIcon}
 				label={showAnnouncements ? "Notifications" : "Inbox"}
 				onOpenChange={setOpen}
 				open={open}
+				renderTrigger={(triggerProps) => (
+					<NotificationBell
+						{...triggerProps}
+						className={cn(
+							"rounded-xl bg-transparent! text-muted-foreground! hover:bg-muted! hover:text-foreground!",
+							open && "bg-muted! text-foreground!"
+						)}
+						color="red"
+						count={totalCount}
+						max={99}
+						size={40}
+						style={{ height: 28, width: 28 }}
+					/>
+				)}
 			>
 				<TrayHeader
 					count={totalCount}

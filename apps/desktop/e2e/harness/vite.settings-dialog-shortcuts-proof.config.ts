@@ -17,6 +17,12 @@ export default defineConfig({
 	define: { "process.env": {} },
 	root: harnessDir,
 	clearScreen: false,
+	// The shared harness directory contains many independent story HTML files.
+	// Limit dependency scanning to this proof so an unrelated story cannot make
+	// this settings test fail through the desktop alias.
+	optimizeDeps: {
+		entries: ["settings-dialog-shortcuts-proof.html"],
+	},
 	resolve: {
 		alias: { "@": desktopRoot },
 	},

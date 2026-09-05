@@ -226,7 +226,7 @@ export function PlanBadge({
 					aria-hidden="true"
 					className="t-plan-badge-border pointer-events-none"
 				/>
-				<span className="relative skew-x-12 font-extrabold italic leading-none tracking-wide">
+				<span className="relative skew-x-12 font-medium italic leading-none tracking-wide">
 					{text}
 				</span>
 			</span>

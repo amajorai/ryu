@@ -67,15 +67,15 @@ export default function Features() {
 				<div className="overflow-hidden rounded-2xl bg-muted/40">
 					{/* Header */}
 					<div className="grid grid-cols-3 gap-2 px-5 py-3.5">
-						<span className="font-semibold text-foreground/50 text-xs uppercase tracking-wider">
+						<span className="font-medium text-foreground/50 text-xs uppercase tracking-wider">
 							Capability
 						</span>
-						<span className="font-semibold text-foreground/50 text-xs uppercase tracking-wider">
+						<span className="font-medium text-foreground/50 text-xs uppercase tracking-wider">
 							Bare agent
 						</span>
-						<span className="flex items-center gap-1.5 font-semibold text-xs uppercase tracking-wider">
+						<span className="flex items-center gap-1.5 font-medium text-xs uppercase tracking-wider">
 							<span className="text-foreground">Agent + Ryu</span>
-							<span className="inline-flex size-4 items-center justify-center rounded-full bg-foreground font-bold text-[10px] text-background">
+							<span className="inline-flex size-4 items-center justify-center rounded-full bg-foreground font-medium text-[10px] text-background">
 								✓
 							</span>
 						</span>

@@ -103,7 +103,7 @@ export function UseCases({ items }: { items: SolutionUseCase[] }) {
 							"flex h-full flex-col gap-2"
 						)}
 					>
-						<h3 className="font-semibold text-base text-foreground">
+						<h3 className="font-medium text-base text-foreground">
 							{item.title}
 						</h3>
 						<p className="text-muted-foreground text-sm leading-relaxed">

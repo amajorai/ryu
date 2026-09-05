@@ -78,7 +78,7 @@ export function SellerReportsPanel() {
 		<div className="mt-8 rounded-lg border bg-card p-5">
 			<div className="mb-4 flex items-center justify-between gap-2">
 				<div>
-					<h3 className="font-semibold text-sm">Reports on your listings</h3>
+					<h3 className="font-medium text-sm">Reports on your listings</h3>
 					<p className="mt-0.5 text-muted-foreground text-xs">
 						Quality reports (“not working” / other) from buyers and installers.
 						Security reports go to Ryu, not here.

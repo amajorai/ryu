@@ -46,6 +46,17 @@ export function directAgentThreads(
 	);
 }
 
+/** Conversations that cannot be represented beneath one known bot row. */
+export function conversationsForOtherChats(
+	conversations: Conversation[],
+	knownAgentIds: ReadonlySet<string>
+): Conversation[] {
+	return conversations.filter((conversation) => {
+		const ids = conversationParticipantIds(conversation);
+		return ids.length !== 1 || !knownAgentIds.has(ids[0] ?? "");
+	});
+}
+
 /** A stable key for grouping all conversations with the same participants. */
 export function conversationGroupKey(
 	conversation: Pick<Conversation, "agentId" | "participants">

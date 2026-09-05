@@ -60,6 +60,21 @@ describe("CreditBalanceBreakdown", () => {
 		expect(html).toContain("No free-provider credits are currently allocated.");
 	});
 
+	it("rounds wallet balances to currency precision after prorated changes", () => {
+		const html = renderToStaticMarkup(
+			<CreditBalanceBreakdown
+				onDemandCreditsMicroUsd={10_000_000}
+				planCreditsMicroUsd={50_000_100}
+				providerAllocations={[]}
+				totalMicroUsd={60_000_100}
+			/>
+		);
+
+		expect(html).toContain("$60.00");
+		expect(html).toContain("$50.00");
+		expect(html).not.toContain("$60.0001");
+	});
+
 	it("does not hide a negative total when metering has created an overdraft", () => {
 		const html = renderToStaticMarkup(
 			<CreditBalanceBreakdown

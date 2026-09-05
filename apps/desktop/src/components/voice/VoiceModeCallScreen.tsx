@@ -144,7 +144,7 @@ export function VoiceModeCallScreen({
 					<div
 						aria-hidden="true"
 						className={cn(
-							"flex items-center justify-center rounded-full bg-primary/15 font-semibold text-primary ring-primary/5",
+							"flex items-center justify-center rounded-full bg-primary/15 font-medium text-primary ring-primary/5",
 							hasComposer ? "size-16 text-lg ring-6" : "size-20 text-xl ring-8"
 						)}
 					>
@@ -267,7 +267,7 @@ export function VoiceModeCallScreen({
 												key={item.id}
 											>
 												{item.widget.title && (
-													<div className="mb-2 truncate font-semibold text-sm tracking-tight">
+													<div className="mb-2 truncate font-medium text-sm tracking-tight">
 														{item.widget.title}
 													</div>
 												)}

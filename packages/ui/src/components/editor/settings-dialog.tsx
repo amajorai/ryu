@@ -359,7 +359,7 @@ export function SettingsDialog() {
 							<div className="size-8 rounded-full bg-purple-100 p-2 dark:bg-purple-900">
 								<Wand2Icon className="size-4 text-purple-600 dark:text-purple-400" />
 							</div>
-							<h4 className="font-semibold">AI</h4>
+							<h4 className="font-medium">AI</h4>
 						</div>
 
 						<div className="space-y-4">
@@ -429,7 +429,7 @@ export function SettingsDialog() {
               <div className="size-8 rounded-full bg-red-100 p-2 dark:bg-red-900">
                 <Upload className="size-4 text-red-600 dark:text-red-400" />
               </div>
-              <h4 className="font-semibold">Upload</h4>
+              <h4 className="font-medium">Upload</h4>
             </div>
 
             <div className="space-y-4">

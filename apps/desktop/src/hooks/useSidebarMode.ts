@@ -7,11 +7,9 @@ import { useCallback, useSyncExternalStore } from "react";
  *   Workflows, Chats, …), all visible at once.
  * - "tabbed": the section labels become a row of buttons at the top; clicking a
  *   button reveals just that one section's list below, like browser tabs.
- * - "agent": BOT MODE — the same tab strip as "tabbed", narrowed to exactly two
- *   tabs (Agents ⇄ Sessions), landing on Agents, with the messaging-style agent
- *   rows forced on. The posture Grok's bot mode and Hermes' Bot Mode ship: the
- *   roster of named agents is the primary surface and a chat list is the other
- *   half of one toggle, rather than one section among fifteen.
+ * - "agent": BOT MODE — a focused stacked view with messaging-style agent rows
+ *   and each bot's direct threads inline. Other chats remain available below the
+ *   roster without a second tab strip.
  *
  * - `plugin:<pluginId>:<modeId>`: an app-registered mode from a manifest's
  *   `contributes.sidebar_modes`.

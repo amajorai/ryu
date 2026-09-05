@@ -1464,6 +1464,7 @@ function TabsTrigger({
 	return (
 		<TabsPrimitive.Tab
 			className={cn(tabsTriggerClassName, className)}
+			data-cuelume-toggle=""
 			data-slot="tabs-trigger"
 			{...props}
 		>
